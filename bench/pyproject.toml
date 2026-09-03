@@ -1,0 +1,55 @@
+[project]
+name = "erp-bench"
+version = "0.1.0"
+description = "Odoo ERP Training Scenarios Setup"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.0.0",
+    "rich>=13.0.0",
+    "ortools>=9.14.6206",
+    "jinja2>=3.1.0",
+    "numpy>=2.2.6",
+]
+
+# Harbor Framework: Install as uv tool (not pip package)
+# uv tool install harbor
+# See: https://harborframework.com/docs/getting-started
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["schemas*", "erp_bench*"]
+
+[tool.uv]
+package = true
+dev-dependencies = [
+    "ruff>=0.14.1",
+    "ty>=0.0.1a26",
+]
+
+[project.scripts]
+generate-tasks = "erp_bench.generation.cli:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

@@ -1,0 +1,865 @@
+{
+  "$defs": {
+    "BOMComponentData": {
+      "description": "Bill of Materials component line",
+      "properties": {
+        "component_code": {
+          "description": "Product code of the component",
+          "title": "Component Code",
+          "type": "string"
+        },
+        "quantity": {
+          "description": "Quantity needed per unit of finished product",
+          "title": "Quantity",
+          "type": "number"
+        }
+      },
+      "required": [
+        "component_code",
+        "quantity"
+      ],
+      "title": "BOMComponentData",
+      "type": "object"
+    },
+    "BOMData": {
+      "description": "Bill of Materials definition",
+      "properties": {
+        "product_code": {
+          "description": "Product code for the finished product",
+          "title": "Product Code",
+          "type": "string"
+        },
+        "type": {
+          "const": "normal",
+          "default": "normal",
+          "description": "BOM type",
+          "title": "Type",
+          "type": "string"
+        },
+        "quantity": {
+          "default": 1.0,
+          "description": "Output quantity produced by this BOM",
+          "title": "Quantity",
+          "type": "number"
+        },
+        "components": {
+          "description": "List of components needed",
+          "items": {
+            "$ref": "#/$defs/BOMComponentData"
+          },
+          "title": "Components",
+          "type": "array"
+        },
+        "warehouse_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Warehouse code where manufacturing happens (sets operation type and component locations)",
+          "title": "Warehouse Code"
+        }
+      },
+      "required": [
+        "product_code",
+        "components"
+      ],
+      "title": "BOMData",
+      "type": "object"
+    },
+    "CustomerData": {
+      "description": "Customer partner information",
+      "properties": {
+        "name": {
+          "description": "Customer name (company or individual)",
+          "title": "Name",
+          "type": "string"
+        },
+        "ref": {
+          "description": "Unique reference code for the customer",
+          "title": "Ref",
+          "type": "string"
+        },
+        "email": {
+          "description": "Customer email address",
+          "title": "Email",
+          "type": "string"
+        },
+        "budget_dollars": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Customer budget ceiling used by procurement scenarios",
+          "title": "Budget Dollars"
+        },
+        "is_company": {
+          "default": true,
+          "description": "Whether this is a company or individual",
+          "title": "Is Company",
+          "type": "boolean"
+        },
+        "comment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Additional notes about the customer",
+          "title": "Comment"
+        },
+        "credit_limit": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Customer credit limit (native Odoo field)",
+          "title": "Credit Limit"
+        },
+        "payment_term": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Payment term code used by the scenario",
+          "title": "Payment Term"
+        },
+        "tags": {
+          "description": "Partner tags/categories (e.g., 'new_customer', 'vip')",
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "ref",
+        "email"
+      ],
+      "title": "CustomerData",
+      "type": "object"
+    },
+    "ExistingSalesOrderData": {
+      "description": "Existing sales order (already in system)",
+      "properties": {
+        "ref": {
+          "description": "Stable external order reference for this seeded SO",
+          "title": "Ref",
+          "type": "string"
+        },
+        "customer_ref": {
+          "description": "Reference to customer",
+          "title": "Customer Ref",
+          "type": "string"
+        },
+        "product_code": {
+          "description": "Product code ordered",
+          "title": "Product Code",
+          "type": "string"
+        },
+        "quantity": {
+          "description": "Order quantity",
+          "title": "Quantity",
+          "type": "number"
+        },
+        "order_days_ago": {
+          "description": "How many days ago this order was placed",
+          "title": "Order Days Ago",
+          "type": "integer"
+        },
+        "commitment_days": {
+          "description": "Days from order date when delivery is promised",
+          "title": "Commitment Days",
+          "type": "integer"
+        },
+        "warehouse_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Warehouse code for delivery (optional)",
+          "title": "Warehouse Code"
+        },
+        "state": {
+          "default": "draft",
+          "description": "Initial pre-procurement sales order state",
+          "enum": [
+            "draft",
+            "sent"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "price_unit": {
+          "description": "Seeded unit sale price",
+          "title": "Price Unit",
+          "type": "number"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Traceability note stored on the seeded order",
+          "title": "Note"
+        }
+      },
+      "required": [
+        "ref",
+        "customer_ref",
+        "product_code",
+        "quantity",
+        "order_days_ago",
+        "commitment_days",
+        "price_unit"
+      ],
+      "title": "ExistingSalesOrderData",
+      "type": "object"
+    },
+    "ProcurementInvoicingPolicyData": {
+      "description": "Procurement task invoicing policy.",
+      "properties": {
+        "invoice_required": {
+          "default": false,
+          "description": "Whether retained procurement orders must be invoiced",
+          "title": "Invoice Required",
+          "type": "boolean"
+        },
+        "payment_term": {
+          "anyOf": [
+            {
+              "enum": [
+                "immediate",
+                "net_30"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Global payment term policy for task customers when invoicing is required",
+          "title": "Payment Term"
+        },
+        "downpayment_required": {
+          "default": false,
+          "description": "Whether some retained orders must use the down payment invoice flow",
+          "title": "Downpayment Required",
+          "type": "boolean"
+        },
+        "downpayment_threshold_amount": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Untaxed sales-order amount threshold that triggers down payment invoicing",
+          "title": "Downpayment Threshold Amount"
+        },
+        "downpayment_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "percentage",
+                "fixed_amount"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Down payment policy mode",
+          "title": "Downpayment Mode"
+        },
+        "downpayment_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Down payment percentage or fixed amount depending on downpayment_mode",
+          "title": "Downpayment Value"
+        }
+      },
+      "title": "ProcurementInvoicingPolicyData",
+      "type": "object"
+    },
+    "ProductData": {
+      "description": "Product definition",
+      "properties": {
+        "name": {
+          "description": "Product name",
+          "title": "Name",
+          "type": "string"
+        },
+        "code": {
+          "description": "Internal reference code (SKU)",
+          "title": "Code",
+          "type": "string"
+        },
+        "category": {
+          "default": "Office Furniture",
+          "description": "Product category",
+          "title": "Category",
+          "type": "string"
+        },
+        "type": {
+          "default": "consu",
+          "description": "Product type: consu (consumable/storable), product (stockable), service",
+          "enum": [
+            "consu",
+            "product",
+            "service"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "list_price": {
+          "description": "Sales price",
+          "title": "List Price",
+          "type": "number"
+        },
+        "standard_price": {
+          "description": "Cost price",
+          "title": "Standard Price",
+          "type": "number"
+        },
+        "routes": {
+          "description": "Product routes: buy (purchase), mto (make-to-order), manufacture, dropship (vendor-to-customer)",
+          "items": {
+            "enum": [
+              "buy",
+              "mto",
+              "manufacture",
+              "dropship"
+            ],
+            "type": "string"
+          },
+          "title": "Routes",
+          "type": "array"
+        },
+        "vendor_info": {
+          "description": "Vendor information (can have multiple for same vendor with different lead times/prices)",
+          "items": {
+            "$ref": "#/$defs/VendorInfoData"
+          },
+          "title": "Vendor Info",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "code",
+        "list_price",
+        "standard_price"
+      ],
+      "title": "ProductData",
+      "type": "object"
+    },
+    "StockLevelData": {
+      "description": "Initial stock level configuration",
+      "properties": {
+        "product_code": {
+          "description": "Product code to set stock for",
+          "title": "Product Code",
+          "type": "string"
+        },
+        "warehouse_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Warehouse code (None = main warehouse)",
+          "title": "Warehouse Code"
+        },
+        "quantity": {
+          "description": "Stock quantity to set",
+          "title": "Quantity",
+          "type": "number"
+        },
+        "location_type": {
+          "default": "stock",
+          "description": "Location type within warehouse",
+          "enum": [
+            "stock",
+            "input",
+            "qc",
+            "output"
+          ],
+          "title": "Location Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "product_code",
+        "quantity"
+      ],
+      "title": "StockLevelData",
+      "type": "object"
+    },
+    "SystemParameterData": {
+      "description": "System-wide configuration parameters stored in ir.config_parameter",
+      "properties": {
+        "key": {
+          "description": "Parameter key (e.g., 'erp_bench.min_margin_percent')",
+          "title": "Key",
+          "type": "string"
+        },
+        "value": {
+          "description": "Parameter value (stored as string)",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "value"
+      ],
+      "title": "SystemParameterData",
+      "type": "object"
+    },
+    "VendorData": {
+      "description": "Vendor/supplier partner information",
+      "properties": {
+        "name": {
+          "description": "Vendor company name",
+          "title": "Name",
+          "type": "string"
+        },
+        "ref": {
+          "description": "Unique reference code for the vendor",
+          "title": "Ref",
+          "type": "string"
+        },
+        "supplier_rank": {
+          "default": 1,
+          "description": "Supplier ranking (1 = active supplier)",
+          "title": "Supplier Rank",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "ref"
+      ],
+      "title": "VendorData",
+      "type": "object"
+    },
+    "VendorInfoData": {
+      "description": "Product vendor relationship (supplier info)",
+      "properties": {
+        "partner_ref": {
+          "description": "Reference to vendor (must match VendorData.ref)",
+          "title": "Partner Ref",
+          "type": "string"
+        },
+        "delay": {
+          "description": "Lead time in days",
+          "title": "Delay",
+          "type": "integer"
+        },
+        "min_qty": {
+          "default": 1.0,
+          "description": "Minimum order quantity",
+          "title": "Min Qty",
+          "type": "number"
+        },
+        "max_qty": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Maximum order quantity supported by this vendor (None means unbounded)",
+          "title": "Max Qty"
+        },
+        "price": {
+          "description": "Unit price from this vendor",
+          "title": "Price",
+          "type": "number"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Description (e.g., 'Expedited Delivery', 'Standard')",
+          "title": "Name"
+        }
+      },
+      "required": [
+        "partner_ref",
+        "delay",
+        "price"
+      ],
+      "title": "VendorInfoData",
+      "type": "object"
+    },
+    "WarehouseData": {
+      "description": "Warehouse configuration",
+      "properties": {
+        "name": {
+          "description": "Warehouse name",
+          "title": "Name",
+          "type": "string"
+        },
+        "code": {
+          "description": "Short code for the warehouse (e.g., SEA, CHI)",
+          "title": "Code",
+          "type": "string"
+        },
+        "reception_steps": {
+          "default": "one_step",
+          "description": "Reception process: one_step (receive), two_steps (receive+QC), three_steps (receive+QC+stock)",
+          "enum": [
+            "one_step",
+            "two_steps",
+            "three_steps"
+          ],
+          "title": "Reception Steps",
+          "type": "string"
+        },
+        "delivery_steps": {
+          "default": "ship_only",
+          "description": "Delivery process steps",
+          "enum": [
+            "ship_only",
+            "pick_ship",
+            "pick_pack_ship"
+          ],
+          "title": "Delivery Steps",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "code"
+      ],
+      "title": "WarehouseData",
+      "type": "object"
+    },
+    "WorkcenterData": {
+      "description": "Manufacturing work center configuration for assembly operations.",
+      "properties": {
+        "product_code": {
+          "description": "Finished product code associated with this work center",
+          "title": "Product Code",
+          "type": "string"
+        },
+        "code": {
+          "description": "Unique work center code (e.g., 'WC_SPP001')",
+          "title": "Code",
+          "type": "string"
+        },
+        "name": {
+          "description": "Display name of the work center",
+          "title": "Name",
+          "type": "string"
+        },
+        "unit_cost": {
+          "description": "Assembly cost per finished unit",
+          "title": "Unit Cost",
+          "type": "number"
+        },
+        "costs_hour": {
+          "description": "Hourly cost rate for the work center",
+          "title": "Costs Hour",
+          "type": "number"
+        },
+        "time_per_unit_minutes": {
+          "description": "Processing time per unit in minutes",
+          "title": "Time Per Unit Minutes",
+          "type": "number"
+        },
+        "time_efficiency": {
+          "default": 100.0,
+          "description": "Efficiency percentage (100.0 = 100%)",
+          "title": "Time Efficiency",
+          "type": "number"
+        },
+        "time_start": {
+          "default": 0.0,
+          "description": "Setup time in minutes prior to production",
+          "title": "Time Start",
+          "type": "number"
+        },
+        "time_stop": {
+          "default": 0.0,
+          "description": "Cleanup time in minutes after production",
+          "title": "Time Stop",
+          "type": "number"
+        },
+        "oee_target": {
+          "default": 1.0,
+          "description": "Overall equipment effectiveness target",
+          "title": "Oee Target",
+          "type": "number"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Operational notes for the workcenter",
+          "title": "Note"
+        },
+        "capacity_minutes": {
+          "description": "Total processing minutes this workcenter can provide across the scenario horizon",
+          "title": "Capacity Minutes",
+          "type": "number"
+        },
+        "lead_days": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lead time window in days associated with the assembly plan (optional metadata)",
+          "title": "Lead Days"
+        },
+        "operation_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Logical BoM operation name for this product/workcenter pairing",
+          "title": "Operation Name"
+        },
+        "sequence": {
+          "default": 100,
+          "description": "BoM operation sequence for this product/workcenter pairing",
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "is_primary": {
+          "default": false,
+          "description": "Whether this row defines the primary workcenter for the logical operation",
+          "title": "Is Primary",
+          "type": "boolean"
+        },
+        "alternative_workcenter_codes": {
+          "description": "Alternative workcenter codes allowed for the same logical operation",
+          "items": {
+            "type": "string"
+          },
+          "title": "Alternative Workcenter Codes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "product_code",
+        "code",
+        "name",
+        "unit_cost",
+        "costs_hour",
+        "time_per_unit_minutes",
+        "capacity_minutes"
+      ],
+      "title": "WorkcenterData",
+      "type": "object"
+    }
+  },
+  "description": "Complete training scenario definition",
+  "properties": {
+    "scenario_number": {
+      "description": "Scenario number (e.g. 1, 2, 3, ...)",
+      "title": "Scenario Number",
+      "type": "integer"
+    },
+    "name": {
+      "description": "Scenario name/title",
+      "title": "Name",
+      "type": "string"
+    },
+    "instruction": {
+      "description": "The instruction/request given to the AI agent",
+      "title": "Instruction",
+      "type": "string"
+    },
+    "seed": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Seed that fully reproduces this scenario. Run generator with this seed to recreate.",
+      "title": "Seed"
+    },
+    "background_and_policy": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Scenario-specific background context and policies the agent must follow that are not encoded in the ERP",
+      "title": "Background And Policy"
+    },
+    "invoicing_policy": {
+      "$ref": "#/$defs/ProcurementInvoicingPolicyData",
+      "description": "Procurement invoicing rules for retained sales orders"
+    },
+    "warehouses": {
+      "description": "Warehouses needed for this scenario",
+      "items": {
+        "$ref": "#/$defs/WarehouseData"
+      },
+      "title": "Warehouses",
+      "type": "array"
+    },
+    "vendors": {
+      "description": "Vendors needed for this scenario",
+      "items": {
+        "$ref": "#/$defs/VendorData"
+      },
+      "title": "Vendors",
+      "type": "array"
+    },
+    "customers": {
+      "description": "Customers for this scenario",
+      "items": {
+        "$ref": "#/$defs/CustomerData"
+      },
+      "title": "Customers",
+      "type": "array"
+    },
+    "products": {
+      "description": "Products (finished goods and components)",
+      "items": {
+        "$ref": "#/$defs/ProductData"
+      },
+      "title": "Products",
+      "type": "array"
+    },
+    "boms": {
+      "description": "Bills of materials",
+      "items": {
+        "$ref": "#/$defs/BOMData"
+      },
+      "title": "Boms",
+      "type": "array"
+    },
+    "workcenters": {
+      "description": "Manufacturing work centers required for assembly",
+      "items": {
+        "$ref": "#/$defs/WorkcenterData"
+      },
+      "title": "Workcenters",
+      "type": "array"
+    },
+    "stock_levels": {
+      "description": "Initial stock to set",
+      "items": {
+        "$ref": "#/$defs/StockLevelData"
+      },
+      "title": "Stock Levels",
+      "type": "array"
+    },
+    "existing_sales_orders": {
+      "description": "Sales orders that already exist in the system (will be created as real SOs)",
+      "items": {
+        "$ref": "#/$defs/ExistingSalesOrderData"
+      },
+      "title": "Existing Sales Orders",
+      "type": "array"
+    },
+    "system_parameters": {
+      "description": "System-wide configuration parameters (business policies, thresholds)",
+      "items": {
+        "$ref": "#/$defs/SystemParameterData"
+      },
+      "title": "System Parameters",
+      "type": "array"
+    }
+  },
+  "required": [
+    "scenario_number",
+    "name",
+    "instruction",
+    "customers",
+    "products"
+  ],
+  "title": "ScenarioData",
+  "type": "object"
+}

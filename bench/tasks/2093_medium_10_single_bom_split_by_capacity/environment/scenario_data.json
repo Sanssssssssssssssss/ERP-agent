@@ -1,0 +1,3125 @@
+{
+  "scenario_number": 2093,
+  "name": "Laser Safety Curtain System",
+  "instruction": "The following Laser Safety Curtain System customer orders are firm and must be supplied on schedule:\n\n- Noble Guild: 14 units due in 8 days (pretax budget cap $42,648)\n- Borough Studios West: 21 units due in 8 days (pretax budget cap $61,984)\n- Raven Labs: 15 units due in 9 days (pretax budget cap $43,495)\n- Bridgeway Conservatory: 14 units due in 10 days (pretax budget cap $41,182)\n- Mosaic Systems: 14 units due in 10 days (pretax budget cap $40,218)\n- Lance Institute: 14 units due in 10 days (pretax budget cap $42,495)\n- Catalyst Observatory: 15 units due in 13 days (pretax budget cap $43,272)\n- Cobalt Exchange: 14 units due in 13 days (pretax budget cap $40,160)\n- Matrix Holdings: 14 units due in 14 days (pretax budget cap $40,684)\n- Spectra Solutions Group: 15 units due in 14 days (pretax budget cap $43,294)\n\nCurrent finished-goods stock is 69 units. Any shortfall can be handled with finished-goods buying, in-house manufacturing, or a mix that still satisfies policy.\n\nAcross all units covered through new purchasing or manufacturing, keep portfolio-level new-spend margin at or above 27.2% at selling price.",
+  "seed": 5772258517818725849,
+  "background_and_policy": "* Cover every customer order while using as little shared workcenter capacity as practical. If multiple feasible plans use the same amount of workcenter capacity, keep new purchasing and manufacturing spend as low as possible.\n* Across all units covered through new purchasing or manufacturing, keep portfolio-level new-spend margin at or above 27.2% at selling price.\n* Use available finished stock where it helps preserve shared workcenter capacity.\n* You must create and confirm the necessary sales orders, purchase orders, and/or manufacturing orders.\n* Customer budgets are pre-tax amounts.\n* Link Sales Orders to the related Manufacturing Orders and Purchase Orders for traceability.\n* For finished goods POs, put the SO reference(s) (e.g. S00030 or S00030, S00031) into the origin field ('Source' in the UI).\n* For component POs, put the MO reference(s) (e.g. WH/MO/00010 or WH/MO/00010, WH/MO/00011) into the origin field.\n* For finished goods MOs, put the Sales Order reference (e.g. S00030) into the origin field ('Source' in the UI).\n* In the end, the lineage must be SO -> MO -> PO or SO -> PO.\n* You must sell this product at List Price.\n* On sales orders, set the commitment date.\n* On manufacturing orders, you must set the start date and the due date.\n* If you choose to manufacture, you must procure the components that are not in stock.\n* On purchase orders, you must set the delivery date.\n* Before releasing anything, read the Internal Notes/comments on stock, customers, vendors, and workcenters.\n\nCapacity constraints:\n- Treat workcenter capacity as a hard horizon-wide limit across all products that share the center.\n- Check each workcenter's Internal Notes in Odoo for the exact horizon-wide minute limit.\n- Assign workcenter on each manufacturing work order.\n- For each finished-goods supplier offer, respect min/max quantities as horizon-wide totals.\n- For each component supplier offer, respect min/max quantities as horizon-wide totals.\n- Use one consolidated PO per supplier offer (do not split a single offer across multiple POs).\n- Check each vendor's Internal Notes in Odoo for maximum order quantity limits.",
+  "invoicing_policy": {
+    "invoice_required": false,
+    "payment_term": null,
+    "downpayment_required": false,
+    "downpayment_threshold_amount": null,
+    "downpayment_mode": null,
+    "downpayment_value": null
+  },
+  "warehouses": [],
+  "vendors": [
+    {
+      "name": "Nexus Solutions",
+      "ref": "r47D0CB45E7_q01",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Osprey Warehouse",
+      "ref": "r47D0CB45E7_q02",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Slate Forwarders",
+      "ref": "r47D0CB45E7_q03",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Cascade Packagers",
+      "ref": "r47D0CB45E7_q04",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Stratos Supply",
+      "ref": "r47D0CB45E7_q05",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Nimbus Warehousing",
+      "ref": "r47D0CB45E7_q06",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Axis Conveyance",
+      "ref": "r47D0CB45E7_q07",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Globe Assemblies",
+      "ref": "r47D0CB45E7_q08",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Orbital Fulfillment",
+      "ref": "r47D0CB45E7_q09",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Cipher Microfactory",
+      "ref": "r47D0CB45E7_q10",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Helix Consolidators",
+      "ref": "r47D0CB45E7_q11",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Forge Materials",
+      "ref": "r47D0CB45E7_q12",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Ironwood Movers",
+      "ref": "r47D0CB45E7_q13",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Titan Procurement",
+      "ref": "r47D0CB45E7_q14",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Circuit Freight",
+      "ref": "r47D0CB45E7_q15",
+      "supplier_rank": 15,
+      "comment": null
+    },
+    {
+      "name": "Marble Resources",
+      "ref": "r47D0CB45E7_q16",
+      "supplier_rank": 16,
+      "comment": null
+    },
+    {
+      "name": "Gateway Depot",
+      "ref": "r47D0CB45E7_q17",
+      "supplier_rank": 17,
+      "comment": null
+    },
+    {
+      "name": "Arrow Provisions",
+      "ref": "r47D0CB45E7_q18",
+      "supplier_rank": 18,
+      "comment": null
+    },
+    {
+      "name": "Sterling Components",
+      "ref": "r47D0CB45E7_q19",
+      "supplier_rank": 19,
+      "comment": null
+    },
+    {
+      "name": "Canton Wholesalers",
+      "ref": "r47D0CB45E7_q20",
+      "supplier_rank": 20,
+      "comment": null
+    },
+    {
+      "name": "Iron Commodities",
+      "ref": "r47D0CB45E7_q21",
+      "supplier_rank": 21,
+      "comment": null
+    },
+    {
+      "name": "Pacific Importers",
+      "ref": "r47D0CB45E7_q22",
+      "supplier_rank": 22,
+      "comment": null
+    },
+    {
+      "name": "Alpine Transit",
+      "ref": "r47D0CB45E7_q23",
+      "supplier_rank": 23,
+      "comment": null
+    },
+    {
+      "name": "Arbor Exporters",
+      "ref": "r47D0CB45E7_q24",
+      "supplier_rank": 24,
+      "comment": null
+    },
+    {
+      "name": "Northbridge Freight",
+      "ref": "r330EFC3690_q01",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Flint Carriers",
+      "ref": "r330EFC3690_q02",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Drift Freight",
+      "ref": "r330EFC3690_q03",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Pinnacle Carriers",
+      "ref": "r330EFC3690_q04",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Alloy Freight",
+      "ref": "r330EFC3690_q05",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Prism Freight",
+      "ref": "r330EFC3690_q06",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Brookfield Trading",
+      "ref": "r330EFC3690_q07",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Ledger Freight",
+      "ref": "r330EFC3690_q08",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Ivory Networks",
+      "ref": "r330EFC3690_q09",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Peak Resources",
+      "ref": "r330EFC3690_q10",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Clearwater Wholesale",
+      "ref": "r330EFC3690_q11",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Hartland Materials",
+      "ref": "r330EFC3690_q12",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Lattice Trading",
+      "ref": "r330EFC3690_q13",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Ridgeline Sourcing",
+      "ref": "r330EFC3690_q14",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Cardinal Carriers",
+      "ref": "r330EFC3690_q15",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Sapphire Networks",
+      "ref": "r330EFC3690_q16",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Thornton Logistics",
+      "ref": "r330EFC3690_q17",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Trellis Logistics",
+      "ref": "r330EFC3690_q18",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Spark Components",
+      "ref": "r330EFC3690_q19",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Steel Logistics",
+      "ref": "r330EFC3690_q20",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Indigo Procurement",
+      "ref": "r330EFC3690_q21",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Cedar Freight",
+      "ref": "r330EFC3690_q22",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Opal Distribution",
+      "ref": "r330EFC3690_q23",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Compass Supply",
+      "ref": "r330EFC3690_q24",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Quartz Logistics",
+      "ref": "r330EFC3690_q25",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Onyx Trading",
+      "ref": "r330EFC3690_q26",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Westfield Components",
+      "ref": "r330EFC3690_q27",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Solace Materials",
+      "ref": "r330EFC3690_q28",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Citadel Transit",
+      "ref": "r330EFC3690_q29",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Skyline Wholesale",
+      "ref": "r330EFC3690_q30",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Vertex Freight",
+      "ref": "r330EFC3690_q31",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Baseline Sourcing",
+      "ref": "r330EFC3690_q32",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Equinox Carriers",
+      "ref": "r330EFC3690_q33",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Arc Trading",
+      "ref": "r330EFC3690_q34",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Velocity Wholesale",
+      "ref": "r330EFC3690_q35",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Crest Materials",
+      "ref": "r330EFC3690_q36",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Flux Materials",
+      "ref": "r330EFC3690_q37",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Redstone Procurement",
+      "ref": "r330EFC3690_q38",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Apex Logistics",
+      "ref": "r330EFC3690_q39",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Comet Trading",
+      "ref": "r330EFC3690_q40",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Anvil Transit",
+      "ref": "r330EFC3690_q41",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Spire Supply",
+      "ref": "r330EFC3690_q42",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Horizon Materials",
+      "ref": "r330EFC3690_q43",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Ashford Parts Co",
+      "ref": "r330EFC3690_q44",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Beacon Freight",
+      "ref": "r330EFC3690_q45",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Grove Networks",
+      "ref": "r330EFC3690_q46",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Aegis Materials",
+      "ref": "r330EFC3690_q47",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Quantum Logistics",
+      "ref": "r330EFC3690_q48",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Summit Wholesale",
+      "ref": "r330EFC3690_q49",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Lumen Carriers",
+      "ref": "r330EFC3690_q50",
+      "supplier_rank": 12,
+      "comment": null
+    }
+  ],
+  "customers": [
+    {
+      "name": "Noble Guild",
+      "ref": "r47D0CB45E7_c01",
+      "email": "orders@nobleguild.io",
+      "budget_dollars": 42647.63,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Borough Studios West",
+      "ref": "r47D0CB45E7_c02",
+      "email": "orders@boroughstudioswest.io",
+      "budget_dollars": 61983.64,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Raven Labs",
+      "ref": "r47D0CB45E7_c03",
+      "email": "orders@ravenlabs.io",
+      "budget_dollars": 43495.21,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Bridgeway Conservatory",
+      "ref": "r47D0CB45E7_c04",
+      "email": "orders@bridgewayconservatory.io",
+      "budget_dollars": 41182.4,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Mosaic Systems",
+      "ref": "r47D0CB45E7_c05",
+      "email": "orders@mosaicsystems.io",
+      "budget_dollars": 40217.72,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Lance Institute",
+      "ref": "r47D0CB45E7_c06",
+      "email": "orders@lanceinstitute.io",
+      "budget_dollars": 42494.74,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Catalyst Observatory",
+      "ref": "r47D0CB45E7_c07",
+      "email": "orders@catalystobservatory.io",
+      "budget_dollars": 43272.0,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Cobalt Exchange",
+      "ref": "r47D0CB45E7_c08",
+      "email": "orders@cobaltexchange.io",
+      "budget_dollars": 40159.78,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Matrix Holdings",
+      "ref": "r47D0CB45E7_c09",
+      "email": "orders@matrixholdings.io",
+      "budget_dollars": 40683.99,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Spectra Solutions Group",
+      "ref": "r47D0CB45E7_c10",
+      "email": "orders@spectrasolutionsgroup.io",
+      "budget_dollars": 43293.56,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Granite Engineering Site Logistics",
+      "ref": "r330EFC3690_p01",
+      "email": "contact@graniteengineering.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Aurora Assembly Quality Lab",
+      "ref": "r330EFC3690_p02",
+      "email": "contact@auroraassembly.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Lakewood Assembly Prototype Shop",
+      "ref": "r330EFC3690_p03",
+      "email": "contact@lakewoodassembly.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Conduit Technologies Prototype Shop",
+      "ref": "r330EFC3690_p04",
+      "email": "contact@conduittechnologies.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Dune Technologies Test Facility",
+      "ref": "r330EFC3690_p05",
+      "email": "contact@dunetechnologies.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Trident Production Test Facility",
+      "ref": "r330EFC3690_p06",
+      "email": "contact@tridentproduction.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Zenith Assembly Plant Maintenance",
+      "ref": "r330EFC3690_p07",
+      "email": "contact@zenithassembly.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Vantage Solutions HQ Procurement",
+      "ref": "r330EFC3690_p08",
+      "email": "contact@vantagesolutions.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Crown Operations Quality Lab",
+      "ref": "r330EFC3690_p09",
+      "email": "contact@crownoperations.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Oxide Production Test Facility",
+      "ref": "r330EFC3690_p10",
+      "email": "contact@oxideproduction.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Coral Engineering Test Facility",
+      "ref": "r330EFC3690_p11",
+      "email": "contact@coralengineering.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Ironside Solutions Prototype Shop",
+      "ref": "r330EFC3690_p12",
+      "email": "contact@ironsidesolutions.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Sentinel Fabrication HQ Procurement",
+      "ref": "r330EFC3690_p13",
+      "email": "contact@sentinelfabrication.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Chrome Manufacturing Test Facility",
+      "ref": "r330EFC3690_p14",
+      "email": "contact@chromemanufacturing.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Crestview Operations Site Logistics",
+      "ref": "r330EFC3690_p15",
+      "email": "contact@crestviewoperations.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Bronze Solutions R&D Workshop",
+      "ref": "r330EFC3690_p16",
+      "email": "contact@bronzesolutions.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Ridge Operations Prototype Shop",
+      "ref": "r330EFC3690_p17",
+      "email": "contact@ridgeoperations.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Echo Assembly Field Ops",
+      "ref": "r330EFC3690_p18",
+      "email": "contact@echoassembly.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Blaze Operations Tooling Center",
+      "ref": "r330EFC3690_p19",
+      "email": "contact@blazeoperations.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Meridian Manufacturing Site Logistics",
+      "ref": "r330EFC3690_p20",
+      "email": "contact@meridianmanufacturing.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Stonewall Fabrication Field Ops",
+      "ref": "r330EFC3690_p21",
+      "email": "contact@stonewallfabrication.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Millbrook Industries Prototype Shop",
+      "ref": "r330EFC3690_p22",
+      "email": "contact@millbrookindustries.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Polar Fabrication Test Facility",
+      "ref": "r330EFC3690_p23",
+      "email": "contact@polarfabrication.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Monarch Technologies Warehouse Ops",
+      "ref": "r330EFC3690_p24",
+      "email": "contact@monarchtechnologies.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Garnet Operations Plant Maintenance",
+      "ref": "r330EFC3690_p25",
+      "email": "contact@garnetoperations.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Cosmo Solutions Field Ops",
+      "ref": "r330EFC3690_p26",
+      "email": "contact@cosmosolutions.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Ember Solutions HQ Procurement",
+      "ref": "r330EFC3690_p27",
+      "email": "contact@embersolutions.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Aether Assembly Prototype Shop",
+      "ref": "r330EFC3690_p28",
+      "email": "contact@aetherassembly.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Evergreen Technologies Plant Maintenance",
+      "ref": "r330EFC3690_p29",
+      "email": "contact@evergreentechnologies.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Jade Manufacturing Quality Lab",
+      "ref": "r330EFC3690_p30",
+      "email": "contact@jademanufacturing.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Keystone Production Prototype Shop",
+      "ref": "r330EFC3690_p31",
+      "email": "contact@keystoneproduction.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Oakmont Technologies HQ Procurement",
+      "ref": "r330EFC3690_p32",
+      "email": "contact@oakmonttechnologies.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Silverline Industries Field Ops",
+      "ref": "r330EFC3690_p33",
+      "email": "contact@silverlineindustries.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Scion Industries Site Logistics",
+      "ref": "r330EFC3690_p34",
+      "email": "contact@scionindustries.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Haven Manufacturing Quality Lab",
+      "ref": "r330EFC3690_p35",
+      "email": "contact@havenmanufacturing.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Bayshore Services Prototype Shop",
+      "ref": "r330EFC3690_p36",
+      "email": "contact@bayshoreservices.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Fairview Manufacturing Plant Maintenance",
+      "ref": "r330EFC3690_p37",
+      "email": "contact@fairviewmanufacturing.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Terra Services Test Facility",
+      "ref": "r330EFC3690_p38",
+      "email": "contact@terraservices.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Element Manufacturing Prototype Shop",
+      "ref": "r330EFC3690_p39",
+      "email": "contact@elementmanufacturing.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Eclipse Assembly Tooling Center",
+      "ref": "r330EFC3690_p40",
+      "email": "contact@eclipseassembly.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Copper Assembly Prototype Shop",
+      "ref": "r330EFC3690_p41",
+      "email": "contact@copperassembly.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Pivot Engineering Prototype Shop",
+      "ref": "r330EFC3690_p42",
+      "email": "contact@pivotengineering.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Riverdale Solutions Warehouse Ops",
+      "ref": "r330EFC3690_p43",
+      "email": "contact@riverdalesolutions.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Metro Technologies HQ Procurement",
+      "ref": "r330EFC3690_p44",
+      "email": "contact@metrotechnologies.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Atlas Manufacturing Quality Lab",
+      "ref": "r330EFC3690_p45",
+      "email": "contact@atlasmanufacturing.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Baltic Production Test Facility",
+      "ref": "r330EFC3690_p46",
+      "email": "contact@balticproduction.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Sierra Engineering Plant Maintenance",
+      "ref": "r330EFC3690_p47",
+      "email": "contact@sierraengineering.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Adjacent Customer 1 Division",
+      "ref": "r330EFC3690_p48",
+      "email": "contact@adjacentcustomer001.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Adjacent Customer 2 Division",
+      "ref": "r330EFC3690_p49",
+      "email": "contact@adjacentcustomer002.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Adjacent Customer 3 Division",
+      "ref": "r330EFC3690_p50",
+      "email": "contact@adjacentcustomer003.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    }
+  ],
+  "products": [
+    {
+      "name": "Laser Safety Curtain System",
+      "code": "P47D0CB45E7-SAF-LSC-006",
+      "category": "Industrial Equipment",
+      "type": "consu",
+      "list_price": 2768.49,
+      "standard_price": 1683.77,
+      "routes": [
+        "buy",
+        "manufacture"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r47D0CB45E7_q01",
+          "delay": 9,
+          "min_qty": 5.0,
+          "max_qty": 50.0,
+          "price": 1532.15,
+          "name": "Priority Shuttle lane (9d transit, 5-50 units)"
+        },
+        {
+          "partner_ref": "r47D0CB45E7_q02",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 1.0,
+          "price": 1870.12,
+          "name": "Express Air lane (6d transit, 1-1 units)"
+        },
+        {
+          "partner_ref": "r47D0CB45E7_q03",
+          "delay": 26,
+          "min_qty": 75.0,
+          "max_qty": 99.0,
+          "price": 774.42,
+          "name": "Bulk Container lane (26d transit, 75-99 units)"
+        },
+        {
+          "partner_ref": "r47D0CB45E7_q04",
+          "delay": 9,
+          "min_qty": 8.0,
+          "max_qty": 14.0,
+          "price": 1805.98,
+          "name": "Hybrid Expedite lane (9d transit, 8-14 units)"
+        },
+        {
+          "partner_ref": "r47D0CB45E7_q05",
+          "delay": 12,
+          "min_qty": 6.0,
+          "max_qty": 8.0,
+          "price": 1387.83,
+          "name": "Regional Cross-Dock lane (12d transit, 6-8 units)"
+        }
+      ]
+    },
+    {
+      "name": "Emergency Stop Rope Pull Switch",
+      "code": "P47D0CB45E7-SAF-ESP-106",
+      "category": "Industrial Equipment",
+      "type": "consu",
+      "list_price": 75.28,
+      "standard_price": 30.8,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r47D0CB45E7_q06",
+          "delay": 2,
+          "min_qty": 6.0,
+          "max_qty": 30.0,
+          "price": 38.66,
+          "name": "Rapid Works (2d)"
+        },
+        {
+          "partner_ref": "r47D0CB45E7_q07",
+          "delay": 2,
+          "min_qty": 27.0,
+          "max_qty": 28.0,
+          "price": 32.73,
+          "name": "Domestic Supply (2d)"
+        },
+        {
+          "partner_ref": "r47D0CB45E7_q08",
+          "delay": 2,
+          "min_qty": 48.0,
+          "max_qty": 52.0,
+          "price": 30.8,
+          "name": "Import Consolidator (2d)"
+        },
+        {
+          "partner_ref": "r47D0CB45E7_q09",
+          "delay": 2,
+          "min_qty": 19.0,
+          "max_qty": 30.0,
+          "price": 41.31,
+          "name": "Hybrid Fabricators (2d)"
+        }
+      ]
+    },
+    {
+      "name": "Safety Light Beacon Module",
+      "code": "P47D0CB45E7-SAF-SLB-109",
+      "category": "Industrial Equipment",
+      "type": "consu",
+      "list_price": 61.95,
+      "standard_price": 26.13,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r47D0CB45E7_q10",
+          "delay": 2,
+          "min_qty": 12.0,
+          "max_qty": 38.0,
+          "price": 34.77,
+          "name": "Rapid Works (2d)"
+        },
+        {
+          "partner_ref": "r47D0CB45E7_q11",
+          "delay": 2,
+          "min_qty": 9.0,
+          "max_qty": 12.0,
+          "price": 37.69,
+          "name": "Hybrid Fabricators (2d)"
+        },
+        {
+          "partner_ref": "r47D0CB45E7_q12",
+          "delay": 2,
+          "min_qty": 27.0,
+          "max_qty": 55.0,
+          "price": 27.29,
+          "name": "Domestic Supply (2d)"
+        },
+        {
+          "partner_ref": "r47D0CB45E7_q13",
+          "delay": 2,
+          "min_qty": 35.0,
+          "max_qty": 36.0,
+          "price": 26.13,
+          "name": "Import Consolidator (2d)"
+        }
+      ]
+    },
+    {
+      "name": "Floor Anchor Bolt Kit",
+      "code": "P47D0CB45E7-SAF-FAB-110",
+      "category": "Industrial Equipment",
+      "type": "consu",
+      "list_price": 28.82,
+      "standard_price": 8.52,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r47D0CB45E7_q14",
+          "delay": 2,
+          "min_qty": 5.0,
+          "max_qty": 192.0,
+          "price": 14.02,
+          "name": "Rapid Works (2d)"
+        },
+        {
+          "partner_ref": "r47D0CB45E7_q15",
+          "delay": 2,
+          "min_qty": 32.0,
+          "max_qty": 155.0,
+          "price": 8.52,
+          "name": "Import Consolidator (2d)"
+        },
+        {
+          "partner_ref": "r47D0CB45E7_q16",
+          "delay": 2,
+          "min_qty": 10.0,
+          "max_qty": 366.0,
+          "price": 13.46,
+          "name": "Hybrid Fabricators (2d)"
+        }
+      ]
+    },
+    {
+      "name": "RFID Access Control Reader",
+      "code": "P47D0CB45E7-SAF-RAC-113",
+      "category": "Industrial Equipment",
+      "type": "consu",
+      "list_price": 216.79,
+      "standard_price": 92.91,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r47D0CB45E7_q17",
+          "delay": 2,
+          "min_qty": 7.0,
+          "max_qty": 44.0,
+          "price": 141.9,
+          "name": "Rapid Works (2d)"
+        },
+        {
+          "partner_ref": "r47D0CB45E7_q18",
+          "delay": 2,
+          "min_qty": 16.0,
+          "max_qty": 20.0,
+          "price": 116.26,
+          "name": "Hybrid Fabricators (2d)"
+        },
+        {
+          "partner_ref": "r47D0CB45E7_q19",
+          "delay": 2,
+          "min_qty": 26.0,
+          "max_qty": 40.0,
+          "price": 126.78,
+          "name": "Domestic Supply (2d)"
+        },
+        {
+          "partner_ref": "r47D0CB45E7_q20",
+          "delay": 2,
+          "min_qty": 29.0,
+          "max_qty": 31.0,
+          "price": 92.91,
+          "name": "Import Consolidator (2d)"
+        }
+      ]
+    },
+    {
+      "name": "Ground Fault Relay Module",
+      "code": "P47D0CB45E7-SAF-GFR-126",
+      "category": "Industrial Equipment",
+      "type": "consu",
+      "list_price": 159.56,
+      "standard_price": 64.49,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r47D0CB45E7_q21",
+          "delay": 2,
+          "min_qty": 6.0,
+          "max_qty": 17.0,
+          "price": 113.27,
+          "name": "Rapid Works (2d)"
+        },
+        {
+          "partner_ref": "r47D0CB45E7_q22",
+          "delay": 2,
+          "min_qty": 10.0,
+          "max_qty": 28.0,
+          "price": 73.62,
+          "name": "Domestic Supply (2d)"
+        },
+        {
+          "partner_ref": "r47D0CB45E7_q23",
+          "delay": 2,
+          "min_qty": 31.0,
+          "max_qty": 108.0,
+          "price": 64.49,
+          "name": "Import Consolidator (2d)"
+        },
+        {
+          "partner_ref": "r47D0CB45E7_q24",
+          "delay": 2,
+          "min_qty": 8.0,
+          "max_qty": 13.0,
+          "price": 108.0,
+          "name": "Hybrid Fabricators (2d)"
+        }
+      ]
+    },
+    {
+      "name": "Metric Beacon Module",
+      "code": "P330EFC3690-A001",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 403.45,
+      "standard_price": 285.23,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q01",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 282.0,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "High-Torque Rope Pull Switch",
+      "code": "P330EFC3690-A002",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 371.52,
+      "standard_price": 206.84,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q02",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 203.33,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Hardened Rope Pull Switch",
+      "code": "P330EFC3690-A003",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 342.19,
+      "standard_price": 182.8,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q03",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 183.03,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Powder-Coated Frame Assembly",
+      "code": "P330EFC3690-A004",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 337.25,
+      "standard_price": 201.71,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q04",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 195.32,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Narrow-Body Vision Panel",
+      "code": "P330EFC3690-A005",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 346.0,
+      "standard_price": 241.34,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q05",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 232.53,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "UV-Stable Anchor Bolt Kit",
+      "code": "P330EFC3690-A006",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 332.16,
+      "standard_price": 218.08,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q06",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 212.47,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Double-Row Rope Pull Switch",
+      "code": "P330EFC3690-A007",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 244.29,
+      "standard_price": 159.6,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q07",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 160.57,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Sealed Clamp Connector Set",
+      "code": "P330EFC3690-A008",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 367.69,
+      "standard_price": 231.88,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q08",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 245.98,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Adjustable Base Plate",
+      "code": "P330EFC3690-A009",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 299.33,
+      "standard_price": 170.8,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q09",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 169.77,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Food-Grade with Base Plate",
+      "code": "P330EFC3690-A010",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 242.57,
+      "standard_price": 145.74,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q10",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 156.59,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Flanged Connector Set",
+      "code": "P330EFC3690-A011",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 207.6,
+      "standard_price": 123.13,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q11",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 121.28,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Self-Lubricating Polycarbonate Vision Panel",
+      "code": "P330EFC3690-A012",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 394.45,
+      "standard_price": 239.68,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q12",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 238.49,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Zero-Backlash Pull Switch",
+      "code": "P330EFC3690-A013",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 340.23,
+      "standard_price": 241.26,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q13",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 254.61,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Spring-Loaded with Base Plate",
+      "code": "P330EFC3690-A014",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 250.13,
+      "standard_price": 177.66,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q14",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 179.7,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Corrosion-Resistant Solenoid Lock Assembly",
+      "code": "P330EFC3690-A015",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 247.35,
+      "standard_price": 138.76,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q15",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 142.19,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Wide-Body Key Interlock System",
+      "code": "P330EFC3690-A016",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 315.95,
+      "standard_price": 174.76,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q16",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 166.88,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Stainless Base Plate",
+      "code": "P330EFC3690-A017",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 208.33,
+      "standard_price": 129.55,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q17",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 131.91,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "High-Temp Beacon Module",
+      "code": "P330EFC3690-A018",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 288.18,
+      "standard_price": 150.16,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q18",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 157.15,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Low-Friction Bolt Kit",
+      "code": "P330EFC3690-A019",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 324.83,
+      "standard_price": 224.03,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q19",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 240.23,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Cleanroom Anchor Bolt Kit",
+      "code": "P330EFC3690-A020",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 272.32,
+      "standard_price": 160.72,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q20",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 169.05,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "High-Performance Rope Pull Switch",
+      "code": "P330EFC3690-A021",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 396.71,
+      "standard_price": 266.89,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q21",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 264.27,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Precision Lock Assembly",
+      "code": "P330EFC3690-A022",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 252.62,
+      "standard_price": 164.57,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q22",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 158.19,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Cold-Rolled with Base Plate",
+      "code": "P330EFC3690-A023",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 404.94,
+      "standard_price": 252.84,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q23",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 243.97,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Dual-Stage Frame Assembly",
+      "code": "P330EFC3690-A024",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 317.62,
+      "standard_price": 169.12,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q24",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 177.11,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Weatherproof Bolt Kit",
+      "code": "P330EFC3690-A025",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 329.19,
+      "standard_price": 185.88,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q25",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 178.14,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Anodized Light Beacon Module",
+      "code": "P330EFC3690-A026",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 276.95,
+      "standard_price": 188.51,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q26",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 198.4,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Low-Flow Vision Panel",
+      "code": "P330EFC3690-A027",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 249.31,
+      "standard_price": 136.64,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q27",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 140.04,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Industrial Pull Switch",
+      "code": "P330EFC3690-A028",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 341.33,
+      "standard_price": 212.41,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q28",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 219.73,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Lightweight Interlock System",
+      "code": "P330EFC3690-A029",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 349.72,
+      "standard_price": 243.47,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q29",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 234.57,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Economy Beacon Module",
+      "code": "P330EFC3690-A030",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 383.14,
+      "standard_price": 233.56,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q30",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 226.66,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Reinforced Lock Assembly",
+      "code": "P330EFC3690-A031",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 206.59,
+      "standard_price": 139.87,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q31",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 136.08,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Non-Magnetic Anchor Bolt Kit",
+      "code": "P330EFC3690-A032",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 312.44,
+      "standard_price": 186.64,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q32",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 191.55,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Impact-Rated Clamp Connector Set",
+      "code": "P330EFC3690-A033",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 228.55,
+      "standard_price": 134.55,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q33",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 128.63,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Thermal-Guard Connector Set",
+      "code": "P330EFC3690-A034",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 289.09,
+      "standard_price": 174.16,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q34",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 166.92,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Heavy-Duty Beacon Module",
+      "code": "P330EFC3690-A035",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 185.89,
+      "standard_price": 113.79,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q35",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 120.38,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Threaded Interlock System",
+      "code": "P330EFC3690-A036",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 398.31,
+      "standard_price": 262.61,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q36",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 271.99,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Low-Noise Connector Set",
+      "code": "P330EFC3690-A037",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 197.01,
+      "standard_price": 117.13,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q37",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 121.64,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Standard Vision Panel",
+      "code": "P330EFC3690-A038",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 381.95,
+      "standard_price": 221.66,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q38",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 230.73,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Medical-Grade Base Plate",
+      "code": "P330EFC3690-A039",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 390.37,
+      "standard_price": 231.66,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q39",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 236.9,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Tapered Pull Switch",
+      "code": "P330EFC3690-A040",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 189.06,
+      "standard_price": 127.08,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q40",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 126.63,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Compact Gate Frame Assembly",
+      "code": "P330EFC3690-A041",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 235.12,
+      "standard_price": 129.22,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q41",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 132.74,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Modular Key Interlock System",
+      "code": "P330EFC3690-A042",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 197.34,
+      "standard_price": 129.81,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q42",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 135.11,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Extended-Life Key Interlock System",
+      "code": "P330EFC3690-A043",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 278.72,
+      "standard_price": 164.53,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q43",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 170.23,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Heat-Treated Vision Panel",
+      "code": "P330EFC3690-A044",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 376.95,
+      "standard_price": 209.49,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q44",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 221.25,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Commercial Frame Assembly",
+      "code": "P330EFC3690-A045",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 419.84,
+      "standard_price": 218.59,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q45",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 219.79,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Low-Profile Clamp Connector Set",
+      "code": "P330EFC3690-A046",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 184.23,
+      "standard_price": 119.08,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q46",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 121.34,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Universal Mesh Panel 4x8ft",
+      "code": "P330EFC3690-A047",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 382.36,
+      "standard_price": 241.52,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q47",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 248.14,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Low-Temp Rope Pull Switch",
+      "code": "P330EFC3690-A048",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 413.76,
+      "standard_price": 286.5,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q48",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 299.29,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Quick-Release Polycarbonate Vision Panel",
+      "code": "P330EFC3690-A049",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 289.5,
+      "standard_price": 201.88,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q49",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 200.91,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Pressure-Balanced Solenoid Lock Assembly",
+      "code": "P330EFC3690-A050",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 361.24,
+      "standard_price": 226.88,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r330EFC3690_q50",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 235.91,
+          "name": "Bulk shipment"
+        }
+      ]
+    }
+  ],
+  "boms": [
+    {
+      "product_code": "P47D0CB45E7-SAF-LSC-006",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P47D0CB45E7-SAF-ESP-106",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "P47D0CB45E7-SAF-SLB-109",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "P47D0CB45E7-SAF-FAB-110",
+          "quantity": 5.0
+        },
+        {
+          "component_code": "P47D0CB45E7-SAF-RAC-113",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "P47D0CB45E7-SAF-GFR-126",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "P330EFC3690-A022",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P330EFC3690-A050",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "P330EFC3690-A049",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P330EFC3690-A018",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "P330EFC3690-A015",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P330EFC3690-A037",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "P330EFC3690-A016",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "P330EFC3690-A038",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P330EFC3690-A004",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "P330EFC3690-A040",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P330EFC3690-A010",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "P330EFC3690-A035",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P330EFC3690-A037",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "P330EFC3690-A003",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "P330EFC3690-A014",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P330EFC3690-A020",
+          "quantity": 3.0
+        },
+        {
+          "component_code": "P330EFC3690-A040",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "P330EFC3690-A011",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P330EFC3690-A004",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "P330EFC3690-A034",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "P330EFC3690-A046",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P330EFC3690-A002",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "P330EFC3690-A032",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P330EFC3690-A020",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "P330EFC3690-A046",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    }
+  ],
+  "workcenters": [
+    {
+      "product_code": "P47D0CB45E7-SAF-LSC-006",
+      "code": "P47D0CB45E7-WC01",
+      "name": "Assembly Line 1",
+      "unit_cost": 31.0,
+      "costs_hour": 38.49,
+      "time_per_unit_minutes": 48.32,
+      "time_efficiency": 100.0,
+      "time_start": 0.0,
+      "time_stop": 0.0,
+      "oee_target": 1.0,
+      "note": "Industrial Equipment workcenter pool 1",
+      "capacity_minutes": 2126.0,
+      "lead_days": 6.0,
+      "operation_name": "P47D0CB45E7-SAF-LSC-006 Assembly",
+      "sequence": 100,
+      "is_primary": true,
+      "alternative_workcenter_codes": [
+        "P47D0CB45E7-WC02"
+      ]
+    },
+    {
+      "product_code": "P47D0CB45E7-SAF-LSC-006",
+      "code": "P47D0CB45E7-WC02",
+      "name": "Fabrication Cell 2",
+      "unit_cost": 36.0,
+      "costs_hour": 37.04,
+      "time_per_unit_minutes": 58.32,
+      "time_efficiency": 100.0,
+      "time_start": 0.0,
+      "time_stop": 0.0,
+      "oee_target": 1.0,
+      "note": "Industrial Equipment workcenter pool 2",
+      "capacity_minutes": 2857.0,
+      "lead_days": 6.0,
+      "operation_name": "P47D0CB45E7-SAF-LSC-006 Assembly",
+      "sequence": 100,
+      "is_primary": false,
+      "alternative_workcenter_codes": []
+    }
+  ],
+  "stock_levels": [
+    {
+      "product_code": "P47D0CB45E7-SAF-ESP-106",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P47D0CB45E7-SAF-FAB-110",
+      "warehouse_code": null,
+      "quantity": 29.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P47D0CB45E7-SAF-GFR-126",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P47D0CB45E7-SAF-LSC-006",
+      "warehouse_code": null,
+      "quantity": 69.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P47D0CB45E7-SAF-RAC-113",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P47D0CB45E7-SAF-SLB-109",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A001",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A002",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A003",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A004",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A005",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A006",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A007",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A008",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A009",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A010",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A011",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A012",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A013",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A014",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A015",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A016",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A017",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A018",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A019",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A020",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A021",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A022",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A023",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A024",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A025",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A026",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A027",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A028",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A029",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A030",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A031",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A032",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A033",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A034",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A035",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A036",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A037",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A038",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A039",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A040",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A041",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A042",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A043",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A044",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A045",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A046",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A047",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A048",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A049",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P330EFC3690-A050",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    }
+  ],
+  "existing_purchase_orders": [],
+  "existing_manufacturing_orders": [],
+  "existing_sales_orders": [],
+  "repair_context": null,
+  "system_parameters": [
+    {
+      "key": "erp_bench.min_margin_percent",
+      "value": "27.2"
+    }
+  ]
+}

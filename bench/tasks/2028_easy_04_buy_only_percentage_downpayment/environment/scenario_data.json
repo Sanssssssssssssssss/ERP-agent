@@ -1,0 +1,2600 @@
+{
+  "scenario_number": 2028,
+  "name": "Compact Hot-Desk Station",
+  "instruction": "The following Compact Hot-Desk Station customer orders are firm and must be supplied on schedule:\n\n- Lumen Engineering: 6 units due in 5 days (pretax budget cap $2,258)\n- Lattice Solutions Group: 5 units due in 6 days (pretax budget cap $2,032)\n- Atlas Theater: 12 units due in 6 days (pretax budget cap $4,716)\n- Baltic Dynamics: 5 units due in 8 days (pretax budget cap $1,917)\n\nCurrent finished-goods stock is 23 units. There is no in-house manufacturing route for the finished product, so any shortfall has to come from vendors.\n\nAcross all units covered through new purchasing or manufacturing, keep portfolio-level new-spend margin at or above 27.9% at selling price. After fulfillment, create and post the required linked customer invoices. Use 30 Days terms on retained sales orders and all linked customer invoices. For retained orders with untaxed totals of $2,000.00 or more, first create and post a down payment invoice for 40%; then create and post a regular invoice for the remaining amount. Below that threshold, create and post one regular invoice.",
+  "seed": 7149780561543446962,
+  "background_and_policy": "* Fulfill all orders while minimizing new spending on procurement and manufacturing.\n* The combined units covered through new purchasing or manufacturing must clear at least 27.9% portfolio-level new-spend margin at selling price.\n* Finance considers the existing stock as sunk cost.\n* Use 30 Days terms on retained sales orders and all linked customer invoices.\n* For retained orders with untaxed totals of $2,000.00 or more, first create and post a down payment invoice for 40%; then create and post a regular invoice for the remaining amount. Below that threshold, create and post one regular invoice.\n* You must create and confirm the necessary sales orders and purchase orders.\n* Customer budgets are pre-tax amounts.\n* Link Sales Orders to the related Purchase Orders for traceability.\n* For finished goods POs, put the SO reference(s) (e.g. S00030 or S00030, S00031) into the origin field ('Source' in the UI).\n* In the end, the lineage must be SO -> PO.\n* You must sell this product at List Price.\n* On sales orders, set the commitment date.\n* On purchase orders, you must set the delivery date.\n* Before releasing anything, read the Internal Notes/comments on stock, customers, and vendors.\n\nCapacity constraints:\n- No in-house manufacturing capacity is available.\n- For each finished-goods supplier offer, respect min/max quantities as horizon-wide totals.\n- Use one consolidated PO per supplier offer (do not split a single offer across multiple POs).\n- Check each vendor's Internal Notes in Odoo for maximum order quantity limits.",
+  "invoicing_policy": {
+    "invoice_required": true,
+    "payment_term": "net_30",
+    "downpayment_required": true,
+    "downpayment_threshold_amount": 2000.0,
+    "downpayment_mode": "percentage",
+    "downpayment_value": 40.0
+  },
+  "warehouses": [],
+  "vendors": [
+    {
+      "name": "Opal Networks",
+      "ref": "r73A9CAA57F_q01",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Onyx Commodities",
+      "ref": "r73A9CAA57F_q02",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Compass Consolidators",
+      "ref": "r73A9CAA57F_q03",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Aether Transit",
+      "ref": "rC32DB5582E_q01",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Catalyst Wholesale",
+      "ref": "rC32DB5582E_q02",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Flint Carriers",
+      "ref": "rC32DB5582E_q03",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Ironside Supply",
+      "ref": "rC32DB5582E_q04",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Axis Supply",
+      "ref": "rC32DB5582E_q05",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Stratos Supply",
+      "ref": "rC32DB5582E_q06",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Jade Freight",
+      "ref": "rC32DB5582E_q07",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Pivot Resources",
+      "ref": "rC32DB5582E_q08",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Terra Resources",
+      "ref": "rC32DB5582E_q09",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Spark Freight",
+      "ref": "rC32DB5582E_q10",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Bayshore Components",
+      "ref": "rC32DB5582E_q11",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Cedar Sourcing",
+      "ref": "rC32DB5582E_q12",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Keystone Components",
+      "ref": "rC32DB5582E_q13",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Silverline Freight",
+      "ref": "rC32DB5582E_q14",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Vantage Transit",
+      "ref": "rC32DB5582E_q15",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Solace Components",
+      "ref": "rC32DB5582E_q16",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Anvil Networks",
+      "ref": "rC32DB5582E_q17",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Matrix Freight",
+      "ref": "rC32DB5582E_q18",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Spectra Resources",
+      "ref": "rC32DB5582E_q19",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Marble Freight",
+      "ref": "rC32DB5582E_q20",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Velocity Freight",
+      "ref": "rC32DB5582E_q21",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Horizon Resources",
+      "ref": "rC32DB5582E_q22",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Sierra Wholesale",
+      "ref": "rC32DB5582E_q23",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Sentinel Distribution",
+      "ref": "rC32DB5582E_q24",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Titan Parts Co",
+      "ref": "rC32DB5582E_q25",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Beacon Trading",
+      "ref": "rC32DB5582E_q26",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Mosaic Freight",
+      "ref": "rC32DB5582E_q27",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Evergreen Transit",
+      "ref": "rC32DB5582E_q28",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Coral Transit",
+      "ref": "rC32DB5582E_q29",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Flux Logistics",
+      "ref": "rC32DB5582E_q30",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Peak Networks",
+      "ref": "rC32DB5582E_q31",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Raven Sourcing",
+      "ref": "rC32DB5582E_q32",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Osprey Logistics",
+      "ref": "rC32DB5582E_q33",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Bridgeway Materials",
+      "ref": "rC32DB5582E_q34",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Ledger Transit",
+      "ref": "rC32DB5582E_q35",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Summit Freight",
+      "ref": "rC32DB5582E_q36",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Pinnacle Supply",
+      "ref": "rC32DB5582E_q37",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Dune Wholesale",
+      "ref": "rC32DB5582E_q38",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Clearwater Procurement",
+      "ref": "rC32DB5582E_q39",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Ridge Sourcing",
+      "ref": "rC32DB5582E_q40",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Oxide Materials",
+      "ref": "rC32DB5582E_q41",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Arbor Resources",
+      "ref": "rC32DB5582E_q42",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Quantum Supply",
+      "ref": "rC32DB5582E_q43",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Iron Resources",
+      "ref": "rC32DB5582E_q44",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Trident Procurement",
+      "ref": "rC32DB5582E_q45",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Comet Supply",
+      "ref": "rC32DB5582E_q46",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Nexus Parts Co",
+      "ref": "rC32DB5582E_q47",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Bronze Wholesale",
+      "ref": "rC32DB5582E_q48",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Crown Freight",
+      "ref": "rC32DB5582E_q49",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Alloy Trading",
+      "ref": "rC32DB5582E_q50",
+      "supplier_rank": 5,
+      "comment": null
+    }
+  ],
+  "customers": [
+    {
+      "name": "Lumen Engineering",
+      "ref": "r73A9CAA57F_c01",
+      "email": "orders@lumenengineering.io",
+      "budget_dollars": 2258.33,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Lattice Solutions Group",
+      "ref": "r73A9CAA57F_c02",
+      "email": "orders@latticesolutionsgroup.io",
+      "budget_dollars": 2032.31,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Atlas Theater",
+      "ref": "r73A9CAA57F_c03",
+      "email": "orders@atlastheater.io",
+      "budget_dollars": 4715.74,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Baltic Dynamics",
+      "ref": "r73A9CAA57F_c04",
+      "email": "orders@balticdynamics.io",
+      "budget_dollars": 1917.03,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Skyline Assembly R&D Workshop",
+      "ref": "rC32DB5582E_p01",
+      "email": "contact@skylineassembly.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Ember Operations R&D Workshop",
+      "ref": "rC32DB5582E_p02",
+      "email": "contact@emberoperations.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Alpine Industries Field Ops",
+      "ref": "rC32DB5582E_p03",
+      "email": "contact@alpineindustries.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Cipher Engineering Warehouse Ops",
+      "ref": "rC32DB5582E_p04",
+      "email": "contact@cipherengineering.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Vertex Manufacturing HQ Procurement",
+      "ref": "rC32DB5582E_p05",
+      "email": "contact@vertexmanufacturing.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Arrow Operations Plant Maintenance",
+      "ref": "rC32DB5582E_p06",
+      "email": "contact@arrowoperations.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Trellis Solutions R&D Workshop",
+      "ref": "rC32DB5582E_p07",
+      "email": "contact@trellissolutions.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Cardinal Industries R&D Workshop",
+      "ref": "rC32DB5582E_p08",
+      "email": "contact@cardinalindustries.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Ridgeline Manufacturing Test Facility",
+      "ref": "rC32DB5582E_p09",
+      "email": "contact@ridgelinemanufacturing.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Haven Industries Plant Maintenance",
+      "ref": "rC32DB5582E_p10",
+      "email": "contact@havenindustries.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Ironwood Operations HQ Procurement",
+      "ref": "rC32DB5582E_p11",
+      "email": "contact@ironwoodoperations.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Meridian Assembly Plant Maintenance",
+      "ref": "rC32DB5582E_p12",
+      "email": "contact@meridianassembly.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Chrome Technologies Tooling Center",
+      "ref": "rC32DB5582E_p13",
+      "email": "contact@chrometechnologies.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Eclipse Services Tooling Center",
+      "ref": "rC32DB5582E_p14",
+      "email": "contact@eclipseservices.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Thornton Technologies Prototype Shop",
+      "ref": "rC32DB5582E_p15",
+      "email": "contact@thorntontechnologies.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Zenith Solutions HQ Procurement",
+      "ref": "rC32DB5582E_p16",
+      "email": "contact@zenithsolutions.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Granite Services Prototype Shop",
+      "ref": "rC32DB5582E_p17",
+      "email": "contact@graniteservices.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Circuit Engineering Tooling Center",
+      "ref": "rC32DB5582E_p18",
+      "email": "contact@circuitengineering.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Slate Operations Quality Lab",
+      "ref": "rC32DB5582E_p19",
+      "email": "contact@slateoperations.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Lance Technologies Field Ops",
+      "ref": "rC32DB5582E_p20",
+      "email": "contact@lancetechnologies.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Orbital Services R&D Workshop",
+      "ref": "rC32DB5582E_p21",
+      "email": "contact@orbitalservices.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Sterling Technologies R&D Workshop",
+      "ref": "rC32DB5582E_p22",
+      "email": "contact@sterlingtechnologies.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Aurora Production Site Logistics",
+      "ref": "rC32DB5582E_p23",
+      "email": "contact@auroraproduction.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Element Technologies R&D Workshop",
+      "ref": "rC32DB5582E_p24",
+      "email": "contact@elementtechnologies.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Prism Services Test Facility",
+      "ref": "rC32DB5582E_p25",
+      "email": "contact@prismservices.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Hartland Engineering Field Ops",
+      "ref": "rC32DB5582E_p26",
+      "email": "contact@hartlandengineering.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Noble Fabrication Field Ops",
+      "ref": "rC32DB5582E_p27",
+      "email": "contact@noblefabrication.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Stonewall Operations R&D Workshop",
+      "ref": "rC32DB5582E_p28",
+      "email": "contact@stonewalloperations.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Aegis Fabrication R&D Workshop",
+      "ref": "rC32DB5582E_p29",
+      "email": "contact@aegisfabrication.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Nimbus Engineering Tooling Center",
+      "ref": "rC32DB5582E_p30",
+      "email": "contact@nimbusengineering.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Cobalt Production Prototype Shop",
+      "ref": "rC32DB5582E_p31",
+      "email": "contact@cobaltproduction.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Fairview Technologies Plant Maintenance",
+      "ref": "rC32DB5582E_p32",
+      "email": "contact@fairviewtechnologies.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Cascade Engineering Warehouse Ops",
+      "ref": "rC32DB5582E_p33",
+      "email": "contact@cascadeengineering.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Cosmo Operations Quality Lab",
+      "ref": "rC32DB5582E_p34",
+      "email": "contact@cosmooperations.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Forge Engineering HQ Procurement",
+      "ref": "rC32DB5582E_p35",
+      "email": "contact@forgeengineering.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Equinox Solutions Site Logistics",
+      "ref": "rC32DB5582E_p36",
+      "email": "contact@equinoxsolutions.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Gateway Operations Quality Lab",
+      "ref": "rC32DB5582E_p37",
+      "email": "contact@gatewayoperations.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Spire Technologies Quality Lab",
+      "ref": "rC32DB5582E_p38",
+      "email": "contact@spiretechnologies.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Metro Assembly Test Facility",
+      "ref": "rC32DB5582E_p39",
+      "email": "contact@metroassembly.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Scion Operations Plant Maintenance",
+      "ref": "rC32DB5582E_p40",
+      "email": "contact@scionoperations.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Indigo Engineering Test Facility",
+      "ref": "rC32DB5582E_p41",
+      "email": "contact@indigoengineering.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Ivory Fabrication Prototype Shop",
+      "ref": "rC32DB5582E_p42",
+      "email": "contact@ivoryfabrication.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Monarch Assembly Prototype Shop",
+      "ref": "rC32DB5582E_p43",
+      "email": "contact@monarchassembly.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Apex Assembly Warehouse Ops",
+      "ref": "rC32DB5582E_p44",
+      "email": "contact@apexassembly.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Northbridge Services Test Facility",
+      "ref": "rC32DB5582E_p45",
+      "email": "contact@northbridgeservices.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Brookfield Technologies Field Ops",
+      "ref": "rC32DB5582E_p46",
+      "email": "contact@brookfieldtechnologies.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Borough Manufacturing Prototype Shop",
+      "ref": "rC32DB5582E_p47",
+      "email": "contact@boroughmanufacturing.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Sapphire Assembly HQ Procurement",
+      "ref": "rC32DB5582E_p48",
+      "email": "contact@sapphireassembly.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Riverdale Manufacturing Field Ops",
+      "ref": "rC32DB5582E_p49",
+      "email": "contact@riverdalemanufacturing.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Conduit Manufacturing Field Ops",
+      "ref": "rC32DB5582E_p50",
+      "email": "contact@conduitmanufacturing.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    }
+  ],
+  "products": [
+    {
+      "name": "Compact Hot-Desk Station",
+      "code": "P73A9CAA57F-WST-CHD-004",
+      "category": "Office Systems",
+      "type": "consu",
+      "list_price": 368.0,
+      "standard_price": 208.76,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r73A9CAA57F_q01",
+          "delay": 5,
+          "min_qty": 11.0,
+          "max_qty": 27.0,
+          "price": 177.66,
+          "name": "Priority Shuttle lane (5d transit, 11-27 units)"
+        },
+        {
+          "partner_ref": "r73A9CAA57F_q02",
+          "delay": 3,
+          "min_qty": 4.0,
+          "max_qty": 27.0,
+          "price": 271.78,
+          "name": "Express Air lane (3d transit, 4-27 units)"
+        },
+        {
+          "partner_ref": "r73A9CAA57F_q03",
+          "delay": 9,
+          "min_qty": 7.0,
+          "max_qty": 15.0,
+          "price": 202.88,
+          "name": "Regional Cross-Dock lane (9d transit, 7-15 units)"
+        }
+      ]
+    },
+    {
+      "name": "Food-Grade Linear Actuator Motor",
+      "code": "PC32DB5582E-A001",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 230.3,
+      "standard_price": 159.58,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q01",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 156.68,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Sealed Monitor Arm Mount",
+      "code": "PC32DB5582E-A002",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 242.93,
+      "standard_price": 160.15,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q02",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 153.87,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Wide-Body Screen Panel",
+      "code": "PC32DB5582E-A003",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 394.01,
+      "standard_price": 234.68,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q03",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 246.27,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Industrial Leveler Set",
+      "code": "PC32DB5582E-A004",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 324.13,
+      "standard_price": 178.91,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q04",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 191.88,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Zero-Backlash Foot Leveler Set",
+      "code": "PC32DB5582E-A005",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 211.56,
+      "standard_price": 132.18,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q05",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 134.69,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Spring-Loaded Tray Slider",
+      "code": "PC32DB5582E-A006",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 387.61,
+      "standard_price": 207.19,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q06",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 217.08,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Extended-Life Edge Trim",
+      "code": "PC32DB5582E-A007",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 197.34,
+      "standard_price": 138.51,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q07",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 132.23,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Cleanroom Memory Presets",
+      "code": "PC32DB5582E-A008",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 411.7,
+      "standard_price": 227.17,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q08",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 230.88,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Anodized Foot Leveler Set",
+      "code": "PC32DB5582E-A009",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 366.98,
+      "standard_price": 204.19,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q09",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 207.08,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Metric with Memory Presets",
+      "code": "PC32DB5582E-A010",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 289.9,
+      "standard_price": 200.54,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q10",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 199.69,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Weatherproof Actuator Motor",
+      "code": "PC32DB5582E-A011",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 371.98,
+      "standard_price": 238.72,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q11",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 255.61,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Premium Desktop Panel 60x30",
+      "code": "PC32DB5582E-A012",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 410.04,
+      "standard_price": 274.36,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q12",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 267.94,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Non-Magnetic Desktop Surface Panel",
+      "code": "PC32DB5582E-A013",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 231.92,
+      "standard_price": 149.71,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q13",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 148.76,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Rapid-Lock Privacy Screen Panel",
+      "code": "PC32DB5582E-A014",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 332.11,
+      "standard_price": 186.74,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q14",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 182.15,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "High-Torque Arm Mount",
+      "code": "PC32DB5582E-A015",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 415.31,
+      "standard_price": 238.81,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q15",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 234.71,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "High-Cycle Desktop Surface Panel",
+      "code": "PC32DB5582E-A016",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 190.39,
+      "standard_price": 121.36,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q16",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 125.42,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "High-Performance Surface Panel",
+      "code": "PC32DB5582E-A017",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 371.6,
+      "standard_price": 231.0,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q17",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 244.37,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Heat-Treated Cable Tray System",
+      "code": "PC32DB5582E-A018",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 390.58,
+      "standard_price": 211.28,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q18",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 222.3,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Universal Grommet Module",
+      "code": "PC32DB5582E-A019",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 248.94,
+      "standard_price": 135.41,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q19",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 141.3,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Thermal-Guard Memory Presets",
+      "code": "PC32DB5582E-A020",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 257.79,
+      "standard_price": 154.83,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q20",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 166.3,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Reinforced Privacy Screen Panel",
+      "code": "PC32DB5582E-A021",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 282.85,
+      "standard_price": 164.12,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q21",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 174.86,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Dual-Stage Desktop Panel 60x30",
+      "code": "PC32DB5582E-A022",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 408.91,
+      "standard_price": 275.83,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q22",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 288.66,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Low-Profile Desktop Edge Trim",
+      "code": "PC32DB5582E-A023",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 217.54,
+      "standard_price": 156.32,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q23",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 165.41,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "UV-Stable Crossbar Stabilizer",
+      "code": "PC32DB5582E-A024",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 256.51,
+      "standard_price": 152.88,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q24",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 160.11,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Low-Friction Desktop Edge Trim",
+      "code": "PC32DB5582E-A025",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 223.57,
+      "standard_price": 147.34,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q25",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 157.21,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Impact-Rated Crossbar Stabilizer",
+      "code": "PC32DB5582E-A026",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 362.7,
+      "standard_price": 229.08,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q26",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 232.46,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Lightweight with Memory Presets",
+      "code": "PC32DB5582E-A027",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 400.27,
+      "standard_price": 237.1,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q27",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 240.53,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Modular Leveler Set",
+      "code": "PC32DB5582E-A028",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 242.78,
+      "standard_price": 133.3,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q28",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 134.87,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Flanged Desktop Panel 60x30",
+      "code": "PC32DB5582E-A029",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 184.66,
+      "standard_price": 130.54,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q29",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 139.66,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Economy Linear Actuator Motor",
+      "code": "PC32DB5582E-A030",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 271.62,
+      "standard_price": 171.92,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q30",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 178.44,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "High-Temp Edge Trim",
+      "code": "PC32DB5582E-A031",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 199.93,
+      "standard_price": 136.98,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q31",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 131.83,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Double-Row Screen Panel",
+      "code": "PC32DB5582E-A032",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 415.16,
+      "standard_price": 257.6,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q32",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 262.54,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Commercial Leg Assembly",
+      "code": "PC32DB5582E-A033",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 277.81,
+      "standard_price": 199.14,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q33",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 210.72,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Medical-Grade Edge Trim",
+      "code": "PC32DB5582E-A034",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 362.08,
+      "standard_price": 197.64,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q34",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 191.9,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Snap-Fit Actuator Motor",
+      "code": "PC32DB5582E-A035",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 281.15,
+      "standard_price": 180.95,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q35",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 186.12,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Tapered Edge Trim",
+      "code": "PC32DB5582E-A036",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 331.21,
+      "standard_price": 220.34,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q36",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 234.59,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Anti-Vibration Monitor Arm Mount",
+      "code": "PC32DB5582E-A037",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 378.7,
+      "standard_price": 251.66,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q37",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 244.65,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Stainless Foot Leveler Set",
+      "code": "PC32DB5582E-A038",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 375.06,
+      "standard_price": 218.72,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q38",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 226.33,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Quick-Release Crossbar Stabilizer",
+      "code": "PC32DB5582E-A039",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 269.05,
+      "standard_price": 163.63,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q39",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 175.04,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Self-Lubricating Tray System",
+      "code": "PC32DB5582E-A040",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 244.56,
+      "standard_price": 139.4,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q40",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 150.03,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Standard Surface Panel",
+      "code": "PC32DB5582E-A041",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 406.43,
+      "standard_price": 277.56,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q41",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 274.54,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Hardened Leg Assembly",
+      "code": "PC32DB5582E-A042",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 379.84,
+      "standard_price": 220.12,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q42",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 226.63,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Powder-Coated Linear Actuator Motor",
+      "code": "PC32DB5582E-A043",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 248.85,
+      "standard_price": 129.62,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q43",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 128.96,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Low-Noise Tray Slider",
+      "code": "PC32DB5582E-A044",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 283.16,
+      "standard_price": 158.08,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q44",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 153.18,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Adjustable Monitor Arm Mount",
+      "code": "PC32DB5582E-A045",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 340.03,
+      "standard_price": 222.47,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q45",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 219.59,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Narrow-Body Desktop Panel 60x30",
+      "code": "PC32DB5582E-A046",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 402.79,
+      "standard_price": 287.84,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q46",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 305.07,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Pressure-Balanced Monitor Arm Mount",
+      "code": "PC32DB5582E-A047",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 337.3,
+      "standard_price": 208.45,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q47",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 223.98,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Heavy-Duty Cable Tray System",
+      "code": "PC32DB5582E-A048",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 186.48,
+      "standard_price": 124.93,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q48",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 125.62,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Single-Stage Foot Leveler Set",
+      "code": "PC32DB5582E-A049",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 300.4,
+      "standard_price": 212.26,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q49",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 214.47,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Cold-Rolled with Memory Presets",
+      "code": "PC32DB5582E-A050",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 358.28,
+      "standard_price": 249.61,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC32DB5582E_q50",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 260.36,
+          "name": "Warehouse direct"
+        }
+      ]
+    }
+  ],
+  "boms": [
+    {
+      "product_code": "PC32DB5582E-A027",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PC32DB5582E-A025",
+          "quantity": 2.0
+        },
+        {
+          "component_code": "PC32DB5582E-A005",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PC32DB5582E-A021",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PC32DB5582E-A017",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "PC32DB5582E-A049",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PC32DB5582E-A045",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PC32DB5582E-A010",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PC32DB5582E-A033",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PC32DB5582E-A047",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "PC32DB5582E-A017",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PC32DB5582E-A015",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PC32DB5582E-A044",
+          "quantity": 2.0
+        },
+        {
+          "component_code": "PC32DB5582E-A047",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PC32DB5582E-A009",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PC32DB5582E-A006",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "PC32DB5582E-A010",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PC32DB5582E-A019",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PC32DB5582E-A036",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PC32DB5582E-A029",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PC32DB5582E-A045",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PC32DB5582E-A024",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PC32DB5582E-A028",
+          "quantity": 2.0
+        },
+        {
+          "component_code": "PC32DB5582E-A031",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PC32DB5582E-A047",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PC32DB5582E-A025",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    }
+  ],
+  "workcenters": [],
+  "stock_levels": [
+    {
+      "product_code": "P73A9CAA57F-WST-CHD-004",
+      "warehouse_code": null,
+      "quantity": 23.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A001",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A002",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A003",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A004",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A005",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A006",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A007",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A008",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A009",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A010",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A011",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A012",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A013",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A014",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A015",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A016",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A017",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A018",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A019",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A020",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A021",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A022",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A023",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A024",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A025",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A026",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A027",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A028",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A029",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A030",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A031",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A032",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A033",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A034",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A035",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A036",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A037",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A038",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A039",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A040",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A041",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A042",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A043",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A044",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A045",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A046",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A047",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A048",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A049",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC32DB5582E-A050",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    }
+  ],
+  "existing_purchase_orders": [],
+  "existing_manufacturing_orders": [],
+  "existing_sales_orders": [],
+  "repair_context": null,
+  "system_parameters": [
+    {
+      "key": "erp_bench.min_margin_percent",
+      "value": "27.9"
+    }
+  ]
+}

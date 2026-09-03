@@ -1,0 +1,155 @@
+{
+  "scenario_number": 2271,
+  "name": "Under-Desk Sound Shield",
+  "instruction": "Ensure all these Under-Desk Sound Shield customer orders are supplied on schedule:\n\n- Oxide Office: 6 units due in 5 days (pretax budget cap $1,507)\n- Grove Research: 12 units due in 7 days (pretax budget cap $2,958)\n- Nexus Observatory: 2 units due in 9 days (pretax budget cap $484)\n- Peak Bazaar: 12 units due in 9 days (pretax budget cap $2,912)\n\nOn-hand finished stock covers 26 units. You cannot build the finished product internally, so any gap beyond stock has to be covered by purchasing.\n\nAcross all units covered through new purchasing or manufacturing, keep portfolio-level new-spend margin at or above 29% at selling price. After fulfillment, create and post the required linked customer invoices. Use 30 Days terms on retained sales orders and all linked customer invoices.",
+  "seed": 1928316172470361927,
+  "background_and_policy": "* Fulfill all orders while minimizing new spending on procurement and manufacturing.\n* Across all units covered through new purchasing or manufacturing, keep portfolio-level new-spend margin at or above 29% at selling price.\n* Finance considers the existing stock as sunk cost.\n* After confirming each retained sales order, create and post exactly one linked customer invoice.\n* Use 30 Days terms on retained sales orders and all linked customer invoices.\n* You must create and confirm the necessary sales orders and purchase orders.\n* Customer budgets are pre-tax amounts.\n* Link Sales Orders to the related Purchase Orders for traceability.\n* For finished goods POs, put the SO reference(s) (e.g. S00030 or S00030, S00031) into the origin field ('Source' in the UI).\n* In the end, the lineage must be SO -> PO.\n* You must sell this product at List Price.\n* On sales orders, set the commitment date.\n* On purchase orders, you must set the delivery date.\n* Before releasing anything, read the Internal Notes/comments on stock, customers, and vendors.\n\nCapacity constraints:\n- No in-house manufacturing capacity is available.\n- For each finished-goods supplier offer, respect min/max quantities as horizon-wide totals.\n- Use one consolidated PO per supplier offer (do not split a single offer across multiple POs).\n- Check each vendor's Internal Notes in Odoo for maximum order quantity limits.",
+  "invoicing_policy": {
+    "invoice_required": true,
+    "payment_term": "net_30",
+    "downpayment_required": false,
+    "downpayment_threshold_amount": null,
+    "downpayment_mode": null,
+    "downpayment_value": null
+  },
+  "warehouses": [],
+  "vendors": [
+    {
+      "name": "Aegis Shipping",
+      "ref": "rFF7D4DAF03_q01",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Quartz Operations",
+      "ref": "rFF7D4DAF03_q02",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Millbrook Networks",
+      "ref": "rFF7D4DAF03_q03",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Stonewall Logistics",
+      "ref": "rFF7D4DAF03_q04",
+      "supplier_rank": 4,
+      "comment": null
+    }
+  ],
+  "customers": [
+    {
+      "name": "Oxide Office",
+      "ref": "rFF7D4DAF03_c01",
+      "email": "orders@oxideoffice.io",
+      "budget_dollars": 1507.15,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Grove Research",
+      "ref": "rFF7D4DAF03_c02",
+      "email": "orders@groveresearch.io",
+      "budget_dollars": 2957.88,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Nexus Observatory",
+      "ref": "rFF7D4DAF03_c03",
+      "email": "orders@nexusobservatory.io",
+      "budget_dollars": 484.03,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Peak Bazaar",
+      "ref": "rFF7D4DAF03_c04",
+      "email": "orders@peakbazaar.io",
+      "budget_dollars": 2911.65,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    }
+  ],
+  "products": [
+    {
+      "name": "Under-Desk Sound Shield",
+      "code": "PFF7D4DAF03-SPP-USS-009",
+      "category": "Office Systems",
+      "type": "consu",
+      "list_price": 233.21,
+      "standard_price": 144.87,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rFF7D4DAF03_q01",
+          "delay": 6,
+          "min_qty": 5.0,
+          "max_qty": 31.0,
+          "price": 121.59,
+          "name": "Priority Shuttle lane (6d transit, 5-31 units)"
+        },
+        {
+          "partner_ref": "rFF7D4DAF03_q02",
+          "delay": 3,
+          "min_qty": 5.0,
+          "max_qty": 17.0,
+          "price": 172.64,
+          "name": "Express Air lane (3d transit, 5-17 units)"
+        },
+        {
+          "partner_ref": "rFF7D4DAF03_q03",
+          "delay": 16,
+          "min_qty": 21.0,
+          "max_qty": 22.0,
+          "price": 78.06,
+          "name": "Bulk Container lane (16d transit, 21-22 units)"
+        },
+        {
+          "partner_ref": "rFF7D4DAF03_q04",
+          "delay": 4,
+          "min_qty": 6.0,
+          "max_qty": 31.0,
+          "price": 152.39,
+          "name": "Microfactory Build-to-Order lane (4d transit, 6-31 units)"
+        }
+      ]
+    }
+  ],
+  "boms": [],
+  "workcenters": [],
+  "stock_levels": [
+    {
+      "product_code": "PFF7D4DAF03-SPP-USS-009",
+      "warehouse_code": null,
+      "quantity": 26.0,
+      "location_type": "stock"
+    }
+  ],
+  "existing_purchase_orders": [],
+  "existing_manufacturing_orders": [],
+  "existing_sales_orders": [],
+  "repair_context": null,
+  "system_parameters": [
+    {
+      "key": "erp_bench.min_margin_percent",
+      "value": "29"
+    }
+  ]
+}

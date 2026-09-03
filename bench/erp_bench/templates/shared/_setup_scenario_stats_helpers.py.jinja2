@@ -1,0 +1,115 @@
+    def _reset_stats(self):
+        return {"created": 0, "updated": 0, "mismatches": 0, "skipped": 0, "errors": 0}
+
+    def _log_section_summary(self, section_name: str, stats: dict):
+        self.section_stats[section_name] = stats
+        parts = []
+        if stats["created"]:
+            parts.append(f"{stats['created']} created")
+        if stats["updated"]:
+            parts.append(f"{stats['updated']} updated")
+        if stats["skipped"]:
+            parts.append(f"{stats['skipped']} skipped")
+        if stats["errors"]:
+            parts.append(f"{stats['errors']} errors")
+        if stats["mismatches"]:
+            parts.append(f"{stats['mismatches']} MISMATCH(ES)")
+        logger.info(f"  Summary: {', '.join(parts) if parts else 'nothing to do'}")
+
+    def _batch_verify(self, verifications: list, stats: dict):
+        """Batch-read records and log mismatches. One RPC call per model.
+        verifications: list of (model, record_id, expected_vals, label)
+        """
+        if not verifications:
+            return
+        from collections import defaultdict
+
+        groups = defaultdict(list)
+        for model, record_id, expected, label in verifications:
+            groups[id(model)].append((model, record_id, expected, label))
+        for _, items in groups.items():
+            model = items[0][0]
+            all_fields = set()
+            for _, _, expected, _ in items:
+                all_fields.update(expected.keys())
+            all_ids = [item[1] for item in items]
+            try:
+                records = model.read(ids=all_ids, fields=list(all_fields))
+                if not isinstance(records, list):
+                    records = [records] if records else []
+                by_id = {r["id"]: r for r in records}
+                for _, record_id, expected, label in items:
+                    actual = by_id.get(record_id, {})
+                    for field, exp_val in expected.items():
+                        actual_val = actual.get(field)
+                        if isinstance(actual_val, (list, tuple)) and len(actual_val) == 2:
+                            actual_val = actual_val[0]
+                        if actual_val != exp_val:
+                            stats["mismatches"] += 1
+                            logger.warning(
+                                "  MISMATCH %s: field '%s' — wrote %r, DB has %r",
+                                label,
+                                field,
+                                exp_val,
+                                actual_val,
+                            )
+            except Exception as e:
+                logger.warning("  BATCH VERIFY ERROR: %s", e)
+
+    def _audit_expected_records(self, label, model_name, domain_fn, expected_items, all_ok, key_field="ref"):
+        expected = len(expected_items)
+        if expected == 0:
+            return all_ok
+        try:
+            Model = self._model(model_name)
+            found = 0
+            missing = []
+            for item in expected_items:
+                ids = Model.search(domain=domain_fn(item), limit=1)
+                if ids:
+                    found += 1
+                else:
+                    key = item.get(key_field, item.get("code", item.get("name", "?")))
+                    missing.append(key)
+            if found == expected:
+                logger.info(f"  {label:<25} expected {expected:>4}, found {found:>4}  OK")
+            else:
+                all_ok = False
+                logger.warning(f"  {label:<25} expected {expected:>4}, found {found:>4}  MISSING {expected - found}")
+                for m in missing[:10]:
+                    logger.warning(f"    missing: {m}")
+                if len(missing) > 10:
+                    logger.warning(f"    ... and {len(missing) - 10} more")
+        except Exception as e:
+            all_ok = False
+            logger.warning(f"  {label:<25} AUDIT ERROR: {e}")
+        return all_ok
+
+    def _log_setup_summary(self):
+        total_mismatches = sum(s.get("mismatches", 0) for s in self.section_stats.values())
+        total_errors = sum(s.get("errors", 0) for s in self.section_stats.values())
+        total_skipped = sum(s.get("skipped", 0) for s in self.section_stats.values())
+        logger.info("")
+        logger.info("=" * 50)
+        logger.info("SETUP SUMMARY")
+        logger.info("=" * 50)
+        for section, s in self.section_stats.items():
+            parts = []
+            if s["created"]:
+                parts.append(f"{s['created']} created")
+            if s["updated"]:
+                parts.append(f"{s['updated']} updated")
+            if s["skipped"]:
+                parts.append(f"{s['skipped']} skipped")
+            if s["errors"]:
+                parts.append(f"{s['errors']} ERRORS")
+            if s["mismatches"]:
+                parts.append(f"{s['mismatches']} MISMATCH(ES)")
+            logger.info(f"  {section:<25} {', '.join(parts) if parts else 'nothing'}")
+        if total_mismatches:
+            logger.warning(f"  *** {total_mismatches} TOTAL MISMATCH(ES) DETECTED ***")
+        if total_errors:
+            logger.warning(f"  *** {total_errors} TOTAL ERROR(S) ***")
+        if total_skipped:
+            logger.info(f"  Total skipped: {total_skipped}")
+        logger.info("=" * 50)

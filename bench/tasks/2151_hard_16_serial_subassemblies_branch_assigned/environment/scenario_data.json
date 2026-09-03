@@ -1,0 +1,3161 @@
+{
+  "scenario_number": 2151,
+  "name": "Centrifugal Compressor 200HP",
+  "instruction": "Ensure all these Centrifugal Compressor 200HP customer orders are supplied on schedule:\n\n- Titan Workspaces: 24 units due in 8 days (pretax budget cap $1,243,258)\n- Comet Clinics: 18 units due in 8 days (pretax budget cap $972,288)\n- Copper Outfitters: 21 units due in 8 days (pretax budget cap $1,060,316)\n- Ridgeline Ventures: 30 units due in 8 days (pretax budget cap $1,601,637)\n- Pinnacle Engineering: 32 units due in 9 days (pretax budget cap $1,647,937)\n- Stratos Theater: 25 units due in 9 days (pretax budget cap $1,346,785)\n- Velocity Collective East: 29 units due in 9 days (pretax budget cap $1,559,302)\n- Conduit Lyceum: 21 units due in 9 days (pretax budget cap $1,053,210)\n- Metro Society: 22 units due in 9 days (pretax budget cap $1,172,594)\n- Solace Architects: 21 units due in 10 days (pretax budget cap $1,120,934)\n- Thornton Alliance: 21 units due in 11 days (pretax budget cap $1,094,630)\n- Spark Bureau: 18 units due in 11 days (pretax budget cap $976,611)\n- Quantum Innovations: 20 units due in 11 days (pretax budget cap $1,065,587)\n- Granite Research: 23 units due in 11 days (pretax budget cap $1,179,149)\n- Ridge Media: 18 units due in 13 days (pretax budget cap $922,718)\n- Clearwater Studios East: 22 units due in 13 days (pretax budget cap $1,155,520)\n- Evergreen Practice: 28 units due in 13 days (pretax budget cap $1,419,169)\n- Ashford Designs: 23 units due in 13 days (pretax budget cap $1,209,226)\n- Flux Creative: 27 units due in 13 days (pretax budget cap $1,462,227)\n- Ivory Labs: 19 units due in 13 days (pretax budget cap $1,022,866)\n- Riverdale Initiative: 21 units due in 13 days (pretax budget cap $1,078,496)\n\nOn-hand finished stock covers 194 units. Any shortfall can be handled with finished-goods buying, in-house manufacturing, or a mix that still satisfies policy.\n\nAcross all units covered through new purchasing or manufacturing, keep portfolio-level new-spend margin at or above 28.2% at selling price.",
+  "seed": 634185446701031660,
+  "background_and_policy": "* Cover every customer order while using as little shared workcenter capacity as practical. If multiple feasible plans use the same amount of workcenter capacity, keep new purchasing and manufacturing spend as low as possible.\n* Across all units covered through new purchasing or manufacturing, keep portfolio-level new-spend margin at or above 28.2% at selling price.\n* Use the finished stock on hand where it helps reduce demand on shared workcenters.\n* You must create and confirm the necessary sales orders, purchase orders, and/or manufacturing orders.\n* Customer budgets are pre-tax amounts.\n* Link Sales Orders to the related Manufacturing Orders and Purchase Orders for traceability.\n* For finished goods POs, put the SO reference(s) (e.g. S00030 or S00030, S00031) into the origin field ('Source' in the UI).\n* For component POs, put the MO reference(s) (e.g. WH/MO/00010 or WH/MO/00010, WH/MO/00011) into the origin field.\n* For finished goods MOs, put the Sales Order reference (e.g. S00030) into the origin field ('Source' in the UI).\n* For subassembly or intermediate MOs, put the immediate parent MO reference(s) that the subassembly feeds (e.g. WH/MO/00020 or WH/MO/00020, WH/MO/00021) into the origin field ('Source' in the UI).\n* In the end, the lineage must be SO -> MO -> (Subassembly MO if needed) -> PO or SO -> PO.\n* You must sell this product at List Price.\n* On sales orders, set the commitment date.\n* On manufacturing orders, you must set the start date and the due date.\n* If you choose to manufacture, you must procure the components that are not in stock.\n* On purchase orders, you must set the delivery date.\n* Review Internal Notes/comments on stock, customers, vendors, and workcenters before you confirm entries in the ERP.\n\nCapacity constraints:\n- Treat workcenter capacity as a hard horizon-wide limit across all products that share the center.\n- Check each workcenter's Internal Notes in Odoo for the exact horizon-wide minute limit.\n- Assign workcenter on each manufacturing work order.\n- For each finished-goods supplier offer, respect min/max quantities as horizon-wide totals.\n- For each component supplier offer, respect min/max quantities as horizon-wide totals.\n- Use one consolidated PO per supplier offer (do not split a single offer across multiple POs).\n- Check each vendor's Internal Notes in Odoo for maximum order quantity limits.",
+  "invoicing_policy": {
+    "invoice_required": false,
+    "payment_term": null,
+    "downpayment_required": false,
+    "downpayment_threshold_amount": null,
+    "downpayment_mode": null,
+    "downpayment_value": null
+  },
+  "warehouses": [],
+  "vendors": [
+    {
+      "name": "Monarch Conveyance",
+      "ref": "r4AF15A4BF5_q01",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Slate Procurement",
+      "ref": "r4AF15A4BF5_q02",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Citadel Distribution",
+      "ref": "r4AF15A4BF5_q03",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Atlas Microfactory",
+      "ref": "r4AF15A4BF5_q04",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Silverline Components",
+      "ref": "r4AF15A4BF5_q05",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Baseline Operations",
+      "ref": "r4AF15A4BF5_q06",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Element Resources",
+      "ref": "r4AF15A4BF5_q07",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Canton Networks",
+      "ref": "r4AF15A4BF5_q08",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Trellis Supply",
+      "ref": "r4AF15A4BF5_q09",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Mosaic Freight",
+      "ref": "r4AF15A4BF5_q10",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Apex Solutions",
+      "ref": "r4AF15A4BF5_q11",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Summit Movers",
+      "ref": "r4AF15A4BF5_q12",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Crest Assemblies",
+      "ref": "r4AF15A4BF5_q13",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Coral Integrators",
+      "ref": "r4AF15A4BF5_q14",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Crestview Fulfillment",
+      "ref": "r4AF15A4BF5_q15",
+      "supplier_rank": 15,
+      "comment": null
+    },
+    {
+      "name": "Spire Commodities",
+      "ref": "r4AF15A4BF5_q16",
+      "supplier_rank": 16,
+      "comment": null
+    },
+    {
+      "name": "Oakmont Carriers",
+      "ref": "r4AF15A4BF5_q17",
+      "supplier_rank": 17,
+      "comment": null
+    },
+    {
+      "name": "Sierra Components",
+      "ref": "rCF3AB7E13F_q01",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Sapphire Trading",
+      "ref": "rCF3AB7E13F_q02",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Stonewall Wholesale",
+      "ref": "rCF3AB7E13F_q03",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Meridian Transit",
+      "ref": "rCF3AB7E13F_q04",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Haven Freight",
+      "ref": "rCF3AB7E13F_q05",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Drift Networks",
+      "ref": "rCF3AB7E13F_q06",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Horizon Logistics",
+      "ref": "rCF3AB7E13F_q07",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Flint Supply",
+      "ref": "rCF3AB7E13F_q08",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Millbrook Wholesale",
+      "ref": "rCF3AB7E13F_q09",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Prism Distribution",
+      "ref": "rCF3AB7E13F_q10",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Keystone Carriers",
+      "ref": "rCF3AB7E13F_q11",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Fairview Carriers",
+      "ref": "rCF3AB7E13F_q12",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Compass Freight",
+      "ref": "rCF3AB7E13F_q13",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Ledger Resources",
+      "ref": "rCF3AB7E13F_q14",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Redstone Trading",
+      "ref": "rCF3AB7E13F_q15",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Northbridge Transit",
+      "ref": "rCF3AB7E13F_q16",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Cardinal Materials",
+      "ref": "rCF3AB7E13F_q17",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Ironside Procurement",
+      "ref": "rCF3AB7E13F_q18",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Vertex Trading",
+      "ref": "rCF3AB7E13F_q19",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Forge Parts Co",
+      "ref": "rCF3AB7E13F_q20",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Lattice Procurement",
+      "ref": "rCF3AB7E13F_q21",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Scion Parts Co",
+      "ref": "rCF3AB7E13F_q22",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Bronze Logistics",
+      "ref": "rCF3AB7E13F_q23",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Sentinel Logistics",
+      "ref": "rCF3AB7E13F_q24",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Borough Transit",
+      "ref": "rCF3AB7E13F_q25",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Cedar Materials",
+      "ref": "rCF3AB7E13F_q26",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Circuit Wholesale",
+      "ref": "rCF3AB7E13F_q27",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Oxide Logistics",
+      "ref": "rCF3AB7E13F_q28",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Steel Wholesale",
+      "ref": "rCF3AB7E13F_q29",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Cipher Parts Co",
+      "ref": "rCF3AB7E13F_q30",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Gateway Sourcing",
+      "ref": "rCF3AB7E13F_q31",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Cosmo Distribution",
+      "ref": "rCF3AB7E13F_q32",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Equinox Logistics",
+      "ref": "rCF3AB7E13F_q33",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Crown Supply",
+      "ref": "rCF3AB7E13F_q34",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Matrix Carriers",
+      "ref": "rCF3AB7E13F_q35",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Marble Logistics",
+      "ref": "rCF3AB7E13F_q36",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Brookfield Networks",
+      "ref": "rCF3AB7E13F_q37",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Nimbus Components",
+      "ref": "rCF3AB7E13F_q38",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Aegis Logistics",
+      "ref": "rCF3AB7E13F_q39",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Ironwood Procurement",
+      "ref": "rCF3AB7E13F_q40",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Indigo Networks",
+      "ref": "rCF3AB7E13F_q41",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Blaze Procurement",
+      "ref": "rCF3AB7E13F_q42",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Alpine Components",
+      "ref": "rCF3AB7E13F_q43",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Lance Supply",
+      "ref": "rCF3AB7E13F_q44",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Dune Trading",
+      "ref": "rCF3AB7E13F_q45",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Pacific Logistics",
+      "ref": "rCF3AB7E13F_q46",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Trident Networks",
+      "ref": "rCF3AB7E13F_q47",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Arrow Sourcing",
+      "ref": "rCF3AB7E13F_q48",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Pivot Wholesale",
+      "ref": "rCF3AB7E13F_q49",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Orbital Components",
+      "ref": "rCF3AB7E13F_q50",
+      "supplier_rank": 1,
+      "comment": null
+    }
+  ],
+  "customers": [
+    {
+      "name": "Titan Workspaces",
+      "ref": "r4AF15A4BF5_c01",
+      "email": "orders@titanworkspaces.io",
+      "budget_dollars": 1243258.26,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Comet Clinics",
+      "ref": "r4AF15A4BF5_c02",
+      "email": "orders@cometclinics.io",
+      "budget_dollars": 972287.54,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Copper Outfitters",
+      "ref": "r4AF15A4BF5_c03",
+      "email": "orders@copperoutfitters.io",
+      "budget_dollars": 1060315.63,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Ridgeline Ventures",
+      "ref": "r4AF15A4BF5_c04",
+      "email": "orders@ridgelineventures.io",
+      "budget_dollars": 1601636.84,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Pinnacle Engineering",
+      "ref": "r4AF15A4BF5_c05",
+      "email": "orders@pinnacleengineering.io",
+      "budget_dollars": 1647937.3,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Stratos Theater",
+      "ref": "r4AF15A4BF5_c06",
+      "email": "orders@stratostheater.io",
+      "budget_dollars": 1346785.29,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Velocity Collective East",
+      "ref": "r4AF15A4BF5_c07",
+      "email": "orders@velocitycollectiveeast.io",
+      "budget_dollars": 1559302.27,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Conduit Lyceum",
+      "ref": "r4AF15A4BF5_c08",
+      "email": "orders@conduitlyceum.io",
+      "budget_dollars": 1053209.61,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Metro Society",
+      "ref": "r4AF15A4BF5_c09",
+      "email": "orders@metrosociety.io",
+      "budget_dollars": 1172594.26,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Solace Architects",
+      "ref": "r4AF15A4BF5_c10",
+      "email": "orders@solacearchitects.io",
+      "budget_dollars": 1120934.36,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Thornton Alliance",
+      "ref": "r4AF15A4BF5_c11",
+      "email": "orders@thorntonalliance.io",
+      "budget_dollars": 1094630.47,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Spark Bureau",
+      "ref": "r4AF15A4BF5_c12",
+      "email": "orders@sparkbureau.io",
+      "budget_dollars": 976610.68,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Quantum Innovations",
+      "ref": "r4AF15A4BF5_c13",
+      "email": "orders@quantuminnovations.io",
+      "budget_dollars": 1065587.11,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Granite Research",
+      "ref": "r4AF15A4BF5_c14",
+      "email": "orders@graniteresearch.io",
+      "budget_dollars": 1179148.95,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Ridge Media",
+      "ref": "r4AF15A4BF5_c15",
+      "email": "orders@ridgemedia.io",
+      "budget_dollars": 922717.78,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Clearwater Studios East",
+      "ref": "r4AF15A4BF5_c16",
+      "email": "orders@clearwaterstudioseast.io",
+      "budget_dollars": 1155520.09,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Evergreen Practice",
+      "ref": "r4AF15A4BF5_c17",
+      "email": "orders@evergreenpractice.io",
+      "budget_dollars": 1419169.23,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Ashford Designs",
+      "ref": "r4AF15A4BF5_c18",
+      "email": "orders@ashforddesigns.io",
+      "budget_dollars": 1209226.24,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Flux Creative",
+      "ref": "r4AF15A4BF5_c19",
+      "email": "orders@fluxcreative.io",
+      "budget_dollars": 1462226.72,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Ivory Labs",
+      "ref": "r4AF15A4BF5_c20",
+      "email": "orders@ivorylabs.io",
+      "budget_dollars": 1022865.64,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Riverdale Initiative",
+      "ref": "r4AF15A4BF5_c21",
+      "email": "orders@riverdaleinitiative.io",
+      "budget_dollars": 1078495.56,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Nexus Production Plant Maintenance",
+      "ref": "rCF3AB7E13F_p01",
+      "email": "contact@nexusproduction.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Skyline Fabrication Warehouse Ops",
+      "ref": "rCF3AB7E13F_p02",
+      "email": "contact@skylinefabrication.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Anvil Technologies Plant Maintenance",
+      "ref": "rCF3AB7E13F_p03",
+      "email": "contact@anviltechnologies.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Terra Technologies R&D Workshop",
+      "ref": "rCF3AB7E13F_p04",
+      "email": "contact@terratechnologies.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Polar Services Test Facility",
+      "ref": "rCF3AB7E13F_p05",
+      "email": "contact@polarservices.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Jade Fabrication HQ Procurement",
+      "ref": "rCF3AB7E13F_p06",
+      "email": "contact@jadefabrication.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Grove Manufacturing Warehouse Ops",
+      "ref": "rCF3AB7E13F_p07",
+      "email": "contact@grovemanufacturing.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Iron Industries Prototype Shop",
+      "ref": "rCF3AB7E13F_p08",
+      "email": "contact@ironindustries.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Bridgeway Fabrication Test Facility",
+      "ref": "rCF3AB7E13F_p09",
+      "email": "contact@bridgewayfabrication.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Quartz Production Prototype Shop",
+      "ref": "rCF3AB7E13F_p10",
+      "email": "contact@quartzproduction.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Spectra Services Warehouse Ops",
+      "ref": "rCF3AB7E13F_p11",
+      "email": "contact@spectraservices.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Raven Operations R&D Workshop",
+      "ref": "rCF3AB7E13F_p12",
+      "email": "contact@ravenoperations.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Aurora Production Plant Maintenance",
+      "ref": "rCF3AB7E13F_p13",
+      "email": "contact@auroraproduction.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Catalyst Fabrication R&D Workshop",
+      "ref": "rCF3AB7E13F_p14",
+      "email": "contact@catalystfabrication.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Globe Engineering Field Ops",
+      "ref": "rCF3AB7E13F_p15",
+      "email": "contact@globeengineering.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Eclipse Production Field Ops",
+      "ref": "rCF3AB7E13F_p16",
+      "email": "contact@eclipseproduction.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Bayshore Industries Plant Maintenance",
+      "ref": "rCF3AB7E13F_p17",
+      "email": "contact@bayshoreindustries.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Ember Industries HQ Procurement",
+      "ref": "rCF3AB7E13F_p18",
+      "email": "contact@emberindustries.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Peak Fabrication Site Logistics",
+      "ref": "rCF3AB7E13F_p19",
+      "email": "contact@peakfabrication.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Hartland Fabrication Site Logistics",
+      "ref": "rCF3AB7E13F_p20",
+      "email": "contact@hartlandfabrication.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Alloy Engineering Warehouse Ops",
+      "ref": "rCF3AB7E13F_p21",
+      "email": "contact@alloyengineering.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Chrome Solutions Prototype Shop",
+      "ref": "rCF3AB7E13F_p22",
+      "email": "contact@chromesolutions.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Arc Industries Plant Maintenance",
+      "ref": "rCF3AB7E13F_p23",
+      "email": "contact@arcindustries.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Cobalt Assembly Quality Lab",
+      "ref": "rCF3AB7E13F_p24",
+      "email": "contact@cobaltassembly.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Onyx Fabrication Tooling Center",
+      "ref": "rCF3AB7E13F_p25",
+      "email": "contact@onyxfabrication.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Westfield Technologies Prototype Shop",
+      "ref": "rCF3AB7E13F_p26",
+      "email": "contact@westfieldtechnologies.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Arbor Assembly Warehouse Ops",
+      "ref": "rCF3AB7E13F_p27",
+      "email": "contact@arborassembly.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Helix Engineering HQ Procurement",
+      "ref": "rCF3AB7E13F_p28",
+      "email": "contact@helixengineering.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Osprey Production Plant Maintenance",
+      "ref": "rCF3AB7E13F_p29",
+      "email": "contact@ospreyproduction.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Noble Operations Plant Maintenance",
+      "ref": "rCF3AB7E13F_p30",
+      "email": "contact@nobleoperations.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Garnet Services Test Facility",
+      "ref": "rCF3AB7E13F_p31",
+      "email": "contact@garnetservices.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Baltic Operations Quality Lab",
+      "ref": "rCF3AB7E13F_p32",
+      "email": "contact@balticoperations.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Lakewood Manufacturing Tooling Center",
+      "ref": "rCF3AB7E13F_p33",
+      "email": "contact@lakewoodmanufacturing.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Cascade Assembly HQ Procurement",
+      "ref": "rCF3AB7E13F_p34",
+      "email": "contact@cascadeassembly.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Vantage Engineering Tooling Center",
+      "ref": "rCF3AB7E13F_p35",
+      "email": "contact@vantageengineering.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Aether Services Test Facility",
+      "ref": "rCF3AB7E13F_p36",
+      "email": "contact@aetherservices.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Echo Manufacturing R&D Workshop",
+      "ref": "rCF3AB7E13F_p37",
+      "email": "contact@echomanufacturing.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Zenith Assembly Site Logistics",
+      "ref": "rCF3AB7E13F_p38",
+      "email": "contact@zenithassembly.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Lumen Production Field Ops",
+      "ref": "rCF3AB7E13F_p39",
+      "email": "contact@lumenproduction.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Opal Technologies Warehouse Ops",
+      "ref": "rCF3AB7E13F_p40",
+      "email": "contact@opaltechnologies.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Sterling Fabrication Warehouse Ops",
+      "ref": "rCF3AB7E13F_p41",
+      "email": "contact@sterlingfabrication.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Beacon Services Quality Lab",
+      "ref": "rCF3AB7E13F_p42",
+      "email": "contact@beaconservices.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Axis Fabrication Prototype Shop",
+      "ref": "rCF3AB7E13F_p43",
+      "email": "contact@axisfabrication.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Adjacent Customer 1 Division",
+      "ref": "rCF3AB7E13F_p44",
+      "email": "contact@adjacentcustomer001.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Adjacent Customer 2 Division",
+      "ref": "rCF3AB7E13F_p45",
+      "email": "contact@adjacentcustomer002.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Adjacent Customer 3 Division",
+      "ref": "rCF3AB7E13F_p46",
+      "email": "contact@adjacentcustomer003.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Adjacent Customer 4 Division",
+      "ref": "rCF3AB7E13F_p47",
+      "email": "contact@adjacentcustomer004.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Adjacent Customer 5 Division",
+      "ref": "rCF3AB7E13F_p48",
+      "email": "contact@adjacentcustomer005.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Adjacent Customer 6 Division",
+      "ref": "rCF3AB7E13F_p49",
+      "email": "contact@adjacentcustomer006.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Adjacent Customer 7 Division",
+      "ref": "rCF3AB7E13F_p50",
+      "email": "contact@adjacentcustomer007.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    }
+  ],
+  "products": [
+    {
+      "name": "Centrifugal Compressor 200HP",
+      "code": "P4AF15A4BF5-CMP-CFC-004",
+      "category": "Industrial Equipment",
+      "type": "consu",
+      "list_price": 48707.05,
+      "standard_price": 25907.67,
+      "routes": [
+        "buy",
+        "manufacture"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r4AF15A4BF5_q01",
+          "delay": 8,
+          "min_qty": 10.0,
+          "max_qty": 11.0,
+          "price": 28520.6,
+          "name": "Priority Shuttle lane (8d transit, 10-11 units)"
+        },
+        {
+          "partner_ref": "r4AF15A4BF5_q02",
+          "delay": 5,
+          "min_qty": 2.0,
+          "max_qty": 125.0,
+          "price": 41946.85,
+          "name": "Express Air lane (5d transit, 2-125 units)"
+        },
+        {
+          "partner_ref": "r4AF15A4BF5_q03",
+          "delay": 24,
+          "min_qty": 241.0,
+          "max_qty": 253.0,
+          "price": 15263.04,
+          "name": "Bulk Container lane (24d transit, 241-253 units)"
+        },
+        {
+          "partner_ref": "r4AF15A4BF5_q04",
+          "delay": 17,
+          "min_qty": 2.0,
+          "max_qty": 2.0,
+          "price": 20879.46,
+          "name": "Scheduled Freight lane (17d transit, 2-2 units)"
+        },
+        {
+          "partner_ref": "r4AF15A4BF5_q05",
+          "delay": 23,
+          "min_qty": 13.0,
+          "max_qty": 13.0,
+          "price": 19888.75,
+          "name": "Economy Ocean lane (23d transit, 13-13 units)"
+        },
+        {
+          "partner_ref": "r4AF15A4BF5_q06",
+          "delay": 13,
+          "min_qty": 8.0,
+          "max_qty": 9.0,
+          "price": 36530.9,
+          "name": "Hybrid Expedite lane (13d transit, 8-9 units)"
+        },
+        {
+          "partner_ref": "r4AF15A4BF5_q07",
+          "delay": 6,
+          "min_qty": 2.0,
+          "max_qty": 19.0,
+          "price": 34028.33,
+          "name": "Microfactory Build-to-Order lane (6d transit, 2-19 units)"
+        }
+      ]
+    },
+    {
+      "name": "Centrifugal Compressor 200HP Subassembly A",
+      "code": "P4AF15A4BF5-SUBA-01",
+      "category": "Industrial Equipment",
+      "type": "consu",
+      "list_price": 13637.97,
+      "standard_price": 898.94,
+      "routes": [
+        "manufacture"
+      ],
+      "vendor_info": []
+    },
+    {
+      "name": "Electric Drive Motor 50HP TEFC",
+      "code": "P4AF15A4BF5-CMP-EDM-102",
+      "category": "Industrial Equipment",
+      "type": "consu",
+      "list_price": 2800.32,
+      "standard_price": 1236.26,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r4AF15A4BF5_q08",
+          "delay": 3,
+          "min_qty": 6.0,
+          "max_qty": 89.0,
+          "price": 2100.14,
+          "name": "Rapid Works (3d)"
+        },
+        {
+          "partner_ref": "r4AF15A4BF5_q09",
+          "delay": 5,
+          "min_qty": 10.0,
+          "max_qty": 26.0,
+          "price": 1884.88,
+          "name": "Domestic Supply (5d)"
+        },
+        {
+          "partner_ref": "r4AF15A4BF5_q10",
+          "delay": 5,
+          "min_qty": 12.0,
+          "max_qty": 30.0,
+          "price": 1867.09,
+          "name": "Hybrid Fabricators (5d)"
+        },
+        {
+          "partner_ref": "r4AF15A4BF5_q11",
+          "delay": 6,
+          "min_qty": 24.0,
+          "max_qty": 149.0,
+          "price": 1236.26,
+          "name": "Import Consolidator (6d)"
+        }
+      ]
+    },
+    {
+      "name": "Centrifugal Compressor 200HP Subassembly B",
+      "code": "P4AF15A4BF5-SUBB-02",
+      "category": "Industrial Equipment",
+      "type": "consu",
+      "list_price": 13637.97,
+      "standard_price": 817.22,
+      "routes": [
+        "manufacture"
+      ],
+      "vendor_info": []
+    },
+    {
+      "name": "Air Receiver Tank 240Gal",
+      "code": "P4AF15A4BF5-CMP-ART-108",
+      "category": "Industrial Equipment",
+      "type": "consu",
+      "list_price": 1272.44,
+      "standard_price": 797.91,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r4AF15A4BF5_q12",
+          "delay": 3,
+          "min_qty": 10.0,
+          "max_qty": 48.0,
+          "price": 797.91,
+          "name": "Rapid Works (3d)"
+        },
+        {
+          "partner_ref": "r4AF15A4BF5_q13",
+          "delay": 3,
+          "min_qty": 8.0,
+          "max_qty": 123.0,
+          "price": 888.6,
+          "name": "Hybrid Fabricators (3d)"
+        },
+        {
+          "partner_ref": "r4AF15A4BF5_q14",
+          "delay": 3,
+          "min_qty": 17.0,
+          "max_qty": 42.0,
+          "price": 852.01,
+          "name": "Domestic Supply (3d)"
+        }
+      ]
+    },
+    {
+      "name": "Solenoid Blow-Off Valve",
+      "code": "P4AF15A4BF5-CMP-SBV-109",
+      "category": "Industrial Equipment",
+      "type": "consu",
+      "list_price": 82.44,
+      "standard_price": 30.98,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r4AF15A4BF5_q15",
+          "delay": 2,
+          "min_qty": 9.0,
+          "max_qty": 13.0,
+          "price": 47.52,
+          "name": "Rapid Works (2d)"
+        },
+        {
+          "partner_ref": "r4AF15A4BF5_q16",
+          "delay": 3,
+          "min_qty": 11.0,
+          "max_qty": 103.0,
+          "price": 42.13,
+          "name": "Hybrid Fabricators (3d)"
+        },
+        {
+          "partner_ref": "r4AF15A4BF5_q17",
+          "delay": 3,
+          "min_qty": 44.0,
+          "max_qty": 67.0,
+          "price": 30.98,
+          "name": "Import Consolidator (3d)"
+        }
+      ]
+    },
+    {
+      "name": "Double-Row Inverter Drive Unit",
+      "code": "PCF3AB7E13F-A001",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 311.36,
+      "standard_price": 205.93,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q01",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 199.71,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Low-Noise Tank 240Gal",
+      "code": "PCF3AB7E13F-A002",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 292.71,
+      "standard_price": 163.13,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q02",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 163.15,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Single-Stage Motor 50HP TEFC",
+      "code": "PCF3AB7E13F-A003",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 333.4,
+      "standard_price": 219.99,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q03",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 211.44,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Thermal-Guard Separator Element",
+      "code": "PCF3AB7E13F-A004",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 364.6,
+      "standard_price": 240.81,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q04",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 236.54,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Weatherproof Oil Filter Cartridge",
+      "code": "PCF3AB7E13F-A005",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 236.25,
+      "standard_price": 163.35,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q05",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 162.73,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Precision Filter Cartridge",
+      "code": "PCF3AB7E13F-A006",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 341.81,
+      "standard_price": 214.82,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q06",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 228.99,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "High-Temp Oil Separator Element",
+      "code": "PCF3AB7E13F-A007",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 343.04,
+      "standard_price": 203.84,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q07",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 203.05,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Cleanroom Element 50HP",
+      "code": "PCF3AB7E13F-A008",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 244.34,
+      "standard_price": 137.64,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q08",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 141.74,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Low-Profile Minimum Pressure Valve",
+      "code": "PCF3AB7E13F-A009",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 378.64,
+      "standard_price": 259.95,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q09",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 275.31,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Standard Valve Assembly",
+      "code": "PCF3AB7E13F-A010",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 278.51,
+      "standard_price": 172.62,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q10",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 171.26,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Wide-Body Minimum Pressure Valve",
+      "code": "PCF3AB7E13F-A011",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 214.41,
+      "standard_price": 120.74,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q11",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 115.7,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Medical-Grade Off Valve",
+      "code": "PCF3AB7E13F-A012",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 264.08,
+      "standard_price": 163.38,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q12",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 158.29,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Stainless Off Valve",
+      "code": "PCF3AB7E13F-A013",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 391.96,
+      "standard_price": 229.3,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q13",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 227.3,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Hardened Heat Exchanger",
+      "code": "PCF3AB7E13F-A014",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 334.05,
+      "standard_price": 211.07,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q14",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 212.67,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Non-Magnetic Minimum Pressure Valve",
+      "code": "PCF3AB7E13F-A015",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 321.16,
+      "standard_price": 196.51,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q15",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 210.33,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Metric Oil Filter Cartridge",
+      "code": "PCF3AB7E13F-A016",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 368.17,
+      "standard_price": 245.91,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q16",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 257.72,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Self-Lubricating 50HP TEFC",
+      "code": "PCF3AB7E13F-A017",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 321.4,
+      "standard_price": 172.27,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q17",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 166.41,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Universal Intellisys Module",
+      "code": "PCF3AB7E13F-A018",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 364.74,
+      "standard_price": 213.08,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q18",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 204.45,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Economy Blow Off Valve",
+      "code": "PCF3AB7E13F-A019",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 243.26,
+      "standard_price": 129.46,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q19",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 126.82,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Commercial Valve Assembly",
+      "code": "PCF3AB7E13F-A020",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 215.5,
+      "standard_price": 116.58,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q20",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 116.92,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Adjustable Minimum Pressure Valve",
+      "code": "PCF3AB7E13F-A021",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 348.58,
+      "standard_price": 221.1,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q21",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 212.7,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Industrial Inlet Valve Assembly",
+      "code": "PCF3AB7E13F-A022",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 296.51,
+      "standard_price": 181.92,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q22",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 184.88,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Low-Friction Filter Cartridge",
+      "code": "PCF3AB7E13F-A023",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 292.28,
+      "standard_price": 172.87,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q23",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 181.75,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Impact-Rated Screw Element 50HP",
+      "code": "PCF3AB7E13F-A024",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 335.14,
+      "standard_price": 226.93,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q24",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 217.25,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Quick-Release Inverter Drive Unit",
+      "code": "PCF3AB7E13F-A025",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 216.03,
+      "standard_price": 121.18,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q25",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 129.49,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "High-Torque Off Valve",
+      "code": "PCF3AB7E13F-A026",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 263.52,
+      "standard_price": 156.29,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q26",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 150.13,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Low-Flow Tank 240Gal",
+      "code": "PCF3AB7E13F-A027",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 304.95,
+      "standard_price": 215.48,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q27",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 214.78,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Low-Temp Filter Element",
+      "code": "PCF3AB7E13F-A028",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 382.45,
+      "standard_price": 260.47,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q28",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 275.86,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Powder-Coated Inverter Drive Unit",
+      "code": "PCF3AB7E13F-A029",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 237.0,
+      "standard_price": 138.65,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q29",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 139.38,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Spring-Loaded Blow Off Valve",
+      "code": "PCF3AB7E13F-A030",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 235.41,
+      "standard_price": 152.39,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q30",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 162.04,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Modular Motor 50HP TEFC",
+      "code": "PCF3AB7E13F-A031",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 258.57,
+      "standard_price": 161.99,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q31",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 171.25,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Anti-Vibration Aftercooler Heat Exchanger",
+      "code": "PCF3AB7E13F-A032",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 411.25,
+      "standard_price": 234.53,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q32",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 225.46,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Pressure-Balanced Oil Separator Element",
+      "code": "PCF3AB7E13F-A033",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 210.56,
+      "standard_price": 122.12,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q33",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 125.0,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Flanged Filter Element",
+      "code": "PCF3AB7E13F-A034",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 394.25,
+      "standard_price": 265.67,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q34",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 266.44,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Narrow-Body Drive Unit",
+      "code": "PCF3AB7E13F-A035",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 287.73,
+      "standard_price": 155.59,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q35",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 157.03,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Tapered Minimum Pressure Valve",
+      "code": "PCF3AB7E13F-A036",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 298.67,
+      "standard_price": 206.45,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q36",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 216.08,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Lightweight Heat Exchanger",
+      "code": "PCF3AB7E13F-A037",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 396.28,
+      "standard_price": 264.27,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q37",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 262.14,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Anodized Element 50HP",
+      "code": "PCF3AB7E13F-A038",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 415.28,
+      "standard_price": 285.54,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q38",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 287.46,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Corrosion-Resistant Oil Separator Element",
+      "code": "PCF3AB7E13F-A039",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 189.3,
+      "standard_price": 101.05,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q39",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 96.33,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Zero-Backlash Pressure Valve",
+      "code": "PCF3AB7E13F-A040",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 402.14,
+      "standard_price": 251.19,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q40",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 265.37,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Premium Aftercooler Heat Exchanger",
+      "code": "PCF3AB7E13F-A041",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 372.99,
+      "standard_price": 267.38,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q41",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 280.5,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Heavy-Duty Filter Element",
+      "code": "PCF3AB7E13F-A042",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 224.73,
+      "standard_price": 158.19,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q42",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 166.38,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "High-Flow Filter Element",
+      "code": "PCF3AB7E13F-A043",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 239.49,
+      "standard_price": 163.4,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q43",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 162.91,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Extended-Life Blow Off Valve",
+      "code": "PCF3AB7E13F-A044",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 203.09,
+      "standard_price": 140.69,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q44",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 145.28,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Sealed Element 50HP",
+      "code": "PCF3AB7E13F-A045",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 375.17,
+      "standard_price": 246.37,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q45",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 251.14,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Dual-Stage Valve Assembly",
+      "code": "PCF3AB7E13F-A046",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 274.52,
+      "standard_price": 164.88,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q46",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 158.94,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Reinforced Drive Unit",
+      "code": "PCF3AB7E13F-A047",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 367.64,
+      "standard_price": 234.72,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q47",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 226.2,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Cold-Rolled Blow Off Valve",
+      "code": "PCF3AB7E13F-A048",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 325.92,
+      "standard_price": 180.55,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q48",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 177.67,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Food-Grade Filter Element",
+      "code": "PCF3AB7E13F-A049",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 275.23,
+      "standard_price": 179.01,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q49",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 180.26,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "UV-Stable Element 50HP",
+      "code": "PCF3AB7E13F-A050",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 314.28,
+      "standard_price": 171.8,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rCF3AB7E13F_q50",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 176.2,
+          "name": "Cross-dock"
+        }
+      ]
+    }
+  ],
+  "boms": [
+    {
+      "product_code": "P4AF15A4BF5-SUBB-02",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P4AF15A4BF5-CMP-ART-108",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "P4AF15A4BF5-CMP-SBV-109",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "P4AF15A4BF5-SUBA-01",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P4AF15A4BF5-SUBB-02",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "P4AF15A4BF5-CMP-CFC-004",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P4AF15A4BF5-SUBA-01",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "P4AF15A4BF5-CMP-EDM-102",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PCF3AB7E13F-A042",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PCF3AB7E13F-A031",
+          "quantity": 2.0
+        },
+        {
+          "component_code": "PCF3AB7E13F-A021",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PCF3AB7E13F-A041",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PCF3AB7E13F-A027",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PCF3AB7E13F-A028",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PCF3AB7E13F-A001",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PCF3AB7E13F-A030",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PCF3AB7E13F-A011",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "PCF3AB7E13F-A043",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PCF3AB7E13F-A011",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PCF3AB7E13F-A001",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PCF3AB7E13F-A048",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PCF3AB7E13F-A019",
+          "quantity": 2.0
+        },
+        {
+          "component_code": "PCF3AB7E13F-A037",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PCF3AB7E13F-A036",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PCF3AB7E13F-A027",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "PCF3AB7E13F-A003",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PCF3AB7E13F-A016",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PCF3AB7E13F-A038",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PCF3AB7E13F-A037",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PCF3AB7E13F-A005",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PCF3AB7E13F-A040",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PCF3AB7E13F-A024",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    }
+  ],
+  "workcenters": [
+    {
+      "product_code": "P4AF15A4BF5-CMP-CFC-004",
+      "code": "P4AF15A4BF5-WC03",
+      "name": "Precision Bench 3",
+      "unit_cost": 36.0,
+      "costs_hour": 48.0,
+      "time_per_unit_minutes": 45.0,
+      "time_efficiency": 100.0,
+      "time_start": 0.0,
+      "time_stop": 0.0,
+      "oee_target": 1.0,
+      "note": "Industrial Equipment workcenter pool 3",
+      "capacity_minutes": 21780.0,
+      "lead_days": 2.0,
+      "operation_name": "P4AF15A4BF5-CMP-CFC-004 Assembly",
+      "sequence": 100,
+      "is_primary": true,
+      "alternative_workcenter_codes": []
+    },
+    {
+      "product_code": "P4AF15A4BF5-SUBA-01",
+      "code": "P4AF15A4BF5-WC02",
+      "name": "Fabrication Cell 2",
+      "unit_cost": 22.0,
+      "costs_hour": 44.0,
+      "time_per_unit_minutes": 30.0,
+      "time_efficiency": 100.0,
+      "time_start": 0.0,
+      "time_stop": 0.0,
+      "oee_target": 1.0,
+      "note": "Industrial Equipment workcenter pool 2",
+      "capacity_minutes": 14520.0,
+      "lead_days": 1.0,
+      "operation_name": "P4AF15A4BF5-SUBA-01 Build",
+      "sequence": 100,
+      "is_primary": true,
+      "alternative_workcenter_codes": []
+    },
+    {
+      "product_code": "P4AF15A4BF5-SUBB-02",
+      "code": "P4AF15A4BF5-WC01",
+      "name": "Assembly Line 1",
+      "unit_cost": 18.0,
+      "costs_hour": 30.86,
+      "time_per_unit_minutes": 35.0,
+      "time_efficiency": 100.0,
+      "time_start": 0.0,
+      "time_stop": 0.0,
+      "oee_target": 1.0,
+      "note": "Industrial Equipment workcenter pool 1",
+      "capacity_minutes": 16940.0,
+      "lead_days": 2.0,
+      "operation_name": "P4AF15A4BF5-SUBB-02 Build",
+      "sequence": 100,
+      "is_primary": true,
+      "alternative_workcenter_codes": []
+    }
+  ],
+  "stock_levels": [
+    {
+      "product_code": "P4AF15A4BF5-CMP-ART-108",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P4AF15A4BF5-CMP-CFC-004",
+      "warehouse_code": null,
+      "quantity": 194.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P4AF15A4BF5-CMP-EDM-102",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P4AF15A4BF5-CMP-SBV-109",
+      "warehouse_code": null,
+      "quantity": 17.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A001",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A002",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A003",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A004",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A005",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A006",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A007",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A008",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A009",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A010",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A011",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A012",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A013",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A014",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A015",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A016",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A017",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A018",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A019",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A020",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A021",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A022",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A023",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A024",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A025",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A026",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A027",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A028",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A029",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A030",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A031",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A032",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A033",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A034",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A035",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A036",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A037",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A038",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A039",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A040",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A041",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A042",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A043",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A044",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A045",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A046",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A047",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A048",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A049",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PCF3AB7E13F-A050",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    }
+  ],
+  "existing_purchase_orders": [],
+  "existing_manufacturing_orders": [],
+  "existing_sales_orders": [],
+  "repair_context": null,
+  "system_parameters": [
+    {
+      "key": "erp_bench.min_margin_percent",
+      "value": "28.2"
+    }
+  ]
+}

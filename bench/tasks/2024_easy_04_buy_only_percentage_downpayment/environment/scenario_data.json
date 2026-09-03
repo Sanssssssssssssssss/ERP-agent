@@ -1,0 +1,2591 @@
+{
+  "scenario_number": 2024,
+  "name": "L-Shaped Corner Workstation",
+  "instruction": "The following customer orders for L-Shaped Corner Workstation require confirmed supply to proceed with fulfillment:\n\n- Osprey Dynamics: 2 units due in 6 days (pretax budget cap $1,809)\n- Arrow Society: 3 units due in 7 days (pretax budget cap $2,865)\n- Coral Arena: 11 units due in 8 days (pretax budget cap $10,103)\n- Noble Ventures: 12 units due in 9 days (pretax budget cap $11,042)\n\nCurrent finished-goods stock is 23 units. There is no in-house manufacturing route for the finished product, so any shortfall has to come from vendors.\n\nAcross all units covered through new purchasing or manufacturing, keep portfolio-level new-spend margin at or above 27.6% at selling price. After fulfillment, create and post the required linked customer invoices. Use 30 Days terms on retained sales orders and all linked customer invoices. For retained orders with untaxed totals of $2,000.00 or more, first create and post a down payment invoice for 40%; then create and post a regular invoice for the remaining amount. Below that threshold, create and post one regular invoice.",
+  "seed": 6918958668575222737,
+  "background_and_policy": "* Fulfill all orders while minimizing new spending on procurement and manufacturing.\n* Across all units covered through new purchasing or manufacturing, keep portfolio-level new-spend margin at or above 27.6% at selling price.\n* Existing stock is a sunk cost and should not be treated as new spend.\n* Use 30 Days terms on retained sales orders and all linked customer invoices.\n* For retained orders with untaxed totals of $2,000.00 or more, first create and post a down payment invoice for 40%; then create and post a regular invoice for the remaining amount. Below that threshold, create and post one regular invoice.\n* You must create and confirm the necessary sales orders and purchase orders.\n* Customer budgets are pre-tax amounts.\n* Link Sales Orders to the related Purchase Orders for traceability.\n* For finished goods POs, put the SO reference(s) (e.g. S00030 or S00030, S00031) into the origin field ('Source' in the UI).\n* In the end, the lineage must be SO -> PO.\n* You must sell this product at List Price.\n* On sales orders, set the commitment date.\n* On purchase orders, you must set the delivery date.\n* Before releasing anything, read the Internal Notes/comments on stock, customers, and vendors.\n\nCapacity constraints:\n- No in-house manufacturing capacity is available.\n- For each finished-goods supplier offer, respect min/max quantities as horizon-wide totals.\n- Use one consolidated PO per supplier offer (do not split a single offer across multiple POs).\n- Check each vendor's Internal Notes in Odoo for maximum order quantity limits.",
+  "invoicing_policy": {
+    "invoice_required": true,
+    "payment_term": "net_30",
+    "downpayment_required": true,
+    "downpayment_threshold_amount": 2000.0,
+    "downpayment_mode": "percentage",
+    "downpayment_value": 40.0
+  },
+  "warehouses": [],
+  "vendors": [
+    {
+      "name": "Velocity Transit",
+      "ref": "rF2A3BEC058_q01",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Cosmo Operations",
+      "ref": "rF2A3BEC058_q02",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Baseline Warehousing",
+      "ref": "rF2A3BEC058_q03",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Spark Freight",
+      "ref": "rAF2E578650_q01",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Anvil Materials",
+      "ref": "rAF2E578650_q02",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Nexus Components",
+      "ref": "rAF2E578650_q03",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Catalyst Trading",
+      "ref": "rAF2E578650_q04",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Flux Logistics",
+      "ref": "rAF2E578650_q05",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Baltic Logistics",
+      "ref": "rAF2E578650_q06",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Lance Carriers",
+      "ref": "rAF2E578650_q07",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Ridgeline Materials",
+      "ref": "rAF2E578650_q08",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Cedar Components",
+      "ref": "rAF2E578650_q09",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Crown Carriers",
+      "ref": "rAF2E578650_q10",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Lattice Resources",
+      "ref": "rAF2E578650_q11",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Horizon Resources",
+      "ref": "rAF2E578650_q12",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Bridgeway Parts Co",
+      "ref": "rAF2E578650_q13",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Metro Logistics",
+      "ref": "rAF2E578650_q14",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Ivory Networks",
+      "ref": "rAF2E578650_q15",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Arbor Materials",
+      "ref": "rAF2E578650_q16",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Scion Materials",
+      "ref": "rAF2E578650_q17",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Circuit Freight",
+      "ref": "rAF2E578650_q18",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Orbital Trading",
+      "ref": "rAF2E578650_q19",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Helix Wholesale",
+      "ref": "rAF2E578650_q20",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Titan Freight",
+      "ref": "rAF2E578650_q21",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Silverline Components",
+      "ref": "rAF2E578650_q22",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Dune Trading",
+      "ref": "rAF2E578650_q23",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Compass Distribution",
+      "ref": "rAF2E578650_q24",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Mosaic Procurement",
+      "ref": "rAF2E578650_q25",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Trident Wholesale",
+      "ref": "rAF2E578650_q26",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Eclipse Logistics",
+      "ref": "rAF2E578650_q27",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Solace Distribution",
+      "ref": "rAF2E578650_q28",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Cascade Distribution",
+      "ref": "rAF2E578650_q29",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Apex Logistics",
+      "ref": "rAF2E578650_q30",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Pacific Wholesale",
+      "ref": "rAF2E578650_q31",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Ashford Transit",
+      "ref": "rAF2E578650_q32",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Brookfield Wholesale",
+      "ref": "rAF2E578650_q33",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Aether Transit",
+      "ref": "rAF2E578650_q34",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Ridge Sourcing",
+      "ref": "rAF2E578650_q35",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Prism Components",
+      "ref": "rAF2E578650_q36",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Canton Resources",
+      "ref": "rAF2E578650_q37",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Ironwood Sourcing",
+      "ref": "rAF2E578650_q38",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Slate Procurement",
+      "ref": "rAF2E578650_q39",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Ironside Wholesale",
+      "ref": "rAF2E578650_q40",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Pinnacle Procurement",
+      "ref": "rAF2E578650_q41",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Marble Parts Co",
+      "ref": "rAF2E578650_q42",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Redstone Logistics",
+      "ref": "rAF2E578650_q43",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Sentinel Procurement",
+      "ref": "rAF2E578650_q44",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Polar Freight",
+      "ref": "rAF2E578650_q45",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Grove Resources",
+      "ref": "rAF2E578650_q46",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Bayshore Procurement",
+      "ref": "rAF2E578650_q47",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Bronze Supply",
+      "ref": "rAF2E578650_q48",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Skyline Materials",
+      "ref": "rAF2E578650_q49",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Stonewall Parts Co",
+      "ref": "rAF2E578650_q50",
+      "supplier_rank": 10,
+      "comment": null
+    }
+  ],
+  "customers": [
+    {
+      "name": "Osprey Dynamics",
+      "ref": "rF2A3BEC058_c01",
+      "email": "orders@ospreydynamics.io",
+      "budget_dollars": 1809.37,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Arrow Society",
+      "ref": "rF2A3BEC058_c02",
+      "email": "orders@arrowsociety.io",
+      "budget_dollars": 2865.18,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Coral Arena",
+      "ref": "rF2A3BEC058_c03",
+      "email": "orders@coralarena.io",
+      "budget_dollars": 10103.18,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Noble Ventures",
+      "ref": "rF2A3BEC058_c04",
+      "email": "orders@nobleventures.io",
+      "budget_dollars": 11041.93,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Peak Technologies HQ Procurement",
+      "ref": "rAF2E578650_p01",
+      "email": "contact@peaktechnologies.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Borough Technologies HQ Procurement",
+      "ref": "rAF2E578650_p02",
+      "email": "contact@boroughtechnologies.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Vertex Production Plant Maintenance",
+      "ref": "rAF2E578650_p03",
+      "email": "contact@vertexproduction.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Steel Production Tooling Center",
+      "ref": "rAF2E578650_p04",
+      "email": "contact@steelproduction.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Copper Engineering Quality Lab",
+      "ref": "rAF2E578650_p05",
+      "email": "contact@copperengineering.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Ember Services Prototype Shop",
+      "ref": "rAF2E578650_p06",
+      "email": "contact@emberservices.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Crest Fabrication Quality Lab",
+      "ref": "rAF2E578650_p07",
+      "email": "contact@crestfabrication.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Stratos Industries Tooling Center",
+      "ref": "rAF2E578650_p08",
+      "email": "contact@stratosindustries.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Cipher Solutions Prototype Shop",
+      "ref": "rAF2E578650_p09",
+      "email": "contact@ciphersolutions.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Westfield Engineering Test Facility",
+      "ref": "rAF2E578650_p10",
+      "email": "contact@westfieldengineering.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Matrix Industries HQ Procurement",
+      "ref": "rAF2E578650_p11",
+      "email": "contact@matrixindustries.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Aurora Services Site Logistics",
+      "ref": "rAF2E578650_p12",
+      "email": "contact@auroraservices.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Keystone Services R&D Workshop",
+      "ref": "rAF2E578650_p13",
+      "email": "contact@keystoneservices.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Fairview Production HQ Procurement",
+      "ref": "rAF2E578650_p14",
+      "email": "contact@fairviewproduction.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Aegis Operations R&D Workshop",
+      "ref": "rAF2E578650_p15",
+      "email": "contact@aegisoperations.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Comet Assembly Field Ops",
+      "ref": "rAF2E578650_p16",
+      "email": "contact@cometassembly.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Chrome Services Prototype Shop",
+      "ref": "rAF2E578650_p17",
+      "email": "contact@chromeservices.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Cardinal Technologies Site Logistics",
+      "ref": "rAF2E578650_p18",
+      "email": "contact@cardinaltechnologies.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Pivot Operations Field Ops",
+      "ref": "rAF2E578650_p19",
+      "email": "contact@pivotoperations.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Summit Engineering Site Logistics",
+      "ref": "rAF2E578650_p20",
+      "email": "contact@summitengineering.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Lumen Production Plant Maintenance",
+      "ref": "rAF2E578650_p21",
+      "email": "contact@lumenproduction.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Iron Operations Quality Lab",
+      "ref": "rAF2E578650_p22",
+      "email": "contact@ironoperations.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Hartland Manufacturing Plant Maintenance",
+      "ref": "rAF2E578650_p23",
+      "email": "contact@hartlandmanufacturing.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Granite Technologies Test Facility",
+      "ref": "rAF2E578650_p24",
+      "email": "contact@granitetechnologies.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Zenith Manufacturing Warehouse Ops",
+      "ref": "rAF2E578650_p25",
+      "email": "contact@zenithmanufacturing.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Thornton Assembly Plant Maintenance",
+      "ref": "rAF2E578650_p26",
+      "email": "contact@thorntonassembly.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Equinox Operations R&D Workshop",
+      "ref": "rAF2E578650_p27",
+      "email": "contact@equinoxoperations.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Onyx Operations R&D Workshop",
+      "ref": "rAF2E578650_p28",
+      "email": "contact@onyxoperations.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Cobalt Services Field Ops",
+      "ref": "rAF2E578650_p29",
+      "email": "contact@cobaltservices.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Atlas Manufacturing Test Facility",
+      "ref": "rAF2E578650_p30",
+      "email": "contact@atlasmanufacturing.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Millbrook Manufacturing Tooling Center",
+      "ref": "rAF2E578650_p31",
+      "email": "contact@millbrookmanufacturing.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Lakewood Services Tooling Center",
+      "ref": "rAF2E578650_p32",
+      "email": "contact@lakewoodservices.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Conduit Industries R&D Workshop",
+      "ref": "rAF2E578650_p33",
+      "email": "contact@conduitindustries.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Sierra Services Warehouse Ops",
+      "ref": "rAF2E578650_p34",
+      "email": "contact@sierraservices.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Oxide Solutions Warehouse Ops",
+      "ref": "rAF2E578650_p35",
+      "email": "contact@oxidesolutions.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Drift Manufacturing Test Facility",
+      "ref": "rAF2E578650_p36",
+      "email": "contact@driftmanufacturing.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Evergreen Technologies Test Facility",
+      "ref": "rAF2E578650_p37",
+      "email": "contact@evergreentechnologies.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Garnet Manufacturing Warehouse Ops",
+      "ref": "rAF2E578650_p38",
+      "email": "contact@garnetmanufacturing.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Element Production Plant Maintenance",
+      "ref": "rAF2E578650_p39",
+      "email": "contact@elementproduction.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Spectra Fabrication Quality Lab",
+      "ref": "rAF2E578650_p40",
+      "email": "contact@spectrafabrication.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Quantum Engineering R&D Workshop",
+      "ref": "rAF2E578650_p41",
+      "email": "contact@quantumengineering.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Nimbus Technologies Test Facility",
+      "ref": "rAF2E578650_p42",
+      "email": "contact@nimbustechnologies.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Indigo Industries Quality Lab",
+      "ref": "rAF2E578650_p43",
+      "email": "contact@indigoindustries.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Trellis Production Test Facility",
+      "ref": "rAF2E578650_p44",
+      "email": "contact@trellisproduction.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Sapphire Technologies Quality Lab",
+      "ref": "rAF2E578650_p45",
+      "email": "contact@sapphiretechnologies.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Alpine Manufacturing Warehouse Ops",
+      "ref": "rAF2E578650_p46",
+      "email": "contact@alpinemanufacturing.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Gateway Services Test Facility",
+      "ref": "rAF2E578650_p47",
+      "email": "contact@gatewayservices.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Citadel Production Quality Lab",
+      "ref": "rAF2E578650_p48",
+      "email": "contact@citadelproduction.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Echo Services HQ Procurement",
+      "ref": "rAF2E578650_p49",
+      "email": "contact@echoservices.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Ledger Manufacturing Prototype Shop",
+      "ref": "rAF2E578650_p50",
+      "email": "contact@ledgermanufacturing.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    }
+  ],
+  "products": [
+    {
+      "name": "L-Shaped Corner Workstation",
+      "code": "PF2A3BEC058-WST-LSC-002",
+      "category": "Office Systems",
+      "type": "consu",
+      "list_price": 860.25,
+      "standard_price": 445.66,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF2A3BEC058_q01",
+          "delay": 6,
+          "min_qty": 10.0,
+          "max_qty": 27.0,
+          "price": 499.23,
+          "name": "Priority Shuttle lane (6d transit, 10-27 units)"
+        },
+        {
+          "partner_ref": "rF2A3BEC058_q02",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 17.0,
+          "price": 716.32,
+          "name": "Express Air lane (4d transit, 1-17 units)"
+        },
+        {
+          "partner_ref": "rF2A3BEC058_q03",
+          "delay": 4,
+          "min_qty": 2.0,
+          "max_qty": 27.0,
+          "price": 824.48,
+          "name": "Air Charter lane (4d transit, 2-27 units)"
+        }
+      ]
+    },
+    {
+      "name": "Weatherproof Tray System",
+      "code": "PAF2E578650-A001",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 334.93,
+      "standard_price": 233.51,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q01",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 247.55,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Compact Tray System",
+      "code": "PAF2E578650-A002",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 300.59,
+      "standard_price": 186.21,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q02",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 188.54,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Extended-Life with Memory Presets",
+      "code": "PAF2E578650-A003",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 306.2,
+      "standard_price": 215.48,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q03",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 212.55,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Medical-Grade Monitor Arm Mount",
+      "code": "PAF2E578650-A004",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 220.29,
+      "standard_price": 135.71,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q04",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 130.22,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Sealed Power Grommet Module",
+      "code": "PAF2E578650-A005",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 293.06,
+      "standard_price": 202.35,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q05",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 216.71,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Tapered Desktop Surface Panel",
+      "code": "PAF2E578650-A006",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 287.66,
+      "standard_price": 163.23,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q06",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 158.68,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Modular with Memory Presets",
+      "code": "PAF2E578650-A007",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 419.87,
+      "standard_price": 283.96,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q07",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 285.83,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Low-Temp with Memory Presets",
+      "code": "PAF2E578650-A008",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 201.3,
+      "standard_price": 140.34,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q08",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 148.47,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Wide-Body Arm Mount",
+      "code": "PAF2E578650-A009",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 329.24,
+      "standard_price": 224.8,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q09",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 241.99,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Spring-Loaded Actuator Motor",
+      "code": "PAF2E578650-A010",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 320.67,
+      "standard_price": 169.37,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q10",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 169.29,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Anti-Vibration Tray System",
+      "code": "PAF2E578650-A011",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 418.91,
+      "standard_price": 237.49,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q11",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 226.31,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Corrosion-Resistant Screen Panel",
+      "code": "PAF2E578650-A012",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 273.43,
+      "standard_price": 150.26,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q12",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 146.71,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Impact-Rated Screen Panel",
+      "code": "PAF2E578650-A013",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 324.83,
+      "standard_price": 185.8,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q13",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 177.76,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Rapid-Lock Tray Slider",
+      "code": "PAF2E578650-A014",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 260.07,
+      "standard_price": 177.57,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q14",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 170.87,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Low-Profile Desktop Surface Panel",
+      "code": "PAF2E578650-A015",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 365.39,
+      "standard_price": 230.63,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q15",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 241.6,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Cold-Rolled Desktop Surface Panel",
+      "code": "PAF2E578650-A016",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 202.9,
+      "standard_price": 132.68,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q16",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 135.19,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Quick-Release Monitor Arm Mount",
+      "code": "PAF2E578650-A017",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 358.99,
+      "standard_price": 213.05,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q17",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 218.24,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Commercial Monitor Arm Mount",
+      "code": "PAF2E578650-A018",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 199.59,
+      "standard_price": 138.69,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q18",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 138.14,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Premium Surface Panel",
+      "code": "PAF2E578650-A019",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 376.71,
+      "standard_price": 262.53,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q19",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 262.9,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "UV-Stable Arm Mount",
+      "code": "PAF2E578650-A020",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 359.28,
+      "standard_price": 250.19,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q20",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 253.01,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Low-Noise Tray System",
+      "code": "PAF2E578650-A021",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 391.92,
+      "standard_price": 271.69,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q21",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 261.79,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Anodized Foot Leveler Set",
+      "code": "PAF2E578650-A022",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 212.84,
+      "standard_price": 137.43,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q22",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 144.35,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Flanged Monitor Arm Mount",
+      "code": "PAF2E578650-A023",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 414.06,
+      "standard_price": 215.89,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q23",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 209.16,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Narrow-Body Privacy Screen Panel",
+      "code": "PAF2E578650-A024",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 217.13,
+      "standard_price": 119.35,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q24",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 118.4,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Standard Desktop Panel 60x30",
+      "code": "PAF2E578650-A025",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 411.57,
+      "standard_price": 291.07,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q25",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 300.11,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Industrial Privacy Screen Panel",
+      "code": "PAF2E578650-A026",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 314.81,
+      "standard_price": 192.34,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q26",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 182.87,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Single-Stage Tray System",
+      "code": "PAF2E578650-A027",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 283.73,
+      "standard_price": 169.88,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q27",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 178.04,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Snap-Fit with Memory Presets",
+      "code": "PAF2E578650-A028",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 225.43,
+      "standard_price": 123.91,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q28",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 123.73,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Dual-Stage Power Grommet Module",
+      "code": "PAF2E578650-A029",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 197.81,
+      "standard_price": 118.46,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q29",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 126.71,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "High-Torque Foot Leveler Set",
+      "code": "PAF2E578650-A030",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 209.41,
+      "standard_price": 125.03,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q30",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 121.45,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Hardened Leveler Set",
+      "code": "PAF2E578650-A031",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 209.97,
+      "standard_price": 134.3,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q31",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 142.25,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "High-Flow Screen Panel",
+      "code": "PAF2E578650-A032",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 337.28,
+      "standard_price": 201.75,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q32",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 214.01,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Economy Cable Tray System",
+      "code": "PAF2E578650-A033",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 182.9,
+      "standard_price": 105.16,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q33",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 104.33,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Zero-Backlash Cable Tray System",
+      "code": "PAF2E578650-A034",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 279.14,
+      "standard_price": 198.64,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q34",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 191.84,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Food-Grade with Memory Presets",
+      "code": "PAF2E578650-A035",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 314.76,
+      "standard_price": 203.96,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q35",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 205.21,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "High-Performance Keyboard Tray Slider",
+      "code": "PAF2E578650-A036",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 303.23,
+      "standard_price": 159.99,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q36",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 152.6,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Reinforced Desktop Surface Panel",
+      "code": "PAF2E578650-A037",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 402.25,
+      "standard_price": 225.23,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q37",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 232.66,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Heat-Treated Monitor Arm Mount",
+      "code": "PAF2E578650-A038",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 247.61,
+      "standard_price": 134.58,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q38",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 134.13,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Heavy-Duty Crossbar Stabilizer",
+      "code": "PAF2E578650-A039",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 303.84,
+      "standard_price": 172.18,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q39",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 172.46,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Powder-Coated Desktop Edge Trim",
+      "code": "PAF2E578650-A040",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 194.29,
+      "standard_price": 131.94,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q40",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 133.2,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Lightweight Monitor Arm Mount",
+      "code": "PAF2E578650-A041",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 295.33,
+      "standard_price": 172.63,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q41",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 178.69,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "High-Cycle Foot Leveler Set",
+      "code": "PAF2E578650-A042",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 282.33,
+      "standard_price": 162.12,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q42",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 174.57,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Universal Privacy Screen Panel",
+      "code": "PAF2E578650-A043",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 291.83,
+      "standard_price": 187.74,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q43",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 178.98,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Metric Desktop Edge Trim",
+      "code": "PAF2E578650-A044",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 308.96,
+      "standard_price": 219.97,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q44",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 223.31,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Stainless Desktop Surface Panel",
+      "code": "PAF2E578650-A045",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 408.16,
+      "standard_price": 241.48,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q45",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 243.73,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Threaded Monitor Arm Mount",
+      "code": "PAF2E578650-A046",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 231.23,
+      "standard_price": 149.4,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q46",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 145.33,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Precision with Memory Presets",
+      "code": "PAF2E578650-A047",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 367.1,
+      "standard_price": 260.31,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q47",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 256.83,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Low-Flow Memory Presets",
+      "code": "PAF2E578650-A048",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 217.55,
+      "standard_price": 149.13,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q48",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 142.7,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Thermal-Guard Linear Actuator Motor",
+      "code": "PAF2E578650-A049",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 262.65,
+      "standard_price": 161.14,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q49",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 162.75,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "High-Temp Leveler Set",
+      "code": "PAF2E578650-A050",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 374.82,
+      "standard_price": 196.26,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rAF2E578650_q50",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 191.79,
+          "name": "Local pickup"
+        }
+      ]
+    }
+  ],
+  "boms": [
+    {
+      "product_code": "PAF2E578650-A029",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PAF2E578650-A039",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "PAF2E578650-A040",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PAF2E578650-A032",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PAF2E578650-A023",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PAF2E578650-A019",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PAF2E578650-A038",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PAF2E578650-A028",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PAF2E578650-A007",
+          "quantity": 3.0
+        },
+        {
+          "component_code": "PAF2E578650-A003",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PAF2E578650-A048",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PAF2E578650-A010",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PAF2E578650-A014",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PAF2E578650-A027",
+          "quantity": 2.0
+        },
+        {
+          "component_code": "PAF2E578650-A005",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PAF2E578650-A003",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PAF2E578650-A024",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PAF2E578650-A016",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PAF2E578650-A034",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PAF2E578650-A050",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PAF2E578650-A010",
+          "quantity": 3.0
+        },
+        {
+          "component_code": "PAF2E578650-A002",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PAF2E578650-A040",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PAF2E578650-A016",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    }
+  ],
+  "workcenters": [],
+  "stock_levels": [
+    {
+      "product_code": "PF2A3BEC058-WST-LSC-002",
+      "warehouse_code": null,
+      "quantity": 23.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A001",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A002",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A003",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A004",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A005",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A006",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A007",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A008",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A009",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A010",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A011",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A012",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A013",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A014",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A015",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A016",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A017",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A018",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A019",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A020",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A021",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A022",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A023",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A024",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A025",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A026",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A027",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A028",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A029",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A030",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A031",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A032",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A033",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A034",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A035",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A036",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A037",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A038",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A039",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A040",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A041",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A042",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A043",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A044",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A045",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A046",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A047",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A048",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A049",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PAF2E578650-A050",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    }
+  ],
+  "existing_purchase_orders": [],
+  "existing_manufacturing_orders": [],
+  "existing_sales_orders": [],
+  "repair_context": null,
+  "system_parameters": [
+    {
+      "key": "erp_bench.min_margin_percent",
+      "value": "27.6"
+    }
+  ]
+}

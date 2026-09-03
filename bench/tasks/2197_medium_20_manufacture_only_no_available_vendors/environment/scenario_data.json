@@ -1,0 +1,3027 @@
+{
+  "scenario_number": 2197,
+  "name": "Auto-Transformer 250kVA",
+  "instruction": "Each customer order below requires a fulfillment-ready supply solution before its delivery due date:\n\n- Cipher Ventures: 22 units due in 9 days (pretax budget cap $301,803)\n- Granite Chambers: 18 units due in 9 days (pretax budget cap $247,468)\n- Vertex Lyceum: 19 units due in 9 days (pretax budget cap $253,542)\n- Oakmont Technologies: 24 units due in 10 days (pretax budget cap $310,666)\n- Baseline Fabricators: 26 units due in 10 days (pretax budget cap $343,600)\n- Quantum Pictures: 26 units due in 11 days (pretax budget cap $349,131)\n- Crestview Works: 24 units due in 12 days (pretax budget cap $325,312)\n- Echo Pavilion: 19 units due in 12 days (pretax budget cap $260,501)\n- Nexus Workshop: 26 units due in 13 days (pretax budget cap $358,954)\n- Lance Media: 26 units due in 14 days (pretax budget cap $347,695)\n\nWe have 42 finished units on hand.\n\nAcross all units covered through new purchasing or manufacturing, keep portfolio-level new-spend margin at or above 28.4% at selling price.",
+  "seed": 8789716280937740449,
+  "background_and_policy": "* Fulfill all orders while minimizing new spending on procurement and manufacturing.\n* The combined units covered through new purchasing or manufacturing must clear at least 28.4% portfolio-level new-spend margin at selling price.\n* Finance considers the existing stock as sunk cost.\n* You must create and confirm the necessary sales orders, manufacturing orders, and any component purchase orders needed for assembly.\n* Customer budgets are pre-tax amounts.\n* Link Sales Orders to the related Manufacturing Orders and Purchase Orders for traceability.\n* Use in-house manufacturing to cover finished-goods shortfalls; purchase orders are only for components.\n* For component POs, put the MO reference(s) (e.g. WH/MO/00010 or WH/MO/00010, WH/MO/00011) into the origin field.\n* For finished goods MOs, put the Sales Order reference (e.g. S00030) into the origin field ('Source' in the UI).\n* In the end, the lineage must be SO -> MO -> PO.\n* You must sell this product at List Price.\n* On sales orders, set the commitment date.\n* On manufacturing orders, you must set the start date and the due date.\n* Procure only the components that are not in stock.\n* On purchase orders, you must set the delivery date.\n* Check Internal Notes/comments on stock, customers, vendors, and workcenters before you release anything.\n\nCapacity constraints:\n- Treat workcenter capacity as a hard horizon-wide limit across all products that share the center.\n- Check each workcenter's Internal Notes in Odoo for the exact horizon-wide minute limit.\n- Assign workcenter on each manufacturing work order.\n- For each component supplier offer, respect min/max quantities as horizon-wide totals.\n- Use one consolidated PO per supplier offer (do not split a single offer across multiple POs).\n- Check each vendor's Internal Notes in Odoo for maximum order quantity limits.",
+  "invoicing_policy": {
+    "invoice_required": false,
+    "payment_term": null,
+    "downpayment_required": false,
+    "downpayment_threshold_amount": null,
+    "downpayment_mode": null,
+    "downpayment_value": null
+  },
+  "warehouses": [],
+  "vendors": [
+    {
+      "name": "Compass Logistics",
+      "ref": "r7CEB49B6BC_q01",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Helix Partners",
+      "ref": "r7CEB49B6BC_q02",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Pinnacle Supply",
+      "ref": "r7CEB49B6BC_q03",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Hartland Transport",
+      "ref": "r7CEB49B6BC_q04",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Axis Depot",
+      "ref": "r7CEB49B6BC_q05",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Clearwater Wholesalers",
+      "ref": "r7CEB49B6BC_q06",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Garnet Freight",
+      "ref": "r7CEB49B6BC_q07",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Skyline Solutions",
+      "ref": "r7CEB49B6BC_q08",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Vantage Manufacturing",
+      "ref": "r7CEB49B6BC_q09",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Iron Procurement",
+      "ref": "r7CEB49B6BC_q10",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Prism Shipping",
+      "ref": "r7CEB49B6BC_q11",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Meridian Resources",
+      "ref": "r7CEB49B6BC_q12",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Thornton Conveyance",
+      "ref": "r7CEB49B6BC_q13",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Catalyst Operations",
+      "ref": "r7CEB49B6BC_q14",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Spectra Importers",
+      "ref": "r7CEB49B6BC_q15",
+      "supplier_rank": 15,
+      "comment": null
+    },
+    {
+      "name": "Lumen Haulage",
+      "ref": "r7CEB49B6BC_q16",
+      "supplier_rank": 16,
+      "comment": null
+    },
+    {
+      "name": "Ledger Transit",
+      "ref": "r7CEB49B6BC_q17",
+      "supplier_rank": 17,
+      "comment": null
+    },
+    {
+      "name": "Arrow Supply",
+      "ref": "r26629875A2_q01",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Anvil Parts Co",
+      "ref": "r26629875A2_q02",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Circuit Sourcing",
+      "ref": "r26629875A2_q03",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Mosaic Supply",
+      "ref": "r26629875A2_q04",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Arc Logistics",
+      "ref": "r26629875A2_q05",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Crown Sourcing",
+      "ref": "r26629875A2_q06",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Grove Resources",
+      "ref": "r26629875A2_q07",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Lattice Wholesale",
+      "ref": "r26629875A2_q08",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Atlas Parts Co",
+      "ref": "r26629875A2_q09",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Pacific Wholesale",
+      "ref": "r26629875A2_q10",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Solace Sourcing",
+      "ref": "r26629875A2_q11",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Sierra Wholesale",
+      "ref": "r26629875A2_q12",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Aegis Carriers",
+      "ref": "r26629875A2_q13",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Fairview Networks",
+      "ref": "r26629875A2_q14",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Conduit Trading",
+      "ref": "r26629875A2_q15",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Alloy Wholesale",
+      "ref": "r26629875A2_q16",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Polar Carriers",
+      "ref": "r26629875A2_q17",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Cedar Resources",
+      "ref": "r26629875A2_q18",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Indigo Materials",
+      "ref": "r26629875A2_q19",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Oxide Supply",
+      "ref": "r26629875A2_q20",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Zenith Procurement",
+      "ref": "r26629875A2_q21",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Stratos Resources",
+      "ref": "r26629875A2_q22",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Millbrook Trading",
+      "ref": "r26629875A2_q23",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Scion Networks",
+      "ref": "r26629875A2_q24",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Spire Supply",
+      "ref": "r26629875A2_q25",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Haven Supply",
+      "ref": "r26629875A2_q26",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Osprey Parts Co",
+      "ref": "r26629875A2_q27",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Sapphire Supply",
+      "ref": "r26629875A2_q28",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Globe Resources",
+      "ref": "r26629875A2_q29",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Ironside Carriers",
+      "ref": "r26629875A2_q30",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Opal Transit",
+      "ref": "r26629875A2_q31",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Trident Components",
+      "ref": "r26629875A2_q32",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Orbital Wholesale",
+      "ref": "r26629875A2_q33",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Alpine Carriers",
+      "ref": "r26629875A2_q34",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Cardinal Wholesale",
+      "ref": "r26629875A2_q35",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Noble Wholesale",
+      "ref": "r26629875A2_q36",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Terra Wholesale",
+      "ref": "r26629875A2_q37",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Brookfield Networks",
+      "ref": "r26629875A2_q38",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Redstone Logistics",
+      "ref": "r26629875A2_q39",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Nimbus Resources",
+      "ref": "r26629875A2_q40",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Ivory Trading",
+      "ref": "r26629875A2_q41",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Metro Sourcing",
+      "ref": "r26629875A2_q42",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Comet Logistics",
+      "ref": "r26629875A2_q43",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Flint Distribution",
+      "ref": "r26629875A2_q44",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Element Transit",
+      "ref": "r26629875A2_q45",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Jade Parts Co",
+      "ref": "r26629875A2_q46",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Westfield Freight",
+      "ref": "r26629875A2_q47",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Chrome Materials",
+      "ref": "r26629875A2_q48",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Keystone Supply",
+      "ref": "r26629875A2_q49",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Silverline Wholesale",
+      "ref": "r26629875A2_q50",
+      "supplier_rank": 13,
+      "comment": null
+    }
+  ],
+  "customers": [
+    {
+      "name": "Cipher Ventures",
+      "ref": "r7CEB49B6BC_c01",
+      "email": "orders@cipherventures.io",
+      "budget_dollars": 301802.68,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Granite Chambers",
+      "ref": "r7CEB49B6BC_c02",
+      "email": "orders@granitechambers.io",
+      "budget_dollars": 247468.39,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Vertex Lyceum",
+      "ref": "r7CEB49B6BC_c03",
+      "email": "orders@vertexlyceum.io",
+      "budget_dollars": 253542.27,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Oakmont Technologies",
+      "ref": "r7CEB49B6BC_c04",
+      "email": "orders@oakmonttechnologies.io",
+      "budget_dollars": 310665.93,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Baseline Fabricators",
+      "ref": "r7CEB49B6BC_c05",
+      "email": "orders@baselinefabricators.io",
+      "budget_dollars": 343599.86,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Quantum Pictures",
+      "ref": "r7CEB49B6BC_c06",
+      "email": "orders@quantumpictures.io",
+      "budget_dollars": 349131.06,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Crestview Works",
+      "ref": "r7CEB49B6BC_c07",
+      "email": "orders@crestviewworks.io",
+      "budget_dollars": 325312.05,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Echo Pavilion",
+      "ref": "r7CEB49B6BC_c08",
+      "email": "orders@echopavilion.io",
+      "budget_dollars": 260501.21,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Nexus Workshop",
+      "ref": "r7CEB49B6BC_c09",
+      "email": "orders@nexusworkshop.io",
+      "budget_dollars": 358954.28,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Lance Media",
+      "ref": "r7CEB49B6BC_c10",
+      "email": "orders@lancemedia.io",
+      "budget_dollars": 347695.05,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Sterling Assembly R&D Workshop",
+      "ref": "r26629875A2_p01",
+      "email": "contact@sterlingassembly.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Equinox Manufacturing Plant Maintenance",
+      "ref": "r26629875A2_p02",
+      "email": "contact@equinoxmanufacturing.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Ashford Manufacturing Site Logistics",
+      "ref": "r26629875A2_p03",
+      "email": "contact@ashfordmanufacturing.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Cobalt Production Quality Lab",
+      "ref": "r26629875A2_p04",
+      "email": "contact@cobaltproduction.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Northbridge Technologies R&D Workshop",
+      "ref": "r26629875A2_p05",
+      "email": "contact@northbridgetechnologies.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Apex Assembly Prototype Shop",
+      "ref": "r26629875A2_p06",
+      "email": "contact@apexassembly.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Raven Engineering Field Ops",
+      "ref": "r26629875A2_p07",
+      "email": "contact@ravenengineering.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Sentinel Technologies Warehouse Ops",
+      "ref": "r26629875A2_p08",
+      "email": "contact@sentineltechnologies.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Baltic Production Tooling Center",
+      "ref": "r26629875A2_p09",
+      "email": "contact@balticproduction.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Ironwood Services Test Facility",
+      "ref": "r26629875A2_p10",
+      "email": "contact@ironwoodservices.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Quartz Operations Plant Maintenance",
+      "ref": "r26629875A2_p11",
+      "email": "contact@quartzoperations.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Eclipse Services Warehouse Ops",
+      "ref": "r26629875A2_p12",
+      "email": "contact@eclipseservices.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Peak Fabrication Prototype Shop",
+      "ref": "r26629875A2_p13",
+      "email": "contact@peakfabrication.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Cascade Manufacturing Tooling Center",
+      "ref": "r26629875A2_p14",
+      "email": "contact@cascademanufacturing.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Aether Production Field Ops",
+      "ref": "r26629875A2_p15",
+      "email": "contact@aetherproduction.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Bronze Solutions Tooling Center",
+      "ref": "r26629875A2_p16",
+      "email": "contact@bronzesolutions.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Onyx Solutions R&D Workshop",
+      "ref": "r26629875A2_p17",
+      "email": "contact@onyxsolutions.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Titan Operations Tooling Center",
+      "ref": "r26629875A2_p18",
+      "email": "contact@titanoperations.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Crest Technologies Tooling Center",
+      "ref": "r26629875A2_p19",
+      "email": "contact@cresttechnologies.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Stonewall Production Plant Maintenance",
+      "ref": "r26629875A2_p20",
+      "email": "contact@stonewallproduction.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Coral Manufacturing HQ Procurement",
+      "ref": "r26629875A2_p21",
+      "email": "contact@coralmanufacturing.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Dune Engineering Site Logistics",
+      "ref": "r26629875A2_p22",
+      "email": "contact@duneengineering.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Slate Fabrication HQ Procurement",
+      "ref": "r26629875A2_p23",
+      "email": "contact@slatefabrication.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Lakewood Services Prototype Shop",
+      "ref": "r26629875A2_p24",
+      "email": "contact@lakewoodservices.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Forge Fabrication Prototype Shop",
+      "ref": "r26629875A2_p25",
+      "email": "contact@forgefabrication.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Ember Services HQ Procurement",
+      "ref": "r26629875A2_p26",
+      "email": "contact@emberservices.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Velocity Production Prototype Shop",
+      "ref": "r26629875A2_p27",
+      "email": "contact@velocityproduction.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Summit Industries Test Facility",
+      "ref": "r26629875A2_p28",
+      "email": "contact@summitindustries.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Arbor Services Test Facility",
+      "ref": "r26629875A2_p29",
+      "email": "contact@arborservices.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Marble Production Quality Lab",
+      "ref": "r26629875A2_p30",
+      "email": "contact@marbleproduction.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Bridgeway Fabrication Tooling Center",
+      "ref": "r26629875A2_p31",
+      "email": "contact@bridgewayfabrication.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Gateway Operations Warehouse Ops",
+      "ref": "r26629875A2_p32",
+      "email": "contact@gatewayoperations.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Matrix Industries HQ Procurement",
+      "ref": "r26629875A2_p33",
+      "email": "contact@matrixindustries.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Spark Technologies Prototype Shop",
+      "ref": "r26629875A2_p34",
+      "email": "contact@sparktechnologies.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Copper Solutions Plant Maintenance",
+      "ref": "r26629875A2_p35",
+      "email": "contact@coppersolutions.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Drift Fabrication Warehouse Ops",
+      "ref": "r26629875A2_p36",
+      "email": "contact@driftfabrication.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Pivot Services Quality Lab",
+      "ref": "r26629875A2_p37",
+      "email": "contact@pivotservices.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Ridge Manufacturing R&D Workshop",
+      "ref": "r26629875A2_p38",
+      "email": "contact@ridgemanufacturing.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Riverdale Fabrication Quality Lab",
+      "ref": "r26629875A2_p39",
+      "email": "contact@riverdalefabrication.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Borough Manufacturing Prototype Shop",
+      "ref": "r26629875A2_p40",
+      "email": "contact@boroughmanufacturing.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Cosmo Technologies Field Ops",
+      "ref": "r26629875A2_p41",
+      "email": "contact@cosmotechnologies.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Flux Solutions Field Ops",
+      "ref": "r26629875A2_p42",
+      "email": "contact@fluxsolutions.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Blaze Solutions Field Ops",
+      "ref": "r26629875A2_p43",
+      "email": "contact@blazesolutions.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Aurora Operations Plant Maintenance",
+      "ref": "r26629875A2_p44",
+      "email": "contact@auroraoperations.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Horizon Production Plant Maintenance",
+      "ref": "r26629875A2_p45",
+      "email": "contact@horizonproduction.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Monarch Operations Field Ops",
+      "ref": "r26629875A2_p46",
+      "email": "contact@monarchoperations.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Bayshore Services R&D Workshop",
+      "ref": "r26629875A2_p47",
+      "email": "contact@bayshoreservices.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Evergreen Engineering Site Logistics",
+      "ref": "r26629875A2_p48",
+      "email": "contact@evergreenengineering.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Steel Engineering HQ Procurement",
+      "ref": "r26629875A2_p49",
+      "email": "contact@steelengineering.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Citadel Solutions Plant Maintenance",
+      "ref": "r26629875A2_p50",
+      "email": "contact@citadelsolutions.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    }
+  ],
+  "products": [
+    {
+      "name": "Auto-Transformer 250kVA",
+      "code": "P7CEB49B6BC-TRF-ATR-006",
+      "category": "Power Equipment",
+      "type": "consu",
+      "list_price": 12416.51,
+      "standard_price": 7958.09,
+      "routes": [
+        "buy",
+        "manufacture"
+      ],
+      "vendor_info": []
+    },
+    {
+      "name": "Tap Changer On-Load Assembly",
+      "code": "P7CEB49B6BC-TRF-TCA-108",
+      "category": "Power Equipment",
+      "type": "consu",
+      "list_price": 3052.86,
+      "standard_price": 1862.93,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r7CEB49B6BC_q01",
+          "delay": 3,
+          "min_qty": 7.0,
+          "max_qty": 79.0,
+          "price": 2421.05,
+          "name": "Rapid Works (3d)"
+        },
+        {
+          "partner_ref": "r7CEB49B6BC_q02",
+          "delay": 4,
+          "min_qty": 22.0,
+          "max_qty": 47.0,
+          "price": 2194.06,
+          "name": "Domestic Supply (4d)"
+        },
+        {
+          "partner_ref": "r7CEB49B6BC_q03",
+          "delay": 7,
+          "min_qty": 16.0,
+          "max_qty": 70.0,
+          "price": 1862.93,
+          "name": "Hybrid Fabricators (7d)"
+        }
+      ]
+    },
+    {
+      "name": "Temperature Indicator Dial Gauge",
+      "code": "P7CEB49B6BC-TRF-TID-111",
+      "category": "Power Equipment",
+      "type": "consu",
+      "list_price": 138.55,
+      "standard_price": 52.35,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r7CEB49B6BC_q04",
+          "delay": 3,
+          "min_qty": 11.0,
+          "max_qty": 78.0,
+          "price": 80.94,
+          "name": "Rapid Works (3d)"
+        },
+        {
+          "partner_ref": "r7CEB49B6BC_q05",
+          "delay": 6,
+          "min_qty": 28.0,
+          "max_qty": 80.0,
+          "price": 78.5,
+          "name": "Domestic Supply (6d)"
+        },
+        {
+          "partner_ref": "r7CEB49B6BC_q06",
+          "delay": 7,
+          "min_qty": 48.0,
+          "max_qty": 242.0,
+          "price": 52.35,
+          "name": "Import Consolidator (7d)"
+        }
+      ]
+    },
+    {
+      "name": "Surge Arrester Lightning Set",
+      "code": "P7CEB49B6BC-TRF-SAL-123",
+      "category": "Power Equipment",
+      "type": "consu",
+      "list_price": 318.17,
+      "standard_price": 170.65,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r7CEB49B6BC_q07",
+          "delay": 3,
+          "min_qty": 4.0,
+          "max_qty": 182.0,
+          "price": 212.6,
+          "name": "Rapid Works (3d)"
+        },
+        {
+          "partner_ref": "r7CEB49B6BC_q08",
+          "delay": 7,
+          "min_qty": 18.0,
+          "max_qty": 35.0,
+          "price": 185.23,
+          "name": "Hybrid Fabricators (7d)"
+        },
+        {
+          "partner_ref": "r7CEB49B6BC_q09",
+          "delay": 6,
+          "min_qty": 22.0,
+          "max_qty": 339.0,
+          "price": 170.65,
+          "name": "Domestic Supply (6d)"
+        },
+        {
+          "partner_ref": "r7CEB49B6BC_q10",
+          "delay": 7,
+          "min_qty": 40.0,
+          "max_qty": 57.0,
+          "price": 172.77,
+          "name": "Import Consolidator (7d)"
+        }
+      ]
+    },
+    {
+      "name": "Neutral Grounding Resistor",
+      "code": "P7CEB49B6BC-TRF-NGR-125",
+      "category": "Power Equipment",
+      "type": "consu",
+      "list_price": 591.04,
+      "standard_price": 235.01,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r7CEB49B6BC_q11",
+          "delay": 3,
+          "min_qty": 5.0,
+          "max_qty": 37.0,
+          "price": 480.44,
+          "name": "Rapid Works (3d)"
+        },
+        {
+          "partner_ref": "r7CEB49B6BC_q12",
+          "delay": 7,
+          "min_qty": 44.0,
+          "max_qty": 110.0,
+          "price": 235.01,
+          "name": "Import Consolidator (7d)"
+        },
+        {
+          "partner_ref": "r7CEB49B6BC_q13",
+          "delay": 6,
+          "min_qty": 22.0,
+          "max_qty": 26.0,
+          "price": 384.37,
+          "name": "Domestic Supply (6d)"
+        },
+        {
+          "partner_ref": "r7CEB49B6BC_q14",
+          "delay": 7,
+          "min_qty": 14.0,
+          "max_qty": 43.0,
+          "price": 349.48,
+          "name": "Hybrid Fabricators (7d)"
+        }
+      ]
+    },
+    {
+      "name": "Drain Valve Assembly Oil",
+      "code": "P7CEB49B6BC-TRF-DVA-128",
+      "category": "Power Equipment",
+      "type": "consu",
+      "list_price": 52.31,
+      "standard_price": 18.79,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r7CEB49B6BC_q15",
+          "delay": 3,
+          "min_qty": 10.0,
+          "max_qty": 24.0,
+          "price": 28.19,
+          "name": "Rapid Works (3d)"
+        },
+        {
+          "partner_ref": "r7CEB49B6BC_q16",
+          "delay": 6,
+          "min_qty": 15.0,
+          "max_qty": 117.0,
+          "price": 29.26,
+          "name": "Hybrid Fabricators (6d)"
+        },
+        {
+          "partner_ref": "r7CEB49B6BC_q17",
+          "delay": 7,
+          "min_qty": 28.0,
+          "max_qty": 84.0,
+          "price": 18.79,
+          "name": "Import Consolidator (7d)"
+        }
+      ]
+    },
+    {
+      "name": "Quick-Release Panel Set",
+      "code": "P26629875A2-A001",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 397.71,
+      "standard_price": 267.45,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q01",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 255.04,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Food-Grade Tank Assembly",
+      "code": "P26629875A2-A002",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 225.6,
+      "standard_price": 146.33,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q02",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 140.11,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Dual-Stage Tank Assembly",
+      "code": "P26629875A2-A003",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 182.16,
+      "standard_price": 99.41,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q03",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 101.7,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Metric LV Set",
+      "code": "P26629875A2-A004",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 258.64,
+      "standard_price": 158.47,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q04",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 161.26,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Industrial Dial Gauge",
+      "code": "P26629875A2-A005",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 327.71,
+      "standard_price": 190.87,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q05",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 192.15,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Lightweight Tank Assembly",
+      "code": "P26629875A2-A006",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 362.1,
+      "standard_price": 235.13,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q06",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 228.4,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Standard Bushing LV Set",
+      "code": "P26629875A2-A007",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 247.75,
+      "standard_price": 165.6,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q07",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 165.32,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Extended-Life LV Set",
+      "code": "P26629875A2-A008",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 250.89,
+      "standard_price": 164.29,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q08",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 166.59,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Corrosion-Resistant On Load Assembly",
+      "code": "P26629875A2-A009",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 183.14,
+      "standard_price": 130.47,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q09",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 129.33,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Premium Core Lamination Set",
+      "code": "P26629875A2-A010",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 280.32,
+      "standard_price": 161.04,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q10",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 164.84,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Double-Row Winding Coil Primary",
+      "code": "P26629875A2-A011",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 237.74,
+      "standard_price": 151.24,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q11",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 146.21,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Self-Lubricating Winding Coil Primary",
+      "code": "P26629875A2-A012",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 258.64,
+      "standard_price": 139.53,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q12",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 149.22,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Low-Flow 55 Gallon Drum",
+      "code": "P26629875A2-A013",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 208.3,
+      "standard_price": 126.02,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q13",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 125.23,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Low-Noise Relief Valve Device",
+      "code": "P26629875A2-A014",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 303.9,
+      "standard_price": 217.12,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q14",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 214.01,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Modular HV Set",
+      "code": "P26629875A2-A015",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 231.47,
+      "standard_price": 146.04,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q15",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 148.87,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Adjustable LV Set",
+      "code": "P26629875A2-A016",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 355.0,
+      "standard_price": 248.54,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q16",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 237.59,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Stainless 55 Gallon Drum",
+      "code": "P26629875A2-A017",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 198.68,
+      "standard_price": 112.38,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q17",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 110.96,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Wide-Body Winding Coil Secondary",
+      "code": "P26629875A2-A018",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 255.85,
+      "standard_price": 142.88,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q18",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 143.64,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Medical-Grade On Load Assembly",
+      "code": "P26629875A2-A019",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 344.68,
+      "standard_price": 211.16,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q19",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 222.56,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "High-Torque Relief Valve Device",
+      "code": "P26629875A2-A020",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 214.4,
+      "standard_price": 128.85,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q20",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 127.12,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "High-Flow Panel Set",
+      "code": "P26629875A2-A021",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 234.63,
+      "standard_price": 142.68,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q21",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 141.42,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Spring-Loaded HV Set",
+      "code": "P26629875A2-A022",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 206.73,
+      "standard_price": 136.08,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q22",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 134.29,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Pressure-Balanced Gallon Drum",
+      "code": "P26629875A2-A023",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 339.51,
+      "standard_price": 211.28,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q23",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 220.42,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "High-Temp Conservator Tank Assembly",
+      "code": "P26629875A2-A024",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 338.76,
+      "standard_price": 221.23,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q24",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 226.5,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Low-Temp Gallon Drum",
+      "code": "P26629875A2-A025",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 274.26,
+      "standard_price": 151.79,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q25",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 152.28,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Impact-Rated Gallon Drum",
+      "code": "P26629875A2-A026",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 258.4,
+      "standard_price": 180.39,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q26",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 193.12,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Low-Friction Load Assembly",
+      "code": "P26629875A2-A027",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 218.07,
+      "standard_price": 146.45,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q27",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 156.04,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Powder-Coated Conservator Tank Assembly",
+      "code": "P26629875A2-A028",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 310.96,
+      "standard_price": 196.28,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q28",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 210.9,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Flanged Tank Assembly",
+      "code": "P26629875A2-A029",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 359.55,
+      "standard_price": 227.96,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q29",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 245.78,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Economy Cooling Panel Set",
+      "code": "P26629875A2-A030",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 259.13,
+      "standard_price": 163.71,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q30",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 168.4,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Zero-Backlash 55 Gallon Drum",
+      "code": "P26629875A2-A031",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 380.49,
+      "standard_price": 237.41,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q31",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 240.43,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Commercial Tank Assembly",
+      "code": "P26629875A2-A032",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 342.11,
+      "standard_price": 234.98,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q32",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 253.47,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "High-Cycle Load Assembly",
+      "code": "P26629875A2-A033",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 361.71,
+      "standard_price": 258.61,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q33",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 257.79,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Compact Dial Gauge",
+      "code": "P26629875A2-A034",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 216.01,
+      "standard_price": 154.23,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q34",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 152.98,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Tapered Relief Valve Device",
+      "code": "P26629875A2-A035",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 411.39,
+      "standard_price": 220.47,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q35",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 237.68,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Heat-Treated Bushing LV Set",
+      "code": "P26629875A2-A036",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 314.01,
+      "standard_price": 169.69,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q36",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 173.52,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Sealed Bushing HV Set",
+      "code": "P26629875A2-A037",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 306.59,
+      "standard_price": 213.31,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q37",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 216.31,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Weatherproof Panel Set",
+      "code": "P26629875A2-A038",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 288.12,
+      "standard_price": 188.02,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q38",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 180.62,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Threaded Load Assembly",
+      "code": "P26629875A2-A039",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 409.14,
+      "standard_price": 216.36,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q39",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 211.04,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Precision Core Lamination Set",
+      "code": "P26629875A2-A040",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 330.82,
+      "standard_price": 236.08,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q40",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 224.53,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Rapid-Lock Bushing LV Set",
+      "code": "P26629875A2-A041",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 246.33,
+      "standard_price": 141.07,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q41",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 143.29,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Thermal-Guard HV Set",
+      "code": "P26629875A2-A042",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 201.86,
+      "standard_price": 127.34,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q42",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 135.72,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Cleanroom Protection Device",
+      "code": "P26629875A2-A043",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 347.67,
+      "standard_price": 210.78,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q43",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 212.68,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Low-Profile Dial Gauge",
+      "code": "P26629875A2-A044",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 346.31,
+      "standard_price": 223.93,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q44",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 231.27,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Snap-Fit Winding Coil Secondary",
+      "code": "P26629875A2-A045",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 377.83,
+      "standard_price": 212.18,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q45",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 217.97,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Single-Stage Indicator Dial Gauge",
+      "code": "P26629875A2-A046",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 409.24,
+      "standard_price": 267.35,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q46",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 283.94,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Cold-Rolled Relief Valve Device",
+      "code": "P26629875A2-A047",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 271.13,
+      "standard_price": 179.85,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q47",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 187.56,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "High-Performance Coil Primary",
+      "code": "P26629875A2-A048",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 250.4,
+      "standard_price": 145.17,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q48",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 152.54,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "UV-Stable Coil Primary",
+      "code": "P26629875A2-A049",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 227.34,
+      "standard_price": 120.8,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q49",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 125.7,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Narrow-Body Bushing LV Set",
+      "code": "P26629875A2-A050",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 199.39,
+      "standard_price": 117.23,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "r26629875A2_q50",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 117.46,
+          "name": "Standard delivery"
+        }
+      ]
+    }
+  ],
+  "boms": [
+    {
+      "product_code": "P7CEB49B6BC-TRF-ATR-006",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P7CEB49B6BC-TRF-TCA-108",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "P7CEB49B6BC-TRF-TID-111",
+          "quantity": 2.0
+        },
+        {
+          "component_code": "P7CEB49B6BC-TRF-SAL-123",
+          "quantity": 3.0
+        },
+        {
+          "component_code": "P7CEB49B6BC-TRF-NGR-125",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "P7CEB49B6BC-TRF-DVA-128",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "P26629875A2-A005",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P26629875A2-A009",
+          "quantity": 3.0
+        },
+        {
+          "component_code": "P26629875A2-A025",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "P26629875A2-A039",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P26629875A2-A022",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "P26629875A2-A047",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P26629875A2-A043",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "P26629875A2-A007",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P26629875A2-A037",
+          "quantity": 3.0
+        },
+        {
+          "component_code": "P26629875A2-A021",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "P26629875A2-A017",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P26629875A2-A014",
+          "quantity": 2.0
+        },
+        {
+          "component_code": "P26629875A2-A016",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "P26629875A2-A040",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P26629875A2-A016",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "P26629875A2-A044",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P26629875A2-A002",
+          "quantity": 3.0
+        },
+        {
+          "component_code": "P26629875A2-A043",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "P26629875A2-A034",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P26629875A2-A020",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "P26629875A2-A029",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P26629875A2-A007",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "P26629875A2-A034",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "P26629875A2-A045",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "P26629875A2-A044",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "P26629875A2-A018",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    }
+  ],
+  "workcenters": [
+    {
+      "product_code": "P7CEB49B6BC-TRF-ATR-006",
+      "code": "P7CEB49B6BC-WC01",
+      "name": "Assembly Line 1",
+      "unit_cost": 28.0,
+      "costs_hour": 37.33,
+      "time_per_unit_minutes": 45.0,
+      "time_efficiency": 100.0,
+      "time_start": 0.0,
+      "time_stop": 0.0,
+      "oee_target": 1.0,
+      "note": "Power Equipment workcenter pool 1",
+      "capacity_minutes": 10395.0,
+      "lead_days": 2.0,
+      "operation_name": "P7CEB49B6BC-TRF-ATR-006 Assembly",
+      "sequence": 100,
+      "is_primary": true,
+      "alternative_workcenter_codes": [
+        "P7CEB49B6BC-WC02"
+      ]
+    },
+    {
+      "product_code": "P7CEB49B6BC-TRF-ATR-006",
+      "code": "P7CEB49B6BC-WC02",
+      "name": "Fabrication Cell 2",
+      "unit_cost": 37.0,
+      "costs_hour": 41.89,
+      "time_per_unit_minutes": 53.0,
+      "time_efficiency": 100.0,
+      "time_start": 0.0,
+      "time_stop": 0.0,
+      "oee_target": 1.0,
+      "note": "Power Equipment workcenter pool 2",
+      "capacity_minutes": 12243.0,
+      "lead_days": 2.0,
+      "operation_name": "P7CEB49B6BC-TRF-ATR-006 Assembly",
+      "sequence": 100,
+      "is_primary": false,
+      "alternative_workcenter_codes": []
+    }
+  ],
+  "stock_levels": [
+    {
+      "product_code": "P7CEB49B6BC-TRF-ATR-006",
+      "warehouse_code": null,
+      "quantity": 42.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P7CEB49B6BC-TRF-DVA-128",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P7CEB49B6BC-TRF-NGR-125",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P7CEB49B6BC-TRF-SAL-123",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P7CEB49B6BC-TRF-TCA-108",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P7CEB49B6BC-TRF-TID-111",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A001",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A002",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A003",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A004",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A005",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A006",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A007",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A008",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A009",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A010",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A011",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A012",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A013",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A014",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A015",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A016",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A017",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A018",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A019",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A020",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A021",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A022",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A023",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A024",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A025",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A026",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A027",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A028",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A029",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A030",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A031",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A032",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A033",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A034",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A035",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A036",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A037",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A038",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A039",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A040",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A041",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A042",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A043",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A044",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A045",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A046",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A047",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A048",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A049",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "P26629875A2-A050",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    }
+  ],
+  "existing_purchase_orders": [],
+  "existing_manufacturing_orders": [],
+  "existing_sales_orders": [],
+  "repair_context": null,
+  "system_parameters": [
+    {
+      "key": "erp_bench.min_margin_percent",
+      "value": "28.4"
+    }
+  ]
+}

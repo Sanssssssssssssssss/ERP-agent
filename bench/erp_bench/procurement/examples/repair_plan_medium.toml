@@ -1,0 +1,36 @@
+# Medium mixed-route repair task where a committed supplier offer is canceled.
+objective_kind = "repair_plan"
+difficulty = "medium"
+available_routes = "buy_and_manufacture"
+
+[repair]
+kind = "supplier_cancellation"
+
+[customers]
+count_range = [4, 5]
+deadline_range = [7, 10]
+demand_range = [5, 12]
+
+[supply]
+stock_ratio_range = [0.05, 0.18]
+finished_vendor_target_range = [3, 4]
+finished_vendor_limit = 4
+include_components = true
+component_count_range = [2, 4]
+component_vendor_category_count_range = [2, 3]
+vendor_capacity_primary_ratio_range = [0.2, 0.55]
+sampling_tightness = 0.35
+
+[order_acceptance]
+mode = "accept_all_orders"
+
+[manufacture]
+bom_structure = "single_bom"
+workcenter_count = 2
+workcenter_choice_path = "split_by_capacity"
+assembly_capacity_buffer_range = [0, 1]
+assembly_capacity_ratio_range = [0.24, 0.42]
+
+[export]
+product_domain = "led_fixtures"
+include_adjacent_data = true

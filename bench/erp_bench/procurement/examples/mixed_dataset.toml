@@ -1,0 +1,46 @@
+kind = "procurement_dataset"
+seed = 42
+start_number = 1900
+
+[[entries]]
+config = "easy_buy_only.toml"
+count = 2
+
+[[entries]]
+config = "medium_split_by_capacity.toml"
+count = 1
+
+[[entries]]
+count = 1
+
+[entries.scenario]
+difficulty = "hard"
+available_routes = "buy_and_manufacture"
+
+[entries.scenario.customers]
+count_range = [20, 32]
+deadline_range = [8, 13]
+demand_range = [18, 31]
+
+[entries.scenario.supply]
+stock_ratio_range = [0.28, 0.42]
+finished_vendor_target_range = [5, 6]
+finished_vendor_limit = 8
+include_components = true
+component_count_range = [8, 10]
+component_vendor_category_count_range = [3, 3]
+vendor_capacity_primary_ratio_range = [0.07, 0.26]
+sampling_tightness = 0.72
+
+[entries.scenario.order_acceptance]
+mode = "accept_all_orders"
+
+[entries.scenario.manufacture]
+bom_structure = "single_bom"
+workcenter_count = 1
+assembly_capacity_buffer_range = [0, 1]
+assembly_capacity_ratio_range = [0.2, 0.34]
+
+[entries.scenario.export]
+product_domain = "default"
+include_adjacent_data = true

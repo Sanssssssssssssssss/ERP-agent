@@ -1,0 +1,39 @@
+# Single-subassembly shared-overflow routing with screened mixed orders and invoicing.
+difficulty = "hard"
+available_routes = "buy_and_manufacture"
+objective_kind = "vendor_consolidation"
+
+[customers]
+count_range = [8, 10]
+deadline_range = [8, 14]
+demand_range = [14, 25]
+
+[supply]
+stock_ratio_range = [0.38, 0.52]
+finished_vendor_target_range = [4, 5]
+finished_vendor_limit = 6
+include_components = true
+component_count_range = [5, 7]
+component_vendor_category_count_range = [3, 3]
+vendor_capacity_primary_ratio_range = [0.1, 0.36]
+sampling_tightness = 0.55
+
+[order_acceptance]
+mode = "screen_orders_by_policy"
+seeded_order_coverage = "mixed_seeded_and_prompt_only"
+reject_rules = ["quantity_outside_window"]
+
+[invoicing]
+required = true
+payment_term = "net_30"
+
+[manufacture]
+bom_structure = "single_subassembly"
+workcenter_count = 3
+workcenter_choice_path = "shared_overflow_capacity"
+assembly_capacity_buffer_range = [0, 1]
+assembly_capacity_ratio_range = [0.24, 0.46]
+
+[export]
+product_domain = "elevator_parts"
+include_adjacent_data = true

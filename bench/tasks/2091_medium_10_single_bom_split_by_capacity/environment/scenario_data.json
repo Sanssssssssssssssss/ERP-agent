@@ -1,0 +1,3084 @@
+{
+  "scenario_number": 2091,
+  "name": "Chemical Storage Safety Cabinet",
+  "instruction": "Prepare a fulfillment strategy for all listed Chemical Storage Safety Cabinet orders to meet due dates and avoid shortages.\n\n- Ridgeline Systems: 16 units due in 8 days (pretax budget cap $30,970)\n- Polar Society: 19 units due in 11 days (pretax budget cap $40,272)\n- Thornton Holdings: 16 units due in 12 days (pretax budget cap $32,416)\n- Redstone Trust: 15 units due in 12 days (pretax budget cap $30,798)\n- Citadel Interactive: 20 units due in 13 days (pretax budget cap $38,662)\n- Stratos Studios South: 24 units due in 14 days (pretax budget cap $47,299)\n- Flint Bureau: 22 units due in 14 days (pretax budget cap $45,770)\n- Cipher Boutique: 16 units due in 14 days (pretax budget cap $32,547)\n- Ashford Studios North: 14 units due in 14 days (pretax budget cap $29,345)\n\nCurrent finished-goods stock is 79 units. Any shortfall can be handled with finished-goods buying, in-house manufacturing, or a mix that still satisfies policy.\n\nAcross all units covered through new purchasing or manufacturing, keep portfolio-level new-spend margin at or above 29.3% at selling price.",
+  "seed": 4823999080860173000,
+  "background_and_policy": "* Get every customer order covered while keeping as much shared workcenter capacity open as possible. Keep new purchasing and manufacturing spend as low as possible when workcenter-capacity use ties.\n* The combined units covered through new purchasing or manufacturing must clear at least 29.3% portfolio-level new-spend margin at selling price.\n* Use available finished stock where it helps preserve shared workcenter capacity.\n* You must create and confirm the necessary sales orders, purchase orders, and/or manufacturing orders.\n* Customer budgets are pre-tax amounts.\n* Link Sales Orders to the related Manufacturing Orders and Purchase Orders for traceability.\n* For finished goods POs, put the SO reference(s) (e.g. S00030 or S00030, S00031) into the origin field ('Source' in the UI).\n* For component POs, put the MO reference(s) (e.g. WH/MO/00010 or WH/MO/00010, WH/MO/00011) into the origin field.\n* For finished goods MOs, put the Sales Order reference (e.g. S00030) into the origin field ('Source' in the UI).\n* In the end, the lineage must be SO -> MO -> PO or SO -> PO.\n* You must sell this product at List Price.\n* On sales orders, set the commitment date.\n* On manufacturing orders, you must set the start date and the due date.\n* If you choose to manufacture, you must procure the components that are not in stock.\n* On purchase orders, you must set the delivery date.\n* Before releasing anything, read the Internal Notes/comments on stock, customers, vendors, and workcenters.\n\nCapacity constraints:\n- Treat workcenter capacity as a hard horizon-wide limit across all products that share the center.\n- Check each workcenter's Internal Notes in Odoo for the exact horizon-wide minute limit.\n- Assign workcenter on each manufacturing work order.\n- For each finished-goods supplier offer, respect min/max quantities as horizon-wide totals.\n- For each component supplier offer, respect min/max quantities as horizon-wide totals.\n- Use one consolidated PO per supplier offer (do not split a single offer across multiple POs).\n- Check each vendor's Internal Notes in Odoo for maximum order quantity limits.",
+  "invoicing_policy": {
+    "invoice_required": false,
+    "payment_term": null,
+    "downpayment_required": false,
+    "downpayment_threshold_amount": null,
+    "downpayment_mode": null,
+    "downpayment_value": null
+  },
+  "warehouses": [],
+  "vendors": [
+    {
+      "name": "Millbrook Logistics",
+      "ref": "rDDD4632448_q01",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Circuit Distribution",
+      "ref": "rDDD4632448_q02",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Cascade Depot",
+      "ref": "rDDD4632448_q03",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Fairview Fabrication",
+      "ref": "rDDD4632448_q04",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Oakmont Solutions",
+      "ref": "rDDD4632448_q05",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Pacific Components",
+      "ref": "rDDD4632448_q06",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Spectra Sourcing",
+      "ref": "rDDD4632448_q07",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Drift Conveyance",
+      "ref": "rDDD4632448_q08",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Crest Forwarders",
+      "ref": "rDDD4632448_q09",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Aegis Haulage",
+      "ref": "rDDD4632448_q10",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Spark Transit",
+      "ref": "rDDD4632448_q11",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Orbital Shipping",
+      "ref": "rDDD4632448_q12",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Sterling Exporters",
+      "ref": "rDDD4632448_q13",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Monarch Carriers",
+      "ref": "rDDD4632448_q14",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Granite Transport",
+      "ref": "rDDD4632448_q15",
+      "supplier_rank": 15,
+      "comment": null
+    },
+    {
+      "name": "Stonewall Materials",
+      "ref": "rDDD4632448_q16",
+      "supplier_rank": 16,
+      "comment": null
+    },
+    {
+      "name": "Haven Resources",
+      "ref": "rDDD4632448_q17",
+      "supplier_rank": 17,
+      "comment": null
+    },
+    {
+      "name": "Axis Importers",
+      "ref": "rDDD4632448_q18",
+      "supplier_rank": 18,
+      "comment": null
+    },
+    {
+      "name": "Ridge Microfactory",
+      "ref": "rDDD4632448_q19",
+      "supplier_rank": 19,
+      "comment": null
+    },
+    {
+      "name": "Eclipse Procurement",
+      "ref": "rDDD4632448_q20",
+      "supplier_rank": 20,
+      "comment": null
+    },
+    {
+      "name": "Borough Assemblies",
+      "ref": "rDDD4632448_q21",
+      "supplier_rank": 21,
+      "comment": null
+    },
+    {
+      "name": "Comet Warehousing",
+      "ref": "rDDD4632448_q22",
+      "supplier_rank": 22,
+      "comment": null
+    },
+    {
+      "name": "Solace Trading",
+      "ref": "rEDA74A0905_q01",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Blaze Freight",
+      "ref": "rEDA74A0905_q02",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Pivot Wholesale",
+      "ref": "rEDA74A0905_q03",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Forge Resources",
+      "ref": "rEDA74A0905_q04",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Conduit Distribution",
+      "ref": "rEDA74A0905_q05",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Canton Trading",
+      "ref": "rEDA74A0905_q06",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Bayshore Wholesale",
+      "ref": "rEDA74A0905_q07",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Noble Networks",
+      "ref": "rEDA74A0905_q08",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Dune Trading",
+      "ref": "rEDA74A0905_q09",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Jade Procurement",
+      "ref": "rEDA74A0905_q10",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Scion Transit",
+      "ref": "rEDA74A0905_q11",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Vantage Parts Co",
+      "ref": "rEDA74A0905_q12",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Titan Freight",
+      "ref": "rEDA74A0905_q13",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Peak Parts Co",
+      "ref": "rEDA74A0905_q14",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Equinox Trading",
+      "ref": "rEDA74A0905_q15",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Crestview Components",
+      "ref": "rEDA74A0905_q16",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Westfield Trading",
+      "ref": "rEDA74A0905_q17",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Horizon Sourcing",
+      "ref": "rEDA74A0905_q18",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Sentinel Freight",
+      "ref": "rEDA74A0905_q19",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Sierra Parts Co",
+      "ref": "rEDA74A0905_q20",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Hartland Trading",
+      "ref": "rEDA74A0905_q21",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Arrow Carriers",
+      "ref": "rEDA74A0905_q22",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Raven Supply",
+      "ref": "rEDA74A0905_q23",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Arbor Wholesale",
+      "ref": "rEDA74A0905_q24",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Pinnacle Transit",
+      "ref": "rEDA74A0905_q25",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Vertex Parts Co",
+      "ref": "rEDA74A0905_q26",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Gateway Components",
+      "ref": "rEDA74A0905_q27",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Spire Sourcing",
+      "ref": "rEDA74A0905_q28",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Iron Carriers",
+      "ref": "rEDA74A0905_q29",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Chrome Trading",
+      "ref": "rEDA74A0905_q30",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Clearwater Materials",
+      "ref": "rEDA74A0905_q31",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Crown Logistics",
+      "ref": "rEDA74A0905_q32",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Globe Logistics",
+      "ref": "rEDA74A0905_q33",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Nexus Freight",
+      "ref": "rEDA74A0905_q34",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Coral Transit",
+      "ref": "rEDA74A0905_q35",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Atlas Supply",
+      "ref": "rEDA74A0905_q36",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Slate Resources",
+      "ref": "rEDA74A0905_q37",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Zenith Wholesale",
+      "ref": "rEDA74A0905_q38",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Meridian Distribution",
+      "ref": "rEDA74A0905_q39",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Catalyst Sourcing",
+      "ref": "rEDA74A0905_q40",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Oxide Supply",
+      "ref": "rEDA74A0905_q41",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Trident Components",
+      "ref": "rEDA74A0905_q42",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Helix Freight",
+      "ref": "rEDA74A0905_q43",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Nimbus Transit",
+      "ref": "rEDA74A0905_q44",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Copper Parts Co",
+      "ref": "rEDA74A0905_q45",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Lattice Supply",
+      "ref": "rEDA74A0905_q46",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Riverdale Freight",
+      "ref": "rEDA74A0905_q47",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Apex Components",
+      "ref": "rEDA74A0905_q48",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Summit Sourcing",
+      "ref": "rEDA74A0905_q49",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Cardinal Distribution",
+      "ref": "rEDA74A0905_q50",
+      "supplier_rank": 4,
+      "comment": null
+    }
+  ],
+  "customers": [
+    {
+      "name": "Ridgeline Systems",
+      "ref": "rDDD4632448_c01",
+      "email": "orders@ridgelinesystems.io",
+      "budget_dollars": 30970.27,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Polar Society",
+      "ref": "rDDD4632448_c02",
+      "email": "orders@polarsociety.io",
+      "budget_dollars": 40272.15,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Thornton Holdings",
+      "ref": "rDDD4632448_c03",
+      "email": "orders@thorntonholdings.io",
+      "budget_dollars": 32416.23,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Redstone Trust",
+      "ref": "rDDD4632448_c04",
+      "email": "orders@redstonetrust.io",
+      "budget_dollars": 30798.17,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Citadel Interactive",
+      "ref": "rDDD4632448_c05",
+      "email": "orders@citadelinteractive.io",
+      "budget_dollars": 38662.48,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Stratos Studios South",
+      "ref": "rDDD4632448_c06",
+      "email": "orders@stratosstudiossouth.io",
+      "budget_dollars": 47299.26,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Flint Bureau",
+      "ref": "rDDD4632448_c07",
+      "email": "orders@flintbureau.io",
+      "budget_dollars": 45769.89,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Cipher Boutique",
+      "ref": "rDDD4632448_c08",
+      "email": "orders@cipherboutique.io",
+      "budget_dollars": 32546.78,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Ashford Studios North",
+      "ref": "rDDD4632448_c09",
+      "email": "orders@ashfordstudiosnorth.io",
+      "budget_dollars": 29344.93,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Ironside Solutions Test Facility",
+      "ref": "rEDA74A0905_p01",
+      "email": "contact@ironsidesolutions.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Steel Engineering Warehouse Ops",
+      "ref": "rEDA74A0905_p02",
+      "email": "contact@steelengineering.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Keystone Fabrication Tooling Center",
+      "ref": "rEDA74A0905_p03",
+      "email": "contact@keystonefabrication.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Brookfield Solutions Quality Lab",
+      "ref": "rEDA74A0905_p04",
+      "email": "contact@brookfieldsolutions.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Lakewood Solutions Quality Lab",
+      "ref": "rEDA74A0905_p05",
+      "email": "contact@lakewoodsolutions.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Indigo Assembly HQ Procurement",
+      "ref": "rEDA74A0905_p06",
+      "email": "contact@indigoassembly.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Compass Technologies Prototype Shop",
+      "ref": "rEDA74A0905_p07",
+      "email": "contact@compasstechnologies.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Lumen Fabrication Field Ops",
+      "ref": "rEDA74A0905_p08",
+      "email": "contact@lumenfabrication.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Flux Operations Warehouse Ops",
+      "ref": "rEDA74A0905_p09",
+      "email": "contact@fluxoperations.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Ember Technologies Test Facility",
+      "ref": "rEDA74A0905_p10",
+      "email": "contact@embertechnologies.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Lance Solutions Tooling Center",
+      "ref": "rEDA74A0905_p11",
+      "email": "contact@lancesolutions.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Alpine Production Site Logistics",
+      "ref": "rEDA74A0905_p12",
+      "email": "contact@alpineproduction.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Arc Industries Quality Lab",
+      "ref": "rEDA74A0905_p13",
+      "email": "contact@arcindustries.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Baseline Production Quality Lab",
+      "ref": "rEDA74A0905_p14",
+      "email": "contact@baselineproduction.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Beacon Engineering Prototype Shop",
+      "ref": "rEDA74A0905_p15",
+      "email": "contact@beaconengineering.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Element Solutions Prototype Shop",
+      "ref": "rEDA74A0905_p16",
+      "email": "contact@elementsolutions.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Alloy Fabrication HQ Procurement",
+      "ref": "rEDA74A0905_p17",
+      "email": "contact@alloyfabrication.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Ivory Manufacturing R&D Workshop",
+      "ref": "rEDA74A0905_p18",
+      "email": "contact@ivorymanufacturing.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Aurora Production Prototype Shop",
+      "ref": "rEDA74A0905_p19",
+      "email": "contact@auroraproduction.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Northbridge Engineering Prototype Shop",
+      "ref": "rEDA74A0905_p20",
+      "email": "contact@northbridgeengineering.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Ledger Manufacturing Quality Lab",
+      "ref": "rEDA74A0905_p21",
+      "email": "contact@ledgermanufacturing.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Velocity Fabrication Tooling Center",
+      "ref": "rEDA74A0905_p22",
+      "email": "contact@velocityfabrication.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Matrix Operations Field Ops",
+      "ref": "rEDA74A0905_p23",
+      "email": "contact@matrixoperations.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Marble Assembly Plant Maintenance",
+      "ref": "rEDA74A0905_p24",
+      "email": "contact@marbleassembly.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Garnet Solutions Prototype Shop",
+      "ref": "rEDA74A0905_p25",
+      "email": "contact@garnetsolutions.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Metro Industries Prototype Shop",
+      "ref": "rEDA74A0905_p26",
+      "email": "contact@metroindustries.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Terra Production Warehouse Ops",
+      "ref": "rEDA74A0905_p27",
+      "email": "contact@terraproduction.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Ironwood Technologies Plant Maintenance",
+      "ref": "rEDA74A0905_p28",
+      "email": "contact@ironwoodtechnologies.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Bronze Assembly Prototype Shop",
+      "ref": "rEDA74A0905_p29",
+      "email": "contact@bronzeassembly.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Bridgeway Industries R&D Workshop",
+      "ref": "rEDA74A0905_p30",
+      "email": "contact@bridgewayindustries.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Mosaic Fabrication Quality Lab",
+      "ref": "rEDA74A0905_p31",
+      "email": "contact@mosaicfabrication.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Cobalt Technologies Warehouse Ops",
+      "ref": "rEDA74A0905_p32",
+      "email": "contact@cobalttechnologies.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Grove Operations HQ Procurement",
+      "ref": "rEDA74A0905_p33",
+      "email": "contact@groveoperations.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Silverline Operations HQ Procurement",
+      "ref": "rEDA74A0905_p34",
+      "email": "contact@silverlineoperations.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Opal Technologies Warehouse Ops",
+      "ref": "rEDA74A0905_p35",
+      "email": "contact@opaltechnologies.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Trellis Industries Tooling Center",
+      "ref": "rEDA74A0905_p36",
+      "email": "contact@trellisindustries.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Baltic Manufacturing Warehouse Ops",
+      "ref": "rEDA74A0905_p37",
+      "email": "contact@balticmanufacturing.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Osprey Production HQ Procurement",
+      "ref": "rEDA74A0905_p38",
+      "email": "contact@ospreyproduction.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Aether Industries Warehouse Ops",
+      "ref": "rEDA74A0905_p39",
+      "email": "contact@aetherindustries.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Quantum Engineering Quality Lab",
+      "ref": "rEDA74A0905_p40",
+      "email": "contact@quantumengineering.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Onyx Manufacturing Warehouse Ops",
+      "ref": "rEDA74A0905_p41",
+      "email": "contact@onyxmanufacturing.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Cedar Engineering HQ Procurement",
+      "ref": "rEDA74A0905_p42",
+      "email": "contact@cedarengineering.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Evergreen Engineering Tooling Center",
+      "ref": "rEDA74A0905_p43",
+      "email": "contact@evergreenengineering.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Cosmo Industries HQ Procurement",
+      "ref": "rEDA74A0905_p44",
+      "email": "contact@cosmoindustries.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Quartz Solutions Plant Maintenance",
+      "ref": "rEDA74A0905_p45",
+      "email": "contact@quartzsolutions.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Anvil Manufacturing R&D Workshop",
+      "ref": "rEDA74A0905_p46",
+      "email": "contact@anvilmanufacturing.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Echo Fabrication R&D Workshop",
+      "ref": "rEDA74A0905_p47",
+      "email": "contact@echofabrication.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Prism Industries Site Logistics",
+      "ref": "rEDA74A0905_p48",
+      "email": "contact@prismindustries.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Skyline Technologies R&D Workshop",
+      "ref": "rEDA74A0905_p49",
+      "email": "contact@skylinetechnologies.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Sapphire Industries Test Facility",
+      "ref": "rEDA74A0905_p50",
+      "email": "contact@sapphireindustries.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    }
+  ],
+  "products": [
+    {
+      "name": "Chemical Storage Safety Cabinet",
+      "code": "PDDD4632448-SAF-CSC-005",
+      "category": "Industrial Equipment",
+      "type": "consu",
+      "list_price": 1894.71,
+      "standard_price": 1031.67,
+      "routes": [
+        "buy",
+        "manufacture"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rDDD4632448_q01",
+          "delay": 8,
+          "min_qty": 7.0,
+          "max_qty": 19.0,
+          "price": 1128.76,
+          "name": "Priority Shuttle lane (8d transit, 7-19 units)"
+        },
+        {
+          "partner_ref": "rDDD4632448_q02",
+          "delay": 6,
+          "min_qty": 3.0,
+          "max_qty": 5.0,
+          "price": 1531.12,
+          "name": "Express Air lane (6d transit, 3-5 units)"
+        },
+        {
+          "partner_ref": "rDDD4632448_q03",
+          "delay": 23,
+          "min_qty": 81.0,
+          "max_qty": 82.0,
+          "price": 719.21,
+          "name": "Bulk Container lane (23d transit, 81-82 units)"
+        },
+        {
+          "partner_ref": "rDDD4632448_q04",
+          "delay": 7,
+          "min_qty": 4.0,
+          "max_qty": 17.0,
+          "price": 1372.03,
+          "name": "Microfactory Build-to-Order lane (7d transit, 4-17 units)"
+        },
+        {
+          "partner_ref": "rDDD4632448_q05",
+          "delay": 20,
+          "min_qty": 81.0,
+          "max_qty": 85.0,
+          "price": 724.69,
+          "name": "Bulk Container lane (20d transit, 81-85 units)"
+        }
+      ]
+    },
+    {
+      "name": "RFID Access Control Reader",
+      "code": "PDDD4632448-SAF-RAC-113",
+      "category": "Industrial Equipment",
+      "type": "consu",
+      "list_price": 217.53,
+      "standard_price": 121.9,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rDDD4632448_q06",
+          "delay": 2,
+          "min_qty": 9.0,
+          "max_qty": 18.0,
+          "price": 138.03,
+          "name": "Rapid Works (2d)"
+        },
+        {
+          "partner_ref": "rDDD4632448_q07",
+          "delay": 2,
+          "min_qty": 12.0,
+          "max_qty": 48.0,
+          "price": 127.11,
+          "name": "Domestic Supply (2d)"
+        },
+        {
+          "partner_ref": "rDDD4632448_q08",
+          "delay": 2,
+          "min_qty": 11.0,
+          "max_qty": 53.0,
+          "price": 121.9,
+          "name": "Hybrid Fabricators (2d)"
+        }
+      ]
+    },
+    {
+      "name": "Sliding Gate Track Rail",
+      "code": "PDDD4632448-SAF-SGT-118",
+      "category": "Industrial Equipment",
+      "type": "consu",
+      "list_price": 83.14,
+      "standard_price": 31.9,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rDDD4632448_q09",
+          "delay": 2,
+          "min_qty": 4.0,
+          "max_qty": 16.0,
+          "price": 47.45,
+          "name": "Rapid Works (2d)"
+        },
+        {
+          "partner_ref": "rDDD4632448_q10",
+          "delay": 2,
+          "min_qty": 18.0,
+          "max_qty": 19.0,
+          "price": 40.72,
+          "name": "Domestic Supply (2d)"
+        },
+        {
+          "partner_ref": "rDDD4632448_q11",
+          "delay": 2,
+          "min_qty": 43.0,
+          "max_qty": 70.0,
+          "price": 31.9,
+          "name": "Import Consolidator (2d)"
+        },
+        {
+          "partner_ref": "rDDD4632448_q12",
+          "delay": 2,
+          "min_qty": 12.0,
+          "max_qty": 23.0,
+          "price": 51.28,
+          "name": "Hybrid Fabricators (2d)"
+        }
+      ]
+    },
+    {
+      "name": "Safety Relay Controller Module",
+      "code": "PDDD4632448-SAF-SRC-119",
+      "category": "Industrial Equipment",
+      "type": "consu",
+      "list_price": 253.31,
+      "standard_price": 105.29,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rDDD4632448_q13",
+          "delay": 2,
+          "min_qty": 12.0,
+          "max_qty": 12.0,
+          "price": 156.68,
+          "name": "Rapid Works (2d)"
+        },
+        {
+          "partner_ref": "rDDD4632448_q14",
+          "delay": 2,
+          "min_qty": 10.0,
+          "max_qty": 45.0,
+          "price": 128.41,
+          "name": "Hybrid Fabricators (2d)"
+        },
+        {
+          "partner_ref": "rDDD4632448_q15",
+          "delay": 2,
+          "min_qty": 25.0,
+          "max_qty": 39.0,
+          "price": 105.29,
+          "name": "Import Consolidator (2d)"
+        }
+      ]
+    },
+    {
+      "name": "Cable Entry Gland Plate",
+      "code": "PDDD4632448-SAF-CEG-121",
+      "category": "Industrial Equipment",
+      "type": "consu",
+      "list_price": 40.43,
+      "standard_price": 16.99,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rDDD4632448_q16",
+          "delay": 2,
+          "min_qty": 6.0,
+          "max_qty": 11.0,
+          "price": 24.26,
+          "name": "Rapid Works (2d)"
+        },
+        {
+          "partner_ref": "rDDD4632448_q17",
+          "delay": 2,
+          "min_qty": 46.0,
+          "max_qty": 81.0,
+          "price": 16.99,
+          "name": "Import Consolidator (2d)"
+        },
+        {
+          "partner_ref": "rDDD4632448_q18",
+          "delay": 2,
+          "min_qty": 15.0,
+          "max_qty": 34.0,
+          "price": 20.9,
+          "name": "Hybrid Fabricators (2d)"
+        }
+      ]
+    },
+    {
+      "name": "Touch-Edge Safety Bumper Strip",
+      "code": "PDDD4632448-SAF-TEB-125",
+      "category": "Industrial Equipment",
+      "type": "consu",
+      "list_price": 48.78,
+      "standard_price": 15.05,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rDDD4632448_q19",
+          "delay": 2,
+          "min_qty": 10.0,
+          "max_qty": 157.0,
+          "price": 26.32,
+          "name": "Rapid Works (2d)"
+        },
+        {
+          "partner_ref": "rDDD4632448_q20",
+          "delay": 2,
+          "min_qty": 41.0,
+          "max_qty": 129.0,
+          "price": 15.05,
+          "name": "Import Consolidator (2d)"
+        },
+        {
+          "partner_ref": "rDDD4632448_q21",
+          "delay": 2,
+          "min_qty": 15.0,
+          "max_qty": 77.0,
+          "price": 19.2,
+          "name": "Domestic Supply (2d)"
+        },
+        {
+          "partner_ref": "rDDD4632448_q22",
+          "delay": 2,
+          "min_qty": 9.0,
+          "max_qty": 37.0,
+          "price": 24.35,
+          "name": "Hybrid Fabricators (2d)"
+        }
+      ]
+    },
+    {
+      "name": "Threaded Mesh Panel 4x8ft",
+      "code": "PEDA74A0905-A001",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 290.92,
+      "standard_price": 158.54,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q01",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 160.03,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Commercial Door Latch Assembly",
+      "code": "PEDA74A0905-A002",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 309.32,
+      "standard_price": 215.43,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q02",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 228.96,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Quick-Release Pull Switch",
+      "code": "PEDA74A0905-A003",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 223.66,
+      "standard_price": 142.62,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q03",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 146.32,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Food-Grade Mesh Panel 4x8ft",
+      "code": "PEDA74A0905-A004",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 247.25,
+      "standard_price": 131.1,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q04",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 138.05,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Narrow-Body Key Interlock System",
+      "code": "PEDA74A0905-A005",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 204.53,
+      "standard_price": 140.21,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q05",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 147.51,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Industrial Latch Assembly",
+      "code": "PEDA74A0905-A006",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 283.51,
+      "standard_price": 200.97,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q06",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 215.82,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Self-Lubricating Mesh Panel 4x8ft",
+      "code": "PEDA74A0905-A007",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 325.99,
+      "standard_price": 205.74,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q07",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 214.18,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "High-Performance Panel 4x8ft",
+      "code": "PEDA74A0905-A008",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 308.47,
+      "standard_price": 191.41,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q08",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 203.54,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Modular Interlock System",
+      "code": "PEDA74A0905-A009",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 369.2,
+      "standard_price": 196.12,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q09",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 196.56,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Dual-Stage Base Plate",
+      "code": "PEDA74A0905-A010",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 201.5,
+      "standard_price": 124.62,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q10",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 126.09,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Low-Flow Panel 4x8ft",
+      "code": "PEDA74A0905-A011",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 282.49,
+      "standard_price": 178.05,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q11",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 173.99,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Flanged with Base Plate",
+      "code": "PEDA74A0905-A012",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 211.18,
+      "standard_price": 110.4,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q12",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 115.86,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Low-Profile Door Latch Assembly",
+      "code": "PEDA74A0905-A013",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 387.4,
+      "standard_price": 204.55,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q13",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 206.06,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Economy Vision Panel",
+      "code": "PEDA74A0905-A014",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 220.38,
+      "standard_price": 125.53,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q14",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 135.33,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Anti-Vibration Polycarbonate Vision Panel",
+      "code": "PEDA74A0905-A015",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 268.13,
+      "standard_price": 176.82,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q15",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 174.95,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Double-Row Polycarbonate Vision Panel",
+      "code": "PEDA74A0905-A016",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 409.6,
+      "standard_price": 273.37,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q16",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 295.01,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Rapid-Lock Lock Assembly",
+      "code": "PEDA74A0905-A017",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 406.66,
+      "standard_price": 267.79,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q17",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 285.62,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Low-Temp Door Latch Assembly",
+      "code": "PEDA74A0905-A018",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 192.9,
+      "standard_price": 124.16,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q18",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 128.38,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Lightweight Interlock System",
+      "code": "PEDA74A0905-A019",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 197.81,
+      "standard_price": 128.83,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q19",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 124.12,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Tapered with Base Plate",
+      "code": "PEDA74A0905-A020",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 226.76,
+      "standard_price": 141.51,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q20",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 142.92,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Adjustable Switch Module",
+      "code": "PEDA74A0905-A021",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 408.32,
+      "standard_price": 268.78,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q21",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 260.95,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Non-Magnetic Polycarbonate Vision Panel",
+      "code": "PEDA74A0905-A022",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 363.61,
+      "standard_price": 260.27,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q22",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 247.97,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Heat-Treated Panel 4x8ft",
+      "code": "PEDA74A0905-A023",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 355.22,
+      "standard_price": 243.25,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q23",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 239.11,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Zero-Backlash Key Interlock System",
+      "code": "PEDA74A0905-A024",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 196.48,
+      "standard_price": 110.68,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q24",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 106.38,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Hardened Latch Assembly",
+      "code": "PEDA74A0905-A025",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 243.1,
+      "standard_price": 171.49,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q25",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 183.86,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Cold-Rolled Solenoid Lock Assembly",
+      "code": "PEDA74A0905-A026",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 382.04,
+      "standard_price": 269.9,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q26",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 259.43,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Powder-Coated Gate Frame Assembly",
+      "code": "PEDA74A0905-A027",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 357.81,
+      "standard_price": 254.19,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q27",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 246.69,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Sealed Frame Assembly",
+      "code": "PEDA74A0905-A028",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 243.98,
+      "standard_price": 172.46,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q28",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 172.68,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "UV-Stable Pull Switch",
+      "code": "PEDA74A0905-A029",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 183.21,
+      "standard_price": 120.59,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q29",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 120.61,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Heavy-Duty Latch Assembly",
+      "code": "PEDA74A0905-A030",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 289.34,
+      "standard_price": 203.91,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q30",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 212.93,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Single-Stage Light Beacon Module",
+      "code": "PEDA74A0905-A031",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 225.39,
+      "standard_price": 135.76,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q31",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 144.06,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Wide-Body Base Plate",
+      "code": "PEDA74A0905-A032",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 245.85,
+      "standard_price": 138.99,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q32",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 148.03,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "High-Flow Panel 4x8ft",
+      "code": "PEDA74A0905-A033",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 224.64,
+      "standard_price": 157.27,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q33",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 162.46,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Spring-Loaded Door Latch Assembly",
+      "code": "PEDA74A0905-A034",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 389.0,
+      "standard_price": 262.4,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q34",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 274.81,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "High-Temp Bolt Kit",
+      "code": "PEDA74A0905-A035",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 226.03,
+      "standard_price": 130.6,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q35",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 133.96,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Metric Door Latch Assembly",
+      "code": "PEDA74A0905-A036",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 348.31,
+      "standard_price": 193.24,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q36",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 185.3,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Extended-Life Door Latch Assembly",
+      "code": "PEDA74A0905-A037",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 309.46,
+      "standard_price": 214.23,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q37",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 229.39,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Stainless Light Beacon Module",
+      "code": "PEDA74A0905-A038",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 206.95,
+      "standard_price": 117.65,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q38",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 125.31,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Reinforced Frame Assembly",
+      "code": "PEDA74A0905-A039",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 407.37,
+      "standard_price": 283.35,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q39",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 288.17,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Precision Interlock System",
+      "code": "PEDA74A0905-A040",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 291.91,
+      "standard_price": 195.17,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q40",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 185.96,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Snap-Fit Lock Assembly",
+      "code": "PEDA74A0905-A041",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 319.59,
+      "standard_price": 167.27,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q41",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 160.28,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Weatherproof Gate Frame Assembly",
+      "code": "PEDA74A0905-A042",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 260.07,
+      "standard_price": 180.89,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q42",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 177.34,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Anodized Rope Pull Switch",
+      "code": "PEDA74A0905-A043",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 361.55,
+      "standard_price": 233.04,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q43",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 225.94,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Low-Noise Lock Assembly",
+      "code": "PEDA74A0905-A044",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 350.45,
+      "standard_price": 210.02,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q44",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 221.54,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Cleanroom Beacon Module",
+      "code": "PEDA74A0905-A045",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 412.02,
+      "standard_price": 233.38,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q45",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 241.09,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Compact Clamp Connector Set",
+      "code": "PEDA74A0905-A046",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 286.82,
+      "standard_price": 177.02,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q46",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 188.08,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "High-Torque Clamp Connector Set",
+      "code": "PEDA74A0905-A047",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 278.28,
+      "standard_price": 147.23,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q47",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 146.48,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "High-Cycle Base Plate",
+      "code": "PEDA74A0905-A048",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 265.3,
+      "standard_price": 172.86,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q48",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 183.04,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Standard Polycarbonate Vision Panel",
+      "code": "PEDA74A0905-A049",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 396.6,
+      "standard_price": 213.6,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q49",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 221.85,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Low-Friction Interlock Switch Module",
+      "code": "PEDA74A0905-A050",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 216.21,
+      "standard_price": 130.58,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rEDA74A0905_q50",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 133.94,
+          "name": "Bulk shipment"
+        }
+      ]
+    }
+  ],
+  "boms": [
+    {
+      "product_code": "PDDD4632448-SAF-CSC-005",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PDDD4632448-SAF-RAC-113",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "PDDD4632448-SAF-SGT-118",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "PDDD4632448-SAF-SRC-119",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "PDDD4632448-SAF-CEG-121",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "PDDD4632448-SAF-TEB-125",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PEDA74A0905-A037",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PEDA74A0905-A050",
+          "quantity": 2.0
+        },
+        {
+          "component_code": "PEDA74A0905-A004",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PEDA74A0905-A050",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PEDA74A0905-A011",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PEDA74A0905-A009",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PEDA74A0905-A017",
+          "quantity": 2.0
+        },
+        {
+          "component_code": "PEDA74A0905-A027",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PEDA74A0905-A043",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PEDA74A0905-A032",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PEDA74A0905-A042",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PEDA74A0905-A028",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "PEDA74A0905-A036",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PEDA74A0905-A016",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PEDA74A0905-A048",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PEDA74A0905-A013",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PEDA74A0905-A004",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PEDA74A0905-A003",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PEDA74A0905-A012",
+          "quantity": 3.0
+        },
+        {
+          "component_code": "PEDA74A0905-A049",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PEDA74A0905-A024",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PEDA74A0905-A039",
+          "quantity": 3.0
+        },
+        {
+          "component_code": "PEDA74A0905-A027",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PEDA74A0905-A047",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PEDA74A0905-A008",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    }
+  ],
+  "workcenters": [
+    {
+      "product_code": "PDDD4632448-SAF-CSC-005",
+      "code": "PDDD4632448-WC01",
+      "name": "Assembly Line 1",
+      "unit_cost": 31.0,
+      "costs_hour": 41.33,
+      "time_per_unit_minutes": 45.0,
+      "time_efficiency": 100.0,
+      "time_start": 0.0,
+      "time_stop": 0.0,
+      "oee_target": 1.0,
+      "note": "Industrial Equipment workcenter pool 1",
+      "capacity_minutes": 2025.0,
+      "lead_days": 6.0,
+      "operation_name": "PDDD4632448-SAF-CSC-005 Assembly",
+      "sequence": 100,
+      "is_primary": true,
+      "alternative_workcenter_codes": [
+        "PDDD4632448-WC02"
+      ]
+    },
+    {
+      "product_code": "PDDD4632448-SAF-CSC-005",
+      "code": "PDDD4632448-WC02",
+      "name": "Fabrication Cell 2",
+      "unit_cost": 36.0,
+      "costs_hour": 39.27,
+      "time_per_unit_minutes": 55.0,
+      "time_efficiency": 100.0,
+      "time_start": 0.0,
+      "time_stop": 0.0,
+      "oee_target": 1.0,
+      "note": "Industrial Equipment workcenter pool 2",
+      "capacity_minutes": 2750.0,
+      "lead_days": 6.0,
+      "operation_name": "PDDD4632448-SAF-CSC-005 Assembly",
+      "sequence": 100,
+      "is_primary": false,
+      "alternative_workcenter_codes": []
+    }
+  ],
+  "stock_levels": [
+    {
+      "product_code": "PDDD4632448-SAF-CEG-121",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PDDD4632448-SAF-CSC-005",
+      "warehouse_code": null,
+      "quantity": 79.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PDDD4632448-SAF-RAC-113",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PDDD4632448-SAF-SGT-118",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PDDD4632448-SAF-SRC-119",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PDDD4632448-SAF-TEB-125",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A001",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A002",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A003",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A004",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A005",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A006",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A007",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A008",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A009",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A010",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A011",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A012",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A013",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A014",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A015",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A016",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A017",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A018",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A019",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A020",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A021",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A022",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A023",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A024",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A025",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A026",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A027",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A028",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A029",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A030",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A031",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A032",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A033",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A034",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A035",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A036",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A037",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A038",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A039",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A040",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A041",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A042",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A043",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A044",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A045",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A046",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A047",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A048",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A049",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PEDA74A0905-A050",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    }
+  ],
+  "existing_purchase_orders": [],
+  "existing_manufacturing_orders": [],
+  "existing_sales_orders": [],
+  "repair_context": null,
+  "system_parameters": [
+    {
+      "key": "erp_bench.min_margin_percent",
+      "value": "29.3"
+    }
+  ]
+}

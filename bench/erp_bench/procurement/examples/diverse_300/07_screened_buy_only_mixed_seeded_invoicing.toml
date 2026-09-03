@@ -1,0 +1,33 @@
+# Screened buy-only orders with mixed requests and invoice follow-through.
+difficulty = "medium"
+available_routes = "buy_only"
+
+[customers]
+count_range = [8, 10]
+deadline_range = [8, 14]
+demand_range = [14, 25]
+
+[supply]
+stock_ratio_range = [0.38, 0.52]
+finished_vendor_target_range = [4, 5]
+finished_vendor_limit = 6
+include_components = false
+component_vendor_category_count_range = [1, 1]
+vendor_capacity_primary_ratio_range = [0.1, 0.36]
+sampling_tightness = 0.55
+
+[order_acceptance]
+mode = "screen_orders_by_policy"
+seeded_order_coverage = "mixed_seeded_and_prompt_only"
+reject_rules = [
+    "quantity_outside_window",
+    "lead_time_below_minimum",
+]
+
+[invoicing]
+required = true
+payment_term = "net_30"
+
+[export]
+product_domain = "hvac_units"
+include_adjacent_data = true

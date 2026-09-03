@@ -1,0 +1,3080 @@
+{
+  "scenario_number": 2124,
+  "name": "Deionization Polishing Unit",
+  "instruction": "Each customer order below requires a fulfillment-ready supply solution before its delivery due date:\n\n- Opal Trust: 21 units due in 8 days (pretax budget cap $95,038)\n- Brookfield Office: 15 units due in 8 days (pretax budget cap $70,418)\n- Zenith Advisory: 20 units due in 9 days (pretax budget cap $90,630)\n- Aurora Archive: 16 units due in 9 days (pretax budget cap $75,455)\n- Apex Society: 17 units due in 11 days (pretax budget cap $77,804)\n- Grove Greenhouse: 15 units due in 12 days (pretax budget cap $71,922)\n- Beacon Systems: 17 units due in 13 days (pretax budget cap $77,266)\n- Atlas Media: 23 units due in 14 days (pretax budget cap $107,819)\n\nWe have 75 finished units on hand. Any shortfall can be handled with finished-goods buying, in-house manufacturing, or a mix that still satisfies policy.\n\nAcross all units covered through new purchasing or manufacturing, keep portfolio-level new-spend margin at or above 29.1% at selling price.",
+  "seed": 7535990599270568765,
+  "background_and_policy": "* Fulfill all orders while minimizing new spending on procurement and manufacturing.\n* Any units you cover through new buying or manufacturing count toward one combined portfolio that must still meet a minimum 29.1% new-spend margin at selling price.\n* Existing stock is a sunk cost and should not be treated as new spend.\n* You must create and confirm the necessary sales orders, purchase orders, and/or manufacturing orders.\n* Customer budgets are pre-tax amounts.\n* Link Sales Orders to the related Manufacturing Orders and Purchase Orders for traceability.\n* For finished goods POs, put the SO reference(s) (e.g. S00030 or S00030, S00031) into the origin field ('Source' in the UI).\n* For component POs, put the MO reference(s) (e.g. WH/MO/00010 or WH/MO/00010, WH/MO/00011) into the origin field.\n* For finished goods MOs, put the Sales Order reference (e.g. S00030) into the origin field ('Source' in the UI).\n* For subassembly or intermediate MOs, put the immediate parent MO reference(s) that the subassembly feeds (e.g. WH/MO/00020 or WH/MO/00020, WH/MO/00021) into the origin field ('Source' in the UI).\n* In the end, the lineage must be SO -> MO -> (Subassembly MO if needed) -> PO or SO -> PO.\n* You must sell this product at List Price.\n* On sales orders, set the commitment date.\n* On manufacturing orders, you must set the start date and the due date.\n* If you choose to manufacture, you must procure the components that are not in stock.\n* On purchase orders, you must set the delivery date.\n* Before releasing anything, read the Internal Notes/comments on stock, customers, vendors, and workcenters.\n\nCapacity constraints:\n- Treat workcenter capacity as a hard horizon-wide limit across all products that share the center.\n- Check each workcenter's Internal Notes in Odoo for the exact horizon-wide minute limit.\n- Assign workcenter on each manufacturing work order.\n- For each finished-goods supplier offer, respect min/max quantities as horizon-wide totals.\n- For each component supplier offer, respect min/max quantities as horizon-wide totals.\n- Use one consolidated PO per supplier offer (do not split a single offer across multiple POs).\n- Check each vendor's Internal Notes in Odoo for maximum order quantity limits.",
+  "invoicing_policy": {
+    "invoice_required": false,
+    "payment_term": null,
+    "downpayment_required": false,
+    "downpayment_threshold_amount": null,
+    "downpayment_mode": null,
+    "downpayment_value": null
+  },
+  "warehouses": [],
+  "vendors": [
+    {
+      "name": "Bronze Carriers",
+      "ref": "rE7BE7302C8_q01",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Iron Industries",
+      "ref": "rE7BE7302C8_q02",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Steel Components",
+      "ref": "rE7BE7302C8_q03",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Clearwater Integrators",
+      "ref": "rE7BE7302C8_q04",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Haven Shipping",
+      "ref": "rE7BE7302C8_q05",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Arc Distributors",
+      "ref": "rE7BE7302C8_q06",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Canton Assemblies",
+      "ref": "rE7BE7302C8_q07",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Ledger Merchants",
+      "ref": "rE7BE7302C8_q08",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Oakmont Exporters",
+      "ref": "rE7BE7302C8_q09",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Onyx Packagers",
+      "ref": "rE7BE7302C8_q10",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Baltic Transport",
+      "ref": "rE7BE7302C8_q11",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Flint Consolidators",
+      "ref": "rE7BE7302C8_q12",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Summit Manufacturing",
+      "ref": "rE7BE7302C8_q13",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Lumen Sourcing",
+      "ref": "rE7BE7302C8_q14",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Lance Networks",
+      "ref": "rE7BE7302C8_q15",
+      "supplier_rank": 15,
+      "comment": null
+    },
+    {
+      "name": "Skyline Holdings",
+      "ref": "rE7BE7302C8_q16",
+      "supplier_rank": 16,
+      "comment": null
+    },
+    {
+      "name": "Anvil Wholesalers",
+      "ref": "rE7BE7302C8_q17",
+      "supplier_rank": 17,
+      "comment": null
+    },
+    {
+      "name": "Ironwood Forwarders",
+      "ref": "rE7BE7302C8_q18",
+      "supplier_rank": 18,
+      "comment": null
+    },
+    {
+      "name": "Ashford Logistics",
+      "ref": "rE7BE7302C8_q19",
+      "supplier_rank": 19,
+      "comment": null
+    },
+    {
+      "name": "Circuit Conveyance",
+      "ref": "rE7BE7302C8_q20",
+      "supplier_rank": 20,
+      "comment": null
+    },
+    {
+      "name": "Sapphire Transit",
+      "ref": "rE7BE7302C8_q21",
+      "supplier_rank": 21,
+      "comment": null
+    },
+    {
+      "name": "Keystone Operations",
+      "ref": "rE7BE7302C8_q22",
+      "supplier_rank": 22,
+      "comment": null
+    },
+    {
+      "name": "Echo Logistics",
+      "ref": "rF63ACD5FA8_q01",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Catalyst Networks",
+      "ref": "rF63ACD5FA8_q02",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Crestview Sourcing",
+      "ref": "rF63ACD5FA8_q03",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Horizon Materials",
+      "ref": "rF63ACD5FA8_q04",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Thornton Wholesale",
+      "ref": "rF63ACD5FA8_q05",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Alpine Procurement",
+      "ref": "rF63ACD5FA8_q06",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Solace Materials",
+      "ref": "rF63ACD5FA8_q07",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Westfield Carriers",
+      "ref": "rF63ACD5FA8_q08",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Gateway Carriers",
+      "ref": "rF63ACD5FA8_q09",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Trellis Procurement",
+      "ref": "rF63ACD5FA8_q10",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Evergreen Distribution",
+      "ref": "rF63ACD5FA8_q11",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Granite Networks",
+      "ref": "rF63ACD5FA8_q12",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Northbridge Components",
+      "ref": "rF63ACD5FA8_q13",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Meridian Procurement",
+      "ref": "rF63ACD5FA8_q14",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Indigo Parts Co",
+      "ref": "rF63ACD5FA8_q15",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Aether Components",
+      "ref": "rF63ACD5FA8_q16",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Quantum Distribution",
+      "ref": "rF63ACD5FA8_q17",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Sierra Parts Co",
+      "ref": "rF63ACD5FA8_q18",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Nexus Trading",
+      "ref": "rF63ACD5FA8_q19",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Orbital Supply",
+      "ref": "rF63ACD5FA8_q20",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Stratos Wholesale",
+      "ref": "rF63ACD5FA8_q21",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Aegis Materials",
+      "ref": "rF63ACD5FA8_q22",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Marble Components",
+      "ref": "rF63ACD5FA8_q23",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Jade Networks",
+      "ref": "rF63ACD5FA8_q24",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Sterling Components",
+      "ref": "rF63ACD5FA8_q25",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Crest Components",
+      "ref": "rF63ACD5FA8_q26",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Terra Freight",
+      "ref": "rF63ACD5FA8_q27",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Pinnacle Materials",
+      "ref": "rF63ACD5FA8_q28",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Riverdale Components",
+      "ref": "rF63ACD5FA8_q29",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Matrix Networks",
+      "ref": "rF63ACD5FA8_q30",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Baseline Materials",
+      "ref": "rF63ACD5FA8_q31",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Slate Components",
+      "ref": "rF63ACD5FA8_q32",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Comet Procurement",
+      "ref": "rF63ACD5FA8_q33",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Cosmo Sourcing",
+      "ref": "rF63ACD5FA8_q34",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Stonewall Networks",
+      "ref": "rF63ACD5FA8_q35",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Cedar Trading",
+      "ref": "rF63ACD5FA8_q36",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Eclipse Wholesale",
+      "ref": "rF63ACD5FA8_q37",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Spark Logistics",
+      "ref": "rF63ACD5FA8_q38",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Prism Resources",
+      "ref": "rF63ACD5FA8_q39",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Hartland Procurement",
+      "ref": "rF63ACD5FA8_q40",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Polar Trading",
+      "ref": "rF63ACD5FA8_q41",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Spire Supply",
+      "ref": "rF63ACD5FA8_q42",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Cipher Trading",
+      "ref": "rF63ACD5FA8_q43",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Lattice Supply",
+      "ref": "rF63ACD5FA8_q44",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Ember Components",
+      "ref": "rF63ACD5FA8_q45",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Titan Wholesale",
+      "ref": "rF63ACD5FA8_q46",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Element Procurement",
+      "ref": "rF63ACD5FA8_q47",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Copper Trading",
+      "ref": "rF63ACD5FA8_q48",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Monarch Materials",
+      "ref": "rF63ACD5FA8_q49",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Coral Materials",
+      "ref": "rF63ACD5FA8_q50",
+      "supplier_rank": 13,
+      "comment": null
+    }
+  ],
+  "customers": [
+    {
+      "name": "Opal Trust",
+      "ref": "rE7BE7302C8_c01",
+      "email": "orders@opaltrust.io",
+      "budget_dollars": 95037.71,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Brookfield Office",
+      "ref": "rE7BE7302C8_c02",
+      "email": "orders@brookfieldoffice.io",
+      "budget_dollars": 70418.48,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Zenith Advisory",
+      "ref": "rE7BE7302C8_c03",
+      "email": "orders@zenithadvisory.io",
+      "budget_dollars": 90629.67,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Aurora Archive",
+      "ref": "rE7BE7302C8_c04",
+      "email": "orders@auroraarchive.io",
+      "budget_dollars": 75454.6,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Apex Society",
+      "ref": "rE7BE7302C8_c05",
+      "email": "orders@apexsociety.io",
+      "budget_dollars": 77803.91,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Grove Greenhouse",
+      "ref": "rE7BE7302C8_c06",
+      "email": "orders@grovegreenhouse.io",
+      "budget_dollars": 71921.76,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Beacon Systems",
+      "ref": "rE7BE7302C8_c07",
+      "email": "orders@beaconsystems.io",
+      "budget_dollars": 77265.94,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Atlas Media",
+      "ref": "rE7BE7302C8_c08",
+      "email": "orders@atlasmedia.io",
+      "budget_dollars": 107818.74,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Raven Operations Field Ops",
+      "ref": "rF63ACD5FA8_p01",
+      "email": "contact@ravenoperations.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Chrome Operations Quality Lab",
+      "ref": "rF63ACD5FA8_p02",
+      "email": "contact@chromeoperations.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Arbor Fabrication Tooling Center",
+      "ref": "rF63ACD5FA8_p03",
+      "email": "contact@arborfabrication.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Pivot Fabrication Warehouse Ops",
+      "ref": "rF63ACD5FA8_p04",
+      "email": "contact@pivotfabrication.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Forge Solutions Plant Maintenance",
+      "ref": "rF63ACD5FA8_p05",
+      "email": "contact@forgesolutions.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Vantage Assembly R&D Workshop",
+      "ref": "rF63ACD5FA8_p06",
+      "email": "contact@vantageassembly.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Arrow Engineering HQ Procurement",
+      "ref": "rF63ACD5FA8_p07",
+      "email": "contact@arrowengineering.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Millbrook Assembly Prototype Shop",
+      "ref": "rF63ACD5FA8_p08",
+      "email": "contact@millbrookassembly.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Silverline Assembly Plant Maintenance",
+      "ref": "rF63ACD5FA8_p09",
+      "email": "contact@silverlineassembly.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Cascade Manufacturing Prototype Shop",
+      "ref": "rF63ACD5FA8_p10",
+      "email": "contact@cascademanufacturing.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Flux Industries R&D Workshop",
+      "ref": "rF63ACD5FA8_p11",
+      "email": "contact@fluxindustries.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Conduit Assembly Test Facility",
+      "ref": "rF63ACD5FA8_p12",
+      "email": "contact@conduitassembly.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Crown Production Quality Lab",
+      "ref": "rF63ACD5FA8_p13",
+      "email": "contact@crownproduction.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Alloy Technologies Plant Maintenance",
+      "ref": "rF63ACD5FA8_p14",
+      "email": "contact@alloytechnologies.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Noble Engineering HQ Procurement",
+      "ref": "rF63ACD5FA8_p15",
+      "email": "contact@nobleengineering.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Drift Production Test Facility",
+      "ref": "rF63ACD5FA8_p16",
+      "email": "contact@driftproduction.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Peak Engineering Prototype Shop",
+      "ref": "rF63ACD5FA8_p17",
+      "email": "contact@peakengineering.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Dune Engineering Site Logistics",
+      "ref": "rF63ACD5FA8_p18",
+      "email": "contact@duneengineering.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Compass Assembly R&D Workshop",
+      "ref": "rF63ACD5FA8_p19",
+      "email": "contact@compassassembly.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Vertex Operations Prototype Shop",
+      "ref": "rF63ACD5FA8_p20",
+      "email": "contact@vertexoperations.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Ridge Operations Warehouse Ops",
+      "ref": "rF63ACD5FA8_p21",
+      "email": "contact@ridgeoperations.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Cardinal Services Plant Maintenance",
+      "ref": "rF63ACD5FA8_p22",
+      "email": "contact@cardinalservices.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Trident Fabrication Quality Lab",
+      "ref": "rF63ACD5FA8_p23",
+      "email": "contact@tridentfabrication.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Sentinel Fabrication R&D Workshop",
+      "ref": "rF63ACD5FA8_p24",
+      "email": "contact@sentinelfabrication.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Oxide Operations Warehouse Ops",
+      "ref": "rF63ACD5FA8_p25",
+      "email": "contact@oxideoperations.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Ironside Operations Tooling Center",
+      "ref": "rF63ACD5FA8_p26",
+      "email": "contact@ironsideoperations.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Nimbus Services HQ Procurement",
+      "ref": "rF63ACD5FA8_p27",
+      "email": "contact@nimbusservices.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Borough Industries R&D Workshop",
+      "ref": "rF63ACD5FA8_p28",
+      "email": "contact@boroughindustries.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Equinox Assembly Plant Maintenance",
+      "ref": "rF63ACD5FA8_p29",
+      "email": "contact@equinoxassembly.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Citadel Technologies Test Facility",
+      "ref": "rF63ACD5FA8_p30",
+      "email": "contact@citadeltechnologies.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Metro Services R&D Workshop",
+      "ref": "rF63ACD5FA8_p31",
+      "email": "contact@metroservices.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Lakewood Solutions HQ Procurement",
+      "ref": "rF63ACD5FA8_p32",
+      "email": "contact@lakewoodsolutions.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Spectra Manufacturing Quality Lab",
+      "ref": "rF63ACD5FA8_p33",
+      "email": "contact@spectramanufacturing.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Bridgeway Fabrication Test Facility",
+      "ref": "rF63ACD5FA8_p34",
+      "email": "contact@bridgewayfabrication.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Velocity Services Test Facility",
+      "ref": "rF63ACD5FA8_p35",
+      "email": "contact@velocityservices.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Bayshore Manufacturing Warehouse Ops",
+      "ref": "rF63ACD5FA8_p36",
+      "email": "contact@bayshoremanufacturing.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Axis Engineering Plant Maintenance",
+      "ref": "rF63ACD5FA8_p37",
+      "email": "contact@axisengineering.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Blaze Services R&D Workshop",
+      "ref": "rF63ACD5FA8_p38",
+      "email": "contact@blazeservices.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Mosaic Manufacturing Test Facility",
+      "ref": "rF63ACD5FA8_p39",
+      "email": "contact@mosaicmanufacturing.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Scion Manufacturing Site Logistics",
+      "ref": "rF63ACD5FA8_p40",
+      "email": "contact@scionmanufacturing.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Garnet Solutions HQ Procurement",
+      "ref": "rF63ACD5FA8_p41",
+      "email": "contact@garnetsolutions.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Quartz Production Test Facility",
+      "ref": "rF63ACD5FA8_p42",
+      "email": "contact@quartzproduction.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Globe Production Test Facility",
+      "ref": "rF63ACD5FA8_p43",
+      "email": "contact@globeproduction.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Fairview Engineering Plant Maintenance",
+      "ref": "rF63ACD5FA8_p44",
+      "email": "contact@fairviewengineering.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Helix Assembly R&D Workshop",
+      "ref": "rF63ACD5FA8_p45",
+      "email": "contact@helixassembly.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Osprey Services Prototype Shop",
+      "ref": "rF63ACD5FA8_p46",
+      "email": "contact@ospreyservices.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Cobalt Solutions Warehouse Ops",
+      "ref": "rF63ACD5FA8_p47",
+      "email": "contact@cobaltsolutions.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Ivory Manufacturing Plant Maintenance",
+      "ref": "rF63ACD5FA8_p48",
+      "email": "contact@ivorymanufacturing.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Pacific Technologies Test Facility",
+      "ref": "rF63ACD5FA8_p49",
+      "email": "contact@pacifictechnologies.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Ridgeline Technologies R&D Workshop",
+      "ref": "rF63ACD5FA8_p50",
+      "email": "contact@ridgelinetechnologies.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    }
+  ],
+  "products": [
+    {
+      "name": "Deionization Polishing Unit",
+      "code": "PE7BE7302C8-WTR-DPU-006",
+      "category": "Utility Equipment",
+      "type": "consu",
+      "list_price": 4331.64,
+      "standard_price": 2318.25,
+      "routes": [
+        "buy",
+        "manufacture"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rE7BE7302C8_q01",
+          "delay": 9,
+          "min_qty": 14.0,
+          "max_qty": 44.0,
+          "price": 2385.69,
+          "name": "Priority Shuttle lane (9d transit, 14-44 units)"
+        },
+        {
+          "partner_ref": "rE7BE7302C8_q02",
+          "delay": 6,
+          "min_qty": 3.0,
+          "max_qty": 3.0,
+          "price": 2998.17,
+          "name": "Express Air lane (6d transit, 3-3 units)"
+        },
+        {
+          "partner_ref": "rE7BE7302C8_q03",
+          "delay": 21,
+          "min_qty": 72.0,
+          "max_qty": 72.0,
+          "price": 1566.31,
+          "name": "Bulk Container lane (21d transit, 72-72 units)"
+        },
+        {
+          "partner_ref": "rE7BE7302C8_q04",
+          "delay": 10,
+          "min_qty": 8.0,
+          "max_qty": 62.0,
+          "price": 2889.96,
+          "name": "Hybrid Expedite lane (10d transit, 8-62 units)"
+        },
+        {
+          "partner_ref": "rE7BE7302C8_q05",
+          "delay": 19,
+          "min_qty": 6.0,
+          "max_qty": 6.0,
+          "price": 2113.95,
+          "name": "Scheduled Freight lane (19d transit, 6-6 units)"
+        },
+        {
+          "partner_ref": "rE7BE7302C8_q06",
+          "delay": 7,
+          "min_qty": 6.0,
+          "max_qty": 20.0,
+          "price": 3272.28,
+          "name": "Microfactory Build-to-Order lane (7d transit, 6-20 units)"
+        }
+      ]
+    },
+    {
+      "name": "Deionization Polishing Unit Subassembly",
+      "code": "PE7BE7302C8-SUB-02",
+      "category": "Utility Equipment",
+      "type": "consu",
+      "list_price": 1212.86,
+      "standard_price": 83.91,
+      "routes": [
+        "manufacture"
+      ],
+      "vendor_info": []
+    },
+    {
+      "name": "DI Resin Cartridge Mixed Bed",
+      "code": "PE7BE7302C8-WTR-DRC-118",
+      "category": "Utility Equipment",
+      "type": "consu",
+      "list_price": 78.57,
+      "standard_price": 37.05,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rE7BE7302C8_q07",
+          "delay": 4,
+          "min_qty": 4.0,
+          "max_qty": 64.0,
+          "price": 42.51,
+          "name": "Rapid Works (4d)"
+        },
+        {
+          "partner_ref": "rE7BE7302C8_q08",
+          "delay": 4,
+          "min_qty": 13.0,
+          "max_qty": 13.0,
+          "price": 41.21,
+          "name": "Domestic Supply (4d)"
+        },
+        {
+          "partner_ref": "rE7BE7302C8_q09",
+          "delay": 6,
+          "min_qty": 26.0,
+          "max_qty": 58.0,
+          "price": 37.05,
+          "name": "Import Consolidator (6d)"
+        },
+        {
+          "partner_ref": "rE7BE7302C8_q10",
+          "delay": 5,
+          "min_qty": 20.0,
+          "max_qty": 25.0,
+          "price": 47.29,
+          "name": "Hybrid Fabricators (5d)"
+        }
+      ]
+    },
+    {
+      "name": "Pressure Switch Assembly",
+      "code": "PE7BE7302C8-WTR-PSA-121",
+      "category": "Utility Equipment",
+      "type": "consu",
+      "list_price": 41.67,
+      "standard_price": 15.23,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rE7BE7302C8_q11",
+          "delay": 3,
+          "min_qty": 11.0,
+          "max_qty": 21.0,
+          "price": 21.56,
+          "name": "Rapid Works (3d)"
+        },
+        {
+          "partner_ref": "rE7BE7302C8_q12",
+          "delay": 6,
+          "min_qty": 33.0,
+          "max_qty": 77.0,
+          "price": 15.23,
+          "name": "Import Consolidator (6d)"
+        },
+        {
+          "partner_ref": "rE7BE7302C8_q13",
+          "delay": 4,
+          "min_qty": 28.0,
+          "max_qty": 46.0,
+          "price": 18.15,
+          "name": "Domestic Supply (4d)"
+        },
+        {
+          "partner_ref": "rE7BE7302C8_q14",
+          "delay": 5,
+          "min_qty": 16.0,
+          "max_qty": 17.0,
+          "price": 20.46,
+          "name": "Hybrid Fabricators (5d)"
+        }
+      ]
+    },
+    {
+      "name": "Activated Carbon Cartridge 20in",
+      "code": "PE7BE7302C8-WTR-ACC-105",
+      "category": "Utility Equipment",
+      "type": "consu",
+      "list_price": 45.65,
+      "standard_price": 18.03,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rE7BE7302C8_q15",
+          "delay": 4,
+          "min_qty": 11.0,
+          "max_qty": 74.0,
+          "price": 22.74,
+          "name": "Rapid Works (4d)"
+        },
+        {
+          "partner_ref": "rE7BE7302C8_q16",
+          "delay": 4,
+          "min_qty": 26.0,
+          "max_qty": 227.0,
+          "price": 18.03,
+          "name": "Import Consolidator (4d)"
+        },
+        {
+          "partner_ref": "rE7BE7302C8_q17",
+          "delay": 4,
+          "min_qty": 10.0,
+          "max_qty": 31.0,
+          "price": 24.07,
+          "name": "Hybrid Fabricators (4d)"
+        },
+        {
+          "partner_ref": "rE7BE7302C8_q18",
+          "delay": 4,
+          "min_qty": 16.0,
+          "max_qty": 23.0,
+          "price": 21.19,
+          "name": "Domestic Supply (4d)"
+        }
+      ]
+    },
+    {
+      "name": "Filter Housing Bracket Set",
+      "code": "PE7BE7302C8-WTR-FHB-110",
+      "category": "Utility Equipment",
+      "type": "consu",
+      "list_price": 29.34,
+      "standard_price": 11.22,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rE7BE7302C8_q19",
+          "delay": 4,
+          "min_qty": 5.0,
+          "max_qty": 42.0,
+          "price": 15.73,
+          "name": "Rapid Works (4d)"
+        },
+        {
+          "partner_ref": "rE7BE7302C8_q20",
+          "delay": 4,
+          "min_qty": 23.0,
+          "max_qty": 121.0,
+          "price": 11.84,
+          "name": "Domestic Supply (4d)"
+        },
+        {
+          "partner_ref": "rE7BE7302C8_q21",
+          "delay": 4,
+          "min_qty": 8.0,
+          "max_qty": 212.0,
+          "price": 13.41,
+          "name": "Hybrid Fabricators (4d)"
+        },
+        {
+          "partner_ref": "rE7BE7302C8_q22",
+          "delay": 4,
+          "min_qty": 31.0,
+          "max_qty": 92.0,
+          "price": 11.22,
+          "name": "Import Consolidator (4d)"
+        }
+      ]
+    },
+    {
+      "name": "Cold-Rolled Element 4x40",
+      "code": "PF63ACD5FA8-A001",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 201.77,
+      "standard_price": 111.46,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q01",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 114.74,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Pressure-Balanced Housing FRP",
+      "code": "PF63ACD5FA8-A002",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 189.19,
+      "standard_price": 108.21,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q02",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 112.86,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Food-Grade Metering Pump",
+      "code": "PF63ACD5FA8-A003",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 240.71,
+      "standard_price": 155.47,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q03",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 160.67,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Dual-Stage Pressure Pump Assembly",
+      "code": "PF63ACD5FA8-A004",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 337.7,
+      "standard_price": 229.09,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q04",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 224.38,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "High-Temp Cartridge 20in",
+      "code": "PF63ACD5FA8-A005",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 267.48,
+      "standard_price": 170.34,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q05",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 180.57,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Low-Temp Membrane Element 4x40",
+      "code": "PF63ACD5FA8-A006",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 393.93,
+      "standard_price": 271.98,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q06",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 277.76,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Flanged Housing FRP",
+      "code": "PF63ACD5FA8-A007",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 307.39,
+      "standard_price": 161.93,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q07",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 173.79,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "High-Performance 0 100PSI",
+      "code": "PF63ACD5FA8-A008",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 191.49,
+      "standard_price": 135.22,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q08",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 130.68,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Self-Lubricating Membrane Element 4x40",
+      "code": "PF63ACD5FA8-A009",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 304.29,
+      "standard_price": 193.37,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q09",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 190.31,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Narrow-Body Chemical Metering Pump",
+      "code": "PF63ACD5FA8-A010",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 345.0,
+      "standard_price": 183.09,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q10",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 191.89,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Stainless Element 4x40",
+      "code": "PF63ACD5FA8-A011",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 349.96,
+      "standard_price": 229.95,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q11",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 226.51,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Double-Row Cartridge 20in",
+      "code": "PF63ACD5FA8-A012",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 371.97,
+      "standard_price": 200.85,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q12",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 213.96,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "High-Cycle Sleeve Set",
+      "code": "PF63ACD5FA8-A013",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 413.25,
+      "standard_price": 223.76,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q13",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 238.79,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Low-Profile Valve Assembly",
+      "code": "PF63ACD5FA8-A014",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 285.14,
+      "standard_price": 197.86,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q14",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 196.84,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Low-Flow Membrane Element 4x40",
+      "code": "PF63ACD5FA8-A015",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 185.37,
+      "standard_price": 100.34,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q15",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 100.67,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Powder-Coated Filter Cartridge 5um",
+      "code": "PF63ACD5FA8-A016",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 259.55,
+      "standard_price": 182.71,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q16",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 188.93,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "High-Torque Housing Bracket Set",
+      "code": "PF63ACD5FA8-A017",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 415.91,
+      "standard_price": 227.71,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q17",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 230.89,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Threaded Housing Bracket Set",
+      "code": "PF63ACD5FA8-A018",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 192.49,
+      "standard_price": 107.68,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q18",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 115.6,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Tapered Membrane Element 4x40",
+      "code": "PF63ACD5FA8-A019",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 260.91,
+      "standard_price": 161.29,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q19",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 173.72,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Cleanroom Solenoid Valve Assembly",
+      "code": "PF63ACD5FA8-A020",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 265.74,
+      "standard_price": 140.72,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q20",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 139.81,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Rapid-Lock Meter Sensor Module",
+      "code": "PF63ACD5FA8-A021",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 278.7,
+      "standard_price": 175.08,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q21",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 172.49,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Thermal-Guard Gauge 0 100PSI",
+      "code": "PF63ACD5FA8-A022",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 398.15,
+      "standard_price": 242.89,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q22",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 261.85,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Sealed Pump Assembly",
+      "code": "PF63ACD5FA8-A023",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 301.03,
+      "standard_price": 180.2,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q23",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 176.67,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Premium Quartz Sleeve Set",
+      "code": "PF63ACD5FA8-A024",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 375.53,
+      "standard_price": 199.22,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q24",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 202.23,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Adjustable Sleeve Set",
+      "code": "PF63ACD5FA8-A025",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 212.87,
+      "standard_price": 136.76,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q25",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 134.26,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Zero-Backlash Sensor Module",
+      "code": "PF63ACD5FA8-A026",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 205.02,
+      "standard_price": 128.66,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q26",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 130.51,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Wide-Body Membrane Element 4x40",
+      "code": "PF63ACD5FA8-A027",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 217.97,
+      "standard_price": 123.43,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q27",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 126.13,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Medical-Grade Bracket Set",
+      "code": "PF63ACD5FA8-A028",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 192.08,
+      "standard_price": 109.32,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q28",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 116.84,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Impact-Rated Cartridge 5um",
+      "code": "PF63ACD5FA8-A029",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 301.05,
+      "standard_price": 197.12,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q29",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 192.95,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Low-Friction Bracket Set",
+      "code": "PF63ACD5FA8-A030",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 416.23,
+      "standard_price": 230.22,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q30",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 235.9,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Hardened Pressure Pump Assembly",
+      "code": "PF63ACD5FA8-A031",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 313.61,
+      "standard_price": 193.84,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q31",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 184.55,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Low-Noise Gauge 0 100PSI",
+      "code": "PF63ACD5FA8-A032",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 369.96,
+      "standard_price": 259.52,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q32",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 274.1,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "High-Flow Pump Assembly",
+      "code": "PF63ACD5FA8-A033",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 277.89,
+      "standard_price": 199.99,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q33",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 197.11,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Spring-Loaded Filter Cartridge 5um",
+      "code": "PF63ACD5FA8-A034",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 377.33,
+      "standard_price": 241.1,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q34",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 235.85,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Anti-Vibration Vessel Housing FRP",
+      "code": "PF63ACD5FA8-A035",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 225.14,
+      "standard_price": 130.04,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q35",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 130.78,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Quick-Release Metering Pump",
+      "code": "PF63ACD5FA8-A036",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 256.87,
+      "standard_price": 139.61,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q36",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 145.4,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Heat-Treated Sleeve Set",
+      "code": "PF63ACD5FA8-A037",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 226.98,
+      "standard_price": 133.63,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q37",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 136.03,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Modular Meter Sensor Module",
+      "code": "PF63ACD5FA8-A038",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 402.35,
+      "standard_price": 249.14,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q38",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 244.33,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Universal Pressure Pump Assembly",
+      "code": "PF63ACD5FA8-A039",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 276.65,
+      "standard_price": 181.5,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q39",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 193.16,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Anodized Metering Pump",
+      "code": "PF63ACD5FA8-A040",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 267.43,
+      "standard_price": 170.96,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q40",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 179.78,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Industrial Element 4x40",
+      "code": "PF63ACD5FA8-A041",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 388.03,
+      "standard_price": 249.79,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q41",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 246.34,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Heavy-Duty Meter Sensor Module",
+      "code": "PF63ACD5FA8-A042",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 346.12,
+      "standard_price": 248.62,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q42",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 247.37,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Lightweight Membrane Element 4x40",
+      "code": "PF63ACD5FA8-A043",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 281.84,
+      "standard_price": 193.82,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q43",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 194.43,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Reinforced Housing FRP",
+      "code": "PF63ACD5FA8-A044",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 251.49,
+      "standard_price": 165.66,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q44",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 169.85,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Compact TDS Conductivity Sensor",
+      "code": "PF63ACD5FA8-A045",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 207.62,
+      "standard_price": 120.78,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q45",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 122.87,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Standard Housing Bracket Set",
+      "code": "PF63ACD5FA8-A046",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 280.32,
+      "standard_price": 163.01,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q46",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 160.59,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Non-Magnetic Filter Cartridge 5um",
+      "code": "PF63ACD5FA8-A047",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 390.54,
+      "standard_price": 214.67,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q47",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 214.45,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Corrosion-Resistant Meter Sensor Module",
+      "code": "PF63ACD5FA8-A048",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 351.91,
+      "standard_price": 202.44,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q48",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 217.68,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Snap-Fit Carbon Cartridge 20in",
+      "code": "PF63ACD5FA8-A049",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 382.8,
+      "standard_price": 222.57,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q49",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 222.66,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Single-Stage Pump Assembly",
+      "code": "PF63ACD5FA8-A050",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 358.68,
+      "standard_price": 232.41,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rF63ACD5FA8_q50",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 236.55,
+          "name": "Local pickup"
+        }
+      ]
+    }
+  ],
+  "boms": [
+    {
+      "product_code": "PE7BE7302C8-SUB-02",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PE7BE7302C8-WTR-ACC-105",
+          "quantity": 2.0
+        },
+        {
+          "component_code": "PE7BE7302C8-WTR-FHB-110",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PE7BE7302C8-WTR-DPU-006",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PE7BE7302C8-SUB-02",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "PE7BE7302C8-WTR-DRC-118",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "PE7BE7302C8-WTR-PSA-121",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PF63ACD5FA8-A027",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PF63ACD5FA8-A008",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PF63ACD5FA8-A041",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PF63ACD5FA8-A029",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PF63ACD5FA8-A003",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PF63ACD5FA8-A029",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PF63ACD5FA8-A020",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PF63ACD5FA8-A004",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PF63ACD5FA8-A017",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PF63ACD5FA8-A033",
+          "quantity": 3.0
+        },
+        {
+          "component_code": "PF63ACD5FA8-A028",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PF63ACD5FA8-A044",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PF63ACD5FA8-A048",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PF63ACD5FA8-A024",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PF63ACD5FA8-A037",
+          "quantity": 2.0
+        },
+        {
+          "component_code": "PF63ACD5FA8-A020",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PF63ACD5FA8-A011",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PF63ACD5FA8-A019",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PF63ACD5FA8-A034",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PF63ACD5FA8-A008",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PF63ACD5FA8-A040",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PF63ACD5FA8-A035",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    }
+  ],
+  "workcenters": [
+    {
+      "product_code": "PE7BE7302C8-WTR-DPU-006",
+      "code": "PE7BE7302C8-WC02",
+      "name": "Fabrication Cell 2",
+      "unit_cost": 34.0,
+      "costs_hour": 45.33,
+      "time_per_unit_minutes": 45.0,
+      "time_efficiency": 100.0,
+      "time_start": 0.0,
+      "time_stop": 0.0,
+      "oee_target": 1.0,
+      "note": "Utility Equipment workcenter pool 2",
+      "capacity_minutes": 6525.0,
+      "lead_days": 2.0,
+      "operation_name": "PE7BE7302C8-WTR-DPU-006 Assembly",
+      "sequence": 100,
+      "is_primary": true,
+      "alternative_workcenter_codes": [
+        "PE7BE7302C8-WC03"
+      ]
+    },
+    {
+      "product_code": "PE7BE7302C8-WTR-DPU-006",
+      "code": "PE7BE7302C8-WC03",
+      "name": "Precision Bench 3",
+      "unit_cost": 41.0,
+      "costs_hour": 44.73,
+      "time_per_unit_minutes": 55.0,
+      "time_efficiency": 100.0,
+      "time_start": 0.0,
+      "time_stop": 0.0,
+      "oee_target": 1.0,
+      "note": "Utility Equipment workcenter pool 3",
+      "capacity_minutes": 1.0,
+      "lead_days": 2.0,
+      "operation_name": "PE7BE7302C8-WTR-DPU-006 Assembly",
+      "sequence": 100,
+      "is_primary": false,
+      "alternative_workcenter_codes": []
+    },
+    {
+      "product_code": "PE7BE7302C8-SUB-02",
+      "code": "PE7BE7302C8-WC01",
+      "name": "Assembly Line 1",
+      "unit_cost": 19.0,
+      "costs_hour": 32.57,
+      "time_per_unit_minutes": 35.0,
+      "time_efficiency": 100.0,
+      "time_start": 0.0,
+      "time_stop": 0.0,
+      "oee_target": 1.0,
+      "note": "Utility Equipment workcenter pool 1",
+      "capacity_minutes": 5075.0,
+      "lead_days": 2.0,
+      "operation_name": "PE7BE7302C8-SUB-02 Build",
+      "sequence": 100,
+      "is_primary": true,
+      "alternative_workcenter_codes": []
+    }
+  ],
+  "stock_levels": [
+    {
+      "product_code": "PE7BE7302C8-WTR-ACC-105",
+      "warehouse_code": null,
+      "quantity": 22.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PE7BE7302C8-WTR-DPU-006",
+      "warehouse_code": null,
+      "quantity": 75.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PE7BE7302C8-WTR-DRC-118",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PE7BE7302C8-WTR-FHB-110",
+      "warehouse_code": null,
+      "quantity": 25.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PE7BE7302C8-WTR-PSA-121",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A001",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A002",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A003",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A004",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A005",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A006",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A007",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A008",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A009",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A010",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A011",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A012",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A013",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A014",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A015",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A016",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A017",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A018",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A019",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A020",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A021",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A022",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A023",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A024",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A025",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A026",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A027",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A028",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A029",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A030",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A031",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A032",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A033",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A034",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A035",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A036",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A037",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A038",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A039",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A040",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A041",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A042",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A043",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A044",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A045",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A046",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A047",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A048",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A049",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PF63ACD5FA8-A050",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    }
+  ],
+  "existing_purchase_orders": [],
+  "existing_manufacturing_orders": [],
+  "existing_sales_orders": [],
+  "repair_context": null,
+  "system_parameters": [
+    {
+      "key": "erp_bench.min_margin_percent",
+      "value": "29.1"
+    }
+  ]
+}

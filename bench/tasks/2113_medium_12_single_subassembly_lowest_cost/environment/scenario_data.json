@@ -1,0 +1,3067 @@
+{
+  "scenario_number": 2113,
+  "name": "6-Axis Articulated Robot 10kg",
+  "instruction": "Ensure all these 6-Axis Articulated Robot 10kg customer orders are supplied on schedule:\n\n- Flint Labs: 15 units due in 8 days (pretax budget cap $444,526)\n- Aether Alliance: 14 units due in 8 days (pretax budget cap $422,894)\n- Noble Studios North: 14 units due in 8 days (pretax budget cap $414,005)\n- Sterling Manufactory: 22 units due in 9 days (pretax budget cap $658,417)\n- Terra Forum: 26 units due in 10 days (pretax budget cap $756,180)\n- Grove Architects: 21 units due in 11 days (pretax budget cap $613,328)\n- Ironside Solutions Group: 14 units due in 13 days (pretax budget cap $401,234)\n- Ivory Practice: 22 units due in 13 days (pretax budget cap $644,539)\n- Stonewall Trust: 26 units due in 14 days (pretax budget cap $799,716)\n- Pinnacle Museum: 26 units due in 14 days (pretax budget cap $799,817)\n\nWe have 104 finished units on hand. Any shortfall can be handled with finished-goods buying, in-house manufacturing, or a mix that still satisfies policy.\n\nAcross all units covered through new purchasing or manufacturing, keep portfolio-level new-spend margin at or above 28.4% at selling price.",
+  "seed": 5139061448305020116,
+  "background_and_policy": "* Fulfill all orders while minimizing new spending on procurement and manufacturing.\n* Any units you cover through new buying or manufacturing count toward one combined portfolio that must still meet a minimum 28.4% new-spend margin at selling price.\n* Accounting treats the existing stock as sunk cost.\n* You must create and confirm the necessary sales orders, purchase orders, and/or manufacturing orders.\n* Customer budgets are pre-tax amounts.\n* Link Sales Orders to the related Manufacturing Orders and Purchase Orders for traceability.\n* For finished goods POs, put the SO reference(s) (e.g. S00030 or S00030, S00031) into the origin field ('Source' in the UI).\n* For component POs, put the MO reference(s) (e.g. WH/MO/00010 or WH/MO/00010, WH/MO/00011) into the origin field.\n* For finished goods MOs, put the Sales Order reference (e.g. S00030) into the origin field ('Source' in the UI).\n* For subassembly or intermediate MOs, put the immediate parent MO reference(s) that the subassembly feeds (e.g. WH/MO/00020 or WH/MO/00020, WH/MO/00021) into the origin field ('Source' in the UI).\n* In the end, the lineage must be SO -> MO -> (Subassembly MO if needed) -> PO or SO -> PO.\n* You must sell this product at List Price.\n* On sales orders, set the commitment date.\n* On manufacturing orders, you must set the start date and the due date.\n* If you choose to manufacture, you must procure the components that are not in stock.\n* On purchase orders, you must set the delivery date.\n* Before releasing anything, read the Internal Notes/comments on stock, customers, vendors, and workcenters.\n\nCapacity constraints:\n- Treat workcenter capacity as a hard horizon-wide limit across all products that share the center.\n- Check each workcenter's Internal Notes in Odoo for the exact horizon-wide minute limit.\n- Assign workcenter on each manufacturing work order.\n- For each finished-goods supplier offer, respect min/max quantities as horizon-wide totals.\n- For each component supplier offer, respect min/max quantities as horizon-wide totals.\n- Use one consolidated PO per supplier offer (do not split a single offer across multiple POs).\n- Check each vendor's Internal Notes in Odoo for maximum order quantity limits.",
+  "invoicing_policy": {
+    "invoice_required": false,
+    "payment_term": null,
+    "downpayment_required": false,
+    "downpayment_threshold_amount": null,
+    "downpayment_mode": null,
+    "downpayment_value": null
+  },
+  "warehouses": [],
+  "vendors": [
+    {
+      "name": "Lattice Merchants",
+      "ref": "rC056BD2D06_q01",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Atlas Microfactory",
+      "ref": "rC056BD2D06_q02",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Borough Solutions",
+      "ref": "rC056BD2D06_q03",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Trident Partners",
+      "ref": "rC056BD2D06_q04",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Arrow Components",
+      "ref": "rC056BD2D06_q05",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Crestview Materials",
+      "ref": "rC056BD2D06_q06",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Helix Packagers",
+      "ref": "rC056BD2D06_q07",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Cardinal Sourcing",
+      "ref": "rC056BD2D06_q08",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Drift Distribution",
+      "ref": "rC056BD2D06_q09",
+      "supplier_rank": 9,
+      "comment": null
+    },
+    {
+      "name": "Gateway Procurement",
+      "ref": "rC056BD2D06_q10",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Lumen Haulage",
+      "ref": "rC056BD2D06_q11",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Sierra Freight",
+      "ref": "rC056BD2D06_q12",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Echo Networks",
+      "ref": "rC056BD2D06_q13",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Onyx Integrators",
+      "ref": "rC056BD2D06_q14",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Cedar Consolidators",
+      "ref": "rC056BD2D06_q15",
+      "supplier_rank": 15,
+      "comment": null
+    },
+    {
+      "name": "Haven Commodities",
+      "ref": "rC056BD2D06_q16",
+      "supplier_rank": 16,
+      "comment": null
+    },
+    {
+      "name": "Anvil Conveyance",
+      "ref": "rC056BD2D06_q17",
+      "supplier_rank": 17,
+      "comment": null
+    },
+    {
+      "name": "Canton Assemblies",
+      "ref": "rC056BD2D06_q18",
+      "supplier_rank": 18,
+      "comment": null
+    },
+    {
+      "name": "Alpine Provisions",
+      "ref": "rC056BD2D06_q19",
+      "supplier_rank": 19,
+      "comment": null
+    },
+    {
+      "name": "Stratos Freight",
+      "ref": "rB5A10590CD_q01",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Steel Logistics",
+      "ref": "rB5A10590CD_q02",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Pacific Materials",
+      "ref": "rB5A10590CD_q03",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Redstone Resources",
+      "ref": "rB5A10590CD_q04",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Quartz Supply",
+      "ref": "rB5A10590CD_q05",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Dune Materials",
+      "ref": "rB5A10590CD_q06",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Mosaic Sourcing",
+      "ref": "rB5A10590CD_q07",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Globe Logistics",
+      "ref": "rB5A10590CD_q08",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Summit Distribution",
+      "ref": "rB5A10590CD_q09",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Arbor Parts Co",
+      "ref": "rB5A10590CD_q10",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Ridge Networks",
+      "ref": "rB5A10590CD_q11",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Fairview Transit",
+      "ref": "rB5A10590CD_q12",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Brookfield Transit",
+      "ref": "rB5A10590CD_q13",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Horizon Sourcing",
+      "ref": "rB5A10590CD_q14",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Nimbus Distribution",
+      "ref": "rB5A10590CD_q15",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Apex Wholesale",
+      "ref": "rB5A10590CD_q16",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Sapphire Logistics",
+      "ref": "rB5A10590CD_q17",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Circuit Distribution",
+      "ref": "rB5A10590CD_q18",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Chrome Trading",
+      "ref": "rB5A10590CD_q19",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Catalyst Transit",
+      "ref": "rB5A10590CD_q20",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Bayshore Carriers",
+      "ref": "rB5A10590CD_q21",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Thornton Parts Co",
+      "ref": "rB5A10590CD_q22",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Keystone Parts Co",
+      "ref": "rB5A10590CD_q23",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Slate Procurement",
+      "ref": "rB5A10590CD_q24",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Crown Transit",
+      "ref": "rB5A10590CD_q25",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Spark Trading",
+      "ref": "rB5A10590CD_q26",
+      "supplier_rank": 4,
+      "comment": null
+    },
+    {
+      "name": "Evergreen Parts Co",
+      "ref": "rB5A10590CD_q27",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Vertex Wholesale",
+      "ref": "rB5A10590CD_q28",
+      "supplier_rank": 7,
+      "comment": null
+    },
+    {
+      "name": "Metro Procurement",
+      "ref": "rB5A10590CD_q29",
+      "supplier_rank": 14,
+      "comment": null
+    },
+    {
+      "name": "Ridgeline Resources",
+      "ref": "rB5A10590CD_q30",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Compass Distribution",
+      "ref": "rB5A10590CD_q31",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Osprey Freight",
+      "ref": "rB5A10590CD_q32",
+      "supplier_rank": 11,
+      "comment": null
+    },
+    {
+      "name": "Riverdale Materials",
+      "ref": "rB5A10590CD_q33",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Aegis Logistics",
+      "ref": "rB5A10590CD_q34",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Ledger Sourcing",
+      "ref": "rB5A10590CD_q35",
+      "supplier_rank": 13,
+      "comment": null
+    },
+    {
+      "name": "Indigo Procurement",
+      "ref": "rB5A10590CD_q36",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Blaze Materials",
+      "ref": "rB5A10590CD_q37",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Solace Trading",
+      "ref": "rB5A10590CD_q38",
+      "supplier_rank": 12,
+      "comment": null
+    },
+    {
+      "name": "Forge Freight",
+      "ref": "rB5A10590CD_q39",
+      "supplier_rank": 3,
+      "comment": null
+    },
+    {
+      "name": "Polar Trading",
+      "ref": "rB5A10590CD_q40",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Silverline Transit",
+      "ref": "rB5A10590CD_q41",
+      "supplier_rank": 8,
+      "comment": null
+    },
+    {
+      "name": "Element Resources",
+      "ref": "rB5A10590CD_q42",
+      "supplier_rank": 6,
+      "comment": null
+    },
+    {
+      "name": "Crest Sourcing",
+      "ref": "rB5A10590CD_q43",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Vantage Freight",
+      "ref": "rB5A10590CD_q44",
+      "supplier_rank": 10,
+      "comment": null
+    },
+    {
+      "name": "Flux Materials",
+      "ref": "rB5A10590CD_q45",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Cipher Parts Co",
+      "ref": "rB5A10590CD_q46",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Zenith Distribution",
+      "ref": "rB5A10590CD_q47",
+      "supplier_rank": 1,
+      "comment": null
+    },
+    {
+      "name": "Ironwood Wholesale",
+      "ref": "rB5A10590CD_q48",
+      "supplier_rank": 2,
+      "comment": null
+    },
+    {
+      "name": "Peak Procurement",
+      "ref": "rB5A10590CD_q49",
+      "supplier_rank": 5,
+      "comment": null
+    },
+    {
+      "name": "Pivot Distribution",
+      "ref": "rB5A10590CD_q50",
+      "supplier_rank": 11,
+      "comment": null
+    }
+  ],
+  "customers": [
+    {
+      "name": "Flint Labs",
+      "ref": "rC056BD2D06_c01",
+      "email": "orders@flintlabs.io",
+      "budget_dollars": 444526.25,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Aether Alliance",
+      "ref": "rC056BD2D06_c02",
+      "email": "orders@aetheralliance.io",
+      "budget_dollars": 422893.65,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Noble Studios North",
+      "ref": "rC056BD2D06_c03",
+      "email": "orders@noblestudiosnorth.io",
+      "budget_dollars": 414004.73,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Sterling Manufactory",
+      "ref": "rC056BD2D06_c04",
+      "email": "orders@sterlingmanufactory.io",
+      "budget_dollars": 658416.94,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Terra Forum",
+      "ref": "rC056BD2D06_c05",
+      "email": "orders@terraforum.io",
+      "budget_dollars": 756180.05,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Grove Architects",
+      "ref": "rC056BD2D06_c06",
+      "email": "orders@grovearchitects.io",
+      "budget_dollars": 613327.73,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Ironside Solutions Group",
+      "ref": "rC056BD2D06_c07",
+      "email": "orders@ironsidesolutionsgroup.io",
+      "budget_dollars": 401233.78,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Ivory Practice",
+      "ref": "rC056BD2D06_c08",
+      "email": "orders@ivorypractice.io",
+      "budget_dollars": 644538.65,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Stonewall Trust",
+      "ref": "rC056BD2D06_c09",
+      "email": "orders@stonewalltrust.io",
+      "budget_dollars": 799715.66,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Pinnacle Museum",
+      "ref": "rC056BD2D06_c10",
+      "email": "orders@pinnaclemuseum.io",
+      "budget_dollars": 799817.49,
+      "is_company": true,
+      "comment": null,
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": []
+    },
+    {
+      "name": "Cascade Production R&D Workshop",
+      "ref": "rB5A10590CD_p01",
+      "email": "contact@cascadeproduction.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Velocity Industries Site Logistics",
+      "ref": "rB5A10590CD_p02",
+      "email": "contact@velocityindustries.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Jade Engineering HQ Procurement",
+      "ref": "rB5A10590CD_p03",
+      "email": "contact@jadeengineering.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Skyline Industries Prototype Shop",
+      "ref": "rB5A10590CD_p04",
+      "email": "contact@skylineindustries.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Bronze Production Plant Maintenance",
+      "ref": "rB5A10590CD_p05",
+      "email": "contact@bronzeproduction.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Titan Services R&D Workshop",
+      "ref": "rB5A10590CD_p06",
+      "email": "contact@titanservices.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Alloy Operations Warehouse Ops",
+      "ref": "rB5A10590CD_p07",
+      "email": "contact@alloyoperations.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Hartland Manufacturing Test Facility",
+      "ref": "rB5A10590CD_p08",
+      "email": "contact@hartlandmanufacturing.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Meridian Operations Test Facility",
+      "ref": "rB5A10590CD_p09",
+      "email": "contact@meridianoperations.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Lakewood Solutions Quality Lab",
+      "ref": "rB5A10590CD_p10",
+      "email": "contact@lakewoodsolutions.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Sentinel Assembly Warehouse Ops",
+      "ref": "rB5A10590CD_p11",
+      "email": "contact@sentinelassembly.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Millbrook Solutions R&D Workshop",
+      "ref": "rB5A10590CD_p12",
+      "email": "contact@millbrooksolutions.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Baltic Technologies Warehouse Ops",
+      "ref": "rB5A10590CD_p13",
+      "email": "contact@baltictechnologies.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Arc Fabrication Tooling Center",
+      "ref": "rB5A10590CD_p14",
+      "email": "contact@arcfabrication.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Nexus Technologies Prototype Shop",
+      "ref": "rB5A10590CD_p15",
+      "email": "contact@nexustechnologies.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Citadel Technologies Quality Lab",
+      "ref": "rB5A10590CD_p16",
+      "email": "contact@citadeltechnologies.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Orbital Manufacturing Quality Lab",
+      "ref": "rB5A10590CD_p17",
+      "email": "contact@orbitalmanufacturing.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Raven Assembly Tooling Center",
+      "ref": "rB5A10590CD_p18",
+      "email": "contact@ravenassembly.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Iron Industries Plant Maintenance",
+      "ref": "rB5A10590CD_p19",
+      "email": "contact@ironindustries.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Spectra Operations Site Logistics",
+      "ref": "rB5A10590CD_p20",
+      "email": "contact@spectraoperations.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Bridgeway Production Plant Maintenance",
+      "ref": "rB5A10590CD_p21",
+      "email": "contact@bridgewayproduction.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Equinox Fabrication Tooling Center",
+      "ref": "rB5A10590CD_p22",
+      "email": "contact@equinoxfabrication.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Conduit Technologies Quality Lab",
+      "ref": "rB5A10590CD_p23",
+      "email": "contact@conduittechnologies.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Clearwater Manufacturing HQ Procurement",
+      "ref": "rB5A10590CD_p24",
+      "email": "contact@clearwatermanufacturing.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Matrix Engineering R&D Workshop",
+      "ref": "rB5A10590CD_p25",
+      "email": "contact@matrixengineering.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Axis Solutions Quality Lab",
+      "ref": "rB5A10590CD_p26",
+      "email": "contact@axissolutions.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Northbridge Industries Test Facility",
+      "ref": "rB5A10590CD_p27",
+      "email": "contact@northbridgeindustries.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Quantum Industries Plant Maintenance",
+      "ref": "rB5A10590CD_p28",
+      "email": "contact@quantumindustries.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Copper Services Test Facility",
+      "ref": "rB5A10590CD_p29",
+      "email": "contact@copperservices.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Aurora Solutions Field Ops",
+      "ref": "rB5A10590CD_p30",
+      "email": "contact@aurorasolutions.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Garnet Industries Quality Lab",
+      "ref": "rB5A10590CD_p31",
+      "email": "contact@garnetindustries.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Granite Production Tooling Center",
+      "ref": "rB5A10590CD_p32",
+      "email": "contact@graniteproduction.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Eclipse Engineering Site Logistics",
+      "ref": "rB5A10590CD_p33",
+      "email": "contact@eclipseengineering.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Scion Fabrication HQ Procurement",
+      "ref": "rB5A10590CD_p34",
+      "email": "contact@scionfabrication.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Oakmont Operations HQ Procurement",
+      "ref": "rB5A10590CD_p35",
+      "email": "contact@oakmontoperations.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Coral Fabrication Warehouse Ops",
+      "ref": "rB5A10590CD_p36",
+      "email": "contact@coralfabrication.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Monarch Services Quality Lab",
+      "ref": "rB5A10590CD_p37",
+      "email": "contact@monarchservices.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Beacon Solutions Test Facility",
+      "ref": "rB5A10590CD_p38",
+      "email": "contact@beaconsolutions.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "logistics"
+      ]
+    },
+    {
+      "name": "Lance Industries Prototype Shop",
+      "ref": "rB5A10590CD_p39",
+      "email": "contact@lanceindustries.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Cosmo Manufacturing Test Facility",
+      "ref": "rB5A10590CD_p40",
+      "email": "contact@cosmomanufacturing.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Trellis Technologies Plant Maintenance",
+      "ref": "rB5A10590CD_p41",
+      "email": "contact@trellistechnologies.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Westfield Services Site Logistics",
+      "ref": "rB5A10590CD_p42",
+      "email": "contact@westfieldservices.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Opal Fabrication HQ Procurement",
+      "ref": "rB5A10590CD_p43",
+      "email": "contact@opalfabrication.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Marble Manufacturing Prototype Shop",
+      "ref": "rB5A10590CD_p44",
+      "email": "contact@marblemanufacturing.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Ashford Solutions Field Ops",
+      "ref": "rB5A10590CD_p45",
+      "email": "contact@ashfordsolutions.warehouse.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Recurring quarterly orders.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    },
+    {
+      "name": "Oxide Production Test Facility",
+      "ref": "rB5A10590CD_p46",
+      "email": "contact@oxideproduction.logistics.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations"
+      ]
+    },
+    {
+      "name": "Baseline Technologies HQ Procurement",
+      "ref": "rB5A10590CD_p47",
+      "email": "contact@baselinetechnologies.ops-mail.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Operating division account.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "maintenance"
+      ]
+    },
+    {
+      "name": "Comet Assembly Site Logistics",
+      "ref": "rB5A10590CD_p48",
+      "email": "contact@cometassembly.procurement.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Maintenance contract on file.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "operations",
+        "bulk"
+      ]
+    },
+    {
+      "name": "Cobalt Assembly Plant Maintenance",
+      "ref": "rB5A10590CD_p49",
+      "email": "contact@cobaltassembly.sourcing.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Preferred payment net-30.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement"
+      ]
+    },
+    {
+      "name": "Prism Assembly Tooling Center",
+      "ref": "rB5A10590CD_p50",
+      "email": "contact@prismassembly.supply-chain.example",
+      "budget_dollars": null,
+      "is_company": true,
+      "comment": "Regional distribution hub.",
+      "credit_limit": null,
+      "payment_term": null,
+      "tags": [
+        "procurement",
+        "preferred"
+      ]
+    }
+  ],
+  "products": [
+    {
+      "name": "6-Axis Articulated Robot 10kg",
+      "code": "PC056BD2D06-ROB-6AX-001",
+      "category": "Industrial Automation",
+      "type": "consu",
+      "list_price": 27929.89,
+      "standard_price": 17481.9,
+      "routes": [
+        "buy",
+        "manufacture"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC056BD2D06_q01",
+          "delay": 8,
+          "min_qty": 6.0,
+          "max_qty": 18.0,
+          "price": 17364.12,
+          "name": "Priority Shuttle lane (8d transit, 6-18 units)"
+        },
+        {
+          "partner_ref": "rC056BD2D06_q02",
+          "delay": 6,
+          "min_qty": 3.0,
+          "max_qty": 20.0,
+          "price": 24461.64,
+          "name": "Express Air lane (6d transit, 3-20 units)"
+        },
+        {
+          "partner_ref": "rC056BD2D06_q03",
+          "delay": 23,
+          "min_qty": 100.0,
+          "max_qty": 104.0,
+          "price": 8763.82,
+          "name": "Bulk Container lane (23d transit, 100-104 units)"
+        },
+        {
+          "partner_ref": "rC056BD2D06_q04",
+          "delay": 10,
+          "min_qty": 5.0,
+          "max_qty": 9.0,
+          "price": 18903.81,
+          "name": "Hybrid Expedite lane (10d transit, 5-9 units)"
+        },
+        {
+          "partner_ref": "rC056BD2D06_q05",
+          "delay": 13,
+          "min_qty": 9.0,
+          "max_qty": 35.0,
+          "price": 15736.85,
+          "name": "Regional Cross-Dock lane (13d transit, 9-35 units)"
+        }
+      ]
+    },
+    {
+      "name": "6-Axis Articulated Robot 10kg Subassembly",
+      "code": "PC056BD2D06-SUB-02",
+      "category": "Industrial Automation",
+      "type": "consu",
+      "list_price": 7820.37,
+      "standard_price": 1898.51,
+      "routes": [
+        "manufacture"
+      ],
+      "vendor_info": []
+    },
+    {
+      "name": "Internal Cable Harness Set",
+      "code": "PC056BD2D06-ROB-ICH-109",
+      "category": "Industrial Automation",
+      "type": "consu",
+      "list_price": 325.83,
+      "standard_price": 151.47,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC056BD2D06_q06",
+          "delay": 2,
+          "min_qty": 4.0,
+          "max_qty": 5.0,
+          "price": 248.83,
+          "name": "Rapid Works (2d)"
+        },
+        {
+          "partner_ref": "rC056BD2D06_q07",
+          "delay": 5,
+          "min_qty": 13.0,
+          "max_qty": 32.0,
+          "price": 199.29,
+          "name": "Hybrid Fabricators (5d)"
+        },
+        {
+          "partner_ref": "rC056BD2D06_q08",
+          "delay": 6,
+          "min_qty": 13.0,
+          "max_qty": 37.0,
+          "price": 164.47,
+          "name": "Domestic Supply (6d)"
+        },
+        {
+          "partner_ref": "rC056BD2D06_q09",
+          "delay": 6,
+          "min_qty": 37.0,
+          "max_qty": 39.0,
+          "price": 151.47,
+          "name": "Import Consolidator (6d)"
+        }
+      ]
+    },
+    {
+      "name": "Base Mounting Plate Assembly",
+      "code": "PC056BD2D06-ROB-BMP-110",
+      "category": "Industrial Automation",
+      "type": "consu",
+      "list_price": 248.1,
+      "standard_price": 103.26,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC056BD2D06_q10",
+          "delay": 4,
+          "min_qty": 6.0,
+          "max_qty": 23.0,
+          "price": 135.25,
+          "name": "Rapid Works (4d)"
+        },
+        {
+          "partner_ref": "rC056BD2D06_q11",
+          "delay": 6,
+          "min_qty": 15.0,
+          "max_qty": 28.0,
+          "price": 143.27,
+          "name": "Hybrid Fabricators (6d)"
+        },
+        {
+          "partner_ref": "rC056BD2D06_q12",
+          "delay": 6,
+          "min_qty": 46.0,
+          "max_qty": 56.0,
+          "price": 103.26,
+          "name": "Import Consolidator (6d)"
+        },
+        {
+          "partner_ref": "rC056BD2D06_q13",
+          "delay": 4,
+          "min_qty": 17.0,
+          "max_qty": 22.0,
+          "price": 111.16,
+          "name": "Domestic Supply (4d)"
+        }
+      ]
+    },
+    {
+      "name": "Cast Aluminum Link Section",
+      "code": "PC056BD2D06-ROB-CAL-106",
+      "category": "Industrial Automation",
+      "type": "consu",
+      "list_price": 510.36,
+      "standard_price": 257.75,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC056BD2D06_q14",
+          "delay": 3,
+          "min_qty": 11.0,
+          "max_qty": 33.0,
+          "price": 329.16,
+          "name": "Rapid Works (3d)"
+        },
+        {
+          "partner_ref": "rC056BD2D06_q15",
+          "delay": 4,
+          "min_qty": 40.0,
+          "max_qty": 164.0,
+          "price": 257.75,
+          "name": "Import Consolidator (4d)"
+        },
+        {
+          "partner_ref": "rC056BD2D06_q16",
+          "delay": 4,
+          "min_qty": 22.0,
+          "max_qty": 62.0,
+          "price": 288.58,
+          "name": "Domestic Supply (4d)"
+        }
+      ]
+    },
+    {
+      "name": "Wrist Assembly 3-Axis",
+      "code": "PC056BD2D06-ROB-WAS-107",
+      "category": "Industrial Automation",
+      "type": "consu",
+      "list_price": 2285.12,
+      "standard_price": 878.03,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rC056BD2D06_q17",
+          "delay": 3,
+          "min_qty": 12.0,
+          "max_qty": 23.0,
+          "price": 1416.01,
+          "name": "Rapid Works (3d)"
+        },
+        {
+          "partner_ref": "rC056BD2D06_q18",
+          "delay": 4,
+          "min_qty": 20.0,
+          "max_qty": 27.0,
+          "price": 1219.32,
+          "name": "Domestic Supply (4d)"
+        },
+        {
+          "partner_ref": "rC056BD2D06_q19",
+          "delay": 4,
+          "min_qty": 24.0,
+          "max_qty": 93.0,
+          "price": 878.03,
+          "name": "Import Consolidator (4d)"
+        }
+      ]
+    },
+    {
+      "name": "Anodized Motor 750W",
+      "code": "PB5A10590CD-A001",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 235.9,
+      "standard_price": 166.22,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q01",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 168.79,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Rapid-Lock Encoder Module",
+      "code": "PB5A10590CD-A002",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 378.47,
+      "standard_price": 240.83,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q02",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 237.16,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Reinforced Aluminum Link Section",
+      "code": "PB5A10590CD-A003",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 214.47,
+      "standard_price": 150.47,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q03",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 150.7,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Snap-Fit Cable Harness Set",
+      "code": "PB5A10590CD-A004",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 408.93,
+      "standard_price": 251.29,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q04",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 246.32,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Spring-Loaded Teach Pendant Interface",
+      "code": "PB5A10590CD-A005",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 315.12,
+      "standard_price": 202.93,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q05",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 196.97,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Weatherproof Plate Assembly",
+      "code": "PB5A10590CD-A006",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 300.46,
+      "standard_price": 175.67,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q06",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 189.56,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Cleanroom 3 Axis",
+      "code": "PB5A10590CD-A007",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 303.38,
+      "standard_price": 192.94,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q07",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 195.69,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Double-Row Absolute Encoder Module",
+      "code": "PB5A10590CD-A008",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 283.36,
+      "standard_price": 179.59,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q08",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 181.64,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Tapered Controller Cabinet",
+      "code": "PB5A10590CD-A009",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 218.05,
+      "standard_price": 140.2,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q09",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 146.02,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Low-Temp Flange ISO 9409",
+      "code": "PB5A10590CD-A010",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 363.62,
+      "standard_price": 261.12,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q10",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 278.44,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Precision Absolute Encoder Module",
+      "code": "PB5A10590CD-A011",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 208.06,
+      "standard_price": 147.36,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q11",
+          "delay": 5,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 143.1,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Sealed Mounting Plate Assembly",
+      "code": "PB5A10590CD-A012",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 389.72,
+      "standard_price": 252.71,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q12",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 260.73,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Economy Plate Assembly",
+      "code": "PB5A10590CD-A013",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 257.29,
+      "standard_price": 176.44,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q13",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 184.1,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Single-Stage Controller Cabinet",
+      "code": "PB5A10590CD-A014",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 223.84,
+      "standard_price": 150.07,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q14",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 149.82,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Pressure-Balanced Absolute Encoder Module",
+      "code": "PB5A10590CD-A015",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 393.88,
+      "standard_price": 251.23,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q15",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 260.41,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Cold-Rolled Encoder Module",
+      "code": "PB5A10590CD-A016",
+      "category": "Maintenance Supplies",
+      "type": "consu",
+      "list_price": 342.96,
+      "standard_price": 242.53,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q16",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 256.27,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Stainless ISO 9409",
+      "code": "PB5A10590CD-A017",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 300.02,
+      "standard_price": 166.56,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q17",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 177.67,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Powder-Coated Gear Reducer",
+      "code": "PB5A10590CD-A018",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 386.25,
+      "standard_price": 263.9,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q18",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 273.04,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Premium Harness Set",
+      "code": "PB5A10590CD-A019",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 403.25,
+      "standard_price": 276.75,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q19",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 264.35,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "UV-Stable Gear Reducer",
+      "code": "PB5A10590CD-A020",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 262.77,
+      "standard_price": 137.81,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q20",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 147.56,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Compact Link Section",
+      "code": "PB5A10590CD-A021",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 218.79,
+      "standard_price": 150.9,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q21",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 145.75,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Commercial Controller Cabinet",
+      "code": "PB5A10590CD-A022",
+      "category": "Replacement Parts",
+      "type": "consu",
+      "list_price": 272.82,
+      "standard_price": 178.92,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q22",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 182.22,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Food-Grade Torque Sensor Module",
+      "code": "PB5A10590CD-A023",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 407.91,
+      "standard_price": 280.24,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q23",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 277.28,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Non-Magnetic 3 Axis",
+      "code": "PB5A10590CD-A024",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 288.6,
+      "standard_price": 194.07,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q24",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 209.02,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Low-Profile Servo Motor 750W",
+      "code": "PB5A10590CD-A025",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 296.01,
+      "standard_price": 181.52,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q25",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 190.78,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Industrial Mounting Plate Assembly",
+      "code": "PB5A10590CD-A026",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 355.21,
+      "standard_price": 189.93,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q26",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 190.14,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Hardened Drive Reducer 100:1",
+      "code": "PB5A10590CD-A027",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 352.77,
+      "standard_price": 208.34,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q27",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 204.05,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Threaded Plate Assembly",
+      "code": "PB5A10590CD-A028",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 343.92,
+      "standard_price": 196.98,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q28",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 190.82,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "High-Torque Sensor Module",
+      "code": "PB5A10590CD-A029",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 392.83,
+      "standard_price": 245.99,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q29",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 241.64,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Modular Harness Set",
+      "code": "PB5A10590CD-A030",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 270.02,
+      "standard_price": 184.39,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q30",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 191.94,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Anti-Vibration Cycloidal Gear Reducer",
+      "code": "PB5A10590CD-A031",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 183.48,
+      "standard_price": 107.4,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q31",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 110.29,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Universal Encoder Module",
+      "code": "PB5A10590CD-A032",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 376.22,
+      "standard_price": 231.21,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q32",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 241.04,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "High-Cycle 3 Axis",
+      "code": "PB5A10590CD-A033",
+      "category": "Hardware Accessories",
+      "type": "consu",
+      "list_price": 327.03,
+      "standard_price": 207.94,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q33",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 215.77,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Adjustable Controller Cabinet",
+      "code": "PB5A10590CD-A034",
+      "category": "Power Transmission",
+      "type": "consu",
+      "list_price": 192.44,
+      "standard_price": 134.06,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q34",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 144.69,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "Impact-Rated Drive Reducer 100:1",
+      "code": "PB5A10590CD-A035",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 209.26,
+      "standard_price": 116.66,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q35",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 122.68,
+          "name": "Regional lane"
+        }
+      ]
+    },
+    {
+      "name": "High-Temp Teach Pendant Interface",
+      "code": "PB5A10590CD-A036",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 232.17,
+      "standard_price": 134.88,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q36",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 143.86,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Corrosion-Resistant Pendant Interface",
+      "code": "PB5A10590CD-A037",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 392.73,
+      "standard_price": 248.21,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q37",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 238.02,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "High-Flow Sensor Module",
+      "code": "PB5A10590CD-A038",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 403.04,
+      "standard_price": 224.57,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q38",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 221.84,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Heavy-Duty ISO 9409",
+      "code": "PB5A10590CD-A039",
+      "category": "Industrial Spare Parts",
+      "type": "consu",
+      "list_price": 186.89,
+      "standard_price": 104.45,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q39",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 109.0,
+          "name": "Express route"
+        }
+      ]
+    },
+    {
+      "name": "Quick-Release ISO 9409",
+      "code": "PB5A10590CD-A040",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 243.73,
+      "standard_price": 132.57,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q40",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 138.61,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Heat-Treated 3 Axis",
+      "code": "PB5A10590CD-A041",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 220.6,
+      "standard_price": 117.48,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q41",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 121.81,
+          "name": "Warehouse direct"
+        }
+      ]
+    },
+    {
+      "name": "Thermal-Guard Encoder Module",
+      "code": "PB5A10590CD-A042",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 212.61,
+      "standard_price": 134.14,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q42",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 136.79,
+          "name": "Standard delivery"
+        }
+      ]
+    },
+    {
+      "name": "Metric Torque Sensor Module",
+      "code": "PB5A10590CD-A043",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 194.62,
+      "standard_price": 131.88,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q43",
+          "delay": 6,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 142.26,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Zero-Backlash ISO 9409",
+      "code": "PB5A10590CD-A044",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 238.76,
+      "standard_price": 156.95,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q44",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 158.81,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Low-Noise Pendant Interface",
+      "code": "PB5A10590CD-A045",
+      "category": "Fasteners and Fixings",
+      "type": "consu",
+      "list_price": 293.55,
+      "standard_price": 188.93,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q45",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 188.65,
+          "name": "Local pickup"
+        }
+      ]
+    },
+    {
+      "name": "Medical-Grade Teach Pendant Interface",
+      "code": "PB5A10590CD-A046",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 337.07,
+      "standard_price": 230.79,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q46",
+          "delay": 3,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 222.66,
+          "name": "Cross-dock"
+        }
+      ]
+    },
+    {
+      "name": "Flanged Encoder Module",
+      "code": "PB5A10590CD-A047",
+      "category": "Mechanical Components",
+      "type": "consu",
+      "list_price": 320.28,
+      "standard_price": 179.29,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q47",
+          "delay": 7,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 172.58,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Low-Friction Plate Assembly",
+      "code": "PB5A10590CD-A048",
+      "category": "Electrical Components",
+      "type": "consu",
+      "list_price": 395.21,
+      "standard_price": 248.93,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q48",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 255.78,
+          "name": "Bulk shipment"
+        }
+      ]
+    },
+    {
+      "name": "Lightweight Gear Reducer",
+      "code": "PB5A10590CD-A049",
+      "category": "Seals and Gaskets",
+      "type": "consu",
+      "list_price": 379.73,
+      "standard_price": 257.6,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q49",
+          "delay": 8,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 255.54,
+          "name": "Scheduled freight"
+        }
+      ]
+    },
+    {
+      "name": "Extended-Life Sensor Module",
+      "code": "PB5A10590CD-A050",
+      "category": "Pneumatic Components",
+      "type": "consu",
+      "list_price": 277.77,
+      "standard_price": 194.53,
+      "routes": [
+        "buy"
+      ],
+      "vendor_info": [
+        {
+          "partner_ref": "rB5A10590CD_q50",
+          "delay": 4,
+          "min_qty": 1.0,
+          "max_qty": 24.0,
+          "price": 186.15,
+          "name": "Standard delivery"
+        }
+      ]
+    }
+  ],
+  "boms": [
+    {
+      "product_code": "PC056BD2D06-SUB-02",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PC056BD2D06-ROB-CAL-106",
+          "quantity": 2.0
+        },
+        {
+          "component_code": "PC056BD2D06-ROB-WAS-107",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PC056BD2D06-ROB-6AX-001",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PC056BD2D06-SUB-02",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "PC056BD2D06-ROB-ICH-109",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "PC056BD2D06-ROB-BMP-110",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PB5A10590CD-A036",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PB5A10590CD-A044",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PB5A10590CD-A020",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PB5A10590CD-A021",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PB5A10590CD-A029",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PB5A10590CD-A001",
+          "quantity": 1.0
+        },
+        {
+          "component_code": "PB5A10590CD-A038",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PB5A10590CD-A035",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PB5A10590CD-A006",
+          "quantity": 2.0
+        },
+        {
+          "component_code": "PB5A10590CD-A038",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PB5A10590CD-A031",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PB5A10590CD-A025",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PB5A10590CD-A015",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PB5A10590CD-A048",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PB5A10590CD-A040",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PB5A10590CD-A032",
+          "quantity": 2.0
+        },
+        {
+          "component_code": "PB5A10590CD-A050",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PB5A10590CD-A046",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PB5A10590CD-A024",
+          "quantity": 2.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PB5A10590CD-A006",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PB5A10590CD-A027",
+          "quantity": 1.0
+        }
+      ],
+      "warehouse_code": null
+    },
+    {
+      "product_code": "PB5A10590CD-A039",
+      "type": "normal",
+      "quantity": 1.0,
+      "components": [
+        {
+          "component_code": "PB5A10590CD-A032",
+          "quantity": 3.0
+        }
+      ],
+      "warehouse_code": null
+    }
+  ],
+  "workcenters": [
+    {
+      "product_code": "PC056BD2D06-ROB-6AX-001",
+      "code": "PC056BD2D06-WC02",
+      "name": "Fabrication Cell 2",
+      "unit_cost": 34.0,
+      "costs_hour": 45.33,
+      "time_per_unit_minutes": 45.0,
+      "time_efficiency": 100.0,
+      "time_start": 0.0,
+      "time_stop": 0.0,
+      "oee_target": 1.0,
+      "note": "Industrial Automation workcenter pool 2",
+      "capacity_minutes": 9045.0,
+      "lead_days": 2.0,
+      "operation_name": "PC056BD2D06-ROB-6AX-001 Assembly",
+      "sequence": 100,
+      "is_primary": true,
+      "alternative_workcenter_codes": []
+    },
+    {
+      "product_code": "PC056BD2D06-SUB-02",
+      "code": "PC056BD2D06-WC01",
+      "name": "Assembly Line 1",
+      "unit_cost": 18.0,
+      "costs_hour": 30.86,
+      "time_per_unit_minutes": 35.0,
+      "time_efficiency": 100.0,
+      "time_start": 0.0,
+      "time_stop": 0.0,
+      "oee_target": 1.0,
+      "note": "Industrial Automation workcenter pool 1",
+      "capacity_minutes": 7035.0,
+      "lead_days": 2.0,
+      "operation_name": "PC056BD2D06-SUB-02 Build",
+      "sequence": 100,
+      "is_primary": true,
+      "alternative_workcenter_codes": [
+        "PC056BD2D06-WC02"
+      ]
+    },
+    {
+      "product_code": "PC056BD2D06-SUB-02",
+      "code": "PC056BD2D06-WC02",
+      "name": "Fabrication Cell 2",
+      "unit_cost": 22.0,
+      "costs_hour": 29.33,
+      "time_per_unit_minutes": 45.0,
+      "time_efficiency": 100.0,
+      "time_start": 0.0,
+      "time_stop": 0.0,
+      "oee_target": 1.0,
+      "note": "Industrial Automation workcenter pool 2",
+      "capacity_minutes": 9045.0,
+      "lead_days": 2.0,
+      "operation_name": "PC056BD2D06-SUB-02 Build",
+      "sequence": 100,
+      "is_primary": false,
+      "alternative_workcenter_codes": []
+    }
+  ],
+  "stock_levels": [
+    {
+      "product_code": "PC056BD2D06-ROB-6AX-001",
+      "warehouse_code": null,
+      "quantity": 104.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC056BD2D06-ROB-BMP-110",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC056BD2D06-ROB-CAL-106",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC056BD2D06-ROB-ICH-109",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PC056BD2D06-ROB-WAS-107",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A001",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A002",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A003",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A004",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A005",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A006",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A007",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A008",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A009",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A010",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A011",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A012",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A013",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A014",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A015",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A016",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A017",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A018",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A019",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A020",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A021",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A022",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A023",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A024",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A025",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A026",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A027",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A028",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A029",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A030",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A031",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A032",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A033",
+      "warehouse_code": null,
+      "quantity": 7.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A034",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A035",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A036",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A037",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A038",
+      "warehouse_code": null,
+      "quantity": 5.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A039",
+      "warehouse_code": null,
+      "quantity": 10.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A040",
+      "warehouse_code": null,
+      "quantity": 15.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A041",
+      "warehouse_code": null,
+      "quantity": 11.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A042",
+      "warehouse_code": null,
+      "quantity": 12.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A043",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A044",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A045",
+      "warehouse_code": null,
+      "quantity": 9.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A046",
+      "warehouse_code": null,
+      "quantity": 14.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A047",
+      "warehouse_code": null,
+      "quantity": 13.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A048",
+      "warehouse_code": null,
+      "quantity": 4.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A049",
+      "warehouse_code": null,
+      "quantity": 8.0,
+      "location_type": "stock"
+    },
+    {
+      "product_code": "PB5A10590CD-A050",
+      "warehouse_code": null,
+      "quantity": 6.0,
+      "location_type": "stock"
+    }
+  ],
+  "existing_purchase_orders": [],
+  "existing_manufacturing_orders": [],
+  "existing_sales_orders": [],
+  "repair_context": null,
+  "system_parameters": [
+    {
+      "key": "erp_bench.min_margin_percent",
+      "value": "28.4"
+    }
+  ]
+}

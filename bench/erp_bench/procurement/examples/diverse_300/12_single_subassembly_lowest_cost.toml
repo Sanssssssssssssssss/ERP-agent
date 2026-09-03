@@ -1,0 +1,32 @@
+# Single subassembly with lowest-cost branch choice.
+difficulty = "medium"
+available_routes = "buy_and_manufacture"
+
+[customers]
+count_range = [8, 10]
+deadline_range = [8, 14]
+demand_range = [14, 25]
+
+[supply]
+stock_ratio_range = [0.38, 0.52]
+finished_vendor_target_range = [4, 5]
+finished_vendor_limit = 6
+include_components = true
+component_count_range = [5, 7]
+component_vendor_category_count_range = [3, 3]
+vendor_capacity_primary_ratio_range = [0.1, 0.36]
+sampling_tightness = 0.55
+
+[order_acceptance]
+mode = "accept_all_orders"
+
+[manufacture]
+bom_structure = "single_subassembly"
+workcenter_count = 2
+workcenter_choice_path = "lowest_cost"
+assembly_capacity_buffer_range = [0, 1]
+assembly_capacity_ratio_range = [0.24, 0.46]
+
+[export]
+product_domain = "robotic_arms"
+include_adjacent_data = true
