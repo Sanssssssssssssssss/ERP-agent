@@ -62,6 +62,9 @@ _ODOO_TOOLS = {
 _SECRET = re.compile(
     r"(?i)(?:bearer\s+|(?:api[_-]?key|token|secret|password)\s*[:=]\s*)[^\s,;]+|sk-[a-z0-9_-]{8,}"
 )
+_SECRET_KEY = re.compile(
+    r"(?i)(?:authorization|api[_-]?key|(?:(?:access|refresh|approval)[_-])?token|secret|password)"
+)
 
 
 def build_trial_summary(
@@ -575,9 +578,20 @@ def _label(value: str) -> str:
 
 def _redact(value: Any) -> Any:
     if isinstance(value, str):
+        # Tool results contain JSON inside text blocks. Redact values, not JSON syntax.
+        if value.lstrip().startswith(("{", "[")):
+            try:
+                payload = json.loads(value)
+            except json.JSONDecodeError:
+                pass
+            else:
+                return json.dumps(_redact(payload), ensure_ascii=False)
         return _SECRET.sub("[REDACTED]", value)
     if isinstance(value, dict):
-        return {key: _redact(item) for key, item in value.items()}
+        return {
+            key: "[REDACTED]" if _SECRET_KEY.fullmatch(str(key)) else _redact(item)
+            for key, item in value.items()
+        }
     if isinstance(value, list):
         return [_redact(item) for item in value]
     return value

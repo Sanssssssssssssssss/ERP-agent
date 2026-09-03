@@ -8,10 +8,41 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from integration.report import load_entries, main, report_path, report_trial, write_index
+from integration.report import load_entries, main, report_path, report_trial, tool_failed, write_index
+from integration.trial_summary import _redact
 
 
 class ReportingTest(unittest.TestCase):
+    def test_redaction_preserves_json_tool_results_and_business_errors(self):
+        for success in (False, True):
+            with self.subTest(success=success), tempfile.TemporaryDirectory() as directory:
+                payload = {
+                    "success": success,
+                    "error": "api_key:missing",
+                    "result": [{"api_key": "private-value", "text": '中文 "quoted" \\ path'}],
+                    "nested": json.dumps({"password": "nested-private", "success": False}),
+                }
+                row = {
+                    "type": "message", "id": "tool", "timestamp": 1.0,
+                    "message": {"role": "toolResult", "toolCallId": "call1",
+                                "toolName": "mcp_odoo_generate_json2_payload", "isError": False,
+                                "content": [{"type": "text", "text": json.dumps(payload)}]},
+                }
+                source = Path(directory) / "session.jsonl"
+                source.write_text(json.dumps(row), encoding="utf-8")
+                original = source.read_bytes()
+                message = load_entries(source)[0].message
+                redacted = json.loads(message.content[0].text)
+                self.assertEqual(tool_failed(message), not success)
+                self.assertIs(redacted["success"], success)
+                self.assertEqual(redacted["error"], "[REDACTED]")
+                self.assertEqual(redacted["result"][0]["api_key"], "[REDACTED]")
+                self.assertEqual(redacted["result"][0]["text"], payload["result"][0]["text"])
+                self.assertEqual(json.loads(redacted["nested"]),
+                                 {"password": "[REDACTED]", "success": False})
+                self.assertEqual(_redact(message.content[0].text), message.content[0].text)
+                self.assertEqual(source.read_bytes(), original)
+
     def test_setup_only_failure_is_visible_without_a_fake_model_score(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
