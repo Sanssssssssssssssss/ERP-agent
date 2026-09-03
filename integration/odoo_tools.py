@@ -15,7 +15,7 @@ from pydantic_core import to_json
 from pi_agent.messages import TextContent
 from pi_agent.tools import AgentToolResult
 
-from integration.native_reads import READ_RESPONSES, NativeReads, normalize_read_arguments
+from odoo_runtime.reads import READ_RESPONSES, NativeReads, normalize_read_arguments
 from odoo_mcp.odoo_client import READ_CALL_ID
 
 

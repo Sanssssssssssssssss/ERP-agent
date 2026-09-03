@@ -23,6 +23,8 @@ class CleanHarnessTest(unittest.TestCase):
 
         self.assertEqual(len(tasks), 300)
         self.assertFalse((ROOT / "bench" / "tasks_ui").exists())
+        self.assertFalse((ROOT / "integration" / "native_reads.py").exists())
+        self.assertTrue((ROOT / "odoo_runtime" / "reads.py").is_file())
         self.assertEqual(patch.count("diff --git "), 3)
         self.assertNotIn("create_coding_tools", runner)
         self.assertIn("tools=list(toolset.tools)", runner)

@@ -22,7 +22,7 @@ from pi_coding.provider_config import (
 from pi_coding.resources import PiResourcePaths
 from pi_coding.session import CodingSession, CodingSessionConfig
 
-from integration.native_reads import NativeReads
+from odoo_runtime.reads import NativeReads
 from integration.odoo_tools import route_tools
 
 CONTEXT_WINDOW = 128_000

@@ -45,7 +45,7 @@ def provision_security(env):
 
 async def run_gate():
     from pi_agent.mcp import McpToolSet
-    from integration.native_reads import NativeReads
+    from odoo_runtime.reads import NativeReads
     from integration.odoo_tools import route_tools
 
     root = Path("/logs/agent")

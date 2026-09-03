@@ -78,7 +78,7 @@ patches/        必要且可追踪的上游补丁
 
 | 职责 | 现有来源 / 接入点 | 计划落点，按需创建 |
 | --- | --- | --- |
-| JSON-2 连接、参数映射和只读重试 | `mcp/src/odoo_mcp/odoo_client.py`、`diagnostics.py`；现有 `integration/native_reads.py` | `odoo_runtime/gateway.py` |
+| JSON-2 连接、参数映射和只读重试 | `mcp/src/odoo_mcp/odoo_client.py`、`diagnostics.py`；第一阶段原型已收拢到原生包 | `odoo_runtime/gateway.py` |
 | 读取、字段选择、缓存和应用策略 | `tools_read.py`、`schema_cache.py`、`field_ranking.py`、`field_policy.py`、`tool_helpers.py` | `odoo_runtime/reads.py`；确需分开时增加 `schema.py`、`policy.py` |
 | 业务观测、引用与回执 | `diagnostics.py` 的错误与关系解析；Pi 的事件及会话存储 | `odoo_runtime/world.py`；不先建图数据库和第二套会话系统 |
 | 写入审批、执行、恢复 | `tools_write.py`、`write_policy.py`、`agent_tools.py`、`server_core.py`、`audit.py` | `odoo_runtime/actions.py` 和一个 `store.py`，后者优先用标准库 SQLite |
@@ -146,7 +146,7 @@ patches/        必要且可追踪的上游补丁
 
 已验收阶段。初始 1,800 秒预算经最新功能优先授权扩大；最终 r3 使用同快照 case 2262 一对 A/B，两组均自然结束、100 分及 62 条适用规则全通过，并完成独立复核。未跑 C 或 Compiler。
 
-- **目标与文件：** 对齐 `odoo_client.py` 的身份、参数、语言/公司、超时和只读重试；使用现有 `integration/native_reads.py`、`odoo_tools.py`、`read_gate.py`、准备脚本，不再新建平行原型。
+- **目标与文件：** 对齐 `odoo_client.py` 的身份、参数、语言/公司、超时和只读重试；第一阶段使用 `integration/native_reads.py`（第二阶段已搬入 `odoo_runtime/reads.py` 和 `gateway.py`，未保留重复实现）、`odoo_tools.py`、`read_gate.py` 与准备脚本。
 - **范围：** `get_odoo_profile`、`get_model_fields`、`search_records`、`read_record` 四个原生工具；所有其他工具仍走 MCP。
 - **完成标准：** 原生读取确实不加载 MCP 服务或调用 MCP；真实管理员/受限身份差分与独立预期断言通过；完整快照恢复和同条件 A/B 通过。保留原来的字段边界回归，不能退回全 schema 导致的 400 问题。
 - **方案级反例：** 在相同身份和可表达上下文下，必要操作仍依赖无法移出的 MCP 私有状态或不存在的 JSON-2 能力。连接配置没对齐不算这种反例。

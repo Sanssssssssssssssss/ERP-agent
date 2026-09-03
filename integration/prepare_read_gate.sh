@@ -16,6 +16,7 @@ docker exec "$fixture" test -f /tmp/saas_setup_complete
 docker exec "$fixture" mkdir -p /tmp/pi-odoo-mcp-source /tmp/pi-odoo-harness/agent/src
 docker cp mcp/src/odoo_mcp "$fixture:/tmp/pi-odoo-mcp-source/"
 docker cp integration "$fixture:/tmp/pi-odoo-harness/"
+docker cp odoo_runtime "$fixture:/tmp/pi-odoo-harness/"
 for package in pi_ai pi_agent pi_coding; do
     docker cp "agent/src/$package" "$fixture:/tmp/pi-odoo-harness/agent/src/"
 done

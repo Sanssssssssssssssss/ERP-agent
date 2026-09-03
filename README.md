@@ -15,6 +15,7 @@ agent/        pinned Pi Agent for Python source and tests
 mcp/          pinned odoo-mcp source and tests
 bench/        ERP-Bench generator plus 300 executable Harbor tasks
 integration/  Python/native Pi adapters, request receipts, offline run reports
+odoo_runtime/ native Odoo read capabilities and JSON-2 boundary (stage 2 in progress)
 configs/      two single-case baselines and optional Docker proxy overlay
 patches/      the exact three-task Odoo 19 image-pin patch
 .runtime/     ignored local wheelhouse, jobs, logs, and environments

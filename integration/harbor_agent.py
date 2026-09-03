@@ -108,6 +108,7 @@ async def _install_task_runtime(agent: Any, environment: BaseEnvironment) -> Non
         )
     await environment.upload_file(runner, "/tmp/pi-odoo-runner.py")
     await environment.upload_dir(root / "integration", "/tmp/pi-odoo-harness/integration")
+    await environment.upload_dir(root / "odoo_runtime", "/tmp/pi-odoo-harness/odoo_runtime")
 
 
 async def _start_task_mcp(agent: Any, environment: BaseEnvironment) -> None:

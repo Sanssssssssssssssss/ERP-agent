@@ -1,4 +1,4 @@
-"""Four native read tools; reuse pinned Odoo core, never import its MCP surface.
+"""Native read tools; reuse pinned Odoo core, never import its MCP surface.
 
 Read semantics adapted from mcp/src/odoo_mcp/tools_read.py and server_core.py.
 Copyright (c) 2025 Lê Anh Tuấn. Distributed under mcp/LICENSE (MIT).
@@ -20,7 +20,7 @@ from odoo_mcp.field_ranking import (
     rank_relevant_fields,
     select_smart_fields,
 )
-from odoo_mcp.odoo_client import OdooClient, build_odoo_client, load_instances_config
+from odoo_mcp.odoo_client import build_odoo_client, load_instances_config
 from odoo_mcp.rate_limit import check_rate
 from odoo_mcp.schema_cache import _build_schema_cache
 from odoo_mcp.schemas import (
@@ -35,6 +35,7 @@ from odoo_mcp.tool_helpers import (
     normalize_domain_input,
     validate_model_name,
 )
+from .gateway import Json2ReadClient
 
 READ_RESPONSES = {
     "get_odoo_profile": GetOdooProfileResponse,
@@ -76,26 +77,6 @@ def normalize_read_arguments(name: str, arguments: dict[str, Any]) -> dict[str, 
         return model.model_validate(parsed).model_dump()
     except ValueError as exc:
         raise RuntimeError(f"Error executing tool {name}: {exc}") from exc
-
-
-class Json2ReadClient(OdooClient):
-    """Closed read-only facade over the existing, tested JSON-2 transport."""
-
-    def __init__(self, *, url: str, db: str, username: str, api_key: str | None = None,
-                 password: str = "", transport: str = "json2", **kwargs):
-        if transport != "json2":
-            raise ValueError("Native reads require the JSON-2 transport")
-        super().__init__(
-            url, db, username, password, transport=transport, api_key=api_key, **kwargs
-        )
-
-    def _json2_call(self, model: str, method: str, payload: dict[str, Any]) -> Any:
-        validate_model_name(model)
-        if method not in {"fields_get", "search_read", "read"} and (
-            model, method
-        ) != ("res.users", "context_get"):
-            raise ValueError(f"Native read gateway refuses {model}.{method}")
-        return super()._json2_call(model, method, payload)
 
 
 class NativeReads:

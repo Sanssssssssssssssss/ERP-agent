@@ -22,7 +22,7 @@ from pi_agent.tools import AgentTool, AgentToolResult
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent
 
-from integration.native_reads import Json2ReadClient, NativeReads, READ_RESPONSES
+from odoo_runtime.reads import Json2ReadClient, NativeReads, READ_RESPONSES
 from integration.odoo_tools import route_tools
 
 
@@ -96,7 +96,7 @@ class NoMcp(importlib.abc.MetaPathFinder):
         if fullname.split('.')[0] in {'mcp', 'mcp_types'}:
             raise AssertionError('MCP dependency imported: ' + fullname)
 sys.meta_path.insert(0, NoMcp())
-from integration.native_reads import NativeReads, Json2ReadClient
+from odoo_runtime.reads import NativeReads, Json2ReadClient
 assert 'odoo_mcp.server' not in sys.modules
 print('MCP_FREE_CORE_IMPORT_OK')
 '''
@@ -130,7 +130,7 @@ print('MCP_FREE_CORE_IMPORT_OK')
             ("read_record", {"model": "res.partner", "record_id": 999}),
             ("read_record", {"model": "res.partner", "record_id": 0}),
         ]
-        with patch("integration.native_reads.get_field_policy", return_value=policy), patch.object(tools_read, "get_field_policy", return_value=policy):
+        with patch("odoo_runtime.reads.get_field_policy", return_value=policy), patch.object(tools_read, "get_field_policy", return_value=policy):
             for name, arguments in cases:
                 with self.subTest(name=name, arguments=arguments):
                     expected_client, actual_client = FakeOdoo(), FakeOdoo()
