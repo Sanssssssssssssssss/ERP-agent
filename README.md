@@ -8,7 +8,7 @@ This is the clean, standalone research surface for one experiment: run the compl
 agent/        pinned Pi Agent for Python source and tests
 mcp/          pinned odoo-mcp source and tests
 bench/        ERP-Bench generator plus 300 executable Harbor tasks
-integration/  the MCP-only Pi runner and Harbor adapter
+integration/  MCP-only runner, Harbor adapter, and offline run reports
 configs/      one-task example and optional Docker proxy overlay
 patches/      the exact three-task Odoo 19 image-pin patch
 .runtime/     ignored local wheelhouse, jobs, logs, and environments
@@ -46,8 +46,8 @@ For the pinned Linux wheels used inside Harbor, download the `wheelhouse-mcp-py3
 Install Harbor 0.22.0 in WSL/Linux, restore the wheelhouse above, edit the model name in `configs/harbor-one-task.example.json`, and run from the repository root so `integration.harbor_agent` is importable:
 
 ```bash
-export PYTHONPATH="$PWD"
-harbor run -c configs/harbor-one-task.example.json
+export PYTHONPATH="$PWD/agent/src:$PWD"
+.runtime/venv-linux/bin/python -m integration.report --run-config configs/harbor-one-task.example.json
 ```
 
 The adapter waits for the task-local Odoo database, reads its short-lived API key inside the container, starts Odoo MCP on loopback, uploads the pinned Python harness, and records Pi session, MCP, and token-usage receipts under the Harbor job directory. `configs/harbor-proxy-compose.yml` is optional and should be added only when the model endpoint requires the host proxy.
@@ -95,6 +95,41 @@ export OPENAI_API_KEY="$LLM_API_KEY" OPENAI_BASE_URL="$LLM_BASE_URL"
 ```
 
 Secrets and raw job logs are intentionally not committed; only this sanitized receipt is saved to GitHub. No further paid retries or compiler/harness-fusion changes were made after the recovery result.
+
+## Inspect every run and model call
+
+The old `trial_summary.py` infrastructure is preserved under `integration/`. The report command reuses the pinned Python Pi HTML exporter and its **Usage** tab for both Python and native Pi sessions; it does not introduce another frontend or service.
+
+Create a **separate** Linux host environment from the pinned agent lock for reporting (Harbor itself must also be available on `PATH` for `--run-config`):
+
+```bash
+UV_PROJECT_ENVIRONMENT="$PWD/.runtime/venv-linux" uv sync --project agent --frozen --no-dev
+export PYTHONPATH="$PWD/agent/src:$PWD"
+# Offline: inspect an existing trial, job, or jobs directory. No model calls.
+.runtime/venv-linux/bin/python -m integration.report .runtime/jobs
+# Future live runs: load .runtime/control.env as above first. This DOES run the model.
+.runtime/venv-linux/bin/python -m integration.report --run-config configs/harbor-one-task.example.json
+```
+
+The wrapper exports reports even if Harbor exits unsuccessfully. After a killed host/WSL process, run the offline command to recover reports from persisted logs. It does not repair, overwrite, resume, or rerun those source logs. An incomplete event stream can fall back to a valid session with an explicit warning; an unsupported or invalid session is listed in `report_errors.json`, not silently dropped. Native Pi adaptation currently supports the four entry kinds observed in these controls; other entry kinds fail visibly.
+
+Open `.runtime/reports/index.html`, then choose a run:
+
+- `session.html`: searchable transcript, tool arguments/results, errors, and the **Usage** dashboard.
+- `requests.json`: each recorded model response's tokens, stop reason, tool names, available latency/TTFT, and diagnostics (including gateway attempts when reported).
+- `trial_summary.json`: totals and separate agent termination, Harbor failure, and raw verifier score. `harbor/` contains a separate scalar reward receipt; the live verifier is still unchanged.
+
+Tokens are **observed usage**, not a bill: reasoning is included in output, failed requests without reported usage remain unknown, and custom-provider prices may be unknown. One assistant entry is not necessarily one physical HTTP attempt. Native Pi logs do not provide all the Python timing/diagnostic fields. Reports contain task data and stay ignored/local.
+
+The original 51-wheel release is a task-image supplement, not a complete clean-host environment: it lacks legacy `httpx`/`httpcore`, which the task image had supplied. The isolated reporting environment was supplemented with the original lock's `httpx==0.28.1` and `httpcore==1.0.9`; use the full agent lock for recreation rather than relying on image-inherited packages.
+
+## Failure diagnosis, not a passing baseline
+
+**Python control:** the final gateway receipt resolves to DeepSeek and records two downstream attempts, both HTTP 400 `Content Exists Risk`, with no fallback. DeepSeek maintainers have tied this error to their content-safety strategy ([official issue comment](https://github.com/deepseek-ai/DeepSeek-V2/issues/30#issuecomment-2134616307)). This supports a content-safety rejection diagnosis, not an authentication, balance, or context-length diagnosis. The receipt does **not** identify the triggering input/output fragment or policy decision. No byte-exact serialized request body was captured, so the exact trigger and any migration causality remain unproven.
+
+**Native control:** it did not end with that 400. Its final response hit `length` at 16,384 output tokens, all reasoning. The historical successful native trial `2262_easy_26_buy_only_net_30_no__y7HHcbQ` scored 100 with 36 assistant entries and 103 MCP calls; its largest single output was 11,891 tokens. Its user prompt matches the current native run after newline normalization, and both sessions record the same model ID. That does not make the complete evolving conversation, provider deployment, or environment identical; it is evidence of different trajectories, not proof that copying broke Pi or that a particular budget change caused it.
+
+The clean Python runner also deliberately changes the system policy/tool exposure relative to the original coding/Tau runner (MCP-only, ordinary coding tools/resources disabled). It is not an exact old-run replay. No provider retry, moderation workaround, budget change, or compiler change was made during this offline diagnosis.
 
 ## Rollback and provenance
 
