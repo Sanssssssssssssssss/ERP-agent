@@ -138,6 +138,8 @@ def report_trial(trial: Path, destination: Path) -> dict:
         trial / "result.json",
         trial / "verifier" / "reward.json",
     )
+    if not verifier_path.is_file():
+        verifier_path = trial / "verifier" / "verifier_details.json"
     events = next(
         (
             p
@@ -243,6 +245,13 @@ def report_trial(trial: Path, destination: Path) -> dict:
     summary["receipts"]["session_sha256"] = hashlib.sha256(
         source.read_bytes()
     ).hexdigest()
+    request_dir = trial / "agent" / "requests"
+    summary["receipts"]["request_directory"] = (
+        str(request_dir.resolve()) if request_dir.is_dir() else None
+    )
+    summary["receipts"]["http_request_bodies"] = len(
+        list(request_dir.glob("*.request.json"))
+    )
     destination.mkdir(parents=True, exist_ok=True)
     write_json(destination / "requests.json", requests)
     prompt = source.with_name("pi-agent-system-prompt.txt")

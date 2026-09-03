@@ -1,0 +1,19 @@
+{
+  "job_name": "baseline-python-schema-bounds-no-cap-20260903-r2",
+  "jobs_dir": ".runtime/jobs",
+  "agent_setup_timeout_multiplier": 4.0,
+  "environment_build_timeout_multiplier": 4.0,
+  "n_concurrent_trials": 1,
+  "quiet": true,
+  "environment": {
+    "type": "docker",
+    "extra_docker_compose": ["configs/harbor-proxy-compose.yml"]
+  },
+  "agents": [{
+    "name": "integration.harbor_agent:PiAgentMcpBaseline",
+    "model_name": "openai/deepseek/deepseek-v4-flash",
+    "override_timeout_sec": 1800,
+    "kwargs": {"thinking": "high", "max_turns": 60}
+  }],
+  "tasks": [{"path": "bench/tasks/2262_easy_26_buy_only_net_30_no_adjacent_data"}]
+}

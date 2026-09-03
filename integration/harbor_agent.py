@@ -37,16 +37,9 @@ except ModuleNotFoundError as exc:
         return function
 
 
-async def _install_task_runtime(agent: Any, environment: BaseEnvironment) -> None:
+async def _install_task_mcp(agent: Any, environment: BaseEnvironment) -> None:
     root = Path(__file__).resolve().parents[1]
     wheelhouse = root / ".runtime" / "wheelhouse-py312"
-    runner = root / "integration" / "pi_odoo_runner.py"
-    sources = tuple(
-        root / "agent" / "src" / name for name in ("pi_ai", "pi_agent", "pi_coding")
-    )
-    for source in (*sources, runner):
-        if not source.exists():
-            raise RuntimeError(f"Pinned runtime input is missing: {source}")
     if not wheelhouse.is_dir():
         raise RuntimeError(
             "Pinned wheelhouse is missing; restore the snapshot release asset to "
@@ -61,15 +54,11 @@ async def _install_task_runtime(agent: Any, environment: BaseEnvironment) -> Non
             "echo 'seeded Odoo setup was not ready after 300s' >&2; exit 1"
         ),
     )
-    await agent.exec_as_root(
-        environment, command="mkdir -p /tmp/pi-odoo-harness/agent/src"
-    )
-    for source in sources:
-        await environment.upload_dir(
-            source, f"/tmp/pi-odoo-harness/agent/src/{source.name}"
-        )
-    await environment.upload_file(runner, "/tmp/pi-odoo-runner.py")
     await environment.upload_dir(wheelhouse, "/tmp/pi-odoo-wheelhouse")
+    await agent.exec_as_root(environment, command="mkdir -p /tmp/pi-odoo-mcp-source")
+    await environment.upload_dir(
+        root / "mcp/src/odoo_mcp", "/tmp/pi-odoo-mcp-source/odoo_mcp"
+    )
     packages = shlex.join(
         (
             "odoo-mcp==1.3.2",
@@ -96,6 +85,26 @@ async def _install_task_runtime(agent: Any, environment: BaseEnvironment) -> Non
     )
 
 
+async def _install_task_runtime(agent: Any, environment: BaseEnvironment) -> None:
+    root = Path(__file__).resolve().parents[1]
+    runner = root / "integration" / "pi_odoo_runner.py"
+    sources = tuple(
+        root / "agent" / "src" / name for name in ("pi_ai", "pi_agent", "pi_coding")
+    )
+    for source in (*sources, runner):
+        if not source.exists():
+            raise RuntimeError(f"Pinned runtime input is missing: {source}")
+    await _install_task_mcp(agent, environment)
+    await agent.exec_as_root(
+        environment, command="mkdir -p /tmp/pi-odoo-harness/agent/src"
+    )
+    for source in sources:
+        await environment.upload_dir(
+            source, f"/tmp/pi-odoo-harness/agent/src/{source.name}"
+        )
+    await environment.upload_file(runner, "/tmp/pi-odoo-runner.py")
+
+
 async def _start_task_mcp(agent: Any, environment: BaseEnvironment) -> None:
     await agent.exec_as_agent(
         environment,
@@ -104,7 +113,7 @@ async def _start_task_mcp(agent: Any, environment: BaseEnvironment) -> None:
             "test -s /etc/odoo/api_key && break; sleep 1; done; "
             "test -s /etc/odoo/api_key || { echo 'Odoo API key was not ready' >&2; exit 1; }; "
             'odoo_key="$(cat /etc/odoo/api_key)"; '
-            "export ODOO_URL=http://127.0.0.1:8069 ODOO_DB=bench ODOO_USERNAME=admin "
+            "export PYTHONPATH=/tmp/pi-odoo-mcp-source ODOO_URL=http://127.0.0.1:8069 ODOO_DB=bench ODOO_USERNAME=admin "
             'ODOO_PASSWORD="$odoo_key" ODOO_API_KEY="$odoo_key" ODOO_TRANSPORT=json2 '
             "ODOO_JSON2_DATABASE_HEADER=1 ODOO_MCP_ENABLE_WRITES=1 "
             "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS=sale.order.action_confirm,"
@@ -191,7 +200,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         await self.exec_as_agent(
             environment,
             command=(
-                "python3 /tmp/pi-odoo-runner.py "
+                "set -o pipefail; python3 /tmp/pi-odoo-runner.py "
                 "--instruction-file /tmp/pi-odoo-instruction.txt "
                 "--usage-file /logs/agent/pi-agent-usage.json "
                 f"--max-turns {self._max_turns} "

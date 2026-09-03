@@ -319,7 +319,11 @@ def list_models(
 
 
 @mcp.tool(
-    description="Get field metadata for a specific Odoo model",
+    description=(
+        "Get bounded field metadata for an Odoo model. Defaults to the top "
+        "max_fields business-relevant fields. Use field_names for exact fields; "
+        "relevance=null explicitly requests the complete model schema."
+    ),
     annotations=READ_ONLY_TOOL,
     structured_output=True,
 )
@@ -327,7 +331,7 @@ def get_model_fields(
     ctx: Context,
     model: str,
     field_names: Optional[List[str]] = None,
-    relevance: Optional[str] = None,
+    relevance: Optional[str] = "top",
     max_fields: int = DEFAULT_MAX_RELEVANT_FIELDS,
     instance: Optional[str] = None,
 ) -> GetModelFieldsResponse:
@@ -335,8 +339,9 @@ def get_model_fields(
     Read field definitions for a model.
 
     Prefer this read-only tool over execute_method for model introspection.
-    Pass ``relevance="top"`` to rank wide models by business relevance and
-    return only the ``max_fields`` most useful fields (with their scores).
+    By default rank wide models by business relevance and return only the
+    ``max_fields`` most useful fields. Explicit field_names are returned exactly;
+    pass relevance=None explicitly when the complete model schema is needed.
     """
     try:
         if relevance not in (None, "top"):
@@ -360,7 +365,7 @@ def get_model_fields(
                        else meta)
                 for name, meta in fields.items()
             }
-        if relevance == "top":
+        if relevance == "top" and not field_names:
             ranking = rank_relevant_fields(fields, max_fields=max_fields)
             ranked_names = [entry["field"] for entry in ranking]
             fields = {name: fields[name] for name in ranked_names}

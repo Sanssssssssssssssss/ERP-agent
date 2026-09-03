@@ -23,11 +23,49 @@ from pi_coding.resources import PiResourcePaths
 from pi_coding.session import CodingSession, CodingSessionConfig
 
 CONTEXT_WINDOW = 128_000
-MAX_OUTPUT_TOKENS = 16_384
+MODEL_COMPAT = {
+    "supportsReasoningEffort": True,
+    "requiresReasoningContentOnAssistantMessages": True,
+}
 MCP_ONLY_POLICY = (
     "Use mcp_odoo tools for every Odoo operation. Do not access Odoo through "
     "shell commands, direct HTTP, XML-RPC, JSON-2, PostgreSQL, or Python libraries."
 )
+
+
+class RequestReceipts:
+    """Keep actual model request bodies locally; never persist auth headers."""
+
+    def __init__(self, directory: Path) -> None:
+        self.directory = directory
+        self.number = 0
+
+    async def before_provider_request(self, payload: object) -> object:
+        self.number += 1
+        self.directory.mkdir(parents=True, exist_ok=True)
+        (self.directory / f"{self.number:04d}.request.json").write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+        )
+        return payload
+
+    async def before_provider_headers(self, headers: dict) -> dict:
+        return headers
+
+    async def after_provider_response(self, status: int, headers: dict) -> None:
+        (self.directory / f"{self.number:04d}.response.json").write_text(
+            json.dumps(
+                {
+                    "status": status,
+                    "request_ids": {
+                        key: value
+                        for key, value in headers.items()
+                        if key.lower()
+                        in {"x-request-id", "request-id", "x-generation-id"}
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
 
 
 def arguments() -> argparse.Namespace:
@@ -63,12 +101,13 @@ async def run(args: argparse.Namespace) -> None:
             base_url=base_url,
             reasoning_effort=thinking,
             thinking_format="openai",
-            compat={"supportsReasoningEffort": True},
+            compat=MODEL_COMPAT,
             provider_name=provider_name,
             timeout_seconds=180,
             max_retries=0,
-            max_tokens=MAX_OUTPUT_TOKENS,
+            max_tokens=None,
             infer_api_from_model=False,
+            provider_hooks=RequestReceipts(args.session_file.parent / "requests"),
         )
     )
     try:
@@ -81,12 +120,11 @@ async def run(args: argparse.Namespace) -> None:
                 models=(model,),
                 default_model=model,
                 context_windows={model: CONTEXT_WINDOW},
-                compat={"supportsReasoningEffort": True},
+                compat=MODEL_COMPAT,
                 model_metadata={
                     model: ProviderModelMetadata(
                         reasoning=True,
                         context_window=CONTEXT_WINDOW,
-                        max_tokens=MAX_OUTPUT_TOKENS,
                     )
                 },
                 timeout_seconds=180,
@@ -100,6 +138,7 @@ async def run(args: argparse.Namespace) -> None:
             session = await CodingSession.load(
                 CodingSessionConfig(
                     provider=provider,
+                    owns_initial_provider=True,
                     model=model,
                     storage=JsonlSessionStorage(args.session_file),
                     cwd=cwd,
@@ -134,7 +173,10 @@ async def run(args: argparse.Namespace) -> None:
                             "reasoning": thinking,
                             "mcpToolCount": len(toolset.tools),
                             "toolNames": [tool.name for tool in session.tools],
-                            "maxOutputTokens": MAX_OUTPUT_TOKENS,
+                            "maxOutputTokens": None,
+                            "requestReceipts": str(
+                                args.session_file.parent / "requests"
+                            ),
                             "maxTurns": args.max_turns,
                             "runtime": "CodingSession",
                             "sessionFile": str(args.session_file),

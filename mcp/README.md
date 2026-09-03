@@ -1,5 +1,7 @@
 # Odoo MCP
 
+Lab modification (2026-09-03): `get_model_fields` defaults to `relevance="top"`, so `max_fields` actually bounds discovery responses. Explicit `field_names` remain exact, and `relevance=null` still requests the full schema. Both lab controls use this same source patch; see the root README for the regression evidence.
+
 <!-- mcp-name: io.github.erpipe-org/mcp-odoo -->
 
 ERPipe is the managed Odoo MCP gateway from the maintainer of [`erpipe-org/mcp-odoo`](https://github.com/erpipe-org/mcp-odoo), formerly [`tuanle96/mcp-odoo`](https://github.com/tuanle96/mcp-odoo); the Python project remains the self-hosted server.
