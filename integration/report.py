@@ -267,8 +267,11 @@ def write_index(destination: Path) -> Path:
         summary = read_json(path)
         name = path.parent.name
         usage, actions = summary["usage"], summary["actions"]
+        terminal = summary["agent_termination"]["kind"]
+        if not summary["receipts"]["harbor_result"]:
+            terminal = f"INCOMPLETE / last response: {terminal}"
         values = [
-            summary["agent_termination"]["kind"],
+            terminal,
             summary["outcome"]["reward"],
             actions["model_calls"],
             actions["mcp_calls"],

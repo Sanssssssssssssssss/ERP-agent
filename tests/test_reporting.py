@@ -163,6 +163,11 @@ class ReportingTest(unittest.TestCase):
                     self.assertNotIn("do-not-export", json.dumps(calls))
                     self.assertEqual((output / "harbor/reward.txt").read_text(), "0\n")
             self.assertIn("Native Pi", write_index(root / "reports").read_text())
+            (trial / "result.json").unlink()
+            report_trial(trial, output)
+            self.assertIn(
+                "INCOMPLETE / last response:", write_index(root / "reports").read_text()
+            )
             rows.append({"type": "unexpected", "id": "x", "timestamp": stamp})
             source.write_text("\n".join(json.dumps(row) for row in rows))
             with self.assertRaisesRegex(ValueError, "Unsupported native entry"):
