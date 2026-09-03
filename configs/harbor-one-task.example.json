@@ -1,0 +1,26 @@
+{
+  "job_name": "pi-odoo-mcp-smoke",
+  "jobs_dir": ".runtime/jobs",
+  "agent_setup_timeout_multiplier": 4.0,
+  "environment_build_timeout_multiplier": 4.0,
+  "n_concurrent_trials": 1,
+  "quiet": true,
+  "environment": {
+    "type": "docker"
+  },
+  "agents": [
+    {
+      "name": "integration.harbor_agent:PiAgentMcpBaseline",
+      "model_name": "openai/replace-with-model-id",
+      "kwargs": {
+        "thinking": "high",
+        "max_turns": 100
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "path": "bench/tasks/2008_easy_02_buy_only_immediate_invoicing"
+    }
+  ]
+}

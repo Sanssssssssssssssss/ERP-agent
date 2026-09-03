@@ -1,0 +1,12 @@
+services:
+  main:
+    build:
+      args:
+        HTTP_PROXY: ${ERP_HARBOR_PROXY:?set ERP_HARBOR_PROXY}
+        HTTPS_PROXY: ${ERP_HARBOR_PROXY:?set ERP_HARBOR_PROXY}
+    environment:
+      HTTP_PROXY: ${ERP_HARBOR_PROXY:?set ERP_HARBOR_PROXY}
+      HTTPS_PROXY: ${ERP_HARBOR_PROXY:?set ERP_HARBOR_PROXY}
+      NO_PROXY: 127.0.0.1,localhost,host.docker.internal
+    extra_hosts:
+      - host.docker.internal:host-gateway
