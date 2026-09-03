@@ -6,7 +6,7 @@ This is the clean, standalone research surface for one experiment: run the compl
 
 完整的[七阶段实现与 A/B 验收路线图](EXPERIMENT.md)已按代码整理：每阶段包括迁移文件、实现要求、验收方法、方案级反例和回退边界。普通实现错误继续修到通过，不再把“第一轮修复失败”一概当作移植方案失败。只做 A/B，Compiler 仅保留未来接口规划。
 
-**第一阶段已验收，开始第二阶段。** r3 A/B 均自然结束、100 分、62 / 62 条适用规则通过，无 Harbor 异常；B 实际执行 88 次原生读取、75 次 MCP 调用。真实权限/返回值差分 28 项、550 张表与 445 个文件的快照恢复、931 项 MCP 与 21 项集成检查，以及独立子 agent 最终复核均通过。当前只验收了四个原生读取工具，尚非完整无 MCP Harness；单对结果不证明性能提升。用户已授权功能优先；两组共同使用 24 小时遗留进程兜底，不限轮数和输出 token，不做 C 或 Compiler。代码检查点保存在私有 GitHub，详细回执、token 和历史失败见 [STAGE1_RESULT.md](STAGE1_RESULT.md)。后面的英文内容是已有基线和运行说明。
+**第二阶段已验收，开始第三阶段。** 11 个读取工具已有原生实现；真实 Odoo 双身份 gate 42/42 通过。第二阶段同快照 A/B 均自然结束、100 分、62 / 62 条适用规则通过；A 执行 125 次 MCP 分发，B 执行 40 次 MCP 与 55 次原生分发。确定性检查、原始调用/token 回执和独立复核均闭合。写入等未迁能力仍走 MCP，尚非最终无 MCP Harness；单对结果不证明性能、token 或质量提升。仍只做 A/B，不做 C 或 Compiler。第一、第二阶段证据分别见 [STAGE1_RESULT.md](STAGE1_RESULT.md) 和 [STAGE2_RESULT.md](STAGE2_RESULT.md)。后面的英文内容是已有基线和运行说明。
 
 ## What is here
 
