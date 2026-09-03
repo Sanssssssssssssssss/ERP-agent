@@ -6,7 +6,7 @@ This is the clean, standalone research surface for one experiment: run the compl
 
 完整的[七阶段实现与 A/B 验收路线图](EXPERIMENT.md)已按代码整理：每阶段包括迁移文件、实现要求、验收方法、方案级反例和回退边界。普通实现错误继续修到通过，不再把“第一轮修复失败”一概当作移植方案失败。只做 A/B，Compiler 仅保留未来接口规划。
 
-**第二阶段已验收，开始第三阶段。** 11 个读取工具已有原生实现；真实 Odoo 双身份 gate 42/42 通过。第二阶段同快照 A/B 均自然结束、100 分、62 / 62 条适用规则通过；A 执行 125 次 MCP 分发，B 执行 40 次 MCP 与 55 次原生分发。确定性检查、原始调用/token 回执和独立复核均闭合。写入等未迁能力仍走 MCP，尚非最终无 MCP Harness；单对结果不证明性能、token 或质量提升。仍只做 A/B，不做 C 或 Compiler。第一、第二阶段证据分别见 [STAGE1_RESULT.md](STAGE1_RESULT.md) 和 [STAGE2_RESULT.md](STAGE2_RESULT.md)。后面的英文内容是已有基线和运行说明。
+**第三阶段已验收，开始第四阶段。** 全部 11 个读取工具已有原生实现，World 现在能在模型上下文外记录身份隔离的观测、关系、版本、失效和语义回执。第三阶段真实 Odoo gate 为 42/42、0 模型调用；同快照 A/B 均自然结束、100 分、62 / 62 条适用规则通过，全部 114 个模型请求为 HTTP 200。project 组的 65 条投影回执全部是 no-op，因此没有证明 token 收益，投影继续显式 opt-in、默认 off；只晋升 World record core。写入等未迁能力仍走 MCP，尚非最终无 MCP Harness。仍只做 A/B，不做 C 或 Compiler。证据见 [STAGE1_RESULT.md](STAGE1_RESULT.md)、[STAGE2_RESULT.md](STAGE2_RESULT.md) 和 [STAGE3_RESULT.md](STAGE3_RESULT.md)。后面的英文内容是已有基线和运行说明。
 
 ## What is here
 
@@ -15,7 +15,7 @@ agent/        pinned Pi Agent for Python source and tests
 mcp/          pinned odoo-mcp source and tests
 bench/        ERP-Bench generator plus 300 executable Harbor tasks
 integration/  Python/native Pi adapters, request receipts, offline run reports
-odoo_runtime/ native Odoo read capabilities and JSON-2 boundary (stage 2 in progress)
+odoo_runtime/ native Odoo reads, JSON-2 boundary, and World receipts (stage 3 accepted)
 configs/      two single-case baselines and optional Docker proxy overlay
 patches/      the exact three-task Odoo 19 image-pin patch
 .runtime/     ignored local wheelhouse, jobs, logs, and environments
@@ -170,7 +170,7 @@ The original 51-wheel release is a task-image supplement, not a complete clean-h
 
 Why did Python encounter it and native Pi not? Python called `get_model_fields(model="res.company", max_fields=10)`. MCP silently ignored `max_fields` unless `relevance="top"`, returning 177 fields. Its advertised description did not explain that condition. The native recovery trajectory never requested `res.company` metadata and never included `chart_template`. This is a tool-interface/trajectory difference, not evidence that Python's chat protocol is inherently rejected.
 
-The shared MCP fix defaults field discovery to the existing `top` ranker and documents the bound in its advertised description. Explicit `field_names` retain exact technical fields; `relevance=null` still exposes the complete schema. There is no country-specific blacklist or task-answer filter. Explicitly requesting the full enum can still encounter the upstream policy. Both controls receive the same fix. Private probe bodies/responses remain under `.runtime/artifacts/request-probe/`; diagnostic probes used a 128-token response ceiling, unlike the uncapped baseline runs.
+The shared MCP fix defaults field discovery to the existing `top` ranker and now constrains the `max_fields` parameter to 1..30 in the advertised schema, MCP body, and native reader. It controls the ranked path; explicit `field_names` within the valid parameter contract retain exact technical fields, while `relevance=null` still exposes the complete schema. There is no country-specific blacklist or task-answer filter. Explicitly requesting the full enum can still encounter the upstream policy. Stage 3 r2 then completed 49 + 65 requests, including both request 23 checkpoints, with HTTP 200 throughout; this supports the mitigation but is not a fixed old/new request replay. Both controls receive the same fix. Private probe bodies/responses remain under `.runtime/artifacts/request-probe/`; diagnostic probes used a 128-token response ceiling, unlike the uncapped baseline runs.
 
 **Native Pi's output cap was real SDK behavior.** Pi 0.84.1 defaults a missing model `maxTokens` to 16,384. Merely deleting the config property restores that default. The local extension uses Pi's official `before_provider_request` hook to remove both `max_tokens` and `max_completion_tokens` from the actual outgoing body. It also records that body. Provider-side limits still apply.
 
