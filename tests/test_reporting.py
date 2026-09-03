@@ -12,6 +12,57 @@ from integration.report import load_entries, main, report_trial, write_index
 
 
 class ReportingTest(unittest.TestCase):
+    def test_local_turn_guard_is_visible_but_not_a_provider_call(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            trial = Path(directory) / "trial"
+            source = trial / "agent/pi-agent-session.jsonl"
+            source.parent.mkdir(parents=True)
+            rows = [
+                {"type": "session_info", "id": "s", "timestamp": 1.0},
+                {
+                    "type": "message",
+                    "id": "response",
+                    "parent_id": "s",
+                    "timestamp": 2.0,
+                    "message": {
+                        "role": "assistant",
+                        "provider": "test",
+                        "model": "test",
+                        "content": [],
+                        "stopReason": "toolUse",
+                        "usage": {"input": 10, "output": 2, "totalTokens": 12},
+                    },
+                },
+                {
+                    "type": "message",
+                    "id": "guard",
+                    "parent_id": "response",
+                    "timestamp": 3.0,
+                    "message": {
+                        "role": "assistant",
+                        "model": "test",
+                        "content": [],
+                        "stopReason": "error",
+                        "errorMessage": "Agent stopped after max_turns=1",
+                    },
+                },
+            ]
+            source.write_text("\n".join(json.dumps(row) for row in rows))
+            original = source.read_bytes()
+            output = Path(directory) / "report"
+            summary = report_trial(trial, output)
+            self.assertEqual(summary["agent_termination"]["kind"], "TURN_LIMIT")
+            self.assertEqual(summary["actions"]["model_calls"], 1)
+            self.assertEqual(summary["actions"]["assistant_entries"], 2)
+            self.assertEqual(summary["usage"]["unreported_error_calls"], 0)
+            self.assertEqual(summary["identity"]["provider"], "test")
+            self.assertEqual(len(json.loads((output / "requests.json").read_text())), 1)
+            self.assertIn(
+                "Agent stopped after max_turns=1",
+                (output / "session.html").read_text(encoding="utf-8"),
+            )
+            self.assertEqual(source.read_bytes(), original)
+
     def test_python_and_native_receipts_are_read_only_and_keep_failure_layers(
         self,
     ) -> None:

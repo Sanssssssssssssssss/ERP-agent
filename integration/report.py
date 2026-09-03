@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from pi_agent.messages import AssistantMessage, ToolResultMessage
-from pi_agent.session import MessageEntry
+from pi_agent.session import LabelEntry, MessageEntry
 from pi_agent.session.jsonl import entry_from_json_line
 from pi_coding.session_export import export_session_html
 from pi_coding.session_usage import collect_session_usage
@@ -129,6 +129,28 @@ def report_trial(trial: Path, destination: Path) -> dict:
     ]
     if not assistants:
         raise ValueError(f"No assistant messages in {source}")
+    last = assistants[-1].message
+    local_stops = {
+        entry.id: entry.message.error_message
+        for entry in assistants
+        if (entry.message.error_message or "").startswith(
+            "Agent stopped after max_turns="
+        )
+    }
+    # The loop persists its turn guard as an assistant error without an API call.
+    # Keep it visible as a local event in the derived viewer, not a billed request.
+    entries = [
+        LabelEntry(
+            id=entry.id,
+            parent_id=entry.parent_id,
+            timestamp=entry.timestamp,
+            label=f"Local control: {local_stops[entry.id]}",
+        )
+        if entry.id in local_stops
+        else entry
+        for entry in entries
+    ]
+    assistants = [entry for entry in assistants if entry.id not in local_stops]
     tool_results = [
         e.message
         for e in entries
@@ -193,19 +215,21 @@ def report_trial(trial: Path, destination: Path) -> dict:
             or message.usage.total_tokens > 0,
         )
         requests.append(row)
-    last = assistants[-1].message
     terminal = (
         "PROVIDER_ERROR" if last.stop_reason == "error" else last.stop_reason.upper()
     )
-    if "Content Exists Risk" in (last.error_message or ""):
+    if (last.error_message or "").startswith("Agent stopped after max_turns="):
+        terminal = "TURN_LIMIT"
+    elif "Content Exists Risk" in (last.error_message or ""):
         terminal = "PROVIDER_CONTENT_REJECTION"
     elif last.stop_reason == "length":
         terminal = "OUTPUT_LIMIT"
     elif last.stop_reason in {"stop", "toolUse"} and not result_path.is_file():
         terminal = "UNFINISHED"
     summary["identity"]["job"] = trial.parent.name
-    summary["identity"]["provider"] = last.provider
-    summary["identity"]["model"] = last.model
+    last_model_response = assistants[-1].message if assistants else last
+    summary["identity"]["provider"] = last_model_response.provider
+    summary["identity"]["model"] = last_model_response.model
     summary["outcome"]["stop_reason"] = last.stop_reason
     summary["harbor_failure"] = summary.pop("failure")
     summary["agent_termination"] = {
@@ -213,8 +237,11 @@ def report_trial(trial: Path, destination: Path) -> dict:
         "stop_reason": last.stop_reason,
         "error": last.error_message,
     }
+    summary["local_control_events"] = list(local_stops.values())
     summary["actions"].update(
+        turns=len(assistants),
         model_calls=len(assistants),
+        assistant_entries=len(assistants) + len(local_stops),
         tool_calls=sum(count for _, count in usage.tool_calls),
         mcp_calls=sum(
             count for name, count in usage.tool_calls if name.startswith("mcp_odoo_")

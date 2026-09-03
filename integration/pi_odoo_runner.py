@@ -95,6 +95,7 @@ async def run(args: argparse.Namespace) -> None:
     args.usage_file.parent.mkdir(parents=True, exist_ok=True)
     provider_name = os.environ.get("LLM_PROVIDER", "openai-compatible")
     thinking = os.environ.get("LLM_THINKING_TYPE", "high")
+    receipts = RequestReceipts(args.session_file.parent / "requests")
     provider = OpenAICompatibleProvider(
         OpenAICompatibleConfig(
             api_key=api_key,
@@ -107,7 +108,7 @@ async def run(args: argparse.Namespace) -> None:
             max_retries=0,
             max_tokens=None,
             infer_api_from_model=False,
-            provider_hooks=RequestReceipts(args.session_file.parent / "requests"),
+            provider_hooks=receipts,
         )
     )
     try:
@@ -208,7 +209,8 @@ async def run(args: argparse.Namespace) -> None:
                     "reasoning": sum(
                         message.usage.reasoning or 0 for message in assistant
                     ),
-                    "modelCalls": len(assistant),
+                    "modelCalls": receipts.number,
+                    "assistantEntries": len(assistant),
                 }
                 args.usage_file.write_text(json.dumps(usage), encoding="utf-8")
             finally:

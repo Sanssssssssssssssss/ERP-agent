@@ -43,7 +43,7 @@ For the pinned Linux wheels used inside Harbor, download the `wheelhouse-mcp-py3
 
 ## Run the bounded Harbor experiment
 
-Install Harbor 0.22.0 in WSL/Linux and put `harbor` on `PATH`. Restore the wheelhouse above. For native Pi, restore the Node/nvm archives listed in `sources.lock.json` to `.runtime/runtime-bundles/`. Keep API settings (`LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_THINKING_TYPE`) in ignored `.runtime/control.env`; align the model name in the chosen config. Run one case per control:
+Install Harbor 0.22.0 in WSL/Linux and put `harbor` on `PATH`. Restore the wheelhouse above. For native Pi, restore the Node/nvm archives from release `baseline-fixes-2026-09-03` to `.runtime/runtime-bundles/` and check the hashes in `sources.lock.json`. Keep API settings (`LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_THINKING_TYPE`) in ignored `.runtime/control.env`; align the model name in the chosen config. Run one case per control:
 
 ```bash
 bash integration/run_baseline.sh configs/baseline-python.json
@@ -66,6 +66,26 @@ $env:PYTHONPATH="$PWD\agent\src"
 ```
 
 Writes are disabled by default in standalone Odoo MCP. Harbor enables writes only inside the disposable benchmark container. Never commit real `.env`, `odoo_config.json`, policy files containing private operational details, or job logs.
+
+## Post-fix business baselines (2026-09-03)
+
+**Both controls scored 100, with all 62 applicable ERP rules passing and no Harbor exception.** Each ran the same public synthetic task 2262 in a separate disposable Odoo container, using the same model, `high` reasoning, and patched MCP. The measured integration checkpoint is `73c50b13746ffea45253060c38f28c953f69d193`; subsequent reporting corrections do not change those raw runs.
+
+| Control | ERP score | Model / HTTP calls | MCP calls | Fresh input | Cached input | Output | Reasoning (within output) | End condition |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Python Pi | 100 | 60 | 119 | 49,175 | 2,016,640 | 131,134 | 115,199 | Local 60-turn guard after business completion; no natural final reply |
+| Native Pi | 100 | 49 | 78 | 47,115 | 1,610,496 | 102,793 | 90,190 | Natural `stop` |
+
+All **109 captured requests returned HTTP 200**, and none contained `max_tokens` or `max_completion_tokens`. Largest successful single outputs were 18,387 tokens (Python) and 16,942 (native), both followed by tool use. Native also made one `bash` call (`date`); Python used only MCP. The runs include 11 and 8 recoverable business-error payloads respectively, not erased from the transcripts. Total job times, including installation/verifier, were 22m33s and 17m46s. This is one passing case per control, not a multi-case quality estimate or matched-budget harness comparison.
+
+Python's loop appends a **synthetic assistant error** for its local turn guard: there are 61 assistant entries but only 60 actual model/HTTP calls. The reporter retains that event as a visible local-control label and reports `TURN_LIMIT`, not a provider failure or an unreported charged call. The original run's usage JSON/Harbor metadata used the old entry counter; the corrected report and actual request bodies are the authoritative call count. Future runner usage uses the request counter directly. The source sessions and scores were not rewritten.
+
+Local receipts:
+
+- Python: `.runtime/jobs/baseline-python-schema-bounds-no-cap-20260903-r2/2262_easy_26_buy_only_net_30_no__RYrBu4c`; session SHA-256 `3e66e192cc763cbc77b0376c845108293df94b347b33c647d7165bdc5d62a022`.
+- Native: `.runtime/jobs/baseline-native-schema-bounds-no-cap-20260903-r2/2262_easy_26_buy_only_net_30_no__KL96Gzy`; session SHA-256 `4d7a11a062ccaf4eff34197edfc4d1eb2ecdad5d4cdf243ad945795ca04dba22`.
+- Both task checksums: `e379100ad4708dd0be1f510cc443af3bf5c9d4b5334479415944494016791366`. Verifier `reward.txt=100.00` agrees with `verifier_details.json` and Harbor `result.json`.
+- Browse `.runtime/reports/index.html` for the two new runs plus retained historical failures. No further paid run was started after these results.
 
 ## Historical control smoke receipts (before fixes, 2026-09-03)
 
@@ -149,7 +169,7 @@ The shared MCP fix defaults field discovery to the existing `top` ranker and doc
 
 **Python instrumentation is preserved across session loading.** `CodingSession.load` previously replaced the runner's supplied provider, dropping its hooks/options. The integration now owns and retains the supplied provider, with no output cap and request receipts. Agent core source is unchanged. Native-compatible empty reasoning fields were aligned but are not claimed as the 400 fix.
 
-Deterministic checks: 7 integration tests pass, including real Python `CodingSession` + mocked HTTP and the native JavaScript hook; the full MCP server test module passes 225 tests. The real baseline outcome must be read separately from these mechanism tests.
+Deterministic checks: 8 integration tests pass, including real Python `CodingSession` + mocked HTTP, the native JavaScript hook, and correct local-turn-limit accounting. The **complete MCP suite passes 931 tests** in the isolated Linux environment (pytest 9.1.0, no inherited proxy variables, temporary files on the Linux filesystem). The initial Windows run had 929 passes plus a symlink-privilege failure and a task-order timing tie; a Linux run on the Windows mount inherited proxy/permission assumptions. No unrelated production code was changed to make those environment-sensitive tests pass. The real baseline outcome is separate from these mechanism tests.
 
 ## Rollback and provenance
 
