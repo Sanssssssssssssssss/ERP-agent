@@ -22,6 +22,9 @@ from pi_coding.provider_config import (
 from pi_coding.resources import PiResourcePaths
 from pi_coding.session import CodingSession, CodingSessionConfig
 
+from integration.native_reads import Json2ReadClient, NativeReads
+from integration.odoo_tools import route_tools
+
 CONTEXT_WINDOW = 128_000
 MODEL_COMPAT = {
     "supportsReasoningEffort": True,
@@ -78,7 +81,8 @@ def arguments() -> argparse.Namespace:
         default=Path("/logs/agent/pi-agent-session.jsonl"),
     )
     parser.add_argument("--mcp-url", default="http://127.0.0.1:8000/mcp")
-    parser.add_argument("--max-turns", type=int, default=100)
+    parser.add_argument("--max-turns", type=int, default=None)
+    parser.add_argument("--read-backend", choices=("mcp", "native"), default="mcp")
     return parser.parse_args()
 
 
@@ -88,7 +92,7 @@ async def run(args: argparse.Namespace) -> None:
     model = os.environ.get("LLM_MODEL")
     if not api_key or not base_url or not model:
         raise RuntimeError("LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL are required")
-    if args.max_turns < 1:
+    if args.max_turns is not None and args.max_turns < 1:
         raise ValueError("max-turns must be positive")
 
     args.session_file.parent.mkdir(parents=True, exist_ok=True)
@@ -113,6 +117,17 @@ async def run(args: argparse.Namespace) -> None:
     )
     try:
         async with McpToolSet(args.mcp_url) as toolset:
+            native = None
+            if getattr(args, "read_backend", "mcp") == "native":
+                os.environ["ODOO_REQUEST_LOG"] = str(args.session_file.parent / "odoo-native-requests.jsonl")
+                os.environ["ODOO_REQUEST_BACKEND"] = "native"
+                native = NativeReads(Json2ReadClient(
+                    url=os.environ["ODOO_URL"], db=os.environ["ODOO_DB"],
+                    username=os.environ["ODOO_USERNAME"], api_key=os.environ["ODOO_API_KEY"],
+                ))
+            toolset.tools = route_tools(
+                toolset.tools, args.session_file.parent / "tool-backends.jsonl", native
+            )
             cwd = Path.cwd()
             provider_config = OpenAICompatibleProviderConfig(
                 name=provider_name,
@@ -173,12 +188,18 @@ async def run(args: argparse.Namespace) -> None:
                             "model": model,
                             "reasoning": thinking,
                             "mcpToolCount": len(toolset.tools),
+                            "readBackend": getattr(args, "read_backend", "mcp"),
                             "toolNames": [tool.name for tool in session.tools],
                             "maxOutputTokens": None,
                             "requestReceipts": str(
                                 args.session_file.parent / "requests"
                             ),
                             "maxTurns": args.max_turns,
+                            "toolContractSha256": hashlib.sha256(json.dumps([
+                                {"name": tool.name, "description": tool.description,
+                                 "parameters": tool.parameters}
+                                for tool in toolset.tools
+                            ], sort_keys=True).encode()).hexdigest(),
                             "runtime": "CodingSession",
                             "sessionFile": str(args.session_file),
                             "systemPromptFile": str(system_prompt_path),

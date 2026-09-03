@@ -17,6 +17,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import xmlrpc.client
+from contextvars import ContextVar
+from pathlib import Path
 from typing import Any, cast
 
 from .diagnostics import (
@@ -26,6 +28,7 @@ from .diagnostics import (
 )
 
 SUPPORTED_TRANSPORTS = {"xmlrpc", "json2"}
+READ_CALL_ID: ContextVar[str | None] = ContextVar("odoo_read_call_id", default=None)
 
 
 def _retry_attempts() -> int:
@@ -298,6 +301,36 @@ class OdooClient:
         return payload
 
     def _json2_call(self, model: str, method: str, payload: dict[str, Any]) -> Any:
+        """Record physical requests separately from tool names, without credentials."""
+        started = time.monotonic()
+        status = None
+        error_type = None
+        try:
+            result = self._json2_call_once(model, method, payload)
+            status = 200
+            return result
+        except Exception as exc:
+            status = getattr(exc, "status_code", None)
+            error_type = type(exc).__name__
+            raise
+        finally:
+            path = os.environ.get("ODOO_REQUEST_LOG")
+            if path:
+                receipt = {
+                    "model": model, "method": method, "status": status,
+                    "backend": os.environ.get("ODOO_REQUEST_BACKEND", "mcp"),
+                    "tool_call_id": READ_CALL_ID.get(), "error_type": error_type,
+                    "elapsed_seconds": time.monotonic() - started,
+                }
+                try:
+                    # Each process uses its own file; one append per bounded row.
+                    with Path(path).open("a", encoding="utf-8") as stream:
+                        stream.write(json.dumps(receipt) + "\n")
+                except OSError:
+                    # Never turn a committed remote write into a retryable failure.
+                    print("Odoo request receipt could not be saved", file=sys.stderr)
+
+    def _json2_call_once(self, model: str, method: str, payload: dict[str, Any]) -> Any:
         """POST a JSON-2 request and return the decoded JSON result."""
         if not self.api_key:
             raise ValueError("JSON-2 API key is not configured")

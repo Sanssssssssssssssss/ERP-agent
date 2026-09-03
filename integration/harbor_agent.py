@@ -103,6 +103,7 @@ async def _install_task_runtime(agent: Any, environment: BaseEnvironment) -> Non
             source, f"/tmp/pi-odoo-harness/agent/src/{source.name}"
         )
     await environment.upload_file(runner, "/tmp/pi-odoo-runner.py")
+    await environment.upload_dir(root / "integration", "/tmp/pi-odoo-harness/integration")
 
 
 async def _start_task_mcp(agent: Any, environment: BaseEnvironment) -> None:
@@ -121,6 +122,7 @@ async def _start_task_mcp(agent: Any, environment: BaseEnvironment) -> None:
             "account.move.action_post ODOO_MCP_LOG_JSON=1 "
             "ODOO_MCP_LOG_FILE=/logs/agent/mcp-odoo.jsonl "
             "ODOO_MCP_AUDIT_LOG=/logs/agent/mcp-write-audit.jsonl; "
+            "export ODOO_REQUEST_LOG=/logs/agent/odoo-mcp-requests.jsonl ODOO_REQUEST_BACKEND=mcp; "
             "nohup odoo-mcp --transport streamable-http --host 127.0.0.1 --port 8000 "
             "--path /mcp >/logs/agent/mcp-odoo-server.log 2>&1 & "
             'echo "$!" >/logs/agent/mcp-odoo.pid; '
@@ -144,18 +146,22 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         self,
         *args: Any,
         version: str = PI_AGENT_COMMIT,
-        max_turns: int = 100,
+        max_turns: int | None = None,
         thinking: str = "high",
+        read_backend: str = "mcp",
         **kwargs: Any,
     ) -> None:
         if version != PI_AGENT_COMMIT:
             raise ValueError(
                 f"PiAgentMcpBaseline requires Pi Agent commit {PI_AGENT_COMMIT}"
             )
-        if max_turns < 1:
+        if max_turns is not None and max_turns < 1:
             raise ValueError("max_turns must be positive")
+        if read_backend not in {"mcp", "native"}:
+            raise ValueError("read_backend must be mcp or native")
         self._max_turns = max_turns
         self._thinking = thinking
+        self._read_backend = read_backend
         super().__init__(*args, version=version, **kwargs)
 
     @staticmethod
@@ -194,16 +200,19 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             "LLM_BASE_URL": base_url,
             "LLM_MODEL": model,
             "LLM_THINKING_TYPE": self._thinking,
-            "PYTHONPATH": "/tmp/pi-odoo-harness/agent/src",
+            "PYTHONPATH": "/tmp/pi-odoo-harness/agent/src:/tmp/pi-odoo-harness:/tmp/pi-odoo-mcp-source",
             "PI_AGENT_SESSION_ID": str(self.context_id or self.session_id or "trial"),
         }
         await self.exec_as_agent(
             environment,
             command=(
-                "set -o pipefail; python3 /tmp/pi-odoo-runner.py "
+                "set -o pipefail; export ODOO_URL=http://127.0.0.1:8069 ODOO_DB=bench ODOO_USERNAME=admin; "
+                'export ODOO_API_KEY="$(cat /etc/odoo/api_key)"; python3 /tmp/pi-odoo-runner.py '
                 "--instruction-file /tmp/pi-odoo-instruction.txt "
                 "--usage-file /logs/agent/pi-agent-usage.json "
-                f"--max-turns {self._max_turns} "
+                f"--read-backend {self._read_backend} "
+                + (f"--max-turns {self._max_turns} " if self._max_turns is not None else "")
+                +
                 "2>&1 | stdbuf -oL tee /logs/agent/pi-agent-odoo-mcp.jsonl"
             ),
             env=env,

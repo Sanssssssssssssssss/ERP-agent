@@ -63,6 +63,18 @@ class ReportingTest(unittest.TestCase):
             )
             self.assertEqual(source.read_bytes(), original)
 
+            (trial / "agent/tool-backends.jsonl").write_text(
+                json.dumps({"event": "start", "backend": "native", "tool": "mcp_odoo_read_record"}) + "\n"
+                + json.dumps({"event": "end", "backend": "native", "elapsed_seconds": 0.01}) + "\n"
+            )
+            (trial / "agent/odoo-native-requests.jsonl").write_text(
+                json.dumps({"backend": "native", "model": "res.partner", "method": "read", "error_type": None}) + "\n"
+            )
+            routed = report_trial(trial, Path(directory) / "routed-report")
+            self.assertEqual(routed["actions"]["mcp_calls"], 0)
+            self.assertEqual(routed["actions"]["native_read_calls"], 1)
+            self.assertEqual(routed["actions"]["odoo_json2_attempts"], 1)
+
     def test_python_and_native_receipts_are_read_only_and_keep_failure_layers(
         self,
     ) -> None:

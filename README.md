@@ -2,6 +2,14 @@
 
 This is the clean, standalone research surface for one experiment: run the completed Python Pi-style agent loop against Odoo exclusively through MCP, then score the resulting Odoo state with ERP-Bench. It deliberately does not include the ERP compiler or modify any source repository.
 
+## Stage-1 experiment branch: stopped before live A/B
+
+The approved [A/B-only plan](EXPERIMENT.md) has an opt-in native-read prototype
+on this branch. **It is not a validated replacement baseline.** Offline checks
+passed, but fixture snapshot preparation failed after one environment recovery
+attempt; work stopped before any paid A/B request. See [the result and exact
+pending issues](STAGE1_RESULT.md). No C group or Compiler was run.
+
 ## What is here
 
 ```text
@@ -50,7 +58,7 @@ bash integration/run_baseline.sh configs/baseline-python.json
 bash integration/run_baseline.sh configs/baseline-native.json
 ```
 
-Choose a fresh `job_name` for each run; never overwrite old jobs. Both checked-in baseline configs have a 1,800-second agent timeout; Python also has a 60-turn ceiling. Neither sends a client output-token cap. The native adapter is now local and does not import the old ERP repository. These are usable-control checks, not a matched-budget ablation: native Pi still has its ordinary coding tools, unlike the MCP-only Python runner.
+Choose a fresh `job_name` for each run; never overwrite old jobs. Both checked-in baseline configs have a 1,800-second agent timeout. This experiment branch removes Python's 60-turn ceiling; the historical results below retain their original limits. Neither sends a client output-token cap. The native adapter is now local and does not import the old ERP repository. These are usable-control checks, not a matched-budget ablation: native Pi still has its ordinary coding tools, unlike the MCP-only Python runner. The native-Pi control is retained for history but is not part of the current A/B experiment.
 
 The adapter waits for the task-local Odoo database, reads its short-lived API key inside the container, starts Odoo MCP on loopback, and records Pi session, MCP, actual request bodies/statuses, and token-usage receipts. Both controls upload the same **locally patched** MCP source on top of the pinned wheel dependencies. No compiler is involved.
 

@@ -250,6 +250,27 @@ def report_trial(trial: Path, destination: Path) -> dict:
         protocol_tool_errors=sum(message.is_error for message in tool_results),
         tools=dict(usage.tool_calls),
     )
+    destination.mkdir(parents=True, exist_ok=True)
+    backend_log = trial / "agent" / "tool-backends.jsonl"
+    if backend_log.is_file():
+        backend_events = [json.loads(line) for line in backend_log.read_text().splitlines() if line.strip()]
+        starts = [event for event in backend_events if event["event"] == "start"]
+        ends = [event for event in backend_events if event["event"] == "end"]
+        summary["actions"].update(
+            mcp_calls=sum(event["backend"] == "mcp" for event in starts),
+            native_read_calls=sum(event["backend"] == "native" for event in starts),
+            backend_count_source="executed dispatches, not tool-name prefixes",
+            unfinished_tool_dispatches=len(starts) - len(ends),
+        )
+        summary["receipts"]["tool_backends"] = str(backend_log.resolve())
+        write_json(destination / "tool_backends.json", backend_events)
+    rpc_logs = list((trial / "agent").glob("odoo-*-requests.jsonl"))
+    if rpc_logs:
+        rpc_events = [json.loads(line) for path in rpc_logs for line in path.read_text().splitlines() if line.strip()]
+        summary["actions"]["odoo_json2_attempts"] = len(rpc_events)
+        summary["actions"]["odoo_json2_errors"] = sum(event["error_type"] is not None for event in rpc_events)
+        summary["receipts"]["odoo_requests"] = [str(path.resolve()) for path in rpc_logs]
+        write_json(destination / "odoo_requests.json", rpc_events)
     summary["usage"].update(
         uncached_input_tokens=usage.total_fresh,
         cached_input_tokens=usage.total_cached,
