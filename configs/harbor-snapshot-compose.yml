@@ -1,0 +1,9 @@
+services:
+  main:
+    entrypoint: ["/bin/bash", "/lab-snapshot-entrypoint.sh"]
+    environment:
+      PI_ODOO_LAB_SNAPSHOT: "1"
+    volumes:
+      - ${PI_ODOO_LAB_ROOT:?set PI_ODOO_LAB_ROOT}/integration/snapshot_entrypoint.sh:/lab-snapshot-entrypoint.sh:ro
+      - ${PI_ODOO_LAB_ROOT:?set PI_ODOO_LAB_ROOT}/integration/snapshot.py:/lab-snapshot.py:ro
+      - ${PI_ODOO_SNAPSHOT:?set PI_ODOO_SNAPSHOT}:/snapshot:ro

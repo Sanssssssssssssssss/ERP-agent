@@ -50,7 +50,8 @@ async def _install_task_mcp(agent: Any, environment: BaseEnvironment) -> None:
         environment,
         command=(
             "set -euo pipefail; for attempt in $(seq 1 300); do "
-            "test -e /tmp/saas_setup_complete && exit 0; sleep 1; done; "
+            "test -e /tmp/saas_setup_complete && "
+            "curl -sf http://127.0.0.1:8069/web/version >/dev/null && exit 0; sleep 1; done; "
             "echo 'seeded Odoo setup was not ready after 300s' >&2; exit 1"
         ),
     )
@@ -79,7 +80,8 @@ async def _install_task_mcp(agent: Any, environment: BaseEnvironment) -> None:
     await agent.exec_as_root(
         environment,
         command=(
-            "uv pip install --system --no-index --find-links /tmp/pi-odoo-wheelhouse "
+            "uv venv --python /usr/bin/python3 --system-site-packages /tmp/pi-odoo-env && "
+            "uv pip install --python /tmp/pi-odoo-env/bin/python --no-index --find-links /tmp/pi-odoo-wheelhouse "
             f"{packages}"
         ),
     )
@@ -123,7 +125,7 @@ async def _start_task_mcp(agent: Any, environment: BaseEnvironment) -> None:
             "ODOO_MCP_LOG_FILE=/logs/agent/mcp-odoo.jsonl "
             "ODOO_MCP_AUDIT_LOG=/logs/agent/mcp-write-audit.jsonl; "
             "export ODOO_REQUEST_LOG=/logs/agent/odoo-mcp-requests.jsonl ODOO_REQUEST_BACKEND=mcp; "
-            "nohup odoo-mcp --transport streamable-http --host 127.0.0.1 --port 8000 "
+            "nohup /tmp/pi-odoo-env/bin/odoo-mcp --transport streamable-http --host 127.0.0.1 --port 8000 "
             "--path /mcp >/logs/agent/mcp-odoo-server.log 2>&1 & "
             'echo "$!" >/logs/agent/mcp-odoo.pid; '
             'for attempt in $(seq 1 30); do python3 -c "import socket; '
@@ -149,6 +151,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         max_turns: int | None = None,
         thinking: str = "high",
         read_backend: str = "mcp",
+        snapshot_sha256: str | None = None,
         **kwargs: Any,
     ) -> None:
         if version != PI_AGENT_COMMIT:
@@ -162,6 +165,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         self._max_turns = max_turns
         self._thinking = thinking
         self._read_backend = read_backend
+        self._snapshot_sha256 = snapshot_sha256
         super().__init__(*args, version=version, **kwargs)
 
     @staticmethod
@@ -178,6 +182,14 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         environment: BaseEnvironment,
         context: AgentContext,
     ) -> None:
+        if self._snapshot_sha256:
+            result = await self.exec_as_agent(
+                environment, command="cat /logs/agent/snapshot-receipt.json",
+            )
+            receipt = json.loads(result.stdout or "{}")
+            if (receipt.get("status") != "verified"
+                    or receipt.get("snapshot_sha256") != self._snapshot_sha256):
+                raise RuntimeError("Verified matching snapshot is required before any model call")
         await _start_task_mcp(self, environment)
         if not self.model_name or "/" not in self.model_name:
             raise ValueError("Model name must be in the format provider/model_name")
@@ -207,7 +219,9 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             environment,
             command=(
                 "set -o pipefail; export ODOO_URL=http://127.0.0.1:8069 ODOO_DB=bench ODOO_USERNAME=admin; "
-                'export ODOO_API_KEY="$(cat /etc/odoo/api_key)"; python3 /tmp/pi-odoo-runner.py '
+                'export ODOO_API_KEY="$(cat /etc/odoo/api_key)"; '
+                'export ODOO_PASSWORD="$ODOO_API_KEY" ODOO_TRANSPORT=json2; '
+                '/tmp/pi-odoo-env/bin/python /tmp/pi-odoo-runner.py '
                 "--instruction-file /tmp/pi-odoo-instruction.txt "
                 "--usage-file /logs/agent/pi-agent-usage.json "
                 f"--read-backend {self._read_backend} "
@@ -231,4 +245,6 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             "model_calls": usage.get("modelCalls"),
             "pi_agent_commit": PI_AGENT_COMMIT,
             "mcp_odoo_commit": MCP_ODOO_COMMIT,
+            "read_backend": self._read_backend,
+            "snapshot_sha256": self._snapshot_sha256,
         }

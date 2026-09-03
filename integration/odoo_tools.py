@@ -12,9 +12,10 @@ from pathlib import Path
 
 from pydantic_core import to_json
 
+from pi_agent.messages import TextContent
 from pi_agent.tools import AgentToolResult
 
-from integration.native_reads import READ_RESPONSES, NativeReads
+from integration.native_reads import READ_RESPONSES, NativeReads, normalize_read_arguments
 from odoo_mcp.odoo_client import READ_CALL_ID
 
 
@@ -38,7 +39,8 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None):
             token = READ_CALL_ID.set(call_id)
             try:
                 if direct:
-                    raw = await asyncio.to_thread(native.call, name, dict(arguments))
+                    normalized = normalize_read_arguments(name, dict(arguments))
+                    raw = await asyncio.to_thread(native.call, name, normalized)
                     structured = READ_RESPONSES[name].model_validate(raw).model_dump(
                         mode="json", by_alias=True
                     )
@@ -48,6 +50,19 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None):
                     )
                 else:
                     result = await tool.execute(call_id, arguments, signal, on_update)
+                if name == "health_check":
+                    # A0: keep process-local counters in receipts, not model context.
+                    # Policy/permission fields remain visible and unchanged in both arms.
+                    with log_path.with_name("health-process-telemetry.jsonl").open("a", encoding="utf-8") as stream:
+                        stream.write(json.dumps({"tool_call_id": call_id, "result": result.model_dump(mode="json")}) + "\n")
+                    result = result.model_copy(deep=True)
+                    payload = json.loads(result.text)
+                    for data in (payload, (result.details or {}).get("structuredContent")):
+                        if isinstance(data, dict):
+                            data.get("runtime", {}).pop("n_plus_one", None)
+                            for key in ("busiest", "over_budget_totals"):
+                                data.get("rate_limits", {}).pop(key, None)
+                    result.content = [TextContent(text=to_json(payload, fallback=str, indent=2).decode())]
                 event["result_sha256"] = hashlib.sha256(result.text.encode()).hexdigest()
                 return result
             except BaseException as exc:

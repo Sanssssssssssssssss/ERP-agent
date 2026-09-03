@@ -6,7 +6,12 @@ Copyright (c) 2025 Lê Anh Tuấn. Distributed under mcp/LICENSE (MIT).
 
 from __future__ import annotations
 
-from typing import Any
+import inspect
+import json
+from functools import cache
+from typing import Any, get_type_hints
+
+from pydantic import create_model
 
 from odoo_mcp.field_policy import get_field_policy
 from odoo_mcp.field_ranking import (
@@ -15,7 +20,7 @@ from odoo_mcp.field_ranking import (
     rank_relevant_fields,
     select_smart_fields,
 )
-from odoo_mcp.odoo_client import OdooClient
+from odoo_mcp.odoo_client import OdooClient, build_odoo_client, load_instances_config
 from odoo_mcp.rate_limit import check_rate
 from odoo_mcp.schema_cache import _build_schema_cache
 from odoo_mcp.schemas import (
@@ -39,12 +44,49 @@ READ_RESPONSES = {
 }
 
 
+@cache
+def _read_arguments_model(name: str):
+    function = getattr(NativeReads, name)
+    hints = get_type_hints(function)
+    fields = {
+        key: (hints[key], ... if param.default is inspect.Parameter.empty else param.default)
+        for key, param in inspect.signature(function).parameters.items() if key != "self"
+    }
+    return create_model(f"{name}Arguments", **fields, instance=(str | None, None))
+
+
+def normalize_read_arguments(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Match the pinned MCP argument boundary without importing its SDK.
+
+    Stage-1 compatibility includes the SDK treating optional string 'null' as
+    None. Changing that behavior is a separate common-baseline change.
+    """
+    model = _read_arguments_model(name)
+    parsed = dict(arguments)
+    for key, field in model.model_fields.items():
+        value = parsed.get(key)
+        if field.annotation is not str and isinstance(value, str):
+            try:
+                decoded = json.loads(value)
+            except json.JSONDecodeError:
+                continue
+            if decoded is None or isinstance(decoded, (list, dict)):
+                parsed[key] = decoded
+    try:
+        return model.model_validate(parsed).model_dump()
+    except ValueError as exc:
+        raise RuntimeError(f"Error executing tool {name}: {exc}") from exc
+
+
 class Json2ReadClient(OdooClient):
     """Closed read-only facade over the existing, tested JSON-2 transport."""
 
-    def __init__(self, *, url: str, db: str, username: str, api_key: str, **kwargs):
+    def __init__(self, *, url: str, db: str, username: str, api_key: str | None = None,
+                 password: str = "", transport: str = "json2", **kwargs):
+        if transport != "json2":
+            raise ValueError("Native reads require the JSON-2 transport")
         super().__init__(
-            url, db, username, api_key, transport="json2", api_key=api_key, **kwargs
+            url, db, username, password, transport=transport, api_key=api_key, **kwargs
         )
 
     def _json2_call(self, model: str, method: str, payload: dict[str, Any]) -> Any:
@@ -66,6 +108,16 @@ class NativeReads:
         self.cache = _build_schema_cache()
         self.cache_hits = 0
         self.cache_misses = 0
+
+    @classmethod
+    def from_environment(cls) -> NativeReads:
+        """Use the reference configuration parser, including connection defaults."""
+        name, instances = load_instances_config()
+        if len(instances) != 1:
+            raise ValueError("Stage-1 native reads require exactly one configured instance")
+        return cls(build_odoo_client(
+            instances[name], name=name, client_type=Json2ReadClient,
+        ), instance=name)
 
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if name not in READ_RESPONSES:

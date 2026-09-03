@@ -8,12 +8,11 @@ writes data, and it is kept in a separate database from the A/B seed snapshot.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import os
 import subprocess
-import time
-from datetime import date, timedelta
+import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 
@@ -36,7 +35,7 @@ def provision_security(env):
         "perm_read": True, "perm_write": False, "perm_create": False, "perm_unlink": False,
     })
     key = env["res.users.apikeys"].sudo().with_user(user.id)._generate(
-        "rpc", "pi-read-gate", date.today() + timedelta(days=1)
+        "rpc", "pi-read-gate", datetime.now() + timedelta(days=1)
     )
     env.cr.commit()
     Path("/tmp/pi-read-gate-key").write_text(key)
@@ -46,7 +45,7 @@ def provision_security(env):
 
 async def run_gate():
     from pi_agent.mcp import McpToolSet
-    from integration.native_reads import Json2ReadClient, NativeReads
+    from integration.native_reads import NativeReads
     from integration.odoo_tools import route_tools
 
     root = Path("/logs/agent")
@@ -64,9 +63,11 @@ async def run_gate():
         ("search_records", {"model": "res.partner", "query": "PI_READ_VISIBLE", "limit": 2, "order": "id"}),
         ("search_records", {"model": "res.partner", "query": "PI_READ_VISIBLE", "limit": 2, "order": "id"}),
         ("search_records", {"model": "res.partner", "domain": "bad domain"}),
+        ("search_records", {"model": "res.partner", "query": "null", "fields": ["name"], "limit": 2}),
         ("read_record", {"model": "res.partner", "record_id": fixture["visible"], "fields": ["name", "email", "comment"]}),
         ("read_record", {"model": "res.partner", "record_id": fixture["hidden"], "fields": ["name"]}),
         ("read_record", {"model": "res.partner", "record_id": 2147483647, "fields": ["name"]}),
+        ("read_record", {"model": "res.partner", "record_id": fixture["visible"], "fields": ["name", "email"], "extra": "ignored"}),
     ]
     results = []
     processes = []
@@ -79,12 +80,12 @@ async def run_gate():
             environment = {
                 **os.environ, "ODOO_URL": "http://127.0.0.1:8069", "ODOO_DB": "bench_read_gate",
                 "ODOO_USERNAME": username, "ODOO_API_KEY": key, "ODOO_PASSWORD": key,
-                "ODOO_TRANSPORT": "json2", "ODOO_LANG": "en_US", "ODOO_MCP_ENABLE_WRITES": "0",
+                "ODOO_TRANSPORT": "json2", "ODOO_LOCALE": "en_US", "ODOO_MCP_ENABLE_WRITES": "0",
                 "ODOO_REQUEST_LOG": str(root / f"gate-{username}-mcp-rpc.jsonl"), "ODOO_REQUEST_BACKEND": "mcp",
             }
             with (root / f"gate-{username}-server.log").open("w") as log:
                 process = subprocess.Popen([
-                    "odoo-mcp", "--transport", "streamable-http", "--host", "127.0.0.1",
+                    str(Path(sys.executable).with_name("odoo-mcp")), "--transport", "streamable-http", "--host", "127.0.0.1",
                     "--port", str(port), "--path", "/mcp",
                 ], env=environment, stdout=log, stderr=subprocess.STDOUT)
             processes.append(process)
@@ -100,12 +101,10 @@ async def run_gate():
                     await asyncio.sleep(0.1)
             else:
                 raise TimeoutError("MCP gate server did not start")
+            os.environ.update(environment)
             os.environ["ODOO_REQUEST_LOG"] = str(root / f"gate-{username}-native-rpc.jsonl")
             os.environ["ODOO_REQUEST_BACKEND"] = "native"
-            native = NativeReads(Json2ReadClient(
-                url=environment["ODOO_URL"], db=environment["ODOO_DB"], username=username,
-                api_key=key, lang="en_US",
-            ))
+            native = NativeReads.from_environment()
             async with McpToolSet(f"http://127.0.0.1:{port}/mcp") as toolset:
                 a = {tool.name: tool for tool in route_tools(toolset.tools, root / f"gate-{username}-a.jsonl")}
                 b = {tool.name: tool for tool in route_tools(toolset.tools, root / f"gate-{username}-b.jsonl", native)}

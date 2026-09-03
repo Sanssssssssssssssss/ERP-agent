@@ -938,7 +938,10 @@ def load_config() -> dict[str, str]:
     return cast(dict[str, str], instances[default_name])
 
 
-def build_odoo_client(entry: dict[str, Any], *, name: str = "default") -> OdooClient:
+def build_odoo_client(
+    entry: dict[str, Any], *, name: str = "default",
+    client_type: type[OdooClient] | None = None,
+) -> OdooClient:
     """Build an OdooClient from a config entry, with env vars as fallback defaults."""
     timeout = int(entry.get("timeout") or os.environ.get("ODOO_TIMEOUT", "30"))
     verify_ssl_raw = entry.get("verify_ssl")
@@ -976,7 +979,7 @@ def build_odoo_client(entry: dict[str, Any], *, name: str = "default") -> OdooCl
     if lang:
         print(f"  Default locale: {lang}", file=sys.stderr)
 
-    return OdooClient(
+    return (client_type or OdooClient)(
         url=entry["url"],
         db=entry["db"],
         username=str(entry.get("username", "")),

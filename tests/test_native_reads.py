@@ -15,9 +15,12 @@ from unittest.mock import patch
 
 from odoo_mcp import server, tools_read
 from odoo_mcp.field_policy import FieldPolicy, ModelFieldRule
-from odoo_mcp.odoo_client import OdooClient
+from odoo_mcp.odoo_client import OdooClient, build_odoo_client, load_instances_config
 from odoo_mcp.schema_cache import _build_schema_cache
 from pi_agent.mcp import _agent_tool
+from pi_agent.tools import AgentTool, AgentToolResult
+from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import CallToolResult, TextContent
 
 from integration.native_reads import Json2ReadClient, NativeReads, READ_RESPONSES
 from integration.odoo_tools import route_tools
@@ -69,6 +72,22 @@ class FakeOdoo:
 
 
 class NativeReadsTest(unittest.TestCase):
+    def test_native_and_reference_share_connection_configuration(self):
+        environment = {
+            "ODOO_URL": "http://fixture", "ODOO_DB": "bench", "ODOO_USERNAME": "admin",
+            "ODOO_PASSWORD": "test-only", "ODOO_API_KEY": "test-only", "ODOO_TRANSPORT": "json2",
+        }
+        for overrides in ({}, {"ODOO_TIMEOUT": "37", "ODOO_LOCALE": "fr_FR",
+                               "ODOO_VERIFY_SSL": "0", "ODOO_JSON2_DATABASE_HEADER": "0"}):
+            with patch.dict(os.environ, {**environment, **overrides}, clear=True), patch.object(OdooClient, "_connect"):
+                name, instances = load_instances_config()
+                reference = build_odoo_client(instances[name])
+                candidate = NativeReads.from_environment().client
+                self.assertIsInstance(candidate, Json2ReadClient)
+                for field in ("url", "db", "username", "password", "api_key", "timeout", "transport", "verify_ssl", "json2_database_header", "lang"):
+                    self.assertEqual(getattr(reference, field), getattr(candidate, field), field)
+                self.assertEqual(candidate.timeout, int(overrides.get("ODOO_TIMEOUT", "30")))
+
     def test_gateway_imports_without_mcp_sdk_or_server(self):
         script = '''
 import importlib.abc, sys
@@ -173,10 +192,16 @@ print('MCP_FREE_CORE_IMPORT_OK')
     def test_agenttool_wire_parity_and_real_backend_receipts(self):
         async def check(directory):
             listed = await server.mcp.list_tools()
+            expected_client = FakeOdoo()
+            app = SimpleNamespace(schema_cache=_build_schema_cache())
             native = NativeReads(FakeOdoo())
             async def call_tool(name, arguments):
                 tool = server.mcp._tool_manager.get_tool(name)
-                return tool.fn_metadata.convert_result(native.call(name, arguments))
+                with patch.object(tools_read, "_resolve_odoo", return_value=("default", expected_client)), patch.object(tools_read, "_app_context", return_value=app):
+                    try:
+                        return await tool.run(arguments, None, convert_result=True)
+                    except ToolError as exc:
+                        return CallToolResult(isError=True, content=[TextContent(type="text", text=str(exc))])
             source = [_agent_tool(SimpleNamespace(call_tool=call_tool), tool, "mcp_odoo_") for tool in listed]
             a = route_tools(source, directory / "a.jsonl")
             b = route_tools(source, directory / "b.jsonl", native)
@@ -186,9 +211,44 @@ print('MCP_FREE_CORE_IMPORT_OK')
                 name = old.name.removeprefix("mcp_odoo_")
                 if name in READ_RESPONSES:
                     self.assertEqual((await old.execute(name, args[name])).model_dump(), (await new.execute(name, args[name])).model_dump())
+            a_by_name, b_by_name = {t.name: t for t in a}, {t.name: t for t in b}
+            for name, arguments in (
+                ("read_record", {"model": "res.partner", "record_id": 1, "extra": "ignored"}),
+                ("search_records", {"model": "res.partner", "query": "null"}),
+                ("search_records", {"model": "res.partner", "query": "literal"}),
+                ("search_records", {"model": "res.partner", "query": "[]"}),
+            ):
+                async def outcome(tool):
+                    try:
+                        return (await tool.execute(name, arguments)).model_dump()
+                    except RuntimeError as exc:
+                        return {"protocol_error": str(exc)}
+                self.assertEqual(await outcome(a_by_name[f"mcp_odoo_{name}"]), await outcome(b_by_name[f"mcp_odoo_{name}"]))
             starts = [json.loads(line) for line in (directory / "b.jsonl").read_text().splitlines() if json.loads(line)["event"] == "start"]
-            self.assertEqual(len(starts), 4)
+            self.assertEqual(len(starts), 8)
             self.assertTrue(all(event["backend"] == "native" for event in starts))
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(check(Path(directory)))
+
+    def test_health_projection_keeps_policy_and_original_telemetry(self):
+        async def check(directory):
+            results = []
+            for count in (0, 10):
+                payload = {"success": True, "tool": "health_check",
+                           "runtime": {"write_execution_enabled": False, "field_acl": {"enabled": True}, "n_plus_one": {"hot_models": [count]}},
+                           "rate_limits": {"mode": "off", "max_calls": 60, "window_seconds": 60,
+                                           "busiest": [count], "over_budget_totals": {"reads": count}}}
+                async def execute(*args, payload=payload, **kwargs):
+                    return AgentToolResult(content=json.dumps(payload), details={"structuredContent": copy.deepcopy(payload), "meta": None})
+                tool = AgentTool(name="mcp_odoo_health_check", label="Health", description="Health", parameters={}, execute_fn=execute)
+                results.append(await route_tools([tool], directory / "routes.jsonl")[0].execute(str(count), {}))
+            self.assertEqual(results[0].model_dump(), results[1].model_dump())
+            payload = json.loads(results[0].text)
+            self.assertFalse(payload["runtime"]["write_execution_enabled"])
+            self.assertEqual(payload["rate_limits"]["max_calls"], 60)
+            self.assertTrue(payload["runtime"]["field_acl"]["enabled"])
+            saved = [json.loads(line) for line in (directory / "health-process-telemetry.jsonl").read_text().splitlines()]
+            self.assertEqual(saved[1]["result"]["details"]["structuredContent"]["runtime"]["n_plus_one"]["hot_models"], [10])
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(check(Path(directory)))
 

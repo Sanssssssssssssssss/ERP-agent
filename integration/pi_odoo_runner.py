@@ -22,7 +22,7 @@ from pi_coding.provider_config import (
 from pi_coding.resources import PiResourcePaths
 from pi_coding.session import CodingSession, CodingSessionConfig
 
-from integration.native_reads import Json2ReadClient, NativeReads
+from integration.native_reads import NativeReads
 from integration.odoo_tools import route_tools
 
 CONTEXT_WINDOW = 128_000
@@ -121,10 +121,7 @@ async def run(args: argparse.Namespace) -> None:
             if getattr(args, "read_backend", "mcp") == "native":
                 os.environ["ODOO_REQUEST_LOG"] = str(args.session_file.parent / "odoo-native-requests.jsonl")
                 os.environ["ODOO_REQUEST_BACKEND"] = "native"
-                native = NativeReads(Json2ReadClient(
-                    url=os.environ["ODOO_URL"], db=os.environ["ODOO_DB"],
-                    username=os.environ["ODOO_USERNAME"], api_key=os.environ["ODOO_API_KEY"],
-                ))
+                native = NativeReads.from_environment()
             toolset.tools = route_tools(
                 toolset.tools, args.session_file.parent / "tool-backends.jsonl", native
             )
