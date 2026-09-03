@@ -100,6 +100,34 @@ class FakeOdoo:
 
 
 class NativeReadsTest(unittest.TestCase):
+    def test_world_identity_is_credential_scoped_without_recording_credentials(self):
+        environment = {
+            "ODOO_URL": "http://fixture", "ODOO_DB": "bench", "ODOO_USERNAME": "admin",
+            "ODOO_API_KEY": "first-secret", "ODOO_PASSWORD": "first-secret",
+            "ODOO_TRANSPORT": "json2",
+        }
+        with patch.object(OdooClient, "_connect"):
+            with patch.dict(os.environ, environment, clear=True):
+                first = NativeReads.from_environment().identity_context()
+            with patch.dict(os.environ, {**environment, "ODOO_API_KEY": "second-secret"}, clear=True):
+                second = NativeReads.from_environment().identity_context()
+        self.assertNotEqual(first["identity_id"], second["identity_id"])
+        self.assertNotEqual(first["credential_scope_sha256"], second["credential_scope_sha256"])
+        self.assertNotIn("secret", json.dumps([first, second]))
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native.jsonl"
+            path.write_text("\n".join(json.dumps(row) for row in (
+                {"tool_call_id": "call", "status": None, "error_type": "ConnectionError"},
+                {"tool_call_id": "call", "status": 200, "error_type": None},
+            )))
+            with patch.dict(os.environ, {"ODOO_REQUEST_LOG": str(path)}):
+                evidence = NativeReads.__new__(NativeReads).world_rpc_evidence("call")
+                empty = NativeReads.__new__(NativeReads).world_rpc_evidence("cache-only")
+            self.assertEqual(evidence["refs"][0]["completed_attempts"], 2)
+            self.assertIsNone(evidence["last_error_type"])
+            self.assertEqual(empty, {"status": "no_completed_attempt", "refs": []})
+
     def test_native_and_reference_share_connection_configuration(self):
         environment = {
             "ODOO_URL": "http://fixture", "ODOO_DB": "bench", "ODOO_USERNAME": "admin",
@@ -125,6 +153,7 @@ class NoMcp(importlib.abc.MetaPathFinder):
             raise AssertionError('MCP dependency imported: ' + fullname)
 sys.meta_path.insert(0, NoMcp())
 from odoo_runtime.reads import NativeReads, Json2ReadClient
+from odoo_runtime.world import WorldStore
 assert 'odoo_mcp.server' not in sys.modules
 print('MCP_FREE_CORE_IMPORT_OK')
 '''

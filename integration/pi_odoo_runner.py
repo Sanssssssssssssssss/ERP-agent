@@ -5,8 +5,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import inspect
 import json
 import os
+import sys
 from pathlib import Path
 
 from pi_agent.mcp import McpToolSet
@@ -23,7 +25,9 @@ from pi_coding.resources import PiResourcePaths
 from pi_coding.session import CodingSession, CodingSessionConfig
 
 from odoo_runtime.reads import NativeReads
+from odoo_runtime.world import WorldStore
 from integration.odoo_tools import route_tools
+from integration.world_context import project_messages
 
 CONTEXT_WINDOW = 128_000
 MODEL_COMPAT = {
@@ -83,6 +87,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--mcp-url", default="http://127.0.0.1:8000/mcp")
     parser.add_argument("--max-turns", type=int, default=None)
     parser.add_argument("--read-backend", choices=("mcp", "native"), default="mcp")
+    parser.add_argument("--world-mode", choices=("off", "record", "project"), default="off")
     return parser.parse_args()
 
 
@@ -94,6 +99,9 @@ async def run(args: argparse.Namespace) -> None:
         raise RuntimeError("LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL are required")
     if args.max_turns is not None and args.max_turns < 1:
         raise ValueError("max-turns must be positive")
+    world_mode = getattr(args, "world_mode", "off")
+    if world_mode not in {"off", "record", "project"}:
+        raise ValueError("world-mode must be off, record, or project")
 
     args.session_file.parent.mkdir(parents=True, exist_ok=True)
     args.usage_file.parent.mkdir(parents=True, exist_ok=True)
@@ -115,6 +123,7 @@ async def run(args: argparse.Namespace) -> None:
             provider_hooks=receipts,
         )
     )
+    world = None
     try:
         async with McpToolSet(args.mcp_url) as toolset:
             native = None
@@ -122,8 +131,16 @@ async def run(args: argparse.Namespace) -> None:
                 os.environ["ODOO_REQUEST_LOG"] = str(args.session_file.parent / "odoo-native-requests.jsonl")
                 os.environ["ODOO_REQUEST_BACKEND"] = "native"
                 native = NativeReads.from_environment()
+            if world_mode != "off":
+                try:
+                    world = WorldStore(
+                        args.session_file.parent / "world-observations.jsonl",
+                        projection_path=args.session_file.parent / "world-projections.jsonl",
+                    )
+                except Exception as exc:
+                    print(f"World initialization failed open: {type(exc).__name__}", file=sys.stderr)
             toolset.tools = route_tools(
-                toolset.tools, args.session_file.parent / "tool-backends.jsonl", native
+                toolset.tools, args.session_file.parent / "tool-backends.jsonl", native, world
             )
             cwd = Path.cwd()
             provider_config = OpenAICompatibleProviderConfig(
@@ -172,6 +189,16 @@ async def run(args: argparse.Namespace) -> None:
                     thinking_level=thinking,
                 )
             )
+            if world is not None and world_mode == "project":
+                existing_transform = session._harness.config.transform_context
+
+                async def project_context(messages, signal):
+                    projected = project_messages(world, messages)
+                    transformed = existing_transform(projected, signal) if existing_transform else projected
+                    return await transformed if inspect.isawaitable(transformed) else transformed
+
+                # The session owns refresh; only compose its existing hook for this run.
+                session._harness.config.transform_context = project_context
             try:
                 system_prompt_path = args.session_file.with_name(
                     "pi-agent-system-prompt.txt"
@@ -186,6 +213,7 @@ async def run(args: argparse.Namespace) -> None:
                             "reasoning": thinking,
                             "mcpToolCount": len(toolset.tools),
                             "readBackend": getattr(args, "read_backend", "mcp"),
+                            "worldMode": world_mode,
                             "toolNames": [tool.name for tool in session.tools],
                             "maxOutputTokens": None,
                             "requestReceipts": str(
@@ -229,11 +257,17 @@ async def run(args: argparse.Namespace) -> None:
                     ),
                     "modelCalls": receipts.number,
                     "assistantEntries": len(assistant),
+                    "worldMode": world_mode,
                 }
                 args.usage_file.write_text(json.dumps(usage), encoding="utf-8")
             finally:
                 await session.aclose()
     finally:
+        if world is not None:
+            try:
+                world.write_summary(args.session_file.parent / "world-summary.json")
+            except Exception as exc:
+                print(f"Derived world summary unavailable: {type(exc).__name__}", file=sys.stderr)
         await provider.aclose()
 
 

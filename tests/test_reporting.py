@@ -107,6 +107,7 @@ class ReportingTest(unittest.TestCase):
             self.assertEqual(summary["actions"]["assistant_entries"], 2)
             self.assertEqual(summary["usage"]["unreported_error_calls"], 0)
             self.assertEqual(summary["identity"]["provider"], "test")
+            self.assertTrue(summary["receipts"]["world_integrity"]["valid"])
             self.assertEqual(len(json.loads((output / "requests.json").read_text())), 1)
             self.assertIn(
                 "Agent stopped after max_turns=1",
@@ -122,6 +123,24 @@ class ReportingTest(unittest.TestCase):
             (trial / "agent/odoo-native-requests.jsonl").write_text(
                 json.dumps({"backend": "native", "model": "res.partner", "method": "read", "error_type": None}) + "\n"
             )
+            observation = {
+                "type": "world_observation", "receipt_id": "obs-1", "call_id": "call1",
+                "identity": {"identity_id": "identity-1"}, "outcome": {"success": True},
+                "targets": [{"model": "res.partner", "records": [{"id": 1}], "relations": []}],
+            }
+            projection = {
+                "type": "world_projection", "compacted_messages": 1,
+                "compacted_call_ids": ["call1"],
+                "original_bytes": 100, "projected_bytes": 40,
+            }
+            (trial / "agent/world-observations.jsonl").write_text(json.dumps(observation) + "\n")
+            (trial / "agent/world-projections.jsonl").write_text(json.dumps(projection) + "\n")
+            (trial / "agent/world-summary.json").write_text(json.dumps({
+                "observations": 1, "successful_observations": 1, "failed_observations": 0,
+                "records": 1, "relations": 0, "projection_calls": 1,
+                "projected_messages": 1, "projection_original_bytes": 100,
+                "projection_bytes": 40, "healthy": True,
+            }))
             (trial / "config.json").write_text(json.dumps({"agent": {"kwargs": {"read_backend": "native"}}}))
             (trial / "agent/snapshot-receipt.json").write_text(json.dumps({"status": "verified", "snapshot_sha256": "fixture"}))
             reports = Path(directory) / "routed-reports"
@@ -130,8 +149,34 @@ class ReportingTest(unittest.TestCase):
             self.assertEqual(routed["actions"]["native_read_calls"], 1)
             self.assertEqual(routed["actions"]["odoo_json2_attempts"], 1)
             self.assertEqual(routed["actions"]["native_cache_hits"], 2)
+            self.assertEqual(routed["actions"]["world_observations"], 1)
+            self.assertEqual(routed["actions"]["world_projected_messages"], 1)
+            self.assertTrue(routed["receipts"]["world_integrity"]["valid"])
             self.assertEqual(routed["identity"]["read_backend"], "native")
+            self.assertEqual(routed["identity"]["world_mode"], "off")
+            self.assertIn("world_observations", routed["receipts"])
             self.assertEqual(routed["receipts"]["snapshot"]["snapshot_sha256"], "fixture")
+            bad_summary = json.loads((trial / "agent/world-summary.json").read_text())
+            bad_summary["observations"] = 99
+            (trial / "agent/world-summary.json").write_text(json.dumps(bad_summary))
+            (trial / "config.json").write_text(json.dumps({"agent": {"kwargs": {
+                "read_backend": "native", "world_mode": "record",
+            }}}))
+            damaged_world = report_trial(trial, reports / "damaged-world")
+            self.assertEqual(damaged_world["actions"]["world_observations"], 1)
+            self.assertFalse(damaged_world["receipts"]["world_integrity"]["valid"])
+            self.assertEqual(
+                damaged_world["receipts"]["world_integrity"]["mismatches"]["observations"]["computed"], 1
+            )
+            bad_summary["observations"] = 1
+            (trial / "agent/world-summary.json").write_text(json.dumps(bad_summary))
+            broken_observation = {**observation, "call_id": "not-dispatched"}
+            (trial / "agent/world-observations.jsonl").write_text(json.dumps(broken_observation) + "\n")
+            unclosed_world = report_trial(trial, reports / "unclosed-world")
+            self.assertEqual(unclosed_world["receipts"]["world_integrity"]["missing_dispatch_call_ids"], ["call1"])
+            self.assertEqual(unclosed_world["receipts"]["world_integrity"]["orphan_observation_call_ids"], ["not-dispatched"])
+            self.assertIsNot(unclosed_world["agent_termination"]["natural_end"], True)
+            (trial / "agent/world-observations.jsonl").write_text(json.dumps(observation) + "\n")
             (trial / "config.json").write_text(json.dumps({"agent": {"kwargs": {"read_backend": "mcp"}}}))
             report_trial(trial, reports / "mcp")
             page = write_index(reports).read_text(encoding="utf-8")
@@ -184,6 +229,15 @@ class ReportingTest(unittest.TestCase):
             self.assertTrue(complete["agent_termination"]["natural_end"])
             self.assertEqual(complete["harbor_failure"]["exception_type"], "VerifierError")
             self.assertEqual(complete["verifier_rules"]["passed"], 62)
+
+            (trial / "config.json").write_text(json.dumps({"agent": {"kwargs": {
+                "read_backend": "mcp", "snapshot_sha256": "fixture", "world_mode": "record",
+            }}}))
+            host_result["agent_result"]["metadata"]["world_mode"] = "record"
+            (trial / "result.json").write_text(json.dumps(host_result))
+            incomplete_world = report_trial(trial, reports / "incomplete-world")
+            self.assertFalse(incomplete_world["agent_termination"]["natural_end"])
+            self.assertFalse(incomplete_world["receipts"]["world_integrity"]["valid"])
 
     def test_python_and_native_receipts_are_read_only_and_keep_failure_layers(
         self,

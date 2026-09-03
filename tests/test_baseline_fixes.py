@@ -111,12 +111,14 @@ class BaselineFixTest(unittest.TestCase):
             requests = []
 
             async def execute(*args, **kwargs):
-                return AgentToolResult(content='{"success":true}')
+                return AgentToolResult(content=json.dumps({
+                    "success": True, "result": {"id": 1, "name": "x" * 400},
+                }))
 
             tool = AgentTool(
-                name="mcp_odoo_health_check",
-                label="Health",
-                description="Health",
+                name="mcp_odoo_read_record",
+                label="Read",
+                description="Read",
                 parameters={"type": "object", "properties": {}},
                 execute_fn=execute,
             )
@@ -140,8 +142,14 @@ class BaselineFixTest(unittest.TestCase):
                                 "index": 0,
                                 "id": "call1",
                                 "type": "function",
-                                "function": {"name": tool.name, "arguments": "{}"},
-                            }
+                                "function": {"name": tool.name, "arguments": '{"model":"res.partner","record_id":1,"fields":["name"]}'},
+                            },
+                            {
+                                "index": 1,
+                                "id": "call2",
+                                "type": "function",
+                                "function": {"name": tool.name, "arguments": '{"model":"res.partner","record_id":1,"fields":["name"]}'},
+                            },
                         ]
                     }
                     if len(requests) == 1
@@ -180,6 +188,7 @@ class BaselineFixTest(unittest.TestCase):
                 usage_file=root / "usage.json",
                 mcp_url="http://unused.invalid",
                 max_turns=3,
+                world_mode="project",
             )
             async with httpx.AsyncClient(
                 transport=httpx.MockTransport(handler)
@@ -205,6 +214,10 @@ class BaselineFixTest(unittest.TestCase):
                             "LLM_MODEL": "deepseek/test",
                             "LLM_PROVIDER": "openai-compatible",
                             "LLM_THINKING_TYPE": "high",
+                            "ODOO_URL": "http://odoo.invalid",
+                            "ODOO_DB": "bench",
+                            "ODOO_USERNAME": "reader",
+                            "ODOO_PASSWORD": "not-recorded",
                         },
                     ),
                     contextlib.redirect_stdout(io.StringIO()),
@@ -223,6 +236,11 @@ class BaselineFixTest(unittest.TestCase):
                 )
             prior = next(m for m in requests[1]["messages"] if m["role"] == "assistant")
             self.assertEqual(prior["reasoning_content"], "")
+            tool_results = [m for m in requests[1]["messages"] if m["role"] == "tool"]
+            self.assertEqual(len(tool_results), 2)
+            self.assertIn("world_projection", tool_results[0]["content"])
+            self.assertIn('"name": "' + "x" * 20, tool_results[1]["content"])
+            self.assertEqual(json.loads((root / "world-summary.json").read_text())["projected_messages"], 1)
             self.assertNotIn(
                 "must-not-be-recorded",
                 (root / "requests/0001.response.json").read_text(),

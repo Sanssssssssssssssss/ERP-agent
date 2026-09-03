@@ -154,6 +154,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         max_turns: int | None = None,
         thinking: str = "high",
         read_backend: str = "mcp",
+        world_mode: str = "off",
         snapshot_sha256: str | None = None,
         runtime_timeout_seconds: int = 1770,
         **kwargs: Any,
@@ -166,11 +167,14 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             raise ValueError("max_turns must be positive")
         if read_backend not in {"mcp", "native"}:
             raise ValueError("read_backend must be mcp or native")
+        if world_mode not in {"off", "record", "project"}:
+            raise ValueError("world_mode must be off, record, or project")
         if type(runtime_timeout_seconds) is not int or runtime_timeout_seconds < 1:
             raise ValueError("runtime_timeout_seconds must be a positive integer")
         self._max_turns = max_turns
         self._thinking = thinking
         self._read_backend = read_backend
+        self._world_mode = world_mode
         self._snapshot_sha256 = snapshot_sha256
         self._runtime_timeout_seconds = runtime_timeout_seconds
         super().__init__(*args, version=version, **kwargs)
@@ -247,6 +251,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             "--instruction-file /tmp/pi-odoo-instruction.txt "
             "--usage-file /logs/agent/pi-agent-usage.json "
             f"--read-backend {self._read_backend} "
+            f"--world-mode {self._world_mode} "
             + (f"--max-turns {self._max_turns} " if self._max_turns is not None else "")
             + "2>&1 | stdbuf -oL tee /logs/agent/pi-agent-odoo-mcp.jsonl"
         )
@@ -271,6 +276,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             "pi_agent_commit": PI_AGENT_COMMIT,
             "mcp_odoo_commit": MCP_ODOO_COMMIT,
             "read_backend": self._read_backend,
+            "world_mode": self._world_mode,
             "snapshot_sha256": self._snapshot_sha256,
             "runtime_timeout_seconds": self._runtime_timeout_seconds,
         }

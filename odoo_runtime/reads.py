@@ -11,6 +11,7 @@ import copy
 import hashlib
 import inspect
 import json
+import os
 import re
 import threading
 from datetime import datetime, timedelta
@@ -175,6 +176,67 @@ class NativeReads:
             "n_plus_one": [entry for runtime in runtimes
                            for entry in runtime._single_reads.report()["busiest"] if entry["calls_in_window"] >= 10],
             "rate_limits": rate_report(),
+        }
+
+    def identity_context(self, instance: str | None = None) -> dict[str, Any]:
+        """Credential-free identity actually used by this native runtime."""
+        runtime = self.instances.get(instance or self.instance)
+        if runtime is None:
+            raise ValueError(f"Unknown Odoo instance {instance!r}")
+        client = runtime.client
+        identity = {
+            "instance": runtime.instance, "url": client.url, "database": client.db,
+            "username": client.username, "lang": client.lang,
+            "context": copy.deepcopy(client.context), "transport": client.transport,
+            "credential_scope_sha256": client.scope_fingerprint(),
+        }
+        identity["identity_id"] = hashlib.sha256(json.dumps([
+            runtime.instance, identity["credential_scope_sha256"],
+        ], sort_keys=True).encode()).hexdigest()[:20]
+        return identity
+
+    def world_metadata(self, name: str, arguments: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        """Return only metadata already loaded by the read; observation adds no RPC."""
+        model = arguments.get("model")
+        if name == "read_attachment":
+            model = "ir.attachment"
+        elif name == "search_employee":
+            model = "hr.employee"
+        elif name == "search_holidays":
+            model = "hr.leave.report.calendar"
+        if not isinstance(model, str):
+            return {}
+        runtime = self.instances.get(arguments.get("instance") or self.instance)
+        if runtime is None:
+            return {}
+        with runtime._lock:
+            value = runtime.cache.get(model)
+            return {model: copy.deepcopy(value)} if isinstance(value, dict) else {}
+
+    def world_rpc_evidence(self, call_id: str) -> dict[str, Any]:
+        """Correlate only completed physical attempts; cache-only reads honestly have none."""
+        value = os.environ.get("ODOO_REQUEST_LOG")
+        if not value:
+            return {"status": "log_not_configured", "refs": []}
+        path = Path(value)
+        try:
+            # ponytail: bounded lab trace scan; add a call-id index only if run size makes this measurable.
+            rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
+                    if line.strip()]
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return {"status": "log_unavailable", "refs": []}
+        matches = [row for row in rows if row.get("tool_call_id") == call_id]
+        if not matches:
+            return {"status": "no_completed_attempt", "refs": []}
+        last = matches[-1]
+        return {
+            "status": "matched",
+            "refs": [{
+                "log": path.name, "correlation": "tool_call_id", "value": call_id,
+                "completed_attempts": len(matches),
+            }],
+            "last_error_type": last.get("error_type"),
+            "last_status": last.get("status"),
         }
 
     def invalidate_schema(self) -> None:

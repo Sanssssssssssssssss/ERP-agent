@@ -21,12 +21,143 @@ from pi_coding.session_usage import collect_session_usage
 
 from integration.reward_adapter import adapt_erp_bench_reward
 from integration.trial_summary import _redact, build_trial_summary
+from odoo_runtime.world import READ_TOOLS
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+
+
+def _typed_jsonl(path: Path, accepted: set[str]) -> tuple[list[dict], list[str]]:
+    rows, errors = [], []
+    if not path.is_file():
+        return rows, errors
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as exc:
+        return rows, [f"{path.name}:{type(exc).__name__}"]
+    for number, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            errors.append(f"{path.name}:{number}:invalid_json")
+            continue
+        if not isinstance(row, dict) or row.get("type") not in accepted:
+            errors.append(f"{path.name}:{number}:invalid_type")
+            continue
+        rows.append(row)
+    return rows, errors
+
+
+def _world_receipts(
+    trial: Path, declared: dict | None, expected_calls: set[str] | None = None,
+) -> tuple[dict, dict]:
+    observations, errors = _typed_jsonl(
+        trial / "agent/world-observations.jsonl",
+        {"world_observation", "world_invalidation"},
+    )
+    projections, projection_errors = _typed_jsonl(
+        trial / "agent/world-projections.jsonl", {"world_projection"}
+    )
+    errors.extend(projection_errors)
+    reads = []
+    for row in observations:
+        if row["type"] == "world_invalidation":
+            if not isinstance(row.get("identity_ids"), list):
+                errors.append("world-observations.jsonl:invalid_invalidation_schema")
+            continue
+        if not (
+            isinstance(row.get("receipt_id"), str)
+            and isinstance(row.get("call_id"), str)
+            and isinstance(row.get("identity"), dict)
+            and isinstance(row["identity"].get("identity_id"), str)
+            and isinstance(row.get("outcome"), dict)
+            and isinstance(row["outcome"].get("success"), bool)
+            and isinstance(row.get("targets"), list)
+            and all(
+                isinstance(target, dict)
+                and isinstance(target.get("model"), str)
+                and isinstance(target.get("records", []), list)
+                and all(isinstance(record, dict) and type(record.get("id")) is int
+                        for record in target.get("records", []))
+                and isinstance(target.get("relations", []), list)
+                for target in row["targets"]
+            )
+        ):
+            errors.append("world-observations.jsonl:invalid_observation_schema")
+            continue
+        reads.append(row)
+    valid_projections = []
+    for row in projections:
+        if (
+            isinstance(row.get("compacted_call_ids"), list)
+            and len(row["compacted_call_ids"]) == row.get("compacted_messages")
+            and all(type(row.get(key)) is int and row[key] >= 0 for key in (
+                "compacted_messages", "original_bytes", "projected_bytes"
+            ))
+        ):
+            valid_projections.append(row)
+        else:
+            errors.append("world-projections.jsonl:invalid_projection_schema")
+    ids = Counter(row.get("receipt_id") for row in reads)
+    calls = Counter(row.get("call_id") for row in reads)
+    duplicates = {
+        "receipt_ids": sorted(str(key) for key, count in ids.items() if key is None or count > 1),
+        "call_ids": sorted(str(key) for key, count in calls.items() if key is None or count > 1),
+    }
+    projected_unknown_calls = sorted({
+        str(call_id)
+        for row in valid_projections
+        for call_id in row["compacted_call_ids"]
+        if call_id not in calls
+    })
+    if projected_unknown_calls:
+        errors.append("world-projections.jsonl:unknown_call_ids")
+    observed_calls = set(calls)
+    missing_calls = sorted((expected_calls or set()) - observed_calls)
+    orphan_calls = sorted(observed_calls - (expected_calls or set())) if expected_calls is not None else []
+    if missing_calls:
+        errors.append("world-observations.jsonl:missing_dispatch_call_ids")
+    if orphan_calls:
+        errors.append("world-observations.jsonl:orphan_call_ids")
+    records = {
+        (row.get("identity", {}).get("identity_id"), target.get("model"), record.get("id"))
+        for row in reads
+        for target in row.get("targets", [])
+        for record in target.get("records", [])
+    }
+    computed = {
+        "observations": len(reads),
+        "successful_observations": sum(bool(row.get("outcome", {}).get("success")) for row in reads),
+        "failed_observations": sum(not bool(row.get("outcome", {}).get("success")) for row in reads),
+        "records": len(records),
+        "relations": sum(len(target.get("relations", [])) for row in reads for target in row.get("targets", [])),
+        "invalidations": sum(row["type"] == "world_invalidation" for row in observations),
+        "projection_calls": len(valid_projections),
+        "projected_messages": sum(row["compacted_messages"] for row in valid_projections),
+        "projection_original_bytes": sum(row["original_bytes"] for row in valid_projections),
+        "projection_bytes": sum(row["projected_bytes"] for row in valid_projections),
+    }
+    comparable = {key: value for key, value in computed.items() if key != "invalidations"}
+    mismatches = {} if declared is None else {
+        key: {"declared": declared.get(key), "computed": value}
+        for key, value in comparable.items()
+        if declared.get(key) != value
+    }
+    valid = not errors and not any(duplicates.values()) and not mismatches
+    return computed, {
+        "valid": valid,
+        "errors": errors,
+        "duplicates": duplicates,
+        "projected_unknown_call_ids": projected_unknown_calls,
+        "missing_dispatch_call_ids": missing_calls,
+        "orphan_observation_call_ids": orphan_calls,
+        "mismatches": mismatches,
+    }
 
 
 def load_entries(path: Path) -> list:
@@ -231,6 +362,7 @@ def report_trial(trial: Path, destination: Path) -> dict:
     summary["identity"]["job"] = trial.parent.name
     agent_options = read_json(trial / "config.json").get("agent", {}).get("kwargs", {})
     summary["identity"]["read_backend"] = agent_options.get("read_backend")
+    summary["identity"]["world_mode"] = agent_options.get("world_mode", "off")
     snapshot_receipt = trial / "agent" / "snapshot-receipt.json"
     if snapshot_receipt.is_file():
         summary["receipts"]["snapshot"] = read_json(snapshot_receipt)
@@ -244,7 +376,7 @@ def report_trial(trial: Path, destination: Path) -> dict:
             if isinstance(metadata, dict) and metadata.get("type") == "run_metadata":
                 summary["run_contract"] = {key: metadata.get(key) for key in (
                     "readBackend", "toolContractSha256", "systemPromptSha256",
-                    "maxTurns", "maxOutputTokens", "model", "reasoning")}
+                    "worldMode", "maxTurns", "maxOutputTokens", "model", "reasoning")}
                 break
     last_model_response = assistants[-1].message if assistants else last
     summary["identity"]["provider"] = last_model_response.provider
@@ -279,6 +411,7 @@ def report_trial(trial: Path, destination: Path) -> dict:
     )
     destination.mkdir(parents=True, exist_ok=True)
     backend_log = trial / "agent" / "tool-backends.jsonl"
+    starts = []
     if backend_log.is_file():
         backend_events = [json.loads(line) for line in backend_log.read_text().splitlines() if line.strip()]
         starts = [event for event in backend_events if event["event"] == "start"]
@@ -305,6 +438,49 @@ def report_trial(trial: Path, destination: Path) -> dict:
             )
         summary["receipts"]["tool_backends"] = str(backend_log.resolve())
         write_json(destination / "tool_backends.json", backend_events)
+    world_summary_path = trial / "agent" / "world-summary.json"
+    world_summary = None
+    world_summary_error = None
+    if world_summary_path.is_file():
+        try:
+            world_summary = read_json(world_summary_path)
+            if not isinstance(world_summary, dict):
+                raise TypeError("world summary must be an object")
+        except (json.JSONDecodeError, OSError, UnicodeError) as exc:
+            world_summary_error = type(exc).__name__
+            world_summary = None
+        except TypeError as exc:
+            world_summary_error = str(exc)
+            world_summary = None
+        summary["receipts"]["world_summary"] = str(world_summary_path.resolve())
+    world_enabled = agent_options.get("world_mode", "off") != "off"
+    expected_world_calls = ({
+        str(event["tool_call_id"])
+        for event in starts
+        if event.get("tool_call_id") is not None
+        and str(event.get("tool", "")).removeprefix("mcp_odoo_") in READ_TOOLS
+    } if world_enabled else None)
+    world_computed, world_integrity = _world_receipts(
+        trial, world_summary, expected_world_calls,
+    )
+    if world_summary_error:
+        world_integrity["errors"].append(f"world-summary.json:{world_summary_error}")
+        world_integrity["valid"] = False
+    if world_enabled and not world_summary_path.is_file():
+        world_integrity["errors"].append("world-summary.json:missing")
+        world_integrity["valid"] = False
+    if world_enabled and not backend_log.is_file():
+        world_integrity["errors"].append("tool-backends.jsonl:missing")
+        world_integrity["valid"] = False
+    if world_enabled and (world_summary or {}).get("healthy") is not True:
+        world_integrity["errors"].append("world-summary.json:unhealthy_or_unreported")
+        world_integrity["valid"] = False
+    summary["actions"].update({f"world_{key}": value for key, value in world_computed.items()})
+    summary["receipts"]["world_integrity"] = world_integrity
+    for name in ("world-observations.jsonl", "world-projections.jsonl"):
+        path = trial / "agent" / name
+        if path.is_file():
+            summary["receipts"][name.removesuffix(".jsonl").replace("-", "_")] = str(path.resolve())
     rpc_logs = list((trial / "agent").glob("odoo-*-requests.jsonl"))
     if rpc_logs:
         rpc_events = [json.loads(line) for path in rpc_logs for line in path.read_text().splitlines() if line.strip()]
@@ -368,12 +544,16 @@ def report_trial(trial: Path, destination: Path) -> dict:
         last.stop_reason == "toolUse"
         or actions.get("unfinished_tool_dispatches", 0) > 0
         or actions.get("requests_without_response_headers", 0) > 0
+        or (agent_options.get("world_mode", "off") != "off"
+            and not world_integrity["valid"])
     ):
         natural_end = False
     elif (
         last.stop_reason == "stop" and not last.tool_calls
         and agent_options.get("read_backend") in {"mcp", "native"}
         and returned.get("read_backend") == agent_options["read_backend"]
+        and ("world_mode" not in agent_options
+             or returned.get("world_mode") == agent_options["world_mode"])
         and bool(agent_options.get("snapshot_sha256"))
         and agent_options.get("snapshot_sha256")
         == returned.get("snapshot_sha256")

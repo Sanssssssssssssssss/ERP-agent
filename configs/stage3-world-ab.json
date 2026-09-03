@@ -1,0 +1,42 @@
+{
+  "job_name": "stage3-world-ab-20260904-r1",
+  "jobs_dir": ".runtime/jobs",
+  "agent_setup_timeout_multiplier": 4.0,
+  "environment_build_timeout_multiplier": 4.0,
+  "n_concurrent_trials": 1,
+  "quiet": true,
+  "environment": {
+    "type": "docker",
+    "extra_docker_compose": [
+      "configs/harbor-proxy-compose.yml",
+      "configs/harbor-snapshot-compose.yml"
+    ]
+  },
+  "agents": [
+    {
+      "name": "integration.harbor_agent:PiAgentMcpBaseline",
+      "model_name": "openai/deepseek/deepseek-v4-flash",
+      "override_timeout_sec": 86400,
+      "kwargs": {
+        "thinking": "high",
+        "read_backend": "native",
+        "world_mode": "record",
+        "runtime_timeout_seconds": 86370,
+        "snapshot_sha256": "169886cd1c4fa78290816fe57288f0d00b68f596b15be7eaa7236acc324a8eb1"
+      }
+    },
+    {
+      "name": "integration.harbor_agent:PiAgentMcpBaseline",
+      "model_name": "openai/deepseek/deepseek-v4-flash",
+      "override_timeout_sec": 86400,
+      "kwargs": {
+        "thinking": "high",
+        "read_backend": "native",
+        "world_mode": "project",
+        "runtime_timeout_seconds": 86370,
+        "snapshot_sha256": "169886cd1c4fa78290816fe57288f0d00b68f596b15be7eaa7236acc324a8eb1"
+      }
+    }
+  ],
+  "tasks": [{"path": "bench/tasks/2262_easy_26_buy_only_net_30_no_adjacent_data"}]
+}

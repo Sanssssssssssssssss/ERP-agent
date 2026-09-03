@@ -53,6 +53,7 @@ def provision_security(env):
 async def run_gate():
     from pi_agent.mcp import McpToolSet
     from odoo_runtime.reads import NativeReads
+    from odoo_runtime.world import WorldStore
     from integration.odoo_tools import route_tools
 
     root = Path(os.environ.get("READ_GATE_ROOT", "/logs/agent"))
@@ -126,9 +127,11 @@ async def run_gate():
             os.environ["ODOO_REQUEST_LOG"] = str(root / f"gate-{username}-native-rpc.jsonl")
             os.environ["ODOO_REQUEST_BACKEND"] = "native"
             native = NativeReads.from_environment()
+            world_path = root / f"gate-{username}-world.jsonl"
+            world = WorldStore(world_path)
             async with McpToolSet(f"http://127.0.0.1:{port}/mcp") as toolset:
                 a = {tool.name: tool for tool in route_tools(toolset.tools, root / f"gate-{username}-a.jsonl")}
-                b = {tool.name: tool for tool in route_tools(toolset.tools, root / f"gate-{username}-b.jsonl", native)}
+                b = {tool.name: tool for tool in route_tools(toolset.tools, root / f"gate-{username}-b.jsonl", native, world)}
                 for number, (name, arguments, expected_equal) in enumerate(cases):
                     if name == "schema_catalog" and username != "admin":
                         expected_equal = True  # ir.model ACL prevents either path from exposing metadata.
@@ -163,8 +166,54 @@ async def run_gate():
                         assert payload["success"] is False, "record rule bypassed"
                     if username == "pi_read_gate" and name == "search_records" and arguments.get("domain") == [["id", "=", fixture["hidden"]]]:
                         assert payload["result"] == [], "restricted record visible in search"
+            world_summary = world.telemetry()
+            assert world_summary["observations"] == len(cases)
+            assert world_summary["failed_observations"] > 0
+            assert key not in world_path.read_text(), "credential leaked into world receipts"
+            recovered_world = WorldStore(world_path)
+            assert recovered_world.telemetry()["recovered_observations"] == len(cases)
+            assert recovered_world.telemetry()["stale_records"] == recovered_world.telemetry()["records"]
+            world.write_summary(root / f"gate-{username}-world-summary.json")
             results.append({"principal": username, "cache_hits": native.cache_hits, "cache_misses": native.cache_misses})
-        summary = {"status": "passed", "comparisons": sum("equal" in row for row in results), "llm_calls": 0}
+            results.append({"principal": username, "world": world_summary})
+        external_args = {
+            "model": "res.partner", "record_id": fixture["visible"],
+            "fields": ["name", "write_date"],
+        }
+        before = json.loads((await b["mcp_odoo_read_record"].execute(
+            "external-before", external_args
+        )).text)
+        update_name = f"PI_READ_VISIBLE_EXTERNAL_UPDATE_{datetime.now().isoformat()}"
+        update = (
+            "if env.cr.dbname != 'bench_read_gate':\n"
+            "    raise RuntimeError('wrong database')\n"
+            f"env['res.partner'].browse({fixture['visible']}).write({{'name': {update_name!r}}})\n"
+            "env.cr.commit()\n"
+        )
+        subprocess.run(
+            ["odoo", "shell", "--config", "/etc/odoo/odoo.conf", "-d", "bench_read_gate", "--no-http"],
+            input=update, text=True, capture_output=True, check=True,
+        )
+        after = json.loads((await b["mcp_odoo_read_record"].execute(
+            "external-after", external_args
+        )).text)
+        receipt = world.receipt_for_call("external-after")
+        assert before["result"]["name"] != after["result"]["name"] == update_name
+        assert receipt and receipt.get("changes"), "external update was not observed"
+        assert receipt["delivery"]["result_cache_hit"] is False
+        assert not world.record_view(
+            receipt["identity"]["identity_id"], "res.partner", fixture["visible"]
+        )["stale"]
+        assert key not in world_path.read_text(), "credential leaked after external update"
+        world.write_summary(root / f"gate-{username}-world-summary.json")
+        results.append({"principal": username, "external_update": {
+            "before": before["result"], "after": after["result"],
+            "receipt_id": receipt["receipt_id"],
+        }})
+        summary = {
+            "status": "passed", "comparisons": sum("equal" in row for row in results),
+            "llm_calls": 0, "world_external_update": True,
+        }
         (root / "read-gate-summary.json").write_text(json.dumps(summary, indent=2))
         print(json.dumps(summary), flush=True)
     except BaseException as exc:
