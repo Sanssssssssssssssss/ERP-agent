@@ -87,6 +87,12 @@ class BaselineFixTest(unittest.TestCase):
             bounded = server.get_model_fields(None, "res.company", max_fields=2)
             self.assertEqual(list(bounded["result"]), ["name", "email"])
             self.assertEqual(bounded["count"], 2)
+            rejected = server.get_model_fields(None, "res.company", max_fields=100)
+            self.assertFalse(rejected["success"])
+            self.assertIn("between 1 and 30", rejected["error"])
+            rejected = server.get_model_fields(None, "res.company", max_fields=0)
+            self.assertFalse(rejected["success"])
+            self.assertIn("between 1 and 30", rejected["error"])
             exact = server.get_model_fields(
                 None, "res.company", field_names=["id", "chart_template"], max_fields=1
             )
@@ -101,6 +107,12 @@ class BaselineFixTest(unittest.TestCase):
         )
         self.assertEqual(
             advertised.input_schema["properties"]["relevance"]["default"], "top"
+        )
+        self.assertEqual(
+            advertised.input_schema["properties"]["max_fields"]["maximum"], 30
+        )
+        self.assertEqual(
+            advertised.input_schema["properties"]["max_fields"]["minimum"], 1
         )
         self.assertIn("max_fields", advertised.description)
 

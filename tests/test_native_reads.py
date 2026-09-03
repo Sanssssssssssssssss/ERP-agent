@@ -167,6 +167,8 @@ print('MCP_FREE_CORE_IMPORT_OK')
             ("get_odoo_profile", {"include_modules": False}),
             ("get_odoo_profile", {"module_limit": 0}),
             ("get_model_fields", {"model": "res.company", "max_fields": 2}),
+            ("get_model_fields", {"model": "res.company", "max_fields": 100}),
+            ("get_model_fields", {"model": "res.company", "field_names": ["id", "chart_template"], "max_fields": 1}),
             ("get_model_fields", {"model": "res.partner", "field_names": ["comment", "email", "missing"]}),
             ("get_model_fields", {"model": "res.company", "relevance": None}),
             ("get_model_fields", {"model": "res.company", "relevance": "bad"}),
@@ -200,6 +202,8 @@ print('MCP_FREE_CORE_IMPORT_OK')
                     if name == "get_model_fields" and arguments.get("max_fields") == 2:
                         self.assertEqual(actual["count"], 2)
                         self.assertNotIn("chart_template", actual["result"])
+                    if arguments.get("field_names") == ["id", "chart_template"]:
+                        self.assertEqual(list(actual["result"]), ["id", "chart_template"])
                     if name in {"search_records", "read_record"} and actual["success"]:
                         self.assertNotIn("SECRET-FIELD", json.dumps(actual))
                     if arguments.get("model") == "secret.model":

@@ -127,6 +127,10 @@ def _world_receipts(
     records = {
         (row.get("identity", {}).get("identity_id"), target.get("model"), record.get("id"))
         for row in reads
+        if not (
+            isinstance(row.get("merge"), dict)
+            and row["merge"].get("status") == "stale_generation"
+        )
         for target in row.get("targets", [])
         for record in target.get("records", [])
     }

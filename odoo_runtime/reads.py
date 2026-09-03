@@ -424,6 +424,10 @@ class NativeReads:
         self, model: str, field_names: list[str] | None = None,
         relevance: str | None = "top", max_fields: int = DEFAULT_MAX_RELEVANT_FIELDS,
     ) -> dict[str, Any]:
+        if not 1 <= max_fields <= DEFAULT_MAX_RELEVANT_FIELDS:
+            raise ValueError(
+                f"max_fields must be between 1 and {DEFAULT_MAX_RELEVANT_FIELDS}"
+            )
         if relevance not in (None, "top"):
             raise ValueError('relevance must be "top" when provided')
         validate_model_name(model)

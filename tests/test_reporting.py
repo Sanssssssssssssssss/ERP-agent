@@ -8,11 +8,52 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from integration.report import load_entries, main, report_path, report_trial, tool_failed, write_index
+from integration.report import (
+    _world_receipts,
+    load_entries,
+    main,
+    report_path,
+    report_trial,
+    tool_failed,
+    write_index,
+)
 from integration.trial_summary import _redact
 
 
 class ReportingTest(unittest.TestCase):
+    def test_stale_generation_target_is_not_counted_as_world_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            trial = Path(directory)
+            (trial / "agent").mkdir()
+            observation = {
+                "type": "world_observation",
+                "receipt_id": "obs-1",
+                "call_id": "call-1",
+                "identity": {"identity_id": "identity-1"},
+                "outcome": {"success": True},
+                "merge": {"status": "stale_generation"},
+                "targets": [{
+                    "model": "res.company", "records": [{"id": 1}], "relations": [],
+                }],
+            }
+            (trial / "agent/world-observations.jsonl").write_text(
+                json.dumps(observation) + "\n", encoding="utf-8"
+            )
+            declared = {
+                "observations": 1,
+                "successful_observations": 1,
+                "failed_observations": 0,
+                "records": 0,
+                "relations": 0,
+                "projection_calls": 0,
+                "projected_messages": 0,
+                "projection_original_bytes": 0,
+                "projection_bytes": 0,
+            }
+            computed, integrity = _world_receipts(trial, declared, {"call-1"})
+            self.assertEqual(computed["records"], 0)
+            self.assertTrue(integrity["valid"])
+
     def test_redaction_preserves_json_tool_results_and_business_errors(self):
         for success in (False, True):
             with self.subTest(success=success), tempfile.TemporaryDirectory() as directory:

@@ -321,7 +321,7 @@ def list_models(
 @mcp.tool(
     description=(
         "Get bounded field metadata for an Odoo model. Defaults to the top "
-        "max_fields business-relevant fields. Use field_names for exact fields; "
+        "max_fields business-relevant fields (1-30). Use field_names for exact fields; "
         "relevance=null explicitly requests the complete model schema."
     ),
     annotations=READ_ONLY_TOOL,
@@ -332,7 +332,9 @@ def get_model_fields(
     model: str,
     field_names: Optional[List[str]] = None,
     relevance: Optional[str] = "top",
-    max_fields: int = DEFAULT_MAX_RELEVANT_FIELDS,
+    max_fields: Annotated[
+        int, Field(ge=1, le=DEFAULT_MAX_RELEVANT_FIELDS)
+    ] = DEFAULT_MAX_RELEVANT_FIELDS,
     instance: Optional[str] = None,
 ) -> GetModelFieldsResponse:
     """
@@ -344,6 +346,10 @@ def get_model_fields(
     pass relevance=None explicitly when the complete model schema is needed.
     """
     try:
+        if not 1 <= max_fields <= DEFAULT_MAX_RELEVANT_FIELDS:
+            raise ValueError(
+                f"max_fields must be between 1 and {DEFAULT_MAX_RELEVANT_FIELDS}"
+            )
         if relevance not in (None, "top"):
             raise ValueError('relevance must be "top" when provided')
         instance_name, odoo = _resolve_odoo(ctx, instance)
