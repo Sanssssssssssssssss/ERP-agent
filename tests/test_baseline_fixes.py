@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import io
 import inspect
+import io
 import json
 import os
 import shutil
@@ -25,6 +25,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class BaselineFixTest(unittest.TestCase):
+    def test_disposable_bench_native_action_policy_is_explicit_and_closed(self):
+        env = harbor_agent.bench_action_env()
+        self.assertEqual(env["ODOO_MCP_ENABLE_WRITES"], "1")
+        self.assertEqual(
+            env["ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS"].split(","),
+            list(harbor_agent.BENCH_SIDE_EFFECT_METHODS),
+        )
+        self.assertEqual(env["ODOO_MCP_AUDIT_LOG"], "/logs/agent/native-write-audit.jsonl")
+        self.assertEqual(env["ODOO_MCP_ELICIT_WRITES"], "0")
+        self.assertEqual(env["MCP_CHATTER_DIRECT"], "0")
+        self.assertEqual(env["ODOO_MCP_ALLOW_UNKNOWN_METHODS"], "0")
+
     def test_cancellation_waits_for_service_stop_even_after_a_second_cancel(self):
         async def check():
             started, stopping, release, stopped = (asyncio.Event() for _ in range(4))

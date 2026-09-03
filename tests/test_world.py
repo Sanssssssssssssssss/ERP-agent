@@ -30,6 +30,49 @@ class WorldStoreTest(unittest.TestCase):
     def store(self, root: Path) -> WorldStore:
         return WorldStore(root / "world.jsonl")
 
+    def test_overlap_uses_pending_calls_not_equal_wall_clock_strings(self):
+        result = lambda record_id, name: json.dumps(
+            {"success": True, "result": {"id": record_id, "name": name}}
+        )
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(os.environ, ENV),
+            patch("odoo_runtime.world._now", return_value="2026-09-04T00:00:00Z"),
+        ):
+            root = Path(directory)
+            world = self.store(root)
+            arguments = {
+                "model": "res.partner",
+                "record_id": 30,
+                "fields": ["name"],
+            }
+            first = world.begin("sequential-a", "read_record", arguments, "native")
+            first_receipt = world.finish(first, result(30, "A"))
+            second = world.begin("sequential-b", "read_record", arguments, "native")
+            second_receipt = world.finish(second, result(30, "B"))
+            self.assertEqual(first_receipt["overlap_call_ids"], [])
+            self.assertEqual(second_receipt["overlap_call_ids"], [])
+            self.assertNotEqual(second_receipt.get("merge", {}).get("status"), "conflict")
+
+            older = world.begin("overlap-older", "read_record", arguments, "native")
+            newer = world.begin("overlap-newer", "read_record", arguments, "native")
+            newer_receipt = world.finish(newer, result(30, "newer"))
+            older_receipt = world.finish(older, result(30, "older"))
+            self.assertEqual(newer_receipt["overlap_call_ids"], ["overlap-older"])
+            self.assertEqual(older_receipt["overlap_call_ids"], [])
+            self.assertEqual(
+                world.record_view(
+                    newer_receipt["identity"]["identity_id"], "res.partner", 30
+                )["fields"]["name"]["value"],
+                "newer",
+            )
+
+            reloaded = self.store(root)
+            self.assertEqual(
+                reloaded.lookup(newer_receipt["receipt_id"])["overlap_call_ids"],
+                ["overlap-older"],
+            )
+
     def test_partial_empty_hidden_relation_and_identity_isolation(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, ENV):
             world = self.store(Path(directory))

@@ -248,6 +248,7 @@ class WorldStore:
                 "call_id": call_id, "tool": pending["tool"], "backend": pending["backend"],
                 "identity": pending["identity"], "generation": pending["generation"],
                 "started_at": pending["started_at"], "finished_at": _now(),
+                "overlap_call_ids": sorted(self._pending),
                 "elapsed_ms": round((time.monotonic_ns() - pending["started_ns"]) / 1_000_000, 3),
                 "request": pending["arguments"], "request_sha256": _sha(pending["arguments"]),
                 "result_sha256": hashlib.sha256((result_text or error_text).encode()).hexdigest(),
@@ -564,6 +565,11 @@ class WorldStore:
         previous = self._receipts.get(previous_receipt_id or "")
         if not previous:
             return False
+        if "overlap_call_ids" in receipt or "overlap_call_ids" in previous:
+            return (
+                previous["call_id"] in receipt.get("overlap_call_ids", [])
+                or receipt["call_id"] in previous.get("overlap_call_ids", [])
+            )
         return (
             receipt["started_at"] <= previous["finished_at"]
             and previous["started_at"] <= receipt["finished_at"]

@@ -24,10 +24,11 @@ from pi_coding.provider_config import (
 from pi_coding.resources import PiResourcePaths
 from pi_coding.session import CodingSession, CodingSessionConfig
 
-from odoo_runtime.reads import NativeReads
-from odoo_runtime.world import WorldStore
 from integration.odoo_tools import route_tools
 from integration.world_context import project_messages
+from odoo_runtime.actions import NativeActions
+from odoo_runtime.reads import NativeReads
+from odoo_runtime.world import WorldStore
 
 CONTEXT_WINDOW = 128_000
 MODEL_COMPAT = {
@@ -87,6 +88,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--mcp-url", default="http://127.0.0.1:8000/mcp")
     parser.add_argument("--max-turns", type=int, default=None)
     parser.add_argument("--read-backend", choices=("mcp", "native"), default="mcp")
+    parser.add_argument("--action-backend", choices=("mcp", "native"), default="mcp")
     parser.add_argument("--world-mode", choices=("off", "record", "project"), default="off")
     return parser.parse_args()
 
@@ -126,11 +128,14 @@ async def run(args: argparse.Namespace) -> None:
     world = None
     try:
         async with McpToolSet(args.mcp_url) as toolset:
-            native = None
-            if getattr(args, "read_backend", "mcp") == "native":
+            native_runtime = None
+            if (getattr(args, "read_backend", "mcp") == "native"
+                    or getattr(args, "action_backend", "mcp") == "native"):
                 os.environ["ODOO_REQUEST_LOG"] = str(args.session_file.parent / "odoo-native-requests.jsonl")
                 os.environ["ODOO_REQUEST_BACKEND"] = "native"
-                native = NativeReads.from_environment()
+                native_runtime = NativeReads.from_environment()
+            native = native_runtime if getattr(args, "read_backend", "mcp") == "native" else None
+            actions = NativeActions(native_runtime) if getattr(args, "action_backend", "mcp") == "native" else None
             if world_mode != "off":
                 try:
                     world = WorldStore(
@@ -140,7 +145,7 @@ async def run(args: argparse.Namespace) -> None:
                 except Exception as exc:
                     print(f"World initialization failed open: {type(exc).__name__}", file=sys.stderr)
             toolset.tools = route_tools(
-                toolset.tools, args.session_file.parent / "tool-backends.jsonl", native, world
+                toolset.tools, args.session_file.parent / "tool-backends.jsonl", native, world, actions
             )
             cwd = Path.cwd()
             provider_config = OpenAICompatibleProviderConfig(
@@ -213,6 +218,7 @@ async def run(args: argparse.Namespace) -> None:
                             "reasoning": thinking,
                             "mcpToolCount": len(toolset.tools),
                             "readBackend": getattr(args, "read_backend", "mcp"),
+                            "actionBackend": getattr(args, "action_backend", "mcp"),
                             "worldMode": world_mode,
                             "toolNames": [tool.name for tool in session.tools],
                             "maxOutputTokens": None,
@@ -258,6 +264,7 @@ async def run(args: argparse.Namespace) -> None:
                     "modelCalls": receipts.number,
                     "assistantEntries": len(assistant),
                     "worldMode": world_mode,
+                    "actionBackend": getattr(args, "action_backend", "mcp"),
                 }
                 args.usage_file.write_text(json.dumps(usage), encoding="utf-8")
             finally:

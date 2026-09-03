@@ -377,7 +377,12 @@ print('MCP_FREE_CORE_IMPORT_OK')
                 self.assertEqual((old.name, old.label, old.description, old.parameters), (new.name, new.label, new.description, new.parameters))
                 name = old.name.removeprefix("mcp_odoo_")
                 if name in READ_RESPONSES:
-                    self.assertEqual((await old.execute(name, args[name])).model_dump(), (await new.execute(name, args[name])).model_dump())
+                    left = json.dumps((await old.execute(name, args[name])).model_dump(), sort_keys=True)
+                    right = json.dumps((await new.execute(name, args[name])).model_dump(), sort_keys=True)
+                    for value in ("true", "false"):
+                        left = left.replace(f'"cache_hit": {value}', '"cache_hit": null')
+                        right = right.replace(f'"cache_hit": {value}', '"cache_hit": null')
+                    self.assertEqual(left, right)
             a_by_name, b_by_name = {t.name: t for t in a}, {t.name: t for t in b}
             for name, arguments in (
                 ("read_record", {"model": "res.partner", "record_id": 1, "extra": "ignored"}),

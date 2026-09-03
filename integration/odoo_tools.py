@@ -10,14 +10,14 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from pydantic_core import to_json
-
+from odoo_mcp.odoo_client import READ_CALL_ID
 from pi_agent.messages import TextContent
 from pi_agent.tools import AgentToolResult
+from pydantic_core import to_json
 
+from odoo_runtime.actions import ACTION_TOOLS, NativeActions
 from odoo_runtime.reads import READ_RESPONSES, NativeReads, normalize_read_arguments
 from odoo_runtime.world import SIDE_EFFECT_TOOLS, WorldStore
-from odoo_mcp.odoo_client import READ_CALL_ID
 
 
 def _world_failed(world: WorldStore, operation: str, error: BaseException) -> None:
@@ -29,15 +29,19 @@ def _world_failed(world: WorldStore, operation: str, error: BaseException) -> No
 
 
 def route_tools(tools, log_path: Path, native: NativeReads | None = None,
-                world: WorldStore | None = None):
+                world: WorldStore | None = None,
+                actions: NativeActions | None = None):
     """No MCP fallback on a native failure; business errors retain their envelope."""
     routed = []
     for tool in tools:
         name = tool.name.removeprefix("mcp_odoo_")
-        direct = native is not None and name in READ_RESPONSES
+        direct_read = native is not None and name in READ_RESPONSES
+        direct_action = actions is not None and name in ACTION_TOOLS
+        direct = direct_read or direct_action
 
         async def execute(call_id, arguments, signal=None, on_update=None,
-                          *, tool=tool, name=name, direct=direct):
+                          *, tool=tool, name=name, direct=direct,
+                          direct_read=direct_read, direct_action=direct_action):
             started = time.monotonic()
             event = {
                 "tool_call_id": call_id, "tool": tool.name,
@@ -48,13 +52,13 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                 stream.write(json.dumps(event) + "\n")
             token = READ_CALL_ID.set(call_id)
             observation = None
-            side_effect_attempted = not direct and name in SIDE_EFFECT_TOOLS
+            side_effect_attempted = name in SIDE_EFFECT_TOOLS
             try:
                 if world is not None and name in READ_RESPONSES:
                     requested_instance = arguments.get("instance")
                     identity = None
                     identity_available = True
-                    if direct and (requested_instance is None or isinstance(requested_instance, str)):
+                    if direct_read and (requested_instance is None or isinstance(requested_instance, str)):
                         try:
                             identity = native.identity_context(requested_instance)
                         except Exception as exc:
@@ -65,7 +69,7 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                             observation = world.begin(call_id, name, dict(arguments), event["backend"], identity=identity)
                         except Exception as exc:
                             _world_failed(world, "begin", exc)
-                if direct:
+                if direct_read:
                     normalized = normalize_read_arguments(name, dict(arguments))
                     raw = await asyncio.to_thread(native.call, name, normalized)
                     structured = READ_RESPONSES[name].model_validate(raw).model_dump(
@@ -74,6 +78,12 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                     result = AgentToolResult(
                         content=to_json(raw, fallback=str, indent=2).decode(),
                         details={"structuredContent": structured, "meta": None},
+                    )
+                elif direct_action:
+                    raw = await asyncio.to_thread(actions.call, name, dict(arguments))
+                    result = AgentToolResult(
+                        content=to_json(raw, fallback=str, indent=2).decode(),
+                        details={"structuredContent": raw, "meta": None},
                     )
                 else:
                     result = await tool.execute(call_id, arguments, signal, on_update)
@@ -103,7 +113,7 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                         )
                     except Exception as exc:
                         _world_failed(world, "finish", exc)
-                if direct:
+                if direct_read:
                     try:
                         event["native_telemetry"] = native.telemetry()
                     except Exception as exc:
@@ -126,9 +136,10 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                 raise
             finally:
                 if side_effect_attempted:
-                    if native is not None:
+                    invalidated_reads = native or (actions.reads if actions is not None else None)
+                    if invalidated_reads is not None:
                         try:
-                            for runtime in set(native.instances.values()):
+                            for runtime in set(invalidated_reads.instances.values()):
                                 runtime.invalidate_schema()
                         except Exception as exc:
                             print(f"Native schema invalidation failed: {type(exc).__name__}", file=sys.stderr)
@@ -145,9 +156,17 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                 except OSError:
                     print("Tool completion receipt could not be saved", file=sys.stderr)
 
-        routed.append(replace(tool, execute_fn=execute))
+        routed.append(replace(
+            tool,
+            execute_fn=execute,
+            execution_mode="sequential" if name in ACTION_TOOLS else tool.execution_mode,
+        ))
     if native is not None:
         present = {tool.name.removeprefix("mcp_odoo_") for tool in tools}
         if not READ_RESPONSES.keys() <= present:
             raise RuntimeError("MCP discovery is missing a required native read tool")
+    if actions is not None:
+        present = {tool.name.removeprefix("mcp_odoo_") for tool in tools}
+        if not ACTION_TOOLS <= present:
+            raise RuntimeError("MCP discovery is missing a required native action tool")
     return routed

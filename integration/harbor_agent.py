@@ -13,10 +13,30 @@ PI_AGENT_COMMIT = "2ee840c3e31a62c06237b4ac781c7f5863044d07"
 MCP_ODOO_COMMIT = "76ec136e0c89c414811a12629eb2903d2dc27357"
 MCP_ODOO_VERSION = "1.3.2"
 MCP_ODOO_URL = "http://127.0.0.1:8000/mcp"
+BENCH_SIDE_EFFECT_METHODS = (
+    "sale.order.action_confirm",
+    "purchase.order.button_confirm",
+    "sale.advance.payment.inv.create_invoices",
+    "account.move.action_post",
+)
 MCP_ONLY_POLICY = (
     "Use mcp_odoo tools for every Odoo operation. Do not access Odoo through "
     "shell commands, direct HTTP, XML-RPC, JSON-2, PostgreSQL, or Python libraries."
 )
+
+
+def bench_action_env() -> dict[str, str]:
+    """Explicit action policy for the disposable ERP-Bench database."""
+    return {
+        "ODOO_MCP_ENABLE_WRITES": "1",
+        "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": ",".join(
+            BENCH_SIDE_EFFECT_METHODS
+        ),
+        "ODOO_MCP_AUDIT_LOG": "/logs/agent/native-write-audit.jsonl",
+        "ODOO_MCP_ELICIT_WRITES": "0",
+        "MCP_CHATTER_DIRECT": "0",
+        "ODOO_MCP_ALLOW_UNKNOWN_METHODS": "0",
+    }
 
 try:
     from harbor.agents.installed.base import BaseInstalledAgent, with_prompt_template
@@ -122,9 +142,8 @@ async def _start_task_mcp(agent: Any, environment: BaseEnvironment) -> None:
             "export PYTHONPATH=/tmp/pi-odoo-mcp-source ODOO_URL=http://127.0.0.1:8069 ODOO_DB=bench ODOO_USERNAME=admin "
             'ODOO_PASSWORD="$odoo_key" ODOO_API_KEY="$odoo_key" ODOO_TRANSPORT=json2 '
             "ODOO_JSON2_DATABASE_HEADER=1 ODOO_MCP_ENABLE_WRITES=1 "
-            "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS=sale.order.action_confirm,"
-            "purchase.order.button_confirm,sale.advance.payment.inv.create_invoices,"
-            "account.move.action_post ODOO_MCP_LOG_JSON=1 "
+            f"ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS={','.join(BENCH_SIDE_EFFECT_METHODS)} "
+            "ODOO_MCP_LOG_JSON=1 "
             "ODOO_MCP_LOG_FILE=/logs/agent/mcp-odoo.jsonl "
             "ODOO_MCP_AUDIT_LOG=/logs/agent/mcp-write-audit.jsonl; "
             "export ODOO_REQUEST_LOG=/logs/agent/odoo-mcp-requests.jsonl ODOO_REQUEST_BACKEND=mcp; "
@@ -154,6 +173,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         max_turns: int | None = None,
         thinking: str = "high",
         read_backend: str = "mcp",
+        action_backend: str = "mcp",
         world_mode: str = "off",
         snapshot_sha256: str | None = None,
         runtime_timeout_seconds: int = 1770,
@@ -167,6 +187,8 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             raise ValueError("max_turns must be positive")
         if read_backend not in {"mcp", "native"}:
             raise ValueError("read_backend must be mcp or native")
+        if action_backend not in {"mcp", "native"}:
+            raise ValueError("action_backend must be mcp or native")
         if world_mode not in {"off", "record", "project"}:
             raise ValueError("world_mode must be off, record, or project")
         if type(runtime_timeout_seconds) is not int or runtime_timeout_seconds < 1:
@@ -174,6 +196,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         self._max_turns = max_turns
         self._thinking = thinking
         self._read_backend = read_backend
+        self._action_backend = action_backend
         self._world_mode = world_mode
         self._snapshot_sha256 = snapshot_sha256
         self._runtime_timeout_seconds = runtime_timeout_seconds
@@ -242,6 +265,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             "LLM_THINKING_TYPE": self._thinking,
             "PYTHONPATH": "/tmp/pi-odoo-harness/agent/src:/tmp/pi-odoo-harness:/tmp/pi-odoo-mcp-source",
             "PI_AGENT_SESSION_ID": str(self.context_id or self.session_id or "trial"),
+            **bench_action_env(),
         }
         command = (
             "set -o pipefail; export ODOO_URL=http://127.0.0.1:8069 ODOO_DB=bench ODOO_USERNAME=admin; "
@@ -251,6 +275,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             "--instruction-file /tmp/pi-odoo-instruction.txt "
             "--usage-file /logs/agent/pi-agent-usage.json "
             f"--read-backend {self._read_backend} "
+            f"--action-backend {self._action_backend} "
             f"--world-mode {self._world_mode} "
             + (f"--max-turns {self._max_turns} " if self._max_turns is not None else "")
             + "2>&1 | stdbuf -oL tee /logs/agent/pi-agent-odoo-mcp.jsonl"
@@ -276,6 +301,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             "pi_agent_commit": PI_AGENT_COMMIT,
             "mcp_odoo_commit": MCP_ODOO_COMMIT,
             "read_backend": self._read_backend,
+            "action_backend": self._action_backend,
             "world_mode": self._world_mode,
             "snapshot_sha256": self._snapshot_sha256,
             "runtime_timeout_seconds": self._runtime_timeout_seconds,

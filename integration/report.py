@@ -21,6 +21,7 @@ from pi_coding.session_usage import collect_session_usage
 
 from integration.reward_adapter import adapt_erp_bench_reward
 from integration.trial_summary import _redact, build_trial_summary
+from odoo_runtime.actions import ACTION_TOOLS
 from odoo_runtime.world import READ_TOOLS
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -366,6 +367,9 @@ def report_trial(trial: Path, destination: Path) -> dict:
     summary["identity"]["job"] = trial.parent.name
     agent_options = read_json(trial / "config.json").get("agent", {}).get("kwargs", {})
     summary["identity"]["read_backend"] = agent_options.get("read_backend")
+    summary["identity"]["action_backend"] = agent_options.get(
+        "action_backend", "mcp"
+    )
     summary["identity"]["world_mode"] = agent_options.get("world_mode", "off")
     snapshot_receipt = trial / "agent" / "snapshot-receipt.json"
     if snapshot_receipt.is_file():
@@ -379,7 +383,7 @@ def report_trial(trial: Path, destination: Path) -> dict:
                 continue
             if isinstance(metadata, dict) and metadata.get("type") == "run_metadata":
                 summary["run_contract"] = {key: metadata.get(key) for key in (
-                    "readBackend", "toolContractSha256", "systemPromptSha256",
+                    "readBackend", "actionBackend", "toolContractSha256", "systemPromptSha256",
                     "worldMode", "maxTurns", "maxOutputTokens", "model", "reasoning")}
                 break
     last_model_response = assistants[-1].message if assistants else last
@@ -424,7 +428,33 @@ def report_trial(trial: Path, destination: Path) -> dict:
         ended_ids = Counter(event.get("tool_call_id") for event in ends)
         summary["actions"].update(
             mcp_calls=sum(event["backend"] == "mcp" for event in starts),
-            native_read_calls=sum(event["backend"] == "native" for event in starts),
+            native_read_calls=sum(
+                event["backend"] == "native"
+                and event.get("tool", "").removeprefix("mcp_odoo_") in READ_TOOLS
+                for event in starts
+            ),
+            native_action_calls=sum(
+                event["backend"] == "native"
+                and event.get("tool", "").removeprefix("mcp_odoo_") in ACTION_TOOLS
+                for event in starts
+            ),
+            action_backend_closure={
+                name: dict(
+                    Counter(
+                        event["backend"]
+                        for event in starts
+                        if event.get("tool", "").removeprefix("mcp_odoo_") == name
+                    )
+                )
+                for name in sorted(ACTION_TOOLS)
+            },
+            action_backend_mismatches=[
+                event.get("tool_call_id")
+                for event in starts
+                if event.get("tool", "").removeprefix("mcp_odoo_") in ACTION_TOOLS
+                and event.get("backend")
+                != agent_options.get("action_backend", "mcp")
+            ],
             backend_count_source="executed dispatches, not tool-name prefixes",
             unfinished_tool_dispatches=sum((started_ids - ended_ids).values()),
             unmatched_tool_completions=sum((ended_ids - started_ids).values()),
@@ -548,6 +578,7 @@ def report_trial(trial: Path, destination: Path) -> dict:
         last.stop_reason == "toolUse"
         or actions.get("unfinished_tool_dispatches", 0) > 0
         or actions.get("requests_without_response_headers", 0) > 0
+        or actions.get("action_backend_mismatches")
         or (agent_options.get("world_mode", "off") != "off"
             and not world_integrity["valid"])
     ):
@@ -556,6 +587,10 @@ def report_trial(trial: Path, destination: Path) -> dict:
         last.stop_reason == "stop" and not last.tool_calls
         and agent_options.get("read_backend") in {"mcp", "native"}
         and returned.get("read_backend") == agent_options["read_backend"]
+        and (
+            "action_backend" not in agent_options
+            or returned.get("action_backend") == agent_options["action_backend"]
+        )
         and ("world_mode" not in agent_options
              or returned.get("world_mode") == agent_options["world_mode"])
         and bool(agent_options.get("snapshot_sha256"))
@@ -610,6 +645,7 @@ def write_index(destination: Path) -> Path:
             actions.get("model_http_request_records"),
             actions["mcp_calls"],
             actions.get("native_read_calls"),
+            actions.get("native_action_calls"),
             actions.get("odoo_json2_attempts"),
             actions["tool_errors"],
             usage["uncached_input_tokens"],
@@ -625,6 +661,11 @@ def write_index(destination: Path) -> Path:
         backend = summary["identity"].get("read_backend")
         if backend in {"mcp", "native"}:
             label += " · 读取：" + ("MCP" if backend == "mcp" else "原生")
+        action_backend = summary["identity"].get("action_backend")
+        if action_backend in {"mcp", "native"}:
+            label += " · 动作：" + (
+                "MCP" if action_backend == "mcp" else "原生"
+            )
         usage_warning = ("<br><small>存在未回报用量的请求；下列 token 不完整，缺失部分不是零。</small>"
                          if usage.get("unmatched_request_usage_unknown")
                          or usage.get("unreported_error_calls") else "")
@@ -652,7 +693,7 @@ def write_index(destination: Path) -> Path:
         '<p><a href="report_errors.json">无法生成报告的记录</a>（包含模型尚未启动的安装失败）。</p>'
         "<table><thead><tr><th>实验</th><th>模型结束状态</th><th>自然结束已核实</th><th>宿主异常</th><th>评分</th><th>模型响应</th>"
         "<th>HTTP 请求记录</th><th>MCP 调用</th>"
-        "<th>原生读取</th><th>JSON-2 尝试</th><th>工具错误</th><th>新输入 token</th><th>缓存 token</th>"
+        "<th>原生读取</th><th>原生动作</th><th>JSON-2 尝试</th><th>工具错误</th><th>新输入 token</th><th>缓存 token</th>"
         "<th>输出 token</th><th>其中推理 token</th></tr></thead>"
         "<tbody>" + "".join(rows) + "</tbody></table>"
         "<h2>无法展示会话的任务</h2><p>零调用的启动失败不是模型零分；已有模型请求但回执损坏的任务保留为证据不完整、不可判定。</p><ul>"

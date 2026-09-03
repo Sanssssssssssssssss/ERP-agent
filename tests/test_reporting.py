@@ -160,6 +160,8 @@ class ReportingTest(unittest.TestCase):
                 json.dumps({"event": "start", "backend": "native", "tool_call_id": "call1", "tool": "mcp_odoo_read_record"}) + "\n"
                 + json.dumps({"event": "end", "backend": "native", "tool_call_id": "call1", "elapsed_seconds": 0.01,
                               "native_telemetry": {"cache_hits": 2, "cache_misses": 1, "n_plus_one": [], "rate_limits": {"mode": "off"}}}) + "\n"
+                + json.dumps({"event": "start", "backend": "native", "tool_call_id": "action1", "tool": "mcp_odoo_execute_method"}) + "\n"
+                + json.dumps({"event": "end", "backend": "native", "tool_call_id": "action1", "elapsed_seconds": 0.01}) + "\n"
             )
             (trial / "agent/odoo-native-requests.jsonl").write_text(
                 json.dumps({"backend": "native", "model": "res.partner", "method": "read", "error_type": None}) + "\n"
@@ -182,18 +184,27 @@ class ReportingTest(unittest.TestCase):
                 "projected_messages": 1, "projection_original_bytes": 100,
                 "projection_bytes": 40, "healthy": True,
             }))
-            (trial / "config.json").write_text(json.dumps({"agent": {"kwargs": {"read_backend": "native"}}}))
+            (trial / "config.json").write_text(json.dumps({"agent": {"kwargs": {
+                "read_backend": "native", "action_backend": "native",
+            }}}))
             (trial / "agent/snapshot-receipt.json").write_text(json.dumps({"status": "verified", "snapshot_sha256": "fixture"}))
             reports = Path(directory) / "routed-reports"
             routed = report_trial(trial, reports / "native")
             self.assertEqual(routed["actions"]["mcp_calls"], 0)
             self.assertEqual(routed["actions"]["native_read_calls"], 1)
+            self.assertEqual(routed["actions"]["native_action_calls"], 1)
+            self.assertEqual(
+                routed["actions"]["action_backend_closure"]["execute_method"],
+                {"native": 1},
+            )
+            self.assertEqual(routed["actions"]["action_backend_mismatches"], [])
             self.assertEqual(routed["actions"]["odoo_json2_attempts"], 1)
             self.assertEqual(routed["actions"]["native_cache_hits"], 2)
             self.assertEqual(routed["actions"]["world_observations"], 1)
             self.assertEqual(routed["actions"]["world_projected_messages"], 1)
             self.assertTrue(routed["receipts"]["world_integrity"]["valid"])
             self.assertEqual(routed["identity"]["read_backend"], "native")
+            self.assertEqual(routed["identity"]["action_backend"], "native")
             self.assertEqual(routed["identity"]["world_mode"], "off")
             self.assertIn("world_observations", routed["receipts"])
             self.assertEqual(routed["receipts"]["snapshot"]["snapshot_sha256"], "fixture")
@@ -430,7 +441,9 @@ class ReportingTest(unittest.TestCase):
                     self.assertNotIn("do-not-export", page)
                     self.assertNotIn("do-not-export", json.dumps(calls))
                     self.assertEqual((output / "harbor/reward.txt").read_text(), "0\n")
-            self.assertIn("Native Pi", write_index(root / "reports").read_text())
+            self.assertIn(
+                "Native Pi", write_index(root / "reports").read_text(encoding="utf-8")
+            )
             (trial / "result.json").unlink()
             report_trial(trial, output)
             self.assertIn(
