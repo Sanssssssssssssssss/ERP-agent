@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import io
+import inspect
 import json
 import os
 import shutil
@@ -11,19 +12,62 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 from odoo_mcp import server, tools_read
 from pi_agent.tools import AgentTool, AgentToolResult
 from pi_ai.openai_compatible import OpenAICompatibleProvider
 
-from integration import pi_odoo_runner
+from integration import harbor_agent, pi_odoo_runner
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class BaselineFixTest(unittest.TestCase):
+    def test_cancellation_waits_for_service_stop_even_after_a_second_cancel(self):
+        async def check():
+            started, stopping, release, stopped = (asyncio.Event() for _ in range(4))
+            async def run_body(*_args):
+                started.set()
+                await asyncio.Event().wait()
+            async def stop_service(service):
+                self.assertEqual(service, "main")
+                stopping.set()
+                await release.wait()
+                stopped.set()
+            agent = SimpleNamespace(_run=run_body)
+            environment = SimpleNamespace(stop_service=stop_service)
+            run = inspect.unwrap(harbor_agent.PiAgentMcpBaseline.run)
+            task = asyncio.create_task(run(agent, "test", environment, None))
+            await started.wait()
+            task.cancel()
+            await stopping.wait()
+            task.cancel()
+            await asyncio.sleep(0)
+            self.assertFalse(task.done())
+            release.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            self.assertTrue(stopped.is_set())
+            agent._run = AsyncMock()
+            environment.stop_service = AsyncMock()
+            await run(agent, "test", environment, None)
+            environment.stop_service.assert_not_awaited()
+            agent._run.side_effect = RuntimeError("nonzero child")
+            with self.assertRaisesRegex(RuntimeError, "nonzero child"):
+                await run(agent, "test", environment, None)
+            environment.stop_service.assert_awaited_once_with("main")
+        asyncio.run(check())
+
+    def test_deadline_wraps_the_entire_pipeline_and_rejects_exhausted_budget(self):
+        command = "printf '%s' 'quoted value' | tee /tmp/unused"
+        import shlex
+        argv = shlex.split(harbor_agent.deadline_command(command, 2))
+        self.assertEqual(argv, ["timeout", "--signal=TERM", "--kill-after=5s", "2s", "bash", "-c", command])
+        with self.assertRaises(TimeoutError):
+            harbor_agent.deadline_command(command, 0)
+
     def test_mcp_default_honors_max_fields_and_exact_queries_keep_technical_fields(
         self,
     ):

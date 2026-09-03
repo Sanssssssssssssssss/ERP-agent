@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shlex
+import time
 from pathlib import Path
 from typing import Any
 
@@ -152,6 +154,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         thinking: str = "high",
         read_backend: str = "mcp",
         snapshot_sha256: str | None = None,
+        runtime_timeout_seconds: int = 1770,
         **kwargs: Any,
     ) -> None:
         if version != PI_AGENT_COMMIT:
@@ -162,10 +165,13 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             raise ValueError("max_turns must be positive")
         if read_backend not in {"mcp", "native"}:
             raise ValueError("read_backend must be mcp or native")
+        if type(runtime_timeout_seconds) is not int or runtime_timeout_seconds < 1:
+            raise ValueError("runtime_timeout_seconds must be a positive integer")
         self._max_turns = max_turns
         self._thinking = thinking
         self._read_backend = read_backend
         self._snapshot_sha256 = snapshot_sha256
+        self._runtime_timeout_seconds = runtime_timeout_seconds
         super().__init__(*args, version=version, **kwargs)
 
     @staticmethod
@@ -182,6 +188,23 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         environment: BaseEnvironment,
         context: AgentContext,
     ) -> None:
+        try:
+            await self._run(instruction, environment, context)
+        except BaseException:
+            # Docker exec cancellation does not stop its remote processes.
+            # Stop this disposable service before Harbor can enter verification.
+            stopping = asyncio.create_task(environment.stop_service("main"))
+            while not stopping.done():
+                try:
+                    await asyncio.shield(stopping)
+                except asyncio.CancelledError:
+                    continue
+            stopping.result()
+            raise
+
+    async def _run(self, instruction: str, environment: BaseEnvironment,
+                   context: AgentContext) -> None:
+        deadline = time.monotonic() + self._runtime_timeout_seconds
         if self._snapshot_sha256:
             result = await self.exec_as_agent(
                 environment, command="cat /logs/agent/snapshot-receipt.json",
@@ -215,22 +238,23 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             "PYTHONPATH": "/tmp/pi-odoo-harness/agent/src:/tmp/pi-odoo-harness:/tmp/pi-odoo-mcp-source",
             "PI_AGENT_SESSION_ID": str(self.context_id or self.session_id or "trial"),
         }
+        command = (
+            "set -o pipefail; export ODOO_URL=http://127.0.0.1:8069 ODOO_DB=bench ODOO_USERNAME=admin; "
+            'export ODOO_API_KEY="$(cat /etc/odoo/api_key)"; '
+            'export ODOO_PASSWORD="$ODOO_API_KEY" ODOO_TRANSPORT=json2; '
+            '/tmp/pi-odoo-env/bin/python /tmp/pi-odoo-runner.py '
+            "--instruction-file /tmp/pi-odoo-instruction.txt "
+            "--usage-file /logs/agent/pi-agent-usage.json "
+            f"--read-backend {self._read_backend} "
+            + (f"--max-turns {self._max_turns} " if self._max_turns is not None else "")
+            + "2>&1 | stdbuf -oL tee /logs/agent/pi-agent-odoo-mcp.jsonl"
+        )
+        remaining = int(deadline - time.monotonic())
         await self.exec_as_agent(
             environment,
-            command=(
-                "set -o pipefail; export ODOO_URL=http://127.0.0.1:8069 ODOO_DB=bench ODOO_USERNAME=admin; "
-                'export ODOO_API_KEY="$(cat /etc/odoo/api_key)"; '
-                'export ODOO_PASSWORD="$ODOO_API_KEY" ODOO_TRANSPORT=json2; '
-                '/tmp/pi-odoo-env/bin/python /tmp/pi-odoo-runner.py '
-                "--instruction-file /tmp/pi-odoo-instruction.txt "
-                "--usage-file /logs/agent/pi-agent-usage.json "
-                f"--read-backend {self._read_backend} "
-                + (f"--max-turns {self._max_turns} " if self._max_turns is not None else "")
-                +
-                "2>&1 | stdbuf -oL tee /logs/agent/pi-agent-odoo-mcp.jsonl"
-            ),
+            command=deadline_command(command, remaining),
             env=env,
-            timeout_sec=3600,
+            timeout_sec=max(1, remaining) + 10,
         )
         usage_result = await self.exec_as_agent(
             environment,
@@ -247,4 +271,13 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             "mcp_odoo_commit": MCP_ODOO_COMMIT,
             "read_backend": self._read_backend,
             "snapshot_sha256": self._snapshot_sha256,
+            "runtime_timeout_seconds": self._runtime_timeout_seconds,
         }
+
+
+def deadline_command(command: str, seconds: int) -> str:
+    """GNU timeout owns the remote process group even if the host disappears."""
+    if seconds < 1:
+        raise TimeoutError("Agent runtime budget exhausted before model startup")
+    return (f"timeout --signal=TERM --kill-after=5s {seconds}s "
+            f"bash -c {shlex.quote(command)}")

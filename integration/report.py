@@ -315,7 +315,7 @@ def report_trial(trial: Path, destination: Path) -> dict:
         cost=usage.total_cost,
         currency="USD" if usage.total_cost is not None else None,
         unreported_error_calls=sum(not row["usage_reported"] for row in requests),
-        note="Observed usage only. Reasoning is part of output, not additional tokens. Unreported failed requests are unknown, not free. Model entries are not physical HTTP attempts; see diagnostics for gateway retries.",
+        note="Observed usage only. Reasoning is part of output, not additional tokens. Unreported failed or interrupted requests are unknown, not free. Model entries are not physical HTTP attempts; see diagnostics for gateway retries.",
     )
     summary["coverage"]["usage"] = {
         key: value is not None
@@ -343,7 +343,9 @@ def report_trial(trial: Path, destination: Path) -> dict:
             requests_without_response_headers=len(request_ids - responses.keys()),
             orphan_response_headers=len(responses.keys() - request_ids),
             model_http_statuses=dict(Counter(str(row.get("status")) for row in responses.values())),
+            request_response_entry_gap=len(request_ids) - len(assistants),
         )
+        summary["usage"]["unmatched_request_usage_unknown"] = len(request_ids) > len(assistants)
         summary["receipts"]["response_note"] = "A response header receipt does not prove stream completion; inspect the final assistant entry and usage receipt."
     # Harbor writes phase end timestamps even on timeout and may still run its
     # verifier. Our own run() metadata + usage receipt prove normal return.
@@ -430,10 +432,13 @@ def write_index(destination: Path) -> Path:
         backend = summary["identity"].get("read_backend")
         if backend in {"mcp", "native"}:
             label += " · 读取：" + ("MCP" if backend == "mcp" else "原生")
+        usage_warning = ("<br><small>存在未回报用量的请求；下列 token 不完整，缺失部分不是零。</small>"
+                         if usage.get("unmatched_request_usage_unknown")
+                         or usage.get("unreported_error_calls") else "")
         rows.append(
             f'<tr><td><a href="{html.escape(name)}/session.html">{html.escape(label)}</a>'
             f'<br><a href="{html.escape(name)}/requests.json">逐次调用</a> · '
-            f'<a href="{html.escape(name)}/trial_summary.json">完整汇总</a></td>{cells}</tr>'
+            f'<a href="{html.escape(name)}/trial_summary.json">完整汇总</a>{usage_warning}</td>{cells}</tr>'
         )
     unavailable = []
     for row in read_json(destination / "report_errors.json") or []:

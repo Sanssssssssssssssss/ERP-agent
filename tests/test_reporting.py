@@ -121,6 +121,9 @@ class ReportingTest(unittest.TestCase):
             self.assertEqual(partial["actions"]["model_http_request_records"], 2)
             self.assertEqual(partial["actions"]["model_http_response_headers"], 1)
             self.assertEqual(partial["actions"]["requests_without_response_headers"], 1)
+            self.assertEqual(partial["actions"]["request_response_entry_gap"], 1)
+            self.assertTrue(partial["usage"]["unmatched_request_usage_unknown"])
+            self.assertIn("下列 token 不完整", write_index(reports).read_text(encoding="utf-8"))
             self.assertFalse(partial["agent_termination"]["natural_end"])
 
             # A host result or verifier timestamp alone never proves success.

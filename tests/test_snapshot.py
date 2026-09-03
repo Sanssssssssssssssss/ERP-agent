@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import tempfile
 import unittest
@@ -15,8 +14,9 @@ from integration import harbor_agent, snapshot
 class SnapshotTest(unittest.TestCase):
     def test_agent_requires_verified_matching_snapshot_before_mcp_or_model(self):
         async def check():
-            run = inspect.unwrap(harbor_agent.PiAgentMcpBaseline.run)
-            agent = SimpleNamespace(_snapshot_sha256="expected", exec_as_agent=AsyncMock())
+            run = harbor_agent.PiAgentMcpBaseline._run
+            agent = SimpleNamespace(_snapshot_sha256="expected", _runtime_timeout_seconds=1770,
+                                    exec_as_agent=AsyncMock())
             with patch.object(harbor_agent, "_start_task_mcp", new_callable=AsyncMock) as start:
                 for receipt in ({}, {"status": "failed", "snapshot_sha256": "expected"},
                                 {"status": "verified", "snapshot_sha256": "other"}):
