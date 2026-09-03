@@ -1,62 +1,355 @@
-# Stage 1: Python Pi / MCP versus native Odoo reads
+# Odoo 原生 Harness：分阶段实现与 A/B 验收路线图
 
-Approved scope (2026-09-03): publish this checkpoint before implementation; run
-only A and B. No native-Pi C run, compiler, source-repository edits, or later-stage
-experiments. Preserve baseline commit `1d4680b55f834f37ceb4bad5e9b9f03341007d49`.
+更新：2026-09-03。依据本仓库代码检查点 `8a83f5c` 和用户提供的七阶段方案编写。
 
-## Comparison
+本文件是**后续实现计划，不是完成报告**。本次只审查代码、写全路线图：不继续修第一阶段，不运行模型，不实施后面阶段。第一阶段已有未验收原型，第二至第七阶段尚未实现。
 
-- A: the current Python Pi harness with all Odoo tools routed through MCP.
-- B: the same harness, with only `get_odoo_profile`, `get_model_fields`,
-  `search_records`, and `read_record` routed directly to Odoo JSON-2. All other
-  tools, including writes, remain on MCP.
-- Preserve model-facing tool names, descriptions, schemas, results, prompts,
-  model, reasoning setting, and permissions. Remove the Python-only 60-turn
-  ceiling; use the same 1,800-second agent timeout and no client output-token cap.
-- Preserve the reference MCP and both historical passing runs. Add only the
-  required native read implementation, tests, and small runner/report changes.
+## 一、目标与执行规则
 
-## Gates and budget
+最终目标是：保留已经做好的 Python Pi 模型循环、会话和调用观测能力，把 Odoo MCP 中有价值的业务能力变成 Harness 的原生能力，由应用直接访问 Odoo 19 JSON-2；ERP-Bench 负责独立评价结果。不是再写一个通用 Agent，也不是把 MCP 函数换个名字。
 
-1. Deterministic contract tests: field bounds (including the previous company
-   schema regression), exact fields, domain validation, missing/empty records,
-   redaction, errors, language/company context, and read-only retry behavior.
-2. Live read differential checks against one isolated, quiescent Odoo fixture,
-   including a restricted principal and policy. Do not treat two equally wrong
-   implementations as proof: assert independent expected properties too.
-3. One paid A/B pair on case 2262, in separate databases restored from the same
-   prepared snapshot. Record snapshot/source/config/tool-contract identities.
-   Both must pass all 62 applicable rules and finish normally before promotion.
-4. Record physical backend routing, Odoo requests and retries separately from
-   model-visible tool names. Reuse the existing per-request token reports.
+最终业务调用关系：
 
-Do not launch the paid pair if earlier gates fail. Initial paid budget: two
-trials, one per arm. If testing identifies a problem, diagnose it and attempt
-only one repair round, then retest the affected gate/arm. If that first repair
-does not resolve the problem, stop and report the evidence to the user; do not
-attempt a second repair, change the case, or weaken the verifier. Passing one
-case establishes integration, not general quality or a statistically reliable
-token improvement. Infrastructure interruptions remain explicit, not solver
-failures or silent successes.
+```text
+Python Pi 会话与模型循环
+  → Odoo 原生工具与能力选择
+  → 读取：业务观测状态 → JSON-2 连接层 → Odoo
+  → 写入：动作审批与执行 → JSON-2 连接层 → Odoo
+  → 检索：受权限约束的本地知识
 
-## Isolation and evidence
+每次调用 → 原始回执、业务回执、token 与耗时报告
+ERP-Bench → 独立读取最终状态并评分，不向 Agent 提供评分答案
+```
 
-Use only this lab's source, isolated runtime, and disposable benchmark resources.
-Never change `erp-agent-odoo`, `pi-agent-python`, or `erp-harness-tau`. Setup may
-provision the test fixture, but the candidate read surface must reject writes.
-Native reads must not import the MCP server or silently fall back to MCP. The
-hybrid B process still uses MCP for the remaining tools; it is not MCP-free.
+执行规则以本节为准，取代旧版文档中“第一次修复失败就一律停工”的解释：
 
-Use unique jobs and retain failed runs. Keep credentials, databases, provider
-payloads, and raw traces in ignored `.runtime/`; commit only source/configuration
-and sanitized summaries. Preserve upstream attribution. Save implementation and
-result checkpoints to GitHub without force-pushing or rewriting old results.
+1. **普通实现错误继续修到验收通过。** 路径、导入、配置、序列化、测试入口等问题，不构成整个移植方向失败。修复时找共同根因，保留失败记录，重跑受影响检查。
+2. **可复现的底层设计问题才升级为方案讨论。** 提供最小反例、违反的约束、因果证据、最小替代方案，暂停受影响的机制；不因一个随机模型失败就推翻全部工作。具体标准见各阶段。
+3. 这不等于无限付费重跑。离线修复可以持续；超过已约定实验预算、需要改 Odoo 服务端或涉及新权限时，仍须报告并取得必要授权。
+4. 每阶段必须完成实现、边界测试、对应集成验证和证据保存，才能进入下一阶段；“代码能导入”“测试桩返回成功”“写了文档”都不等于阶段完成。
+5. **只做 A/B，不做 C。** 原生 TypeScript Pi 对照保留历史文件和成绩，本轮不启动。Compiler 不阅读、不移植、不运行；第六阶段只规划它的未来接口与启用条件。
+6. 只在 `pi-odoo-harness-lab` 修改。旧的 `erp-agent-odoo`、`pi-agent-python`、`erp-harness-tau` 及其环境保持不动。实验只使用隔离的可丢弃 Odoo 数据库，不触碰真实业务环境。
 
-## Deferred stages (not authorized in this run)
+历史基线 `1d4680b55f834f37ceb4bad5e9b9f03341007d49` 保留。第一阶段原型的历史记录见 [STAGE1_RESULT.md](STAGE1_RESULT.md)：已有离线检查结果，但没有真实读取差分和付费 A/B 成绩，不能晋升为新基线。本文件只更新后续执行规则，不改写当时的停止事实。
 
-After the stage-1 gates pass: separately test context projection/deduplication,
-then native writes, then dynamic tool selection, and finally MCP-free packaging.
-Write migration must cover both CRUD approvals and allowlisted business methods.
-An ambiguous remote commit requires reconciliation, not blind retry; a local
-action ID alone cannot guarantee exactly-once execution. Compiler remains out
-of scope. Do not scaffold these future subsystems now.
+## 二、对照代码后，原方案需要修正的地方
+
+以下未展开的 MCP 源文件路径均相对 `mcp/src/odoo_mcp/`，Pi 的 `pi_*` 路径均相对 `agent/src/`。
+
+| 代码事实 | 对实现方案的影响 |
+| --- | --- |
+| `agent/src/pi_agent/mcp.py::_agent_tool` 已经把 MCP 工具转换成普通 `AgentTool`；`AgentTool` 接受执行函数 | 原生接入有现成边界，不需要重写 Pi loop，也不需要先设计只有一个实现的 Gateway 接口体系。 |
+| `tools_read.py` 依赖 `Context`、`server_core`、延迟导入的 `server` 和进程生命周期状态 | 不能只删装饰器后整文件导入。要把业务调用和配置、缓存、权限依赖显式接入原生运行时。 |
+| `server_core.py::_cached_fields_metadata`、`knowledge_index.py::KnowledgeStore` 的键主要是 `instance:model` | 现有固定实例客户端假设不能直接扩展成多身份共享状态。至少按数据库、身份、公司、语言及策略版本隔离或失效。 |
+| `access_helpers.py` 是访问权限诊断；`field_policy.py` 是应用字段策略 | 真正的 Odoo ACL 和记录规则仍由调用身份在 Odoo 内执行。诊断不能代替授权；字段策略不能遗漏附件、聚合、知识和诊断结果。 |
+| `tools_write.py` 同时有批准后 CRUD、`execute_method`、`chatter_post`，还有本地文件上传处理 | 写迁移必须覆盖所有副作用入口。只接管 `execute_approved_write` 会留下业务动作旁路。 |
+| `server_core.py` 把批准记录存在内存，执行后才移除；`audit.py` 写日志失败默认不阻断 | 它们不是持久动作账本。本地唯一编号也不能解决“远端已提交、本地没收到”的不确定结果。 |
+| `prompts_workflows.py` 的发票流程把“过账动作”写成 CRUD 审批链；现有该执行器只支持 create/write/unlink | SOP 要逐步对照真实方法实现验证。不能照抄提示词，更不能直接改状态字段来模拟 Odoo 的业务动作。 |
+| `task_queue.py` 是内存线程池、TTL 结果和协作取消；取消运行任务会丢弃结果，但不终止底层工作 | 当前选入的代码不能证明已有可恢复的 Tau 子任务。必须明确中断与恢复语义，不能用改名宣称具备持久任务能力。 |
+| `pi_agent/loop.py` 有前后工具钩子和下一轮上下文更新；`pi_coding/session.py::_prepare_next_turn_refresh` 会刷新工具和 provider | 动态能力要和现有会话刷新组合，不能覆盖钩子导致刷新、持久化或模型设置失效。 |
+| `agent/pyproject.toml` 强依赖 MCP，`pi_agent/__init__.py` 会导入 MCP 适配器 | 不启动 MCP 进程还不够。最后要做独立安装和导入闭包检查，证明原生运行包不依赖 MCP SDK。 |
+| `auth.py` 服务于 MCP HTTP 入口认证；`odoo_client.py` 处理到 Odoo 的连接身份 | 移除 MCP HTTP 服务可以移除其认证壳，但不能移除 Odoo 身份校验。未来若开放远程 Harness 服务，须另外设计入口认证。 |
+
+另有三项整体修正：
+
+- 第二阶段结束时，**只有迁完的读取走原生**；写入、诊断等未迁能力仍需 MCP，不能提前称 MCP 只用于测试。
+- Odoo 请求限速、并发上限和模型 token 预算是不同控制项，不能互相替代。
+- “一个业务协调运行时”不等于必须只有一个操作系统进程。Odoo、测试器和必要 worker 可以独立存在；最终要消除的是 MCP 运行依赖，不是所有并发。
+
+上述检查没有证明“原生移植路线整体不可行”。它证明了若干承诺不能靠简单搬文件实现；以下阶段按这些约束设计。
+
+## 三、文件怎么放，保持结构干净
+
+```text
+agent/          保留三层 Python Pi 库，不放 Odoo 业务规则
+mcp/            固定版本的来源与迁移对照，最终只留在开发环境
+bench/          ERP-Bench 场景、环境和独立评分器
+integration/    启动适配、A/B 测试、请求回执、离线报告
+odoo_runtime/   后续逐步形成的原生业务包；本次不创建
+configs/        实验配置、原生能力清单；不放密钥
+tests/          跨组件的契约、恢复与隔离检查
+patches/        必要且可追踪的上游补丁
+.runtime/       忽略提交的环境、快照、数据库、任务和原始回执
+```
+
+五个概念子系统不是五套框架，也不要求五层目录。后续需要真实实现时，先用扁平模块：
+
+| 职责 | 现有来源 / 接入点 | 计划落点，按需创建 |
+| --- | --- | --- |
+| JSON-2 连接、参数映射和只读重试 | `mcp/src/odoo_mcp/odoo_client.py`、`diagnostics.py`；现有 `integration/native_reads.py` | `odoo_runtime/gateway.py` |
+| 读取、字段选择、缓存和应用策略 | `tools_read.py`、`schema_cache.py`、`field_ranking.py`、`field_policy.py`、`tool_helpers.py` | `odoo_runtime/reads.py`；确需分开时增加 `schema.py`、`policy.py` |
+| 业务观测、引用与回执 | `diagnostics.py` 的错误与关系解析；Pi 的事件及会话存储 | `odoo_runtime/world.py`；不先建图数据库和第二套会话系统 |
+| 写入审批、执行、恢复 | `tools_write.py`、`write_policy.py`、`agent_tools.py`、`server_core.py`、`audit.py` | `odoo_runtime/actions.py` 和一个 `store.py`，后者优先用标准库 SQLite |
+| 能力选择与原生工具定义 | `AgentTool`、Pi 钩子、现有 `integration/odoo_tools.py` | `odoo_runtime/capabilities.py`；模型适配仍留 `integration/odoo_tools.py` |
+| 诊断、账龄、数据质量、跨实例、只读后台任务 | 对应纯函数及 `tools_*` 薄层 | 需要时才创建对应业务模块；简单编排复用现有标准库 |
+| SOP 与知识 | `prompts.py`、`prompts_workflows.py`、`knowledge_index.py`、`tools_knowledge.py` | `odoo_runtime/skills/` 只放已验收 SOP；知识先用 `knowledge.py` |
+| token 与调用观测 | `integration/pi_odoo_runner.py::RequestReceipts`、`report.py`、`trial_summary.py`、Pi HTML/Usage 导出 | 原位扩展，不另建监控服务或报表前端 |
+
+迁移原则：
+
+- `pi_ai → pi_agent → pi_coding` 是已有库分层，不是要另外搭三套 Agent。继续使用 `CodingSession`，Odoo 细节只放应用包。
+- 现有原型已跨过部分第一、第二阶段职责；后续把它收拢到应用包，不能留下两套同时演进的原生读实现。
+- 迁移期可以继续复用已确认不加载 MCP 服务的纯函数；第七阶段再完成必要源码抽取和安装依赖分离。不为每个旧文件建一层转发壳。
+- 对照 `mcp/` 固定为指定提交。提取后的原生代码独立演进；不能拿被 B 同步修改过的 MCP 当 A。
+- 能力清单在第五阶段建立为一个文件，记录旧入口、原生入口、权限、副作用、实现状态和测试。不能靠不注册某工具，悄悄把“完全移植”缩成只支持一个 case。
+- 保留 `sources.lock.json`、Git 提交和上游许可证。抽取源码时保留版权声明并更新来源记录；不复制旧虚拟环境中的可编辑安装路径、嵌套 `.git` 或原始密钥。
+
+## 四、所有阶段共用的 A/B 和证据要求
+
+### 4.1 比较什么
+
+默认对照：**A = Python Pi + 固定 MCP；B = 同一个 Python Pi + 当前阶段累计原生实现。** 不再跑原生 TypeScript Pi 的 C 组。
+
+正式实验先保存共同基线 A0：把取消 60 轮上限、必要观测和测试基础设施修正同时应用到两组，固定为新检查点。历史 60 轮成绩仍保留，但不能直接拿来和新 B 算提升。
+
+共同保持：模型及 provider、reasoning、输入任务、初始数据、Odoo 身份及公司上下文、公共安全策略和外层时间预算。沿用两组相同的 1,800 秒 agent 超时，不恢复客户端输出 token 上限。若以后需要额外费用或 API 次数保护，必须在实验清单中事先声明并同样作用于两组，不能暗中加回 60 轮。
+
+- 传输迁移阶段保持模型可见的工具名、说明、参数、结果和提示词一致。
+- 状态投影、SOP、动态工具属于**有意改变模型输入的机制**，分别测试，不和换模型、改工具命名、改推理预算一起实验。
+- A 固定、B 累计时，只能把差异称为累计效果。单机制归因先用固定输入、固定轨迹的离线回放；确需实测前后版本时，另开一个明确标注参考提交的两版本 A/B，不增加第三组，不擅自追加付费试验。
+- 不能把 A 的轨迹、隐藏校验规则或目标数据库状态喂给 B。A/B 都执行完之后，分析器才能读取两边证据。
+
+### 4.2 用同一份初始世界，而不是“同一个 case 名”
+
+`bench/tasks/2262_easy_26_buy_only_net_30_no_adjacent_data/environment/setup_scenario.py` 使用 `datetime.now()` 构造多处日期。因此同 case、同随机种子不等于同状态。
+
+1. 隔离环境准备一次场景，停止会改数据的后台活动，保存相互一致的数据库和实际 Odoo 配置指定的 filestore；同时记录模块、身份、策略、时区与镜像摘要。
+2. 恢复到 A、B 各自独立的环境，并检查关键记录、权限和附件摘要一致。恢复完整性不通过，不启动 Agent。
+3. 读取差分可以使用同一份静止 fixture；涉及写入时绝不在同一个业务数据库依次执行 A、B。
+4. 副作用测试限制在可丢弃实例，禁止真实邮件、付款或外部业务通知。多步写入不天然是事务，必须检查部分成功情况。
+
+### 4.3 先证明做对，再测是否更好
+
+验收顺序固定为：**确定性检查 → 不用模型的真实 Odoo 检查 → 获授权预算内的一对 A/B → 通过后再决定扩展样本。** 不在前面的检查失败时“换个 case 试试看”。
+
+第一对仍为原先约定的 case 2262，两组各一个新 trial；必须全部 62 条适用规则通过，并自然结束。其他阶段按机制选固定小样本，事先声明 case、通过条件和预算，不自动跑 300 个任务。其他 299 个 verifier 的 Harbor 输出格式还没统一，扩展前先做无模型格式检查，只修输出兼容性，不改评分规则。
+
+每组都应保存：
+
+- `source/config/snapshot/tool-contract` 标识及提示词、工具集摘要；B 当前原生覆盖范围。
+- 原始模型请求与响应状态、每次输入/缓存/输出/reasoning token、停止原因、耗时和可得的请求编号。
+- 模型可见工具次数、实际 MCP 分发次数、原生分发次数、Odoo HTTP 尝试与重试、缓存命中，分开统计。工具名字带 `mcp_` 不等于实际经过 MCP。
+- 有开始无结束、取消、超时、业务失败、provider 失败、环境中断都明确标注。没有 usage 的失败请求是未知消耗，不记成免费；reasoning 已含在 output 中，不重复加总。
+- ERP 分数、适用规则数量、未预期副作用、是否自然结束，以及当前阶段的专门指标。
+
+沿用 `integration/report.py` 及 `.runtime/reports/`。原始调用含业务数据，保持本地且不记录认证头；GitHub 只保存代码、配置模板、来源信息和经过脱敏的中文结论。
+
+一对成功只能证明这条链路跑通，不能证明普遍优于基线。确定性边界测试通过，也不能冒充解决任务能力提升。
+
+## 五、第一阶段：JSON-2 连接层，只列前置门槛
+
+本轮不继续审第一阶段的具体故障，也不执行修复。
+
+- **目标与文件：** 对齐 `odoo_client.py` 的身份、参数、语言/公司、超时和只读重试；使用现有 `integration/native_reads.py`、`odoo_tools.py`、`read_gate.py`、准备脚本，不再新建平行原型。
+- **范围：** `get_odoo_profile`、`get_model_fields`、`search_records`、`read_record` 四个原生工具；所有其他工具仍走 MCP。
+- **完成标准：** 原生读取确实不加载 MCP 服务或调用 MCP；真实管理员/受限身份差分与独立预期断言通过；完整快照恢复和同条件 A/B 通过。保留原来的字段边界回归，不能退回全 schema 导致的 400 问题。
+- **方案级反例：** 在相同身份和可表达上下文下，必要操作仍依赖无法移出的 MCP 私有状态或不存在的 JSON-2 能力。连接配置没对齐不算这种反例。
+- **产物：** 一个可恢复的已验收读取检查点及中文结果；在此之前，现有原型一直标为未完成。
+
+## 六、第二阶段：完整读取、Schema 和统一策略
+
+**要回答的问题：** 除了四个简单工具，其余读取语义能否脱离 MCP 并保持正确、可控？
+
+### 实现内容与文件
+
+主要来源：`tools_read.py`、`schema_cache.py`、`field_ranking.py`、`field_policy.py`、`tool_helpers.py`、`rate_limit.py`、`server_core.py` 的字段解析。主落点为 `odoo_runtime/reads.py`，按实际复杂度分出 schema/policy；通过 `integration/odoo_tools.py` 接回同一个 `CodingSession`。
+
+1. 明确区分：默认业务字段、显式字段、显式全量字段；保留字段排序、上限、分页、domain 解析、空结果和错误语义。完整 metadata 留在主机侧，默认不整包塞给模型。
+2. 缓存有容量/TTL，缓存键覆盖身份和有效上下文；策略、身份、模块变化会使相应缓存失效。metadata 请求失败不能默默变成全字段读取；需要有独立断言确认可控降级或显式失败。
+3. 迁入 model/catalog、普通 search/read、aggregate、附件，以及员工/请假等现有读取封装。Odoo 19 聚合使用实际支持的接口；只有确认方法缺失才做兼容回退，权限错误不能触发绕过。
+4. 附件限制元数据、内容大小、二次检查和 URL 行为；URL 只是数据，不自动下载任意地址。应用字段策略覆盖附件元数据/内容、聚合字段和返回值。当前 `read_attachment` 没有和普通 read 一样调用字段脱敏，不能不加检查就宣称统一策略已经存在。
+5. 原生 N+1 诊断、限速和请求观测进入同一个运行时；它们不再依赖只看得到 MCP 请求的服务端计数。权限拒绝、字段缺失和空业务结果保持可区分。
+6. 原生工具不能借客户端的通用 `execute_method` 暴露未审核写入口。读取允许的方法、参数和上下文在执行边界校验。
+
+### 验证与完成标准
+
+- 无模型表驱动检查：省略字段/显式字段/全字段、分页/排序/复杂 domain、缺失记录、restricted 字段、公司/语言变化、缓存失效、超限附件和权限错误。
+- 真实 fixture 上逐项比较 MCP/原生，并额外核对字段策略、只读性、聚合结果及附件校验和。若旧实现也错，先独立复现并修共同基线，或把安全改进列成单独变化；不把“两边一样错”算通过。
+- 对同输入记录首次/重复读取的 RPC、缓存、延迟和返回大小；再做预定预算内的 A/B。后端替换不应被提前宣传成 token 必然下降。
+- **完成：** 当前读取表面全部有去向、有真实 Odoo 回执，字段和访问边界不退化；读工具实际走原生。写入、知识等尚未迁移部分继续走 MCP。
+
+**需要重审方案的反例：** 当前缓存共享方式无法保住身份隔离，或某项“只读”能力必须经隐藏写操作才能工作。缓存键漏字段、结果格式错等仍是要修好的实现问题。
+
+## 七、第三阶段：业务观测状态（World）与语义回执
+
+**要回答的问题：** 能否在不丢事实、不把过期缓存当真相的前提下，让 Harness 记住它已经观察到什么，并减少重复上下文？
+
+### 实现内容与文件
+
+来源：第二阶段读取返回，`diagnostics.py` 的关系/错误解析，`pi_agent` 事件及 JSONL 会话；主要新增 `odoo_runtime/world.py`，观测报告仍扩展 `integration/report.py`。
+
+1. **记录观测：** 保存实例、数据库、身份上下文、模型/ID、本次实际读取字段、采集时间和来源调用号。区分“未知、未读、被隐藏、确认为空”，局部读取不能覆盖成完整记录。
+2. **关系视图：** 只从真实关系字段形成可追溯边。缺少相关记录不推断为不存在；先用普通字典和列表，不引入图数据库。
+3. **版本与新鲜度：** `write_date` 或内容摘要只是观测版本，不是普遍可靠的并发锁。注明覆盖字段、读取区间和失效条件；多次 JSON-2 请求不能假装是单一事务快照。
+4. **读取回执：** 记录返回/缺失/隐藏字段、缓存来源、截断、错误、耗时、RPC 引用和版本。摘要可展开到受权限约束的原始结果，不能只剩模型写的总结。
+5. **错误分类：** schema、access、business、transport、unknown；保留原始脱敏错误和重试属性，未知错误不能硬归成某个业务结论。
+6. **先记录，后改模型上下文：** 第一个子步骤只在模型上下文外记录，不改变模型看到的内容；通过后再独立实验上下文投影/去重。保留工具调用与结果配对，不损坏 Pi 历史修复、压缩和恢复。
+7. 先复用追加式回执和现有会话恢复；写动作的权威持久账本留到第四阶段，不为“World”另造通用存储框架。
+
+### 验证与完成标准
+
+- 固定相同工具结果回放：重复读、局部覆盖、关系缺失、权限切换、删除、外部更新、乱序完成、恢复后过期数据，检查每条引用和状态。
+- 第一子步骤不改变模型请求；第二子步骤比较投影开/关，核对保留的信息、可展开原文、重复读次数、上下文大小和任务完成度。不能只看 token 少了多少。
+- 有真实更新时，下次关键读取不能继续以旧缓存作当前事实；记录版本冲突并重新观察，不伪造确定状态。
+- **完成：** 每次读取和失败都有可追溯回执；状态合并和失效语义有测试；投影若无收益或损害完整性，可以不启用，但不能以此删除回执能力。
+
+**需要重审方案的反例：** 任务正确性依赖多调用间强一致快照，而选定 API 无法提供；或压缩表示不能表达必要事实且原文也无法取回。此时缩小一致性承诺或放弃该投影，不盲目补更多摘要规则。
+
+## 八、第四阶段：统一写动作、审批、执行后验证与恢复
+
+**要回答的问题：** 所有可能改变 Odoo 或发出通知的动作，能否被统一管住，并在中断后诚实判断做没做成？
+
+### 实现内容与文件
+
+来源：`tools_write.py`、`write_policy.py`、`agent_tools.py` 的校验/批准载荷、`server_core.py` 的批准记录与上传路径约束、`audit.py`。落点为 `odoo_runtime/actions.py` 和 `store.py`；接入 Pi 的执行前后边界，不给 `pi_agent` 加 Odoo 特例。
+
+分两个实现检查点：先原生搬迁现有语义并收拢入口；再增加持久化和更强门控。不能一次同时改传输、审批协议和提示词后，把变化都归因给“原生化”。
+
+1. **完整副作用清单：** create/write/unlink、批量创建、批准的自定义方法、订单确认、发票过账、向导动作、chatter/通知、附件上传。明确每个入口的权限、参数、可验证后态和重试性质；未知副作用默认拒绝。
+2. **预览与实时校验：** 同时检查参数、最新 schema、当前业务状态、方法许可和字段策略。字段合法不等于业务操作合法；不能通过直接写状态字段替代 Odoo 业务方法。
+3. **审批凭证：** 绑定规范化动作、实例/身份/公司、目标记录、参数/文件内容摘要、前态依据、策略版本和有效期。模型传入的 metadata、`confirm=true` 或自造 token 不是可信人类授权。
+4. **授权来源：** 实验内可用明确配置且留证的自动批准策略，只作用于可丢弃 Bench 实例；真实人工审批必须由受信宿主提供。参数、策略或关键前态变化后重新校验，必要时重新审批。
+5. **持久动作账本：** SQLite 事务记录批准、领取执行权、结果和业务回执；用唯一约束防止本地重复领取。以运行编号关联会话检查点、已完成/待做动作引用，恢复多步任务时不能重新执行已完成动作。写前必需记录失败则不执行；旧的可选 JSONL 审计只作为导出，不能充当唯一权威状态。
+6. **执行与并发：** 有副作用工具按正确顺序执行，同一受影响对象不能通过并行批次绕过审批。取消前未发送就取消；发送后超时/取消不能直接认为未执行。`asyncio.to_thread` 的等待被取消，也不代表底层 HTTP 已停止。
+7. **执行后验证：** 从 Odoo 重读实际受影响状态，判断满足、未满足或无法确认；除目标字段外核对重要关联和意外通知。业务回执引用前态、后态、执行结果及验证依据。远端已成功但日志导出失败，不能把动作降成可安全重试的失败。
+8. **恢复与对账：** 重启后恢复批准有效期、执行中动作和未导出回执。可能已提交的动作进入“结果待核对”，只做必要读取对账；不能自动再次 create、付款或发消息。
+
+建议状态不是一条只会成功的直线：
+
+```text
+提议 → 已校验 → 待批准 → 已批准 → 执行中 → 已验证成功
+                   ↘ 拒绝/过期          ↘ 已知失败
+                                        ↘ 结果待核对 → 对账确认/仍需人工处理
+发送之前可以取消；发送之后是否生效必须按证据判断。
+```
+
+### 必须明确的能力边界
+
+本地 `action_id`、SQLite 事务和“执行前重读”**都不能单独保证远端恰好执行一次或跨请求原子性**。真正严格的去重、条件写或组合事务需要 Odoo 服务端配合。当前默认实现为本地去重、不盲目重试、结果不明时停止后续依赖动作并对账；若业务要求更强语义，先报告服务端改动方案，不能擅自装 addon。
+
+一次调用或一个动作成功也不等于整套多步业务流程原子成功；补偿操作本身是新的受控动作，不是自动“回滚一切”。
+
+### 验证与完成标准
+
+- 预览、校验可对照比较；真实执行严格单后端。A、B 各自从同一快照恢复，比较各自最终状态，不在同一数据库双写。
+- 故障注入覆盖：批准前后重启、领取后发送前中断、远端提交后响应丢失、写后验证失败、重复提交、两个并发提交、审批过期、参数篡改、外部状态变化、上传文件替换。
+- 对所有副作用入口检查“不绕过统一门控”；测试多动作部分完成、消息/附件旁路和 unknown method。对账无充分证据时保持待核对，而不是猜成功。
+- **完成：** 原生写覆盖清单通过，持久恢复语义可演示，Bench 全规则及副作用检查通过；报告已验证的保证与服务端原子性边界。普通导入/配置失败继续修，不能再次误判为整体路线失败。
+
+**需要重审方案的反例：** 业务必须保证远端严格一次执行，但它无唯一业务键、无可靠后态且服务端不能配合；或统一审批方案无法绑定真正执行的参数。此时暂停该动作类型，给出最小服务端支持或更弱保证的选择。
+
+## 九、第五阶段：原生能力、SOP 与动态工具编排
+
+**要回答的问题：** MCP 中的诊断、业务封装和工作流能否成为原生能力，并按需呈现给模型，而不损失可达性和权限边界？
+
+### 实现内容与文件
+
+来源：`agent_tools.py`、`diagnostics.py`、`access_helpers.py`、`accounting_tools.py`、`data_quality.py`、`cross_instance.py`、对应 `tools_*`、`prompts.py`、`prompts_workflows.py`、`task_queue.py`、`tools_async.py`。接入 `AgentTool` 和 `CodingSession`，能力元数据主放 `odoo_runtime/capabilities.py` 及一份 `configs/capabilities.json`。
+
+拆为三个独立检查点：**原生能力全覆盖 → SOP 正确接入 → 动态可见工具集**。后两项各自比较，不与模型变更混跑。
+
+1. **能力清单：** 列出当前固定 MCP 广告的每个工具及使用到的 prompt/resource，逐项标记原生实现、等价合并或尚未迁移；删除支持范围必须另获确认。模块缺失、权限不足和暂不可用是不同状态，不能都说“不支持”。
+2. **诊断与业务封装：** 复用纯计算，连接读取改走统一原生读表面。诊断结论附证据与不确定性。账龄的 `as_of` 只是当前未结项的分桶参考，不宣称历史账龄快照；数据质量抽样、聚合截断和跨实例局部失败不得伪装成全量结论。
+3. **字段策略贯穿所有出口：** 例如 `accounting_tools.py::fetch_aging_lines` 直接读 client，不能假设它已经执行应用层脱敏。受限金额/身份字段要拒绝相关分析或正确限制结果，不能仅删除最外层字段名。
+4. **SOP：** 按真实 Odoo 方法改写并检查每一步的工具、字段、前置模块和人类检查点。过账/批准必须走第四阶段业务动作，不照抄错误的 CRUD 状态变更描述。SOP 是操作指导，不是授权凭证，也不能包含 Bench 标准答案。
+5. **受控加载：** 当前 runner 关闭项目资源、skills、extensions。只显式加载本仓库已审核 Odoo SOP，不为启用它们重新开放任意工作目录资源、shell 工具或不受信插件。模型必须能按受控 SOP 标识读取正文，或在激活能力时得到正文；不能只展示技能名和文件路径，却没有可用的读取入口。
+6. **动态工具：** 保留小型基础读取/能力发现/激活入口；按已安装模块、任务需要和权限选择业务工具。先用确定性规则，不再加一个 LLM 路由器。启动不强制扫描所有模型 schema，按需发现、缓存并记录开销。
+7. **每轮一致性：** 工具集合变化在下一轮生效，给出新增/撤回的明确回执；执行时仍检查当前授权和能力版本。同一回复中“激活某能力并立刻调用新工具”按明确的批次规则拒绝或延后，不能执行当轮未发布工具。
+8. **会话接缝：** 保留 `_prepare_next_turn_refresh` 原行为；若现有公共入口不足，只在本仓库 agent 副本增加最小、通用的组合入口及假 provider 回归测试，不让 `pi_agent` 依赖 Odoo，不以切换成裸 loop 绕开会话行为。
+9. **异步与多实例：** 先保持只读后台任务允许清单、有界并发、逐实例错误及来源标记。复用已有线程池思想；任务一旦跨会话，使用第四阶段同一持久存储记录状态。进程中断后明确标为中断，只有可安全重跑的读任务才能重启；不宣称从任意执行位置续跑。取消后保留“底层仍可能在运行”的事实，不让迟到结果污染新身份的 World/知识。
+10. `plugin_api.py` 是绑定 MCP 的受信进程内插件 API，不是通用权限沙箱。原生阶段先显式注册迁入的可信能力，不新增任意第三方插件市场或执行器。
+
+### 验证与完成标准
+
+- 对能力清单做入口覆盖和真实 Odoo 小用例；缺模块、受限用户、部分失败、日期/金额边界、异步取消/恢复、跨实例标签与缓存隔离都要验证。
+- 固定轨迹检查能力始终可发现、激活/撤回时序正确、不依赖隐藏工具；每轮工具 schema 和 token 开销有记录。
+- SOP 单独验证业务过程；动态工具单独 A/B，比较完成率、首次正确工具可达时间、工具定义 token、恢复调用次数和耗时。少发工具定义却让任务陷入找工具循环，不算成功。
+- 更新 `tests/test_layout.py` 时把旧 A 的关闭资源约束和 B 的受控能力模式分开验证，不能只删除不再好看的断言。若动 `agent/`，执行它的贡献指南要求的测试与静态检查。
+- **完成：** 在已声明范围内原生能力与 SOP 都可用，动态选择有明确恢复路径；后台任务恢复边界经过验证。动态优化若无价值可保持静态工具，不能因此把迁移遗漏藏起来。
+
+**需要重审方案的反例：** 必要工具被不可恢复地隐藏；会话刷新始终把激活结果覆盖且无法通过小型公共接缝解决；所需长任务语义超出本地只读可重跑范围。分别缩小过滤策略或重新设计该生命周期，不扩建一个“万能能力平台”。
+
+## 十、第六阶段：知识接入；Compiler 只规划未来边界
+
+### 6A：先让现有知识能力原生化并可信
+
+**来源与落点：** `knowledge_index.py`、`tools_knowledge.py`、`tools_async.py` 的索引任务，落到 `odoo_runtime/knowledge.py`。当前 BM25 已在本地运行，没必要因为“Super Harness”就立即替换它。
+
+实现要求：
+
+1. 保留分词、BM25、容量上限和有界抓取，先证明同一合法语料上的等价搜索。后续向量检索/混合检索只能是单独实验，不在移植时一起换。
+2. 知识按实例、数据库、调用身份、公司和策略隔离；索引前执行字段策略。策略或身份变化时使旧索引失效，索引条目保留来源字段、记录版本、时间和覆盖范围。
+3. 当前 `search_knowledge` 不回 Odoo，现有索引也没有自动感知记录删除/权限变化；因此返回缓存片段前要有明确的权限新鲜度办法。最小默认是同身份重新验证候选记录并从当前允许内容生成片段；不能只依靠“当初允许索引”。
+4. 处理新增、更新、删除、空内容替换和失去权限的记录；本地残留旧片段不能继续可搜。更新失败或重建不完整时明确标注，不以旧数据冒充完整新版本。
+5. 知识命中是线索，不是批准写入的证据。转为关键业务依据时，先通过 World 获取所需的当前记录，形成可追溯引用。
+
+验证：固定语料排序回归，加删除、权限撤销、策略修改、异步取消和 stale 命中测试；真实 Odoo 验证权限与内容刷新。原生移植不额外调用 LLM；检索收益另行用已声明检索任务或 A/B 验证。完成时，知识功能不再经过 MCP 调用；残留的纯源码引用在第七阶段抽离，不宣称已经完成 Compiler。
+
+**方案级反例：** 目标要求即时权限撤销生效，却禁止查询当前权限也没有可靠变更通知。这是新鲜度契约矛盾，需要选择可接受的校验方案，不能靠增大 TTL 掩盖。
+
+### 6B：Evidence Compiler 的未来接缝，本轮禁止实现
+
+只定义希望交接的信息，不声称旧 Compiler 已兼容，也不创建空目录、空适配器或永远放行的测试桩：
+
+- 输入：规范化动作提议、目标身份与实例、必需证据引用、观测版本/时间和适用策略版本。
+- 输出：允许、拒绝或需补充证据；理由、引用和适用范围，绑定具体动作/参数摘要、策略版本及有效期。
+- 消费方：第四阶段动作运行时；判定不替代实时权限校验、审批或执行后验证。证据缺失、过期、动作改变、服务不可用都有明确处理，不能默认放行需要证据的高风险动作。
+- 权限：检索或判定组件不获得绕开动作门控的写能力；Odoo 记录文本中的指令不能改变受信策略。
+
+**启用条件：** 用户明确同意开始 Compiler 工作后，再检查实际代码/接口是否成立，先做无模型契约与伪造/过期证据检查，再在预算内比较 gate 开/关。发现实际接口冲突时回到设计讨论，不能为了满足文档去强行移植。
+
+第七阶段“去 MCP”可以在 6A 完成、6B 未开启时验收，结果名为“不含 Compiler 的 Odoo 原生 Harness”；包含 Compiler 的最终版本必须另外完成 6B，不能混为一个完成状态。
+
+## 十一、第七阶段：移除实际 MCP 运行依赖
+
+**要回答的问题：** 把 MCP 服务和 SDK 从部署环境拿走后，全部声明能力是否仍能独立启动、执行、恢复并接受评分？
+
+### 实现内容与文件
+
+1. 以第五阶段能力清单逐项结账：原有工具、使用中的 prompt/resource 都有已验证原生去向；保留能力而非强求入口名字一一对应。剩余缺口必须补齐或由用户明确同意缩小范围，不以关闭工具过滤器掩盖。
+2. `odoo_runtime` 不再 import `odoo_mcp` 的服务壳或纯函数；最后抽取确实需要的业务源码/数据文件并保留许可。迁移期的临时引用收敛为唯一原生实现，保留的 `mcp/` 只作为固定开发对照。
+3. 原生启动从能力清单构造 `AgentTool`，不再经过 `McpToolSet`、`tools/list`、`tools/call` 或 MCP prompt/resource 获取。旧 `mcp_odoo_` 工具名前缀不是运行依赖；改名若要研究，另开变量。
+4. 修改本仓库 `agent/pyproject.toml` 和导入边界，使 MCP 适配器成为可选依赖，原生部署不安装 `mcp`/`mcp-types`；保留带可选依赖的历史 A 启动能力。更新锁文件和必要的打包配置，不裁掉已使用的会话、Usage 等能力。
+5. `integration/pi_odoo_runner.py`、`harbor_agent.py` 及部署配置区分 A 的参考启动和 B 的原生启动。B 不启动 MCP、不等待 MCP 健康检查、不读取 MCP 服务 URL；Odoo 密钥仍由宿主注入，不能进入模型工具参数。
+6. 纯本地 Harness 不需要 MCP HTTP OAuth 壳；若未来变成远程服务，入口授权必须另立任务处理，不能顺便暴露一个无认证端口。
+7. 从干净环境安装原生包，开发对照依赖单独安装。环境/锁可重建，不能依赖原仓库路径、用户机器已有 SDK、某个历史 wheel 的偶然传递依赖。
+
+### 验证与完成标准
+
+- **静态：** 原生安装依赖闭包没有 MCP SDK，入口及可达业务模块无 MCP 导入；来源/license/资源文件完整。
+- **动态：** 无 MCP SDK 的干净环境成功导入、启动和运行；`mcp`/`mcp-types` 未安装，没有 MCP 子进程，没有 MCP 网络/协议分发，实际 Odoo 请求回执齐全。零调用不是仅由工具名计数推导。
+- **业务：** 读取、写入、权限、附件、知识、能力动态变化、恢复场景按清单通过；阶段约定的 ERP-Bench A/B 检查通过，无静默 fallback。
+- **隔离：** 原始 A 仍能从历史检查点与参考环境启动，开发对照没有进入 B 的部署包；老仓库和其环境未被改变。
+- **完成：** 发布可恢复检查点和中文部署/结果说明，注明是否包含 Compiler、支持的 Odoo 版本及尚不承诺的远端原子性。不是简单把 `mcp/` 文件夹删掉。
+
+**需要重审方案的反例：** 原生运行仍依赖 MCP 生命周期或隐藏发现行为才能构造能力，或脱离 MCP 后必要的授权/确认无替代路径。单纯漏一个可选导入、少打包一个 JSON 文件属于继续修复的实现问题。
+
+## 十二、阶段推进、暂停与回退
+
+| 阶段 | 通过后才能称什么 | 模型可见变化 | 后续前提 |
+| --- | --- | --- | --- |
+| 1 | 四个原生读取工具的已验收混合运行版本 | 无，保持契约 | 完整快照、真实差分、首对 A/B |
+| 2 | 完整原生读取表面 | 传输替换默认无；策略修正单独说明 | 读取及权限边界通过 |
+| 3 | 可追溯业务观测与回执 | 先无；投影单独实验 | 状态新鲜度、恢复和信息完整性通过 |
+| 4 | 原生动作门控及明确恢复保证 | 传输与审批机制分步验证 | 所有副作用路径及故障注入通过 |
+| 5 | 原生业务能力、SOP、可选动态工具 | SOP、动态集合分别实验 | 能力覆盖、不越权、不丢可达性 |
+| 6A | 受权限约束的原生知识 | 先保持检索，再单测优化 | 权限变化、删除、证据刷新通过 |
+| 6B | 含证据判定的版本 | 待授权后另定 | 尚未阅读实际 Compiler，不能提前验收 |
+| 7 | 可独立部署的无 MCP Harness | 包装迁移不混入工具改名 | 1—5、6A 完成；含 Compiler 声明还需 6B |
+
+阶段内实现普通错误继续迭代；出现方案级反例时，用中文按以下内容报告：
+
+1. 原承诺是什么，最小输入/状态是什么，实际发生了什么。
+2. 哪条约束被打破；为什么这是机制本身的问题，而不是尚未修好的实现错误。
+3. 已验证的影响范围：单工具、单机制还是整条路线；保留哪些已经通过的阶段。
+4. 最小替代方案、额外权限/服务端支持、代价和会改变的实验变量。
+5. 当前安全状态、证据位置和可回退检查点；需要用户决定什么。
+
+保存与回退：
+
+- 每阶段先保存实现检查点，再保存验收结论；未通过标记为未验收，不能只因 commit/push 成功就标为完成。
+- 实验分支推进，不直接覆盖稳定基线；提交前核对文件范围与敏感信息，按已授权的 GitHub 保存流程推送，并验证远端提交。禁止 force push、重写历史回执或混入旧仓库改动。
+- Git 回退只能恢复代码，不能撤销数据库、已发通知或外部付款。实验状态靠对应可恢复快照；待核对动作先对账，再决定是否允许恢复执行。
+- 本文只维护一份总体路线图。阶段结果先写进已有结果文档/独立的简短阶段结果；大量 JSONL、数据库、HTML 报告放 `.runtime/`，不污染源码树。
+
+**下一次进入实现时：** 先完成已有第一阶段的普通缺陷与未通过验收，不跳过它去搭后面框架；随后按上述顺序逐段实现。当前这次交付止于完整路线图。

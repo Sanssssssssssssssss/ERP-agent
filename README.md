@@ -2,13 +2,11 @@
 
 This is the clean, standalone research surface for one experiment: run the completed Python Pi-style agent loop against Odoo exclusively through MCP, then score the resulting Odoo state with ERP-Bench. It deliberately does not include the ERP compiler or modify any source repository.
 
-## Stage-1 experiment branch: stopped before live A/B
+## 当前计划与状态（中文）
 
-The approved [A/B-only plan](EXPERIMENT.md) has an opt-in native-read prototype
-on this branch. **It is not a validated replacement baseline.** Offline checks
-passed, but fixture snapshot preparation failed after one environment recovery
-attempt; work stopped before any paid A/B request. See [the result and exact
-pending issues](STAGE1_RESULT.md). No C group or Compiler was run.
+完整的[七阶段实现与 A/B 验收路线图](EXPERIMENT.md)已按代码整理：每阶段包括迁移文件、实现要求、验收方法、方案级反例和回退边界。普通实现错误继续修到通过，不再把“第一轮修复失败”一概当作移植方案失败。只做 A/B，Compiler 仅保留未来接口规划。
+
+本次只更新文档，没有继续修第一阶段或启动实验。本分支的原生读取仍是**未验收原型，不是替代基线**；此前在快照准备阶段停止，没有发生付费 A/B 调用。历史经过、离线检查和待办保留在 [STAGE1_RESULT.md](STAGE1_RESULT.md)，其当时的停止记录不代表新的执行规则。后面的英文内容是已有基线和运行说明。
 
 ## What is here
 
