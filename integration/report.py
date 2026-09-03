@@ -294,6 +294,15 @@ def report_trial(trial: Path, destination: Path) -> dict:
             tool_dispatches_missing_ids=sum(not event.get("tool_call_id") for event in backend_events),
             backend_errors=dict(Counter(event["error_type"] for event in ends if event.get("error_type"))),
         )
+        telemetry = next((event.get("native_telemetry") for event in reversed(ends)
+                          if isinstance(event.get("native_telemetry"), dict)), None)
+        if telemetry:
+            summary["actions"].update(
+                native_cache_hits=telemetry.get("cache_hits"),
+                native_cache_misses=telemetry.get("cache_misses"),
+                native_n_plus_one=telemetry.get("n_plus_one"),
+                native_rate_limits=telemetry.get("rate_limits"),
+            )
         summary["receipts"]["tool_backends"] = str(backend_log.resolve())
         write_json(destination / "tool_backends.json", backend_events)
     rpc_logs = list((trial / "agent").glob("odoo-*-requests.jsonl"))

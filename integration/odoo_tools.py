@@ -50,6 +50,9 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None):
                     )
                 else:
                     result = await tool.execute(call_id, arguments, signal, on_update)
+                    if native is not None and name in {"execute_approved_write", "chatter_post", "execute_method"}:
+                        for runtime in set(native.instances.values()):
+                            runtime.invalidate_schema()
                 if name == "health_check":
                     # A0: keep process-local counters in receipts, not model context.
                     # Policy/permission fields remain visible and unchanged in both arms.
@@ -64,6 +67,8 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None):
                                 data.get("rate_limits", {}).pop(key, None)
                     result.content = [TextContent(text=to_json(payload, fallback=str, indent=2).decode())]
                 event["result_sha256"] = hashlib.sha256(result.text.encode()).hexdigest()
+                if direct:
+                    event["native_telemetry"] = native.telemetry()
                 return result
             except BaseException as exc:
                 event["error_type"] = type(exc).__name__
@@ -81,5 +86,5 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None):
     if native is not None:
         present = {tool.name.removeprefix("mcp_odoo_") for tool in tools}
         if not READ_RESPONSES.keys() <= present:
-            raise RuntimeError("MCP discovery is missing a required stage-1 read tool")
+            raise RuntimeError("MCP discovery is missing a required native read tool")
     return routed

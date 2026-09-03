@@ -116,7 +116,8 @@ class ReportingTest(unittest.TestCase):
 
             (trial / "agent/tool-backends.jsonl").write_text(
                 json.dumps({"event": "start", "backend": "native", "tool_call_id": "call1", "tool": "mcp_odoo_read_record"}) + "\n"
-                + json.dumps({"event": "end", "backend": "native", "tool_call_id": "call1", "elapsed_seconds": 0.01}) + "\n"
+                + json.dumps({"event": "end", "backend": "native", "tool_call_id": "call1", "elapsed_seconds": 0.01,
+                              "native_telemetry": {"cache_hits": 2, "cache_misses": 1, "n_plus_one": [], "rate_limits": {"mode": "off"}}}) + "\n"
             )
             (trial / "agent/odoo-native-requests.jsonl").write_text(
                 json.dumps({"backend": "native", "model": "res.partner", "method": "read", "error_type": None}) + "\n"
@@ -128,6 +129,7 @@ class ReportingTest(unittest.TestCase):
             self.assertEqual(routed["actions"]["mcp_calls"], 0)
             self.assertEqual(routed["actions"]["native_read_calls"], 1)
             self.assertEqual(routed["actions"]["odoo_json2_attempts"], 1)
+            self.assertEqual(routed["actions"]["native_cache_hits"], 2)
             self.assertEqual(routed["identity"]["read_backend"], "native")
             self.assertEqual(routed["receipts"]["snapshot"]["snapshot_sha256"], "fixture")
             (trial / "config.json").write_text(json.dumps({"agent": {"kwargs": {"read_backend": "mcp"}}}))

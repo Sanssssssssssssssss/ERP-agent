@@ -8,6 +8,7 @@ writes data, and it is kept in a separate database from the A/B seed snapshot.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import subprocess
@@ -28,6 +29,10 @@ def provision_security(env):
     })
     hidden = env["res.partner"].create({"name": "PI_READ_DENIED", "comment": "FIELD_POLICY_CANARY"})
     visible = env["res.partner"].create({"name": "PI_READ_VISIBLE", "email": False, "comment": "FIELD_POLICY_CANARY"})
+    attachment = env["ir.attachment"].create({
+        "name": "pi-read-gate.txt", "mimetype": "text/plain", "res_model": "res.partner",
+        "res_id": visible.id, "datas": base64.b64encode(b"PI_ATTACHMENT_CONTENT"),
+    })
     env["ir.rule"].create({
         "name": "Pi read gate: one restricted record",
         "model_id": env.ref("base.model_res_partner").id,
@@ -39,7 +44,9 @@ def provision_security(env):
     )
     env.cr.commit()
     Path("/tmp/pi-read-gate-key").write_text(key)
-    Path("/tmp/pi-read-gate-fixture.json").write_text(json.dumps({"hidden": hidden.id, "visible": visible.id, "uid": user.id}))
+    Path("/tmp/pi-read-gate-fixture.json").write_text(json.dumps({
+        "hidden": hidden.id, "visible": visible.id, "attachment": attachment.id, "uid": user.id,
+    }))
     print("READ_GATE_SECURITY_FIXTURE_READY")
 
 
@@ -48,26 +55,40 @@ async def run_gate():
     from odoo_runtime.reads import NativeReads
     from integration.odoo_tools import route_tools
 
-    root = Path("/logs/agent")
+    root = Path(os.environ.get("READ_GATE_ROOT", "/logs/agent"))
+    root.mkdir(parents=True, exist_ok=True)
     fixture = json.loads(Path("/tmp/pi-read-gate-fixture.json").read_text())
     policy = root / "read-gate-field-policy.json"
-    policy.write_text(json.dumps({"field_acl": {"default": {"res.partner": {"deny": ["comment"]}}}}))
+    policy.write_text(json.dumps({"field_acl": {"default": {
+        "res.partner": {"deny": ["comment"]},
+        "ir.attachment": {"deny": ["datas", "name", "url"]},
+        "hr.employee": {"deny": ["name", "display_name"]},
+        "hr.leave.report.calendar": {"deny": ["employee_id", "name"]},
+    }}}))
     os.environ["ODOO_MCP_FIELD_POLICY_FILE"] = str(policy)
     cases = [
-        ("get_odoo_profile", {"include_modules": False}),
-        ("get_odoo_profile", {}),
-        ("get_model_fields", {"model": "res.company", "max_fields": 10}),
-        ("get_model_fields", {"model": "res.partner", "field_names": ["name", "comment", "email"]}),
-        ("search_records", {"model": "res.partner", "fields": ["name", "email", "comment"], "limit": 5, "order": "id"}),
-        ("search_records", {"model": "res.partner", "domain": [["id", "=", fixture["hidden"]]], "fields": ["name", "comment"]}),
-        ("search_records", {"model": "res.partner", "query": "PI_READ_VISIBLE", "limit": 2, "order": "id"}),
-        ("search_records", {"model": "res.partner", "query": "PI_READ_VISIBLE", "limit": 2, "order": "id"}),
-        ("search_records", {"model": "res.partner", "domain": "bad domain"}),
-        ("search_records", {"model": "res.partner", "query": "null", "fields": ["name"], "limit": 2}),
-        ("read_record", {"model": "res.partner", "record_id": fixture["visible"], "fields": ["name", "email", "comment"]}),
-        ("read_record", {"model": "res.partner", "record_id": fixture["hidden"], "fields": ["name"]}),
-        ("read_record", {"model": "res.partner", "record_id": 2147483647, "fields": ["name"]}),
-        ("read_record", {"model": "res.partner", "record_id": fixture["visible"], "fields": ["name", "email"], "extra": "ignored"}),
+        ("get_odoo_profile", {"include_modules": False}, True),
+        ("get_odoo_profile", {}, True),
+        ("list_instances", {}, True),
+        ("list_models", {"query": "partner", "limit": 5}, True),
+        # The reference catalog forgets its own field policy; native marks the same restricted field.
+        ("schema_catalog", {"models": ["res.partner"], "include_fields": True}, False),
+        ("get_model_fields", {"model": "res.company", "max_fields": 10}, True),
+        ("get_model_fields", {"model": "res.partner", "field_names": ["name", "comment", "email"]}, True),
+        ("search_records", {"model": "res.partner", "fields": ["name", "email", "comment"], "limit": 5, "order": "id"}, True),
+        ("search_records", {"model": "res.partner", "domain": [["id", "=", fixture["hidden"]]], "fields": ["name", "comment"]}, True),
+        ("search_records", {"model": "res.partner", "query": "PI_READ_VISIBLE", "limit": 2, "order": "id"}, True),
+        ("search_records", {"model": "res.partner", "query": "PI_READ_VISIBLE", "limit": 2, "order": "id"}, True),
+        ("search_records", {"model": "res.partner", "domain": "bad domain"}, True),
+        ("search_records", {"model": "res.partner", "domain": [["comment", "ilike", "FIELD_POLICY_CANARY"]], "fields": ["name"]}, False),
+        ("read_record", {"model": "res.partner", "record_id": fixture["visible"], "fields": ["name", "email", "comment"]}, True),
+        ("read_record", {"model": "res.partner", "record_id": fixture["hidden"], "fields": ["name"]}, True),
+        ("read_record", {"model": "res.partner", "record_id": 2147483647, "fields": ["name"]}, True),
+        ("aggregate_records", {"model": "res.partner", "group_by": ["company_id"], "measures": ["id:count"]}, True),
+        ("aggregate_records", {"model": "res.partner", "group_by": ["company_id"], "domain": [["comment", "ilike", "FIELD_POLICY_CANARY"]]}, False),
+        ("read_attachment", {"attachment_id": fixture["attachment"]}, False),
+        ("search_employee", {"name": "__PI_READ_GATE_NO_EMPLOYEE__"}, False),
+        ("search_holidays", {"start_date": "2099-01-01", "end_date": "2099-01-02"}, False),
     ]
     results = []
     processes = []
@@ -108,18 +129,30 @@ async def run_gate():
             async with McpToolSet(f"http://127.0.0.1:{port}/mcp") as toolset:
                 a = {tool.name: tool for tool in route_tools(toolset.tools, root / f"gate-{username}-a.jsonl")}
                 b = {tool.name: tool for tool in route_tools(toolset.tools, root / f"gate-{username}-b.jsonl", native)}
-                for number, (name, arguments) in enumerate(cases):
+                for number, (name, arguments, expected_equal) in enumerate(cases):
+                    if name == "schema_catalog" and username != "admin":
+                        expected_equal = True  # ir.model ACL prevents either path from exposing metadata.
                     full_name = f"mcp_odoo_{name}"
                     expected = await a[full_name].execute(str(number), arguments)
                     actual = await b[full_name].execute(str(number), arguments)
                     equal = expected.model_dump() == actual.model_dump()
-                    row = {"principal": username, "tool": name, "arguments": arguments, "equal": equal,
+                    row = {"principal": username, "tool": name, "arguments": arguments,
+                           "expected_equal": expected_equal, "equal": equal,
                            "a": expected.model_dump(), "b": actual.model_dump()}
                     results.append(row)
-                    if not equal:
-                        raise AssertionError(f"Read differential mismatch: {username}/{name}/case {number}")
+                    if equal != expected_equal:
+                        raise AssertionError(f"Unexpected read differential: {username}/{name}/case {number}")
                     payload = json.loads(actual.text)
                     assert "FIELD_POLICY_CANARY" not in actual.text, "field policy leaked a value"
+                    if name in {"search_employee", "search_holidays"}:
+                        assert payload["success"] is False
+                    if name == "read_attachment":
+                        assert not payload["data_included"] and "name" not in payload["attachment"]
+                    if name == "schema_catalog":
+                        if username == "admin":
+                            assert payload["result"][0]["fields"]["comment"]["access"] == "restricted"
+                        else:
+                            assert payload["success"] is False
                     if name == "get_model_fields" and arguments["model"] == "res.company":
                         assert payload["count"] == 10
                         assert "chart_template" not in payload["result"]

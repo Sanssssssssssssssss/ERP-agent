@@ -6,42 +6,67 @@ Copyright (c) 2025 Lê Anh Tuấn. Distributed under mcp/LICENSE (MIT).
 
 from __future__ import annotations
 
+import base64
+import copy
+import hashlib
 import inspect
 import json
+import re
+import threading
+from datetime import datetime, timedelta
 from functools import cache
+from pathlib import Path
 from typing import Any, get_type_hints
 
 from pydantic import create_model
 
-from odoo_mcp.field_policy import get_field_policy
+from odoo_mcp.field_policy import FieldPolicy, FieldPolicyError, _parse_field_policy, field_policy_file_path
 from odoo_mcp.field_ranking import (
     DEFAULT_MAX_RELEVANT_FIELDS,
     build_text_query_domain,
     rank_relevant_fields,
     select_smart_fields,
 )
-from odoo_mcp.odoo_client import build_odoo_client, load_instances_config
-from odoo_mcp.rate_limit import check_rate
+from odoo_mcp.odoo_client import build_odoo_client, list_configured_instances, load_instances_config
+from odoo_mcp.rate_limit import SlidingWindowRateTracker, check_rate, rate_report
 from odoo_mcp.schema_cache import _build_schema_cache
 from odoo_mcp.schemas import (
     GetModelFieldsResponse,
     GetOdooProfileResponse,
+    AggregateRecordsResponse,
+    ListInstancesResponse,
+    ListModelsResponse,
+    ReadAttachmentResponse,
     ReadRecordResponse,
+    SchemaCatalogResponse,
     SearchRecordsResponse,
 )
 from odoo_mcp.tool_helpers import (
     clamp_limit,
+    formatted_read_group_missing,
+    max_attachment_bytes,
     max_smart_fields,
     normalize_domain_input,
+    odoo_major_version,
+    parse_measure_spec,
+    SearchEmployeeResponse,
+    SearchHolidaysResponse,
     validate_model_name,
 )
-from .gateway import Json2ReadClient
+from .gateway import Json2ReadClient, read_context
 
 READ_RESPONSES = {
     "get_odoo_profile": GetOdooProfileResponse,
     "get_model_fields": GetModelFieldsResponse,
     "search_records": SearchRecordsResponse,
     "read_record": ReadRecordResponse,
+    "list_instances": ListInstancesResponse,
+    "list_models": ListModelsResponse,
+    "schema_catalog": SchemaCatalogResponse,
+    "read_attachment": ReadAttachmentResponse,
+    "aggregate_records": AggregateRecordsResponse,
+    "search_employee": SearchEmployeeResponse,
+    "search_holidays": SearchHolidaysResponse,
 }
 
 
@@ -53,7 +78,9 @@ def _read_arguments_model(name: str):
         key: (hints[key], ... if param.default is inspect.Parameter.empty else param.default)
         for key, param in inspect.signature(function).parameters.items() if key != "self"
     }
-    return create_model(f"{name}Arguments", **fields, instance=(str | None, None))
+    if name != "list_instances":
+        fields["instance"] = (str | None, None)
+    return create_model(f"{name}Arguments", **fields)
 
 
 def normalize_read_arguments(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -80,75 +107,233 @@ def normalize_read_arguments(name: str, arguments: dict[str, Any]) -> dict[str, 
 
 
 class NativeReads:
-    """One fixed principal/instance per run, with the reference field policy/cache."""
+    """One private client/cache per instance; call() is the policy/identity boundary."""
 
-    def __init__(self, client: Json2ReadClient, *, instance: str = "default"):
+    def __init__(self, client: Json2ReadClient, *, instance: str = "default", policy: FieldPolicy | None = None):
         self.client = client
         self.instance = instance
-        self.policy = get_field_policy()  # Malformed policy aborts before execution.
+        self.instances = {instance: self}
+        self._policy_override = policy
+        self._policy_version = None
+        self._scope = None
+        # ponytail: serialize one instance's reads; separate clients/locks if parallel reads become necessary.
+        self._lock = threading.RLock()
         self.cache = _build_schema_cache()
         self.cache_hits = 0
         self.cache_misses = 0
+        self._single_reads = SlidingWindowRateTracker(window_seconds=60, max_calls=10)
+        self._refresh_scope()  # Malformed policy aborts before model execution.
 
     @classmethod
     def from_environment(cls) -> NativeReads:
         """Use the reference configuration parser, including connection defaults."""
         name, instances = load_instances_config()
-        if len(instances) != 1:
-            raise ValueError("Stage-1 native reads require exactly one configured instance")
-        return cls(build_odoo_client(
-            instances[name], name=name, client_type=Json2ReadClient,
-        ), instance=name)
+        runtimes = {}
+        for instance, entry in instances.items():
+            client = build_odoo_client(entry, name=instance, client_type=Json2ReadClient)
+            client.context = read_context(entry.get("context", {}))
+            runtimes[instance] = cls(client, instance=instance)
+        root = runtimes[name]
+        root.instances = runtimes
+        return root
 
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if name not in READ_RESPONSES:
             raise ValueError(f"Not a native read tool: {name}")
         try:
             args = dict(arguments)
-            instance = args.pop("instance", None)
-            if instance and instance != self.instance:
+            instance = args.pop("instance", None) or self.instance
+            if instance not in self.instances:
                 raise ValueError(
                     f"Unknown Odoo instance {instance!r}. "
-                    f"Available instances: {[self.instance]}"
+                    f"Available instances: {sorted(self.instances)}"
                 )
-            if name in {"search_records", "read_record"}:
-                refusal = check_rate(self.instance, name)
-                if refusal is not None:
-                    return refusal
-            return getattr(self, name)(**args)
+            runtime = self.instances[instance]
+            with runtime._lock:
+                runtime._refresh_scope()
+                if name in {"search_records", "read_record", "aggregate_records"}:
+                    refusal = check_rate(runtime.instance, name)
+                    if refusal is not None:
+                        return refusal
+                result = getattr(runtime, name)(**args)
+                if name in {"search_employee", "search_holidays"}:
+                    result = READ_RESPONSES[name].model_validate(result).model_dump()
         except Exception as exc:
-            result = {"success": False, "error": str(exc)}
-            if name == "get_odoo_profile":
-                result["tool"] = name
-            return result
+            if name in {"get_odoo_profile", "schema_catalog", "list_instances", "read_attachment"}:
+                result = {"success": False, "tool": name, "error": str(exc)}
+            else:
+                result = {"success": False, "error": str(exc)}
+        if name in {"search_employee", "search_holidays"}:
+            return READ_RESPONSES[name].model_validate(result).model_dump()
+        return result
+
+    def telemetry(self) -> dict[str, Any]:
+        runtimes = set(self.instances.values())
+        return {
+            "cache_hits": sum(runtime.cache_hits for runtime in runtimes),
+            "cache_misses": sum(runtime.cache_misses for runtime in runtimes),
+            "n_plus_one": [entry for runtime in runtimes
+                           for entry in runtime._single_reads.report()["busiest"] if entry["calls_in_window"] >= 10],
+            "rate_limits": rate_report(),
+        }
+
+    def invalidate_schema(self) -> None:
+        """Host/refresh hook after module or policy changes; external changes also expire by TTL."""
+        with self._lock:
+            self.cache = _build_schema_cache()
+
+    def _refresh_scope(self) -> None:
+        path = field_policy_file_path()
+        if self._policy_override is not None:
+            policy_version = repr(self._policy_override._by_instance)
+            self.policy = self._policy_override
+        else:
+            try:
+                raw = Path(path).read_bytes() if path else b'{}'
+                policy_version = hashlib.sha256(raw).hexdigest()
+                if policy_version != self._policy_version:
+                    data = json.loads(raw)
+                    if not isinstance(data, dict):
+                        raise FieldPolicyError("Field policy must contain an object")
+                    self.policy = _parse_field_policy(data)
+            except (OSError, ValueError) as exc:
+                raise FieldPolicyError(f"Cannot load native field policy: {exc}") from exc
+        fingerprint = getattr(self.client, "scope_fingerprint", None)
+        scope = (id(self.client), fingerprint() if fingerprint else None, policy_version)
+        if scope != self._scope:
+            self.invalidate_schema()
+            self._scope = scope
+        self._policy_version = policy_version
 
     def _metadata(self, model: str) -> dict[str, Any]:
         cached = self.cache.get(model)
         if isinstance(cached, dict):
             self.cache_hits += 1
-            return cached
+            return copy.deepcopy(cached)
         self.cache_misses += 1
         fields = self.client.get_model_fields(model)
         if isinstance(fields, dict) and "error" not in fields:
-            self.cache[model] = fields
+            self.cache[model] = copy.deepcopy(fields)
             return fields
-        return {}
+        raise ValueError(fields.get("error", "Invalid field metadata") if isinstance(fields, dict) else "Invalid field metadata")
 
     def _fields(self, model: str, fields: list[str] | None) -> list[str] | None:
         if fields is None:
             metadata = self._metadata(model)
-            return (
-                select_smart_fields(metadata, max_fields=max_smart_fields())
-                if metadata
-                else None
-            )
+            if not metadata:
+                raise ValueError("No readable field metadata; refusing implicit full-field read")
+            return select_smart_fields(metadata, max_fields=max_smart_fields())
         return None if fields == ["*"] else fields
+
+    def _require_fields(self, model: str, fields: list[str]) -> None:
+        denied = self.policy.restricted_fields(self.instance, model, fields)
+        if denied:
+            raise ValueError(f"Field policy denies access to {sorted(denied)} on {model}")
+
+    def _field_path(self, model: str, path: str) -> tuple[str, str]:
+        if not isinstance(path, str) or not re.fullmatch(r"[a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*)*", path):
+            raise ValueError("Unsupported field path in native read")
+        parts = path.split(".")
+        for index, field in enumerate(parts):
+            self._require_fields(model, [field])
+            if index < len(parts) - 1:
+                relation = self._metadata(model).get(field, {}).get("relation")
+                if not relation:
+                    raise ValueError(f"Cannot resolve policy for related field {path}")
+                model = relation
+        return model, parts[-1]
+
+    def _query_policy(self, model: str, domain: list, order: str | None = None) -> None:
+        if not self.policy.active():
+            return
+        for leaf in domain:
+            if isinstance(leaf, (list, tuple)) and len(leaf) == 3:
+                parent, field = self._field_path(model, leaf[0])
+                if leaf[1] in {"any", "not any", "any!", "not any!"}:
+                    relation = self._metadata(parent).get(field, {}).get("relation")
+                    if not relation or "!" in leaf[1]:
+                        raise ValueError("Unsupported related-domain policy expression")
+                    self._query_policy(relation, normalize_domain_input(leaf[2]))
+        if order:
+            for term in order.split(","):
+                field, *direction = term.strip().split()
+                if " ".join(direction).lower() not in {"", "asc", "desc", "asc nulls first", "asc nulls last", "desc nulls first", "desc nulls last"}:
+                    raise ValueError("Unsupported ordering under field policy")
+                self._field_path(model, field)
+
+    def _marked_metadata(self, model: str) -> dict[str, Any]:
+        fields = self._metadata(model)
+        restricted = self.policy.restricted_fields(self.instance, model, fields)
+        return {name: {**meta, "access": "restricted"} if name in restricted else meta
+                for name, meta in fields.items()}
+
+    def list_instances(self) -> dict[str, Any]:
+        instances = list_configured_instances()
+        return {
+            "success": True, "tool": "list_instances",
+            "default": next((name for name, entry in instances.items() if entry.get("is_default")), None),
+            "instance_count": len(instances),
+            "instances": [{"name": name, **entry} for name, entry in sorted(instances.items())],
+        }
+
+    def list_models(self, query: str | None = None, limit: int = 100) -> dict[str, Any]:
+        limit = clamp_limit(limit, maximum=500)
+        self._require_fields("ir.model", ["model", "name"])
+        models = self.client.get_models()
+        if "error" in models:
+            return {"success": False, "error": models["error"]}
+        details = models.get("models_details", {})
+        names = [name for name in models.get("model_names", []) if not query
+                 or query.lower() in name.lower()
+                 or query.lower() in str(details.get(name, {}).get("name", "")).lower()]
+        records = [{"model": name, "name": details.get(name, {}).get("name", "")} for name in names[:limit]]
+        return {"success": True, "count": len(records), "result": records}
+
+    def schema_catalog(
+        self, query: str | None = None, models: list[str] | None = None,
+        include_fields: bool = False, refresh: bool = False, limit: int = 50,
+    ) -> dict[str, Any]:
+        limit = clamp_limit(limit, maximum=500)
+        for model in models or []:
+            validate_model_name(model)
+        self._require_fields("ir.model", ["model", "name"])
+        if refresh:
+            self.invalidate_schema()
+        key = json.dumps(["catalog", query, sorted(models or []), include_fields, limit])
+        cached = self.cache.get(key)
+        if cached is not None:
+            self.cache_hits += 1
+            result = copy.deepcopy(cached)
+            result["metadata_used"]["cache_hit"] = True
+            return result
+        self.cache_misses += 1
+        raw = self.client.get_models()
+        if "error" in raw:
+            raise ValueError(raw["error"])
+        details = raw.get("models_details", {})
+        names = [name for name in raw.get("model_names", [])
+                 if (not models or name in models) and (not query or query.lower() in name.lower()
+                 or query.lower() in str(details.get(name, {}).get("name", "")).lower())]
+        records = []
+        for name in names[:limit]:
+            record = {"model": name, "name": details.get(name, {}).get("name", "")}
+            if include_fields:
+                # Fail closed; a partial/failed schema is not a successful cache entry.
+                record.update(fields=self._marked_metadata(name), field_error=None)
+            records.append(record)
+        result = {
+            "success": True, "tool": "schema_catalog", "count": len(records), "result": records,
+            "metadata_used": {"live_odoo": True, "fields_get": include_fields, "cache_hit": False},
+        }
+        self.cache[key] = copy.deepcopy(result)
+        return result
 
     def get_odoo_profile(
         self, include_modules: bool = True, module_limit: int = 100
     ) -> dict[str, Any]:
         module_limit = clamp_limit(module_limit, maximum=500)
         if include_modules:
+            self._require_fields("ir.module.module", ["name", "shortdesc", "state"])
             profile = self.client.get_profile(module_limit=module_limit)
         else:
             profile = {
@@ -180,9 +365,7 @@ class NativeReads:
         if relevance not in (None, "top"):
             raise ValueError('relevance must be "top" when provided')
         validate_model_name(model)
-        fields = self.client.get_model_fields(model)
-        if "error" in fields:
-            return {"success": False, "error": fields["error"]}
+        fields = self._metadata(model)
         if field_names:
             fields = {name: fields[name] for name in field_names if name in fields}
         restricted = self.policy.restricted_fields(self.instance, model, list(fields))
@@ -216,8 +399,11 @@ class NativeReads:
         domain = normalize_domain_input(domain)
         query_fields = None
         if query is not None and str(query).strip():
-            query_domain, query_fields = build_text_query_domain(query, self._metadata(model))
+            metadata = self._metadata(model)
+            allowed, _ = self.policy.filter_fields(self.instance, model, metadata)
+            query_domain, query_fields = build_text_query_domain(query, {key: metadata[key] for key in allowed})
             domain = query_domain + domain
+        self._query_policy(model, domain, order)
         resolved = self._fields(model, fields)
         records = self.client.search_read(
             model_name=model, domain=domain, fields=resolved,
@@ -234,6 +420,143 @@ class NativeReads:
             result["redacted_fields"] = redacted
         return result
 
+    def read_attachment(self, attachment_id: int, include_data: bool = True) -> dict[str, Any]:
+        if attachment_id < 1:
+            raise ValueError("attachment_id must be greater than 0")
+        model = "ir.attachment"
+        fields = ["name", "mimetype", "file_size", "type", "url", "res_model", "res_id", "checksum", "create_date"]
+        rows = self.client.execute_method(model, "read", [attachment_id], fields=fields)
+        if not isinstance(rows, list) or not rows:
+            raise ValueError(f"Attachment not found: ir.attachment ID {attachment_id}")
+        attachment = dict(rows[0])
+        warnings = []
+        data = None
+        cap = max_attachment_bytes()
+        size = int(attachment.get("file_size") or 0)
+        if size < 0:
+            raise ValueError("Invalid attachment file_size")
+        binary = str(attachment.get("type") or "binary") == "binary"
+        if include_data and self.policy.restricted_fields(self.instance, model, ["datas"]):
+            warnings.append("Field policy denies attachment content; content omitted.")
+        elif include_data and binary:
+            if size > cap:
+                if self.policy.restricted_fields(self.instance, model, ["file_size"]):
+                    warnings.append("Attachment content exceeds the configured cap; content omitted.")
+                else:
+                    warnings.append(f"Attachment is {size} bytes; cap is {cap} (raise ODOO_MCP_MAX_ATTACHMENT_BYTES to fetch it).")
+            else:
+                # Read metadata + data in the same RPC so content cannot be paired with stale metadata.
+                rows = self.client.execute_method(model, "read", [attachment_id], fields=[*fields, "datas"], context={"bin_size": False})
+                if not isinstance(rows, list) or not rows:
+                    raise ValueError(f"Attachment not found: ir.attachment ID {attachment_id}")
+                attachment = dict(rows[0])
+                raw = attachment.pop("datas", None)
+                if str(attachment.get("type") or "binary") != "binary":
+                    warnings.append("Attachment type changed during read; content omitted.")
+                elif isinstance(raw, str) and raw:
+                    if len(raw) > 4 * ((cap + 2) // 3):
+                        warnings.append("Attachment content exceeded the cap when fetched; content omitted.")
+                    else:
+                        decoded = base64.b64decode(raw, validate=True)
+                        if len(decoded) > cap:
+                            warnings.append("Attachment content exceeded the cap when fetched; content omitted.")
+                        elif int(attachment.get("file_size") or 0) != len(decoded):
+                            raise ValueError("Attachment content size does not match metadata")
+                        elif attachment.get("checksum") and hashlib.sha1(decoded).hexdigest() != attachment["checksum"]:
+                            raise ValueError("Attachment content checksum does not match metadata")
+                        else:
+                            data = raw
+        elif include_data and not binary:
+            warnings.append("URL-type attachment; fetch the url field directly.")
+        attachment, redacted = self.policy.redact_record(self.instance, model, attachment)
+        result = {
+            "success": True, "tool": "read_attachment", "attachment": attachment,
+            "data_base64": data, "data_included": data is not None, "max_bytes": cap, "warnings": warnings,
+        }
+        if redacted:
+            result["redacted_fields"] = redacted
+        return result
+
+    def aggregate_records(
+        self, model: str, group_by: list[str], measures: list[str] | None = None,
+        domain: Any = None, lazy: bool = False, limit: int | None = None,
+        offset: int = 0, order: str | None = None,
+    ) -> dict[str, Any]:
+        validate_model_name(model)
+        if not group_by:
+            raise ValueError("group_by must include at least one field")
+        if offset < 0:
+            raise ValueError("offset must be greater than or equal to 0")
+        # No silent truncation when the caller omitted a limit.
+        bounded_limit = clamp_limit(limit) if limit is not None else 101
+        domain = normalize_domain_input(domain)
+        normalized = [f"{field}:{agg}" for field, agg in map(parse_measure_spec, measures or [])]
+        referenced = [entry.split(":", 1)[0] for entry in [*group_by, *normalized]]
+        blocked = self.policy.check_aggregate(self.instance, model, referenced)
+        if blocked:
+            return {"success": False, "error": blocked}
+        if self.policy.active():
+            for field in referenced:
+                self._field_path(model, field)
+        self._query_policy(model, domain, order)
+        major = odoo_major_version(self.client)
+        common = {"domain": domain, "groupby": group_by, "limit": bounded_limit}
+        if offset:
+            common["offset"] = offset
+        formatted = {**common, "aggregates": normalized, **({"order": order} if order else {})}
+        legacy = {**common, "fields": normalized, "lazy": lazy, **({"orderby": order} if order else {})}
+        method, reason = "read_group", None
+        if major is not None and major < 19:
+            rows = self.client.execute_method(model, method, **legacy)
+        else:
+            method = "formatted_read_group"
+            try:
+                rows = self.client.execute_method(model, method, **formatted)
+            except Exception as exc:
+                error = getattr(exc, "odoo_error", None) or {}
+                if (not formatted_read_group_missing(exc) or getattr(exc, "status_code", None) in {401, 403}
+                        or any(word in str(error).lower() + str(exc).lower() for word in ("accesserror", "access denied", "permission", "accessdenied"))):
+                    raise
+                method, reason = "read_group", str(exc)
+                rows = self.client.execute_method(model, method, **legacy)
+        if not isinstance(rows, list):
+            raise ValueError("Invalid aggregate result")
+        if limit is None and len(rows) > 100:
+            raise ValueError("More than 100 aggregate groups; narrow the domain or specify limit/offset")
+        return {
+            "success": True, "method": method, "major_version": major, "fallback_reason": reason,
+            "model": model, "group_by": group_by, "measures": normalized, "row_count": len(rows), "rows": rows,
+        }
+
+    def search_employee(self, name: str, limit: int = 20) -> dict[str, Any]:
+        self._require_fields("hr.employee", ["name", "display_name"])
+        rows = self.client.execute_method("hr.employee", "name_search", name=name, limit=clamp_limit(limit))
+        return {"success": True, "result": [{"id": row[0], "name": row[1]} for row in rows]}
+
+    def search_holidays(self, start_date: str, end_date: str, employee_id: int | None = None) -> dict[str, Any]:
+        for key, value in (("start_date", start_date), ("end_date", end_date)):
+            try:
+                datetime.strptime(value, "%Y-%m-%d")
+            except ValueError:
+                return {"success": False, "error": f"Invalid {key} format. Use YYYY-MM-DD."}
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        if start > datetime.strptime(end_date, "%Y-%m-%d"):
+            raise ValueError("start_date must not be after end_date")
+        if employee_id is not None and employee_id < 1:
+            raise ValueError("employee_id must be greater than 0")
+        model = "hr.leave.report.calendar"
+        fields = ["display_name", "start_datetime", "stop_datetime", "employee_id", "name", "state"]
+        self._require_fields(model, fields)
+        # Preserve the reference's legacy date window; timezone redesign is not this transport experiment.
+        previous = (start - timedelta(days=1)).strftime("%Y-%m-%d")
+        domain = ["&", ["start_datetime", "<=", f"{end_date} 22:59:59"], ["stop_datetime", ">=", f"{previous} 23:00:00"]]
+        if employee_id:
+            domain.append(["employee_id", "=", employee_id])
+        rows = self.client.search_read(model_name=model, domain=domain, fields=fields, limit=101)
+        if len(rows) > 100:
+            raise ValueError("More than 100 holidays; narrow the date range or select an employee")
+        return {"success": True, "result": rows}
+
     def read_record(
         self, model: str, record_id: int, fields: list[str] | None = None,
     ) -> dict[str, Any]:
@@ -241,6 +564,7 @@ class NativeReads:
         if record_id < 1:
             raise ValueError("record_id must be greater than 0")
         resolved = self._fields(model, fields)
+        self._single_reads.record(self.instance, model)
         records = self.client.read_records(model, [record_id], fields=resolved)
         if not records:
             return {"success": False, "error": f"Record not found: {model} ID {record_id}"}

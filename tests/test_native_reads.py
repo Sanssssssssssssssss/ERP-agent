@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import copy
+import hashlib
 import io
 import json
 import os
@@ -12,6 +14,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 from odoo_mcp import server, tools_read
 from odoo_mcp.field_policy import FieldPolicy, ModelFieldRule
@@ -23,6 +26,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent
 
 from odoo_runtime.reads import Json2ReadClient, NativeReads, READ_RESPONSES
+from odoo_runtime.gateway import OdooResponseLimitError
 from integration.odoo_tools import route_tools
 
 
@@ -64,11 +68,35 @@ class FakeOdoo:
         self.requests.append(("search_read", kwargs))
         if kwargs["model_name"] == "secret.model":
             raise ValueError("AccessError: not allowed")
+        if kwargs["model_name"] == "hr.leave.report.calendar":
+            return [{"display_name": "Leave", "start_datetime": "2026-01-01 08:00:00",
+                     "stop_datetime": "2026-01-01 17:00:00", "employee_id": [1, "Person"],
+                     "name": "Annual leave", "state": "validate"}]
         return [] if kwargs["domain"] == [["id", "=", -1]] else self._records(kwargs["fields"])
 
     def read_records(self, model, ids, fields=None):
         self.requests.append(("read", model, ids, fields))
         return self._records(fields) if ids == [1] else []
+
+    def get_models(self):
+        self.requests.append(("get_models",))
+        return {"model_names": ["res.company", "res.partner"],
+                "models_details": {"res.company": {"name": "Company"}, "res.partner": {"name": "Contact"}}}
+
+    def execute_method(self, model, method, *args, **kwargs):
+        self.requests.append((model, method, args, kwargs))
+        if model == "ir.attachment" and method == "read":
+            raw = b"Attachment test"
+            row = {"id": 1, "name": "file.txt", "mimetype": "text/plain", "file_size": len(raw),
+                   "type": "binary", "url": False, "res_model": "res.partner", "res_id": 1,
+                   "checksum": hashlib.sha1(raw).hexdigest(), "create_date": "2026-01-01 00:00:00",
+                   "datas": base64.b64encode(raw).decode()}
+            return [{key: value for key, value in row.items() if key == "id" or key in kwargs["fields"]}]
+        if method in {"formatted_read_group", "read_group"}:
+            return [{"company_id": [1, "Company"], "__count": 2}]
+        if model == "hr.employee" and method == "name_search":
+            return [[1, "Person"]]
+        raise AssertionError((model, method, args, kwargs))
 
 
 class NativeReadsTest(unittest.TestCase):
@@ -130,14 +158,14 @@ print('MCP_FREE_CORE_IMPORT_OK')
             ("read_record", {"model": "res.partner", "record_id": 999}),
             ("read_record", {"model": "res.partner", "record_id": 0}),
         ]
-        with patch("odoo_runtime.reads.get_field_policy", return_value=policy), patch.object(tools_read, "get_field_policy", return_value=policy):
+        with patch.object(tools_read, "get_field_policy", return_value=policy):
             for name, arguments in cases:
                 with self.subTest(name=name, arguments=arguments):
                     expected_client, actual_client = FakeOdoo(), FakeOdoo()
                     app = SimpleNamespace(schema_cache=_build_schema_cache())
                     with patch.object(tools_read, "_resolve_odoo", return_value=("default", expected_client)), patch.object(tools_read, "_app_context", return_value=app):
                         expected = getattr(tools_read, name)(None, **arguments)
-                    actual = NativeReads(actual_client).call(name, arguments)
+                    actual = NativeReads(actual_client, policy=policy).call(name, arguments)
                     self.assertEqual(actual, expected)
                     self.assertEqual(actual_client.requests, expected_client.requests)
                     if name == "get_model_fields" and arguments.get("max_fields") == 2:
@@ -175,6 +203,102 @@ print('MCP_FREE_CORE_IMPORT_OK')
             self.assertEqual(gateway.read_records("res.partner", [1]), [])
             self.assertEqual(http.call_count, 2)
 
+    def test_stage2_policy_and_cache_counterexamples(self):
+        def policy(model, *fields):
+            return FieldPolicy({"default": {model: ModelFieldRule("deny", frozenset(fields))}})
+
+        client = FakeOdoo()
+        result = NativeReads(client, policy=policy("ir.attachment", "datas", "name", "url")).call(
+            "read_attachment", {"attachment_id": 1})
+        self.assertTrue(result["success"])
+        self.assertNotIn("name", result["attachment"])
+        self.assertFalse(result["data_included"])
+        self.assertEqual(sum(row[:2] == ("ir.attachment", "read") for row in client.requests), 1)
+
+        client = FakeOdoo()
+        result = NativeReads(client, policy=policy("hr.employee", "name", "display_name")).call(
+            "search_employee", {"name": "Person"})
+        self.assertFalse(result["success"])
+        self.assertFalse(any(row[:2] == ("hr.employee", "name_search") for row in client.requests))
+
+        client = FakeOdoo()
+        result = NativeReads(client, policy=policy("hr.leave.report.calendar", "employee_id")).call(
+            "search_holidays", {"start_date": "2026-01-01", "end_date": "2026-01-02"})
+        self.assertFalse(result["success"])
+        self.assertFalse(client.requests)
+
+        client = FakeOdoo()
+        result = NativeReads(client, policy=policy("res.partner", "comment")).call(
+            "aggregate_records", {"model": "res.partner", "group_by": ["company_id"],
+                                  "domain": [["comment", "ilike", "secret"]]})
+        self.assertFalse(result["success"])
+        self.assertFalse(any(len(row) > 1 and row[1] in {"formatted_read_group", "read_group"} for row in client.requests))
+
+        reads = NativeReads(FakeOdoo())
+        for _ in range(10):
+            reads.call("read_record", {"model": "res.partner", "record_id": 0})
+        self.assertEqual(reads.telemetry()["n_plus_one"], [])
+
+        first, second = FakeOdoo(), FakeOdoo()
+        reads = NativeReads(first)
+        reads.call("schema_catalog", {"include_fields": True})
+        reads.client = second
+        reads.call("schema_catalog", {"include_fields": True})
+        self.assertTrue(second.requests)
+        self.assertGreaterEqual(reads.cache_misses, 2)
+
+        client = FakeOdoo()
+        client.get_model_fields = lambda model: {"error": "ACL denied"}
+        result = NativeReads(client).call("search_records", {"model": "res.partner"})
+        self.assertFalse(result["success"])
+        self.assertFalse(any(row[0] == "search_read" for row in client.requests))
+
+    def test_gateway_bounded_errors_routing_and_aggregate_retry(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(OdooClient, "_connect"):
+            path = Path(directory) / "requests.jsonl"
+            gateway = Json2ReadClient(url="http://fixture", db="bench", username="admin", api_key="test-secret")
+            before = gateway.scope_fingerprint()
+            gateway.json2_database_header = False
+            self.assertNotEqual(before, gateway.scope_fingerprint())
+
+            huge = HTTPError("http://fixture", 403, "Forbidden", {}, io.BytesIO(
+                b'{"message":"denied","debug":"PRIVATE_DEBUG_SENTINEL' + b'x' * (1024 * 1024) + b'"}'))
+            with patch("urllib.request.urlopen", side_effect=huge):
+                with self.assertRaises(Exception) as caught:
+                    gateway.read_records("res.partner", [1])
+            self.assertNotIn("PRIVATE_DEBUG_SENTINEL", str(caught.exception))
+            self.assertLess(len(str(caught.exception)), 500)
+
+            large_message = HTTPError("http://fixture", 403, "Forbidden", {}, io.BytesIO(
+                json.dumps({"message": "m" * 900_000, "debug": "PRIVATE_DEBUG_SENTINEL"}).encode()))
+            with patch("urllib.request.urlopen", side_effect=large_message):
+                with self.assertRaises(Exception) as caught:
+                    gateway.read_records("res.partner", [1])
+            self.assertLess(len(str(caught.exception)), 5000)
+            self.assertNotIn("PRIVATE_DEBUG_SENTINEL", str(caught.exception))
+
+            gateway.json2_database_header = True
+            with patch.dict(os.environ, {"ODOO_REQUEST_LOG": str(path), "ODOO_MCP_MAX_ATTACHMENT_BYTES": "1"}), \
+                    patch("urllib.request.urlopen", return_value=io.BytesIO(b'x' * 70000)):
+                with self.assertRaises(OdooResponseLimitError):
+                    gateway.read_records("ir.attachment", [1], fields=["datas"])
+            self.assertEqual(json.loads(path.read_text().splitlines()[-1])["status"], 200)
+
+            with patch.object(gateway, "_json2_call_once", side_effect=[ConnectionError("transient"), []]) as call, \
+                    patch.dict(os.environ, {"ODOO_MCP_RETRY_ATTEMPTS": "1", "ODOO_MCP_RETRY_BACKOFF": "0"}):
+                self.assertEqual(gateway.execute_method("res.partner", "formatted_read_group",
+                                                       domain=[], groupby=["company_id"], aggregates=[]), [])
+                self.assertEqual(call.call_count, 2)
+
+            with patch.object(gateway, "_json2_call_once") as call:
+                for payload in ({"order": []}, {"load": {}}, {"lazy": "yes"}, {"name": {}}):
+                    method = "search_read" if "order" in payload else "read" if "load" in payload else "read_group" if "lazy" in payload else "name_search"
+                    model = "hr.employee" if method == "name_search" else "res.partner"
+                    base = {"domain": [], "fields": [], "groupby": []} if method == "read_group" else {"ids": [1]} if method == "read" else {}
+                    with self.assertRaises(ValueError):
+                        gateway._json2_call(model, method, {**base, **payload})
+                call.assert_not_called()
+
     def test_http_headers_and_receipts_do_not_log_credentials(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(OdooClient, "_connect"):
             path = Path(directory) / "odoo.jsonl"
@@ -205,7 +329,17 @@ print('MCP_FREE_CORE_IMPORT_OK')
             source = [_agent_tool(SimpleNamespace(call_tool=call_tool), tool, "mcp_odoo_") for tool in listed]
             a = route_tools(source, directory / "a.jsonl")
             b = route_tools(source, directory / "b.jsonl", native)
-            args = {"get_odoo_profile": {}, "get_model_fields": {"model": "res.company", "max_fields": 2}, "search_records": {"model": "res.partner", "fields": ["name", "email"]}, "read_record": {"model": "res.partner", "record_id": 1}}
+            args = {
+                "get_odoo_profile": {}, "get_model_fields": {"model": "res.company", "max_fields": 2},
+                "search_records": {"model": "res.partner", "fields": ["name", "email"]},
+                "read_record": {"model": "res.partner", "record_id": 1},
+                "list_instances": {}, "list_models": {"query": "Contact"},
+                "schema_catalog": {"models": ["res.partner"], "include_fields": True},
+                "read_attachment": {"attachment_id": 1},
+                "aggregate_records": {"model": "res.partner", "group_by": ["company_id"]},
+                "search_employee": {"name": "Person"},
+                "search_holidays": {"start_date": "2026-01-01", "end_date": "2026-01-02"},
+            }
             for old, new in zip(a, b, strict=True):
                 self.assertEqual((old.name, old.label, old.description, old.parameters), (new.name, new.label, new.description, new.parameters))
                 name = old.name.removeprefix("mcp_odoo_")
@@ -225,7 +359,7 @@ print('MCP_FREE_CORE_IMPORT_OK')
                         return {"protocol_error": str(exc)}
                 self.assertEqual(await outcome(a_by_name[f"mcp_odoo_{name}"]), await outcome(b_by_name[f"mcp_odoo_{name}"]))
             starts = [json.loads(line) for line in (directory / "b.jsonl").read_text().splitlines() if json.loads(line)["event"] == "start"]
-            self.assertEqual(len(starts), 8)
+            self.assertEqual(len(starts), len(READ_RESPONSES) + 4)
             self.assertTrue(all(event["backend"] == "native" for event in starts))
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(check(Path(directory)))
