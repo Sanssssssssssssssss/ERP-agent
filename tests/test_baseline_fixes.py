@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -25,6 +26,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class BaselineFixTest(unittest.TestCase):
+    def test_current_time_is_a_tool_not_system_prompt_data(self):
+        result = asyncio.run(pi_odoo_runner.CURRENT_TIME_TOOL.execute("clock", {}))
+        payload = json.loads(result.text)
+        self.assertEqual(
+            payload["local_date"],
+            datetime.fromisoformat(payload["local_datetime"]).date().isoformat(),
+        )
+        self.assertIsNotNone(datetime.fromisoformat(payload["utc_datetime"]).tzinfo)
+
     def test_disposable_bench_native_action_policy_is_explicit_and_closed(self):
         env = harbor_agent.bench_action_env()
         self.assertEqual(env["ODOO_MCP_ENABLE_WRITES"], "1")
@@ -267,6 +277,14 @@ class BaselineFixTest(unittest.TestCase):
                     ),
                     payload,
                 )
+            self.assertIn(
+                "get_current_time",
+                {tool["function"]["name"] for tool in requests[0]["tools"]},
+            )
+            system = next(
+                m for m in requests[0]["messages"] if m["role"] == "system"
+            )
+            self.assertNotIn("Current runtime date:", system["content"])
             prior = next(m for m in requests[1]["messages"] if m["role"] == "assistant")
             self.assertEqual(prior["reasoning_content"], "")
             tool_results = [m for m in requests[1]["messages"] if m["role"] == "tool"]

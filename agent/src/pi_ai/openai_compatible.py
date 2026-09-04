@@ -1306,9 +1306,12 @@ def _message_to_openai(
             if isinstance(block, ThinkingContent) and block.thinking.strip()
         ]
         if thinking:
+            thinking_text = "\n".join(block.thinking for block in thinking)
             signature = thinking[0].thinking_signature or "reasoning_content"
-            if signature in {"reasoning_content", "reasoning", "reasoning_text", "thinking"}:
-                item[signature] = "\n".join(block.thinking for block in thinking)
+            if requires_reasoning_content:
+                item["reasoning_content"] = thinking_text
+            elif signature in {"reasoning_content", "reasoning", "reasoning_text", "thinking"}:
+                item[signature] = thinking_text
         if message.tool_calls:
             item["tool_calls"] = [
                 _tool_call_to_openai(tool_call) for tool_call in message.tool_calls

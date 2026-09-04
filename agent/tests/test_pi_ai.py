@@ -1147,7 +1147,7 @@ async def test_openai_compatible_replays_reasoning_text_and_encrypted_tool_detai
 
 
 @pytest.mark.anyio
-async def test_deepseek_compat_replays_empty_reasoning_content_when_required() -> None:
+async def test_deepseek_compat_replays_required_reasoning_content() -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -1178,14 +1178,28 @@ async def test_deepseek_compat_replays_empty_reasoning_content_when_required() -
                     UserMessage(content="first"),
                     AssistantMessage(content="prior answer"),
                     UserMessage(content="next"),
+                    AssistantMessage(
+                        content=[
+                            ThinkingContent(
+                                thinking="persisted plan", thinking_signature="reasoning"
+                            ),
+                            TextContent(text="intermediate answer"),
+                        ],
+                        api="openai-completions",
+                        provider="OpenAI-compatible provider",
+                        model="deepseek-reasoner",
+                    ),
+                    UserMessage(content="continue"),
                 ],
                 tools=[],
             )
         )
 
-    replay = loads(requests[0].content)["messages"][2]
-    assert replay["content"] == "prior answer"
-    assert replay["reasoning_content"] == ""
+    messages = loads(requests[0].content)["messages"]
+    assert messages[2]["content"] == "prior answer"
+    assert messages[2]["reasoning_content"] == ""
+    assert messages[4]["reasoning_content"] == "persisted plan"
+    assert "reasoning" not in messages[4]
 
 
 @pytest.mark.anyio

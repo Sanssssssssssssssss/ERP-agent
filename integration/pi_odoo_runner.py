@@ -9,12 +9,13 @@ import inspect
 import json
 import os
 import sys
-from datetime import date
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pi_agent.mcp import McpToolSet
 from pi_agent.messages import AssistantMessage
 from pi_agent.session import JsonlSessionStorage
+from pi_agent.tools import AgentTool, AgentToolResult
 from pi_ai.env import OpenAICompatibleConfig
 from pi_ai.openai_compatible import OpenAICompatibleProvider
 from pi_coding.provider_config import (
@@ -41,6 +42,30 @@ MODEL_COMPAT = {
 MCP_ONLY_POLICY = (
     "Use mcp_odoo tools for every Odoo operation. Do not access Odoo through "
     "shell commands, direct HTTP, XML-RPC, JSON-2, PostgreSQL, or Python libraries."
+)
+
+
+async def _get_current_time(_call_id, _arguments, _signal=None, _on_update=None):
+    local = datetime.now().astimezone()
+    payload = {
+        "success": True,
+        "local_datetime": local.isoformat(),
+        "local_date": local.date().isoformat(),
+        "timezone": str(local.tzinfo),
+        "utc_datetime": local.astimezone(UTC).isoformat(),
+    }
+    return AgentToolResult(content=json.dumps(payload, indent=2), details=payload)
+
+
+CURRENT_TIME_TOOL = AgentTool(
+    name="get_current_time",
+    label="Current Time",
+    description=(
+        "Read the current runtime date and time, including the local timezone and UTC. "
+        "Use this to anchor relative dates and deadlines."
+    ),
+    parameters={"type": "object", "properties": {}, "additionalProperties": False},
+    execute_fn=_get_current_time,
 )
 
 
@@ -168,10 +193,13 @@ async def run(args: argparse.Namespace) -> None:
                     )
                 except Exception as exc:  # noqa: BLE001 - optional world state must fail open
                     print(f"World initialization failed open: {type(exc).__name__}", file=sys.stderr)
-            toolset.tools = route_tools(
-                toolset.tools, args.session_file.parent / "tool-backends.jsonl",
-                native, world, actions, capabilities
-            )
+            toolset.tools = [
+                *route_tools(
+                    toolset.tools, args.session_file.parent / "tool-backends.jsonl",
+                    native, world, actions, capabilities
+                ),
+                CURRENT_TIME_TOOL,
+            ]
             cwd = Path.cwd()
             provider_config = OpenAICompatibleProviderConfig(
                 name=provider_name,
@@ -195,7 +223,7 @@ async def run(args: argparse.Namespace) -> None:
                 thinking_parameter="reasoning_effort",
                 thinking_defaults={model: thinking},
             )
-            runtime_date = date.today().isoformat()
+            runtime_date = datetime.now().astimezone().date().isoformat()
             session = await CodingSession.load(
                 CodingSessionConfig(
                     provider=provider,
@@ -216,9 +244,7 @@ async def run(args: argparse.Namespace) -> None:
                     runtime_provider_config=provider_config,
                     skills_enabled=False,
                     extensions_enabled=False,
-                    append_system_prompt=(
-                        f"{MCP_ONLY_POLICY}\nCurrent runtime date: {runtime_date}."
-                    ),
+                    append_system_prompt=MCP_ONLY_POLICY,
                     thinking_level=thinking,
                 )
             )
