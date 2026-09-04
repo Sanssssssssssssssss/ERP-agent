@@ -447,6 +447,7 @@ def report_trial(trial: Path, destination: Path) -> dict:
                 summary["run_contract"] = {key: metadata.get(key) for key in (
                     "commit_sha", "readBackend", "actionBackend", "toolContractSha256", "systemPromptSha256",
                     "worldMode", "maxTurns", "maxOutputTokens", "model", "reasoning")}
+                summary["identity"]["commit_sha"] = metadata.get("commit_sha")
                 break
     last_model_response = assistants[-1].message if assistants else last
     summary["identity"]["provider"] = last_model_response.provider

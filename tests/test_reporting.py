@@ -143,7 +143,8 @@ class ReportingTest(unittest.TestCase):
             ]
             source.write_text("\n".join(json.dumps(row) for row in rows))
             (trial / "agent/pi-agent-odoo-mcp.jsonl").write_text(
-                json.dumps(
+                "non-json runner preamble\n"
+                + json.dumps(
                     {
                         "type": "run_metadata",
                         "commit_sha": "fixture-commit",
