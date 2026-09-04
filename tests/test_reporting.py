@@ -142,6 +142,15 @@ class ReportingTest(unittest.TestCase):
                 },
             ]
             source.write_text("\n".join(json.dumps(row) for row in rows))
+            (trial / "agent/pi-agent-odoo-mcp.jsonl").write_text(
+                json.dumps(
+                    {
+                        "type": "run_metadata",
+                        "commit_sha": "fixture-commit",
+                    }
+                )
+                + "\n"
+            )
             original = source.read_bytes()
             output = Path(directory) / "report"
             summary = report_trial(trial, output)
@@ -150,6 +159,7 @@ class ReportingTest(unittest.TestCase):
             self.assertEqual(summary["actions"]["assistant_entries"], 2)
             self.assertEqual(summary["usage"]["unreported_error_calls"], 0)
             self.assertEqual(summary["identity"]["provider"], "test")
+            self.assertEqual(summary["identity"]["commit_sha"], "fixture-commit")
             self.assertTrue(summary["receipts"]["world_integrity"]["valid"])
             self.assertEqual(len(json.loads((output / "requests.json").read_text())), 1)
             self.assertIn(

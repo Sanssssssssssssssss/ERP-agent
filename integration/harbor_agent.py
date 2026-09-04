@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shlex
 import time
 from pathlib import Path
@@ -266,6 +267,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             "LLM_THINKING_TYPE": self._thinking,
             "PYTHONPATH": "/tmp/pi-odoo-harness/agent/src:/tmp/pi-odoo-harness:/tmp/pi-odoo-mcp-source",
             "PI_AGENT_SESSION_ID": str(self.context_id or self.session_id or "trial"),
+            "PI_ODOO_SOURCE_COMMIT": os.environ.get("PI_ODOO_SOURCE_COMMIT", ""),
             **bench_action_env(),
         }
         command = (
@@ -306,6 +308,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             "world_mode": self._world_mode,
             "snapshot_sha256": self._snapshot_sha256,
             "runtime_timeout_seconds": self._runtime_timeout_seconds,
+            "commit_sha": os.environ.get("PI_ODOO_SOURCE_COMMIT") or None,
         }
 
 

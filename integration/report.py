@@ -445,7 +445,7 @@ def report_trial(trial: Path, destination: Path) -> dict:
                 continue
             if isinstance(metadata, dict) and metadata.get("type") == "run_metadata":
                 summary["run_contract"] = {key: metadata.get(key) for key in (
-                    "readBackend", "actionBackend", "toolContractSha256", "systemPromptSha256",
+                    "commit_sha", "readBackend", "actionBackend", "toolContractSha256", "systemPromptSha256",
                     "worldMode", "maxTurns", "maxOutputTokens", "model", "reasoning")}
                 break
     last_model_response = assistants[-1].message if assistants else last

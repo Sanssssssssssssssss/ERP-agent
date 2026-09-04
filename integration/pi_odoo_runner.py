@@ -225,6 +225,7 @@ async def run(args: argparse.Namespace) -> None:
                         {
                             "type": "run_metadata",
                             "entrant": "pi-agent-odoo-mcp",
+                            "commit_sha": os.environ.get("PI_ODOO_SOURCE_COMMIT"),
                             "model": model,
                             "reasoning": thinking,
                             "mcpToolCount": len(toolset.tools),
@@ -276,6 +277,7 @@ async def run(args: argparse.Namespace) -> None:
                     "assistantEntries": len(assistant),
                     "worldMode": world_mode,
                     "actionBackend": getattr(args, "action_backend", "mcp"),
+                    "commitSha": os.environ.get("PI_ODOO_SOURCE_COMMIT"),
                 }
                 args.usage_file.write_text(json.dumps(usage), encoding="utf-8")
             finally:

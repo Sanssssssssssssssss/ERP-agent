@@ -218,6 +218,7 @@ class BaselineFixTest(unittest.TestCase):
             async with httpx.AsyncClient(
                 transport=httpx.MockTransport(handler)
             ) as client:
+                stdout = io.StringIO()
                 with (
                     patch.object(pi_odoo_runner, "McpToolSet", ToolSet),
                     patch.object(
@@ -239,15 +240,22 @@ class BaselineFixTest(unittest.TestCase):
                             "LLM_MODEL": "deepseek/test",
                             "LLM_PROVIDER": "openai-compatible",
                             "LLM_THINKING_TYPE": "high",
+                            "PI_ODOO_SOURCE_COMMIT": "fixture-commit",
                             "ODOO_URL": "http://odoo.invalid",
                             "ODOO_DB": "bench",
                             "ODOO_USERNAME": "reader",
                             "ODOO_PASSWORD": "not-recorded",
                         },
                     ),
-                    contextlib.redirect_stdout(io.StringIO()),
+                    contextlib.redirect_stdout(stdout),
                 ):
                     await pi_odoo_runner.run(args)
+            metadata = next(
+                json.loads(line)
+                for line in stdout.getvalue().splitlines()
+                if line.startswith('{') and '"type": "run_metadata"' in line
+            )
+            self.assertEqual(metadata["commit_sha"], "fixture-commit")
             self.assertEqual(len(requests), 2)
             self.assertEqual(json.loads(args.usage_file.read_text())["modelCalls"], 2)
             for number, payload in enumerate(requests, 1):
