@@ -449,7 +449,7 @@ def report_trial(trial: Path, destination: Path) -> dict:
                 continue
             if isinstance(metadata, dict) and metadata.get("type") == "run_metadata":
                 summary["run_contract"] = {key: metadata.get(key) for key in (
-                    "commit_sha", "readBackend", "actionBackend", "capabilityBackend", "toolContractSha256", "systemPromptSha256",
+                    "commit_sha", "readBackend", "actionBackend", "capabilityBackend", "toolContractSha256", "systemPromptSha256", "runtimeDate",
                     "worldMode", "maxTurns", "maxOutputTokens", "model", "reasoning")}
                 summary["identity"]["commit_sha"] = metadata.get("commit_sha")
                 break

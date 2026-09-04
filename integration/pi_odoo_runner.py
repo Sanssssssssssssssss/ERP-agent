@@ -9,6 +9,7 @@ import inspect
 import json
 import os
 import sys
+from datetime import date
 from pathlib import Path
 
 from pi_agent.mcp import McpToolSet
@@ -194,6 +195,7 @@ async def run(args: argparse.Namespace) -> None:
                 thinking_parameter="reasoning_effort",
                 thinking_defaults={model: thinking},
             )
+            runtime_date = date.today().isoformat()
             session = await CodingSession.load(
                 CodingSessionConfig(
                     provider=provider,
@@ -214,7 +216,9 @@ async def run(args: argparse.Namespace) -> None:
                     runtime_provider_config=provider_config,
                     skills_enabled=False,
                     extensions_enabled=False,
-                    append_system_prompt=MCP_ONLY_POLICY,
+                    append_system_prompt=(
+                        f"{MCP_ONLY_POLICY}\nCurrent runtime date: {runtime_date}."
+                    ),
                     thinking_level=thinking,
                 )
             )
@@ -246,6 +250,7 @@ async def run(args: argparse.Namespace) -> None:
                             "actionBackend": getattr(args, "action_backend", "mcp"),
                             "capabilityBackend": getattr(args, "capability_backend", "mcp"),
                             "worldMode": world_mode,
+                            "runtimeDate": runtime_date,
                             "toolNames": [tool.name for tool in session.tools],
                             "maxOutputTokens": None,
                             "requestReceipts": str(
