@@ -24,6 +24,7 @@ _PARAMETERS = {
     "search_read": {"domain", "fields", "offset", "limit", "order"},
     "read": {"ids", "fields", "load"},
     "search": {"domain", "offset", "limit", "order"},
+    "search_count": {"domain", "limit"},
     "formatted_read_group": {"domain", "groupby", "aggregates", "offset", "limit", "order"},
     "read_group": {"domain", "fields", "groupby", "offset", "limit", "orderby", "lazy"},
     "name_search": {"name", "limit"},

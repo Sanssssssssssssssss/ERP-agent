@@ -54,6 +54,20 @@ class CleanHarnessTest(unittest.TestCase):
                 source.read_text(),
             )
 
+    def test_stage5_capability_inventory_is_complete_and_compiler_free(self) -> None:
+        inventory = json.loads(
+            (ROOT / "configs" / "capabilities.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(inventory["compiler"], "out_of_scope")
+        self.assertEqual(len(inventory["tools"]), 41)
+        self.assertEqual(len({row["name"] for row in inventory["tools"]}), 41)
+        self.assertEqual(len(inventory["prompts"]), 11)
+        self.assertEqual(len(inventory["resources"]), 4)
+        self.assertEqual(
+            sum(row["stage"] == 5 and row["status"].startswith("native") for row in inventory["tools"]),
+            21,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

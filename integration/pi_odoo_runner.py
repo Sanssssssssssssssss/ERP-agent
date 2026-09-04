@@ -27,6 +27,7 @@ from pi_coding.session import CodingSession, CodingSessionConfig
 from integration.odoo_tools import route_tools
 from integration.world_context import project_messages
 from odoo_runtime.actions import NativeActions
+from odoo_runtime.capabilities import NativeCapabilities
 from odoo_runtime.reads import NativeReads
 from odoo_runtime.store import ActionStore
 from odoo_runtime.world import WorldStore
@@ -90,6 +91,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--max-turns", type=int, default=None)
     parser.add_argument("--read-backend", choices=("mcp", "native"), default="mcp")
     parser.add_argument("--action-backend", choices=("mcp", "native"), default="mcp")
+    parser.add_argument("--capability-backend", choices=("mcp", "native"), default="mcp")
     parser.add_argument("--world-mode", choices=("off", "record", "project"), default="off")
     return parser.parse_args()
 
@@ -128,11 +130,13 @@ async def run(args: argparse.Namespace) -> None:
     )
     world = None
     actions = None
+    capabilities = None
     try:
         async with McpToolSet(args.mcp_url) as toolset:
             native_runtime = None
             if (getattr(args, "read_backend", "mcp") == "native"
-                    or getattr(args, "action_backend", "mcp") == "native"):
+                    or getattr(args, "action_backend", "mcp") == "native"
+                    or getattr(args, "capability_backend", "mcp") == "native"):
                 os.environ["ODOO_REQUEST_LOG"] = str(args.session_file.parent / "odoo-native-requests.jsonl")
                 os.environ["ODOO_REQUEST_BACKEND"] = "native"
                 native_runtime = NativeReads.from_environment()
@@ -147,6 +151,14 @@ async def run(args: argparse.Namespace) -> None:
             )
             if actions is not None:
                 actions.store.recover_interrupted()
+            capabilities = (
+                NativeCapabilities(
+                    native_runtime,
+                    task_path=args.session_file.parent / "capability-tasks.sqlite3",
+                )
+                if getattr(args, "capability_backend", "mcp") == "native"
+                else None
+            )
             if world_mode != "off":
                 try:
                     world = WorldStore(
@@ -156,7 +168,8 @@ async def run(args: argparse.Namespace) -> None:
                 except Exception as exc:  # noqa: BLE001 - optional world state must fail open
                     print(f"World initialization failed open: {type(exc).__name__}", file=sys.stderr)
             toolset.tools = route_tools(
-                toolset.tools, args.session_file.parent / "tool-backends.jsonl", native, world, actions
+                toolset.tools, args.session_file.parent / "tool-backends.jsonl",
+                native, world, actions, capabilities
             )
             cwd = Path.cwd()
             provider_config = OpenAICompatibleProviderConfig(
@@ -231,6 +244,7 @@ async def run(args: argparse.Namespace) -> None:
                             "mcpToolCount": len(toolset.tools),
                             "readBackend": getattr(args, "read_backend", "mcp"),
                             "actionBackend": getattr(args, "action_backend", "mcp"),
+                            "capabilityBackend": getattr(args, "capability_backend", "mcp"),
                             "worldMode": world_mode,
                             "toolNames": [tool.name for tool in session.tools],
                             "maxOutputTokens": None,
@@ -277,6 +291,7 @@ async def run(args: argparse.Namespace) -> None:
                     "assistantEntries": len(assistant),
                     "worldMode": world_mode,
                     "actionBackend": getattr(args, "action_backend", "mcp"),
+                    "capabilityBackend": getattr(args, "capability_backend", "mcp"),
                     "commitSha": os.environ.get("PI_ODOO_SOURCE_COMMIT"),
                 }
                 args.usage_file.write_text(json.dumps(usage), encoding="utf-8")
@@ -293,6 +308,8 @@ async def run(args: argparse.Namespace) -> None:
                 print(f"Action ledger summary unavailable: {type(exc).__name__}", file=sys.stderr)
             finally:
                 actions.store.close()
+        if capabilities is not None:
+            capabilities.close()
         if world is not None:
             try:
                 world.write_summary(args.session_file.parent / "world-summary.json")

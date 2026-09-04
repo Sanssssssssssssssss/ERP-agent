@@ -176,6 +176,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         thinking: str = "high",
         read_backend: str = "mcp",
         action_backend: str = "mcp",
+        capability_backend: str = "mcp",
         world_mode: str = "off",
         snapshot_sha256: str | None = None,
         runtime_timeout_seconds: int = 1770,
@@ -191,6 +192,8 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             raise ValueError("read_backend must be mcp or native")
         if action_backend not in {"mcp", "native"}:
             raise ValueError("action_backend must be mcp or native")
+        if capability_backend not in {"mcp", "native"}:
+            raise ValueError("capability_backend must be mcp or native")
         if world_mode not in {"off", "record", "project"}:
             raise ValueError("world_mode must be off, record, or project")
         if type(runtime_timeout_seconds) is not int or runtime_timeout_seconds < 1:
@@ -199,6 +202,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         self._thinking = thinking
         self._read_backend = read_backend
         self._action_backend = action_backend
+        self._capability_backend = capability_backend
         self._world_mode = world_mode
         self._snapshot_sha256 = snapshot_sha256
         self._runtime_timeout_seconds = runtime_timeout_seconds
@@ -279,6 +283,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             "--usage-file /logs/agent/pi-agent-usage.json "
             f"--read-backend {self._read_backend} "
             f"--action-backend {self._action_backend} "
+            f"--capability-backend {self._capability_backend} "
             f"--world-mode {self._world_mode} "
             + (f"--max-turns {self._max_turns} " if self._max_turns is not None else "")
             + "2>&1 | stdbuf -oL tee /logs/agent/pi-agent-odoo-mcp.jsonl"
@@ -305,6 +310,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             "mcp_odoo_commit": MCP_ODOO_COMMIT,
             "read_backend": self._read_backend,
             "action_backend": self._action_backend,
+            "capability_backend": self._capability_backend,
             "world_mode": self._world_mode,
             "snapshot_sha256": self._snapshot_sha256,
             "runtime_timeout_seconds": self._runtime_timeout_seconds,

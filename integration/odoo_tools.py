@@ -16,6 +16,7 @@ from pi_agent.tools import AgentToolResult
 from pydantic_core import to_json
 
 from odoo_runtime.actions import ACTION_TOOLS, NativeActions
+from odoo_runtime.capabilities import CAPABILITY_TOOLS, NativeCapabilities
 from odoo_runtime.reads import READ_RESPONSES, NativeReads, normalize_read_arguments
 from odoo_runtime.world import SIDE_EFFECT_TOOLS, WorldStore
 
@@ -30,23 +31,33 @@ def _world_failed(world: WorldStore, operation: str, error: BaseException) -> No
 
 def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                 world: WorldStore | None = None,
-                actions: NativeActions | None = None):
+                actions: NativeActions | None = None,
+                capabilities: NativeCapabilities | None = None):
     """No MCP fallback on a native failure; business errors retain their envelope."""
     routed = []
     for tool in tools:
         name = tool.name.removeprefix("mcp_odoo_")
         direct_read = native is not None and name in READ_RESPONSES
         direct_action = actions is not None and name in ACTION_TOOLS
-        direct = direct_read or direct_action
+        capability_ready = capabilities is not None and name in CAPABILITY_TOOLS
 
         async def execute(call_id, arguments, signal=None, on_update=None,
-                          *, tool=tool, name=name, direct=direct,
+                          *, tool=tool, name=name, capability_ready=capability_ready,
                           direct_read=direct_read, direct_action=direct_action):
             started = time.monotonic()
+            # Knowledge indexing remains on MCP until Stage 6; every other
+            # allowlisted background operation is native in Stage 5.
+            direct_capability = capability_ready and not (
+                name == "submit_async_task"
+                and arguments.get("operation") == "index_knowledge"
+            )
+            direct = direct_read or direct_action or direct_capability
             event = {
                 "tool_call_id": call_id, "tool": tool.name,
                 "backend": "native" if direct else "mcp", "event": "start",
             }
+            if capability_ready and not direct_capability:
+                event["deferred_capability"] = "index_knowledge"
             log_path.parent.mkdir(parents=True, exist_ok=True)
             with log_path.open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps(event) + "\n")
@@ -81,6 +92,14 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                     )
                 elif direct_action:
                     raw = await asyncio.to_thread(actions.call, name, dict(arguments))
+                    result = AgentToolResult(
+                        content=to_json(raw, fallback=str, indent=2).decode(),
+                        details={"structuredContent": raw, "meta": None},
+                    )
+                elif direct_capability:
+                    raw = await asyncio.to_thread(
+                        capabilities.call, name, dict(arguments)
+                    )
                     result = AgentToolResult(
                         content=to_json(raw, fallback=str, indent=2).decode(),
                         details={"structuredContent": raw, "meta": None},
@@ -169,4 +188,8 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
         present = {tool.name.removeprefix("mcp_odoo_") for tool in tools}
         if not ACTION_TOOLS <= present:
             raise RuntimeError("MCP discovery is missing a required native action tool")
+    if capabilities is not None:
+        present = {tool.name.removeprefix("mcp_odoo_") for tool in tools}
+        if not CAPABILITY_TOOLS <= present:
+            raise RuntimeError("MCP discovery is missing a required native capability tool")
     return routed
