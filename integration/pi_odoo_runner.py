@@ -28,6 +28,7 @@ from integration.odoo_tools import route_tools
 from integration.world_context import project_messages
 from odoo_runtime.actions import NativeActions
 from odoo_runtime.reads import NativeReads
+from odoo_runtime.store import ActionStore
 from odoo_runtime.world import WorldStore
 
 CONTEXT_WINDOW = 128_000
@@ -126,6 +127,7 @@ async def run(args: argparse.Namespace) -> None:
         )
     )
     world = None
+    actions = None
     try:
         async with McpToolSet(args.mcp_url) as toolset:
             native_runtime = None
@@ -135,14 +137,23 @@ async def run(args: argparse.Namespace) -> None:
                 os.environ["ODOO_REQUEST_BACKEND"] = "native"
                 native_runtime = NativeReads.from_environment()
             native = native_runtime if getattr(args, "read_backend", "mcp") == "native" else None
-            actions = NativeActions(native_runtime) if getattr(args, "action_backend", "mcp") == "native" else None
+            actions = (
+                NativeActions(
+                    native_runtime,
+                    store=ActionStore(args.session_file.parent / "odoo-actions.sqlite3"),
+                )
+                if getattr(args, "action_backend", "mcp") == "native"
+                else None
+            )
+            if actions is not None:
+                actions.store.recover_interrupted()
             if world_mode != "off":
                 try:
                     world = WorldStore(
                         args.session_file.parent / "world-observations.jsonl",
                         projection_path=args.session_file.parent / "world-projections.jsonl",
                     )
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - optional world state must fail open
                     print(f"World initialization failed open: {type(exc).__name__}", file=sys.stderr)
             toolset.tools = route_tools(
                 toolset.tools, args.session_file.parent / "tool-backends.jsonl", native, world, actions
@@ -270,10 +281,20 @@ async def run(args: argparse.Namespace) -> None:
             finally:
                 await session.aclose()
     finally:
+        if actions is not None:
+            try:
+                summary = actions.store.summary()
+                (args.session_file.parent / "action-ledger-summary.json").write_text(
+                    json.dumps(summary, sort_keys=True), encoding="utf-8"
+                )
+            except Exception as exc:  # noqa: BLE001 - preserve the agent result on receipt failure
+                print(f"Action ledger summary unavailable: {type(exc).__name__}", file=sys.stderr)
+            finally:
+                actions.store.close()
         if world is not None:
             try:
                 world.write_summary(args.session_file.parent / "world-summary.json")
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - derived receipts must not mask the run result
                 print(f"Derived world summary unavailable: {type(exc).__name__}", file=sys.stderr)
         await provider.aclose()
 

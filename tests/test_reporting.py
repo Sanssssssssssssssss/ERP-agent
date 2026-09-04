@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -184,6 +186,31 @@ class ReportingTest(unittest.TestCase):
                 "projected_messages": 1, "projection_original_bytes": 100,
                 "projection_bytes": 40, "healthy": True,
             }))
+            ledger_path = trial / "agent/odoo-actions.sqlite3"
+            database = sqlite3.connect(ledger_path)
+            try:
+                database.execute(
+                    "CREATE TABLE action_ledger (action_id TEXT, kind TEXT, "
+                    "status TEXT, approval_source TEXT, created_at REAL)"
+                )
+                database.execute(
+                    "INSERT INTO action_ledger VALUES (?, ?, ?, ?, ?)",
+                    ("action1", "method", "verified", "bench_auto_disposable", 1.0),
+                )
+                database.commit()
+            finally:
+                database.close()
+            ledger = ledger_path.read_bytes()
+            (trial / "agent/action-ledger-summary.json").write_text(json.dumps({
+                "database": "odoo-actions.sqlite3",
+                "sha256": hashlib.sha256(ledger).hexdigest(),
+                "actions": 1,
+                "status_counts": {"verified": 1},
+                "receipts": [{
+                    "action_id": "action1", "kind": "method", "status": "verified",
+                    "approval_source": "bench_auto_disposable",
+                }],
+            }))
             (trial / "config.json").write_text(json.dumps({"agent": {"kwargs": {
                 "read_backend": "native", "action_backend": "native",
             }}}))
@@ -203,11 +230,26 @@ class ReportingTest(unittest.TestCase):
             self.assertEqual(routed["actions"]["world_observations"], 1)
             self.assertEqual(routed["actions"]["world_projected_messages"], 1)
             self.assertTrue(routed["receipts"]["world_integrity"]["valid"])
+            self.assertTrue(routed["receipts"]["action_ledger_integrity"]["valid"])
+            self.assertEqual(routed["actions"]["action_ledger_status_counts"], {"verified": 1})
             self.assertEqual(routed["identity"]["read_backend"], "native")
             self.assertEqual(routed["identity"]["action_backend"], "native")
             self.assertEqual(routed["identity"]["world_mode"], "off")
             self.assertIn("world_observations", routed["receipts"])
             self.assertEqual(routed["receipts"]["snapshot"]["snapshot_sha256"], "fixture")
+            blocked_ledger = json.loads(
+                (trial / "agent/action-ledger-summary.json").read_text()
+            )
+            blocked_ledger["status_counts"] = {"needs_reconciliation": 1}
+            (trial / "agent/action-ledger-summary.json").write_text(
+                json.dumps(blocked_ledger)
+            )
+            blocked_action = report_trial(trial, reports / "blocked-action")
+            self.assertIsNot(blocked_action["agent_termination"]["natural_end"], True)
+            blocked_ledger["status_counts"] = {"verified": 1}
+            (trial / "agent/action-ledger-summary.json").write_text(
+                json.dumps(blocked_ledger)
+            )
             bad_summary = json.loads((trial / "agent/world-summary.json").read_text())
             bad_summary["observations"] = 99
             (trial / "agent/world-summary.json").write_text(json.dumps(bad_summary))

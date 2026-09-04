@@ -7,6 +7,7 @@ import hashlib
 import html
 import json
 import os
+import sqlite3
 import subprocess
 from collections import Counter
 from dataclasses import asdict
@@ -29,6 +30,25 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+
+
+def _read_action_ledger(path: Path) -> dict:
+    database = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    database.row_factory = sqlite3.Row
+    try:
+        rows = database.execute(
+            "SELECT action_id, kind, status, approval_source "
+            "FROM action_ledger ORDER BY created_at"
+        ).fetchall()
+    finally:
+        database.close()
+    counts = Counter(row["status"] for row in rows)
+    return {
+        "database": path.name,
+        "actions": len(rows),
+        "status_counts": dict(sorted(counts.items())),
+        "receipts": [dict(row) for row in rows],
+    }
 
 
 def _typed_jsonl(path: Path, accepted: set[str]) -> tuple[list[dict], list[str]]:
@@ -311,10 +331,10 @@ def report_trial(trial: Path, destination: Path) -> dict:
         ),
         source,
     )
-    options = dict(
-        result_path=result_path if result_path.is_file() else None,
-        verifier_path=verifier_path if verifier_path.is_file() else None,
-        identity={
+    options = {
+        "result_path": result_path if result_path.is_file() else None,
+        "verifier_path": verifier_path if verifier_path.is_file() else None,
+        "identity": {
             "trial_id": trial.name,
             "entrant": "Python Pi"
             if source.name == "pi-agent-session.jsonl"
@@ -322,7 +342,7 @@ def report_trial(trial: Path, destination: Path) -> dict:
             if source.parent.name == "sessions"
             else "Tau",
         },
-    )
+    }
     try:
         summary = build_trial_summary(events, **options)
     except ValueError:
@@ -374,6 +394,48 @@ def report_trial(trial: Path, destination: Path) -> dict:
     snapshot_receipt = trial / "agent" / "snapshot-receipt.json"
     if snapshot_receipt.is_file():
         summary["receipts"]["snapshot"] = read_json(snapshot_receipt)
+    ledger_required = summary["identity"]["action_backend"] == "native"
+    ledger_summary_path = trial / "agent" / "action-ledger-summary.json"
+    ledger_database_path = trial / "agent" / "odoo-actions.sqlite3"
+    ledger_summary = read_json(ledger_summary_path)
+    ledger_integrity = {
+        "required": ledger_required,
+        "valid": not ledger_required,
+        "errors": [],
+    }
+    ledger_computed = {}
+    if ledger_summary_path.is_file():
+        ledger_integrity["valid"] = True
+        if not ledger_database_path.is_file():
+            ledger_integrity["valid"] = False
+            ledger_integrity["errors"].append("odoo-actions.sqlite3:missing")
+        else:
+            if hashlib.sha256(ledger_database_path.read_bytes()).hexdigest() != ledger_summary.get(
+                "sha256"
+            ):
+                ledger_integrity["valid"] = False
+                ledger_integrity["errors"].append("odoo-actions.sqlite3:sha256_mismatch")
+            try:
+                ledger_computed = _read_action_ledger(ledger_database_path)
+            except sqlite3.Error as exc:
+                ledger_integrity["valid"] = False
+                ledger_integrity["errors"].append(
+                    f"odoo-actions.sqlite3:invalid:{type(exc).__name__}"
+                )
+            for field in ("database", "actions", "status_counts", "receipts"):
+                if ledger_computed and ledger_summary.get(field) != ledger_computed[field]:
+                    ledger_integrity["valid"] = False
+                    ledger_integrity["errors"].append(
+                        f"action-ledger-summary.json:{field}_mismatch"
+                    )
+    elif ledger_required:
+        ledger_integrity["errors"].append("action-ledger-summary.json:missing")
+    ledger_integrity["computed"] = ledger_computed
+    summary["receipts"]["action_ledger"] = ledger_summary
+    summary["receipts"]["action_ledger_integrity"] = ledger_integrity
+    summary["actions"]["action_ledger_status_counts"] = ledger_computed.get(
+        "status_counts", ledger_summary.get("status_counts", {})
+    )
     summary["experiment"] = read_json(trial.parent / "experiment.json")
     if events != source:
         for line in events.read_text(encoding="utf-8").splitlines():
@@ -572,13 +634,29 @@ def report_trial(trial: Path, destination: Path) -> dict:
     closure = read_json(trial / "agent" / "pi-agent-usage.json")
     returned = (harbor_result.get("agent_result") or {}).get("metadata") or {}
     actions = summary["actions"]
-    if local_stops or last.stop_reason in {"error", "aborted", "length"}:
+    if local_stops or last.stop_reason in {"error", "aborted", "length"}:  # noqa: SIM114
         natural_end = False
     elif result_path.is_file() and (
         last.stop_reason == "toolUse"
         or actions.get("unfinished_tool_dispatches", 0) > 0
         or actions.get("requests_without_response_headers", 0) > 0
         or actions.get("action_backend_mismatches")
+        or (
+            agent_options.get("action_backend", "mcp") == "native"
+            and (
+                not ledger_integrity["valid"]
+                or any(
+                    actions.get("action_ledger_status_counts", {}).get(status, 0)
+                    for status in (
+                        "pending_approval",
+                        "approved",
+                        "executing",
+                        "sending",
+                        "needs_reconciliation",
+                    )
+                )
+            )
+        )
         or (agent_options.get("world_mode", "off") != "off"
             and not world_integrity["valid"])
     ):

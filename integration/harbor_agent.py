@@ -36,6 +36,7 @@ def bench_action_env() -> dict[str, str]:
         "ODOO_MCP_ELICIT_WRITES": "0",
         "MCP_CHATTER_DIRECT": "0",
         "ODOO_MCP_ALLOW_UNKNOWN_METHODS": "0",
+        "ODOO_ACTION_APPROVAL_MODE": "bench-auto",
     }
 
 try:

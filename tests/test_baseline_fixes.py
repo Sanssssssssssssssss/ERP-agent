@@ -36,6 +36,7 @@ class BaselineFixTest(unittest.TestCase):
         self.assertEqual(env["ODOO_MCP_ELICIT_WRITES"], "0")
         self.assertEqual(env["MCP_CHATTER_DIRECT"], "0")
         self.assertEqual(env["ODOO_MCP_ALLOW_UNKNOWN_METHODS"], "0")
+        self.assertEqual(env["ODOO_ACTION_APPROVAL_MODE"], "bench-auto")
 
     def test_cancellation_waits_for_service_stop_even_after_a_second_cancel(self):
         async def check():

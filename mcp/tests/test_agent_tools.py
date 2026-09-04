@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from odoo_mcp import agent_tools
-from odoo_mcp import field_ranking
+from odoo_mcp import agent_tools, field_ranking
 
 
 def _meta(field_type: str = "char", **extra) -> dict:
@@ -362,6 +361,48 @@ def test_validate_write_emits_many2one_and_relational_hints():
     )
     fields = {hint["field"] for hint in report["field_hints"]}
     assert {"company_id", "tag_ids"} <= fields
+
+
+def test_validate_write_rejects_string_relational_command_opcode():
+    report = agent_tools.validate_write_report(
+        model="sale.order",
+        operation="create",
+        values=None,
+        values_list=[
+            {
+                "partner_id": 1,
+                "order_line": [["0", "false", {"product_id": 2}]],
+            }
+        ],
+        record_ids=None,
+        fields_metadata={
+            "partner_id": {"type": "many2one", "readonly": False},
+            "order_line": {"type": "one2many", "readonly": False},
+        },
+        metadata_source="server",
+    )
+
+    assert report["success"] is False
+    issue = next(
+        item for item in report["issues"] if item["code"] == "invalid_relational_command"
+    )
+    assert "values_list[0]" in issue["message"]
+    assert "integer opcode" in issue["message"]
+
+
+def test_validate_write_accepts_relational_record_id_list():
+    report = agent_tools.validate_write_report(
+        model="sale.advance.payment.inv",
+        operation="create",
+        values={"sale_order_ids": [7]},
+        record_ids=None,
+        fields_metadata={
+            "sale_order_ids": {"type": "many2many", "readonly": False},
+        },
+        metadata_source="server",
+    )
+
+    assert report["success"] is True
 
 
 def test_validate_write_create_emits_required_field_hints():
