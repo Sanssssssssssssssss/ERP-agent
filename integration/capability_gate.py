@@ -1,0 +1,101 @@
+"""Zero-LLM Stage-5 capability gate against a disposable Odoo snapshot."""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+from pathlib import Path
+
+
+def run_gate() -> None:
+    from odoo_runtime.capabilities import CAPABILITY_TOOLS, NativeCapabilities
+    from odoo_runtime.reads import NativeReads
+
+    root = Path(os.environ.get("CAPABILITY_GATE_ROOT", "/logs/agent"))
+    root.mkdir(parents=True, exist_ok=True)
+    policy = root / "capability-field-policy.json"
+    policy.write_text("{}")
+    os.environ.update({
+        "ODOO_MCP_FIELD_POLICY_FILE": str(policy),
+        "ODOO_REQUEST_LOG": str(root / "native-requests.jsonl"),
+        "ODOO_REQUEST_BACKEND": "native-capability",
+        "ODOO_ADDONS_PATHS": "/usr/lib/python3/dist-packages/odoo/addons",
+        "PI_AGENT_SESSION_ID": "stage5-zero-llm-gate",
+    })
+    capabilities = NativeCapabilities(
+        NativeReads.from_environment(), task_path=root / "capability-tasks.sqlite3"
+    )
+    results: dict[str, dict] = {}
+
+    def call(name: str, arguments: dict) -> dict:
+        result = capabilities.call(name, arguments)
+        assert result.get("success"), (name, result)
+        results[name] = result
+        return result
+
+    call("diagnose_odoo_call", {"model": "res.partner", "method": "search_read"})
+    call("generate_json2_payload", {"model": "res.partner", "method": "search_read", "args": [[]]})
+    call("upgrade_risk_report", {"source_version": "18", "target_version": "19"})
+    call("analyze_upgrade_log", {"log_text": "ERROR: External ID not found: base.missing"})
+    call("lookup_model_history", {"name": "account.invoice"})
+    call("fit_gap_report", {"requirements": ["Track customer contacts"]})
+    call("build_domain", {"conditions": [{"field": "name", "operator": "ilike", "value": "a"}]})
+    call("scan_addons_source", {"max_files": 1, "max_file_bytes": 300000})
+
+    call("inspect_model_relationships", {"model": "res.partner"})
+    call("diagnose_access", {"model": "res.partner", "expected_count": 0, "limit": 10})
+    call("business_pack_report", {"pack": "sales"})
+    call("accounting_health_summary", {})
+    call("receivable_payable_aging", {"limit": 20, "top_partners": 3})
+    call("data_quality_report", {"model": "res.partner", "checks": ["format_anomalies"], "sample_limit": 20})
+    call("search_across_instances", {"model": "res.partner", "fields": ["name"], "limit_per_instance": 1})
+    call("aggregate_across_instances", {"model": "res.partner", "group_by": ["company_id"], "measures": ["id:count"]})
+    call("accounting_health_across_instances", {"top_partners": 2})
+
+    submitted = call("submit_async_task", {
+        "operation": "data_quality_report",
+        "params": {"model": "res.partner", "checks": ["format_anomalies"], "sample_limit": 10},
+    })
+    for _ in range(300):
+        status = capabilities.call("get_async_task", {"task_id": submitted["task_id"]})
+        if status.get("status") in {"succeeded", "failed"}:
+            break
+        time.sleep(0.02)
+    assert status.get("status") == "succeeded" and status.get("result", {}).get("success"), status
+    results["get_async_task"] = status
+    results["list_async_tasks"] = call("list_async_tasks", {})
+
+    cancellable = call("submit_async_task", {
+        "operation": "scan_addons_source", "params": {"max_files": 1000}
+    })
+    cancelled = capabilities.call("cancel_async_task", {"task_id": cancellable["task_id"]})
+    assert cancelled.get("success") or "already succeeded" in cancelled.get("error", ""), cancelled
+    results["cancel_async_task"] = cancelled
+
+    request_log = Path(os.environ["ODOO_REQUEST_LOG"])
+    before = len(request_log.read_text().splitlines()) if request_log.is_file() else 0
+    policy.write_text(json.dumps({"field_acl": {"default": {
+        "account.move.line": {"deny": ["amount_residual"]}
+    }}}))
+    denied = capabilities.call("receivable_payable_aging", {})
+    after = len(request_log.read_text().splitlines()) if request_log.is_file() else 0
+    assert not denied.get("success") and "amount_residual" in denied.get("error", ""), denied
+    assert after == before, "restricted accounting analysis reached Odoo"
+
+    assert set(results) == CAPABILITY_TOOLS, sorted(CAPABILITY_TOOLS - set(results))
+    (root / "capability-gate-results.json").write_text(
+        json.dumps(results, ensure_ascii=False, indent=2, default=str)
+    )
+    summary = {
+        "status": "passed", "llm_calls": 0,
+        "native_capabilities": len(results), "field_policy_fail_closed": True,
+        "async_persistent": True, "knowledge_deferred": True,
+    }
+    (root / "capability-gate-summary.json").write_text(json.dumps(summary, indent=2))
+    print(json.dumps(summary), flush=True)
+    capabilities.close()
+
+
+if __name__ == "__main__":
+    run_gate()
