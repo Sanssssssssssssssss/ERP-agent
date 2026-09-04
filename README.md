@@ -6,7 +6,7 @@ This is the clean, standalone research surface for one experiment: run the compl
 
 完整的[七阶段实现与 A/B 验收路线图](EXPERIMENT.md)已按代码整理：每阶段包括迁移文件、实现要求、验收方法、方案级反例和回退边界。普通实现错误继续修到通过，不再把“第一轮修复失败”一概当作移植方案失败。只做 A/B，Compiler 仅保留未来接口规划。
 
-**第三阶段已验收，开始第四阶段。** 全部 11 个读取工具已有原生实现，World 现在能在模型上下文外记录身份隔离的观测、关系、版本、失效和语义回执。第三阶段真实 Odoo gate 为 42/42、0 模型调用；同快照 A/B 均自然结束、100 分、62 / 62 条适用规则通过，全部 114 个模型请求为 HTTP 200。project 组的 65 条投影回执全部是 no-op，因此没有证明 token 收益，投影继续显式 opt-in、默认 off；只晋升 World record core。写入等未迁能力仍走 MCP，尚非最终无 MCP Harness。仍只做 A/B，不做 C 或 Compiler。证据见 [STAGE1_RESULT.md](STAGE1_RESULT.md)、[STAGE2_RESULT.md](STAGE2_RESULT.md) 和 [STAGE3_RESULT.md](STAGE3_RESULT.md)。后面的英文内容是已有基线和运行说明。
+**第四阶段已验收，开始第五阶段。** 读取、World 记录和统一原生动作门控现已可用；动作通过 SQLite 持久化，发送后未知结果进入待对账，执行后必须从 Odoo 验证。真实零模型 gate 为 11/11；同提交的固定 A 与补跑 B 均自然结束、100 分、62/62 条适用规则通过。一次 B=22.77 的采购规划失败完整保留，证据显示不是动作转换故障。当前仍是混合运行：诊断、业务封装、SOP、知识等能力尚待迁移，并非最终无 MCP Harness。仍只做 A/B，不做 C 或 Compiler。证据见 [STAGE1_RESULT.md](STAGE1_RESULT.md)、[STAGE2_RESULT.md](STAGE2_RESULT.md)、[STAGE3_RESULT.md](STAGE3_RESULT.md) 和 [STAGE4_RESULT.md](STAGE4_RESULT.md)。后面的英文内容是已有基线和运行说明。
 
 ## What is here
 
@@ -15,7 +15,7 @@ agent/        pinned Pi Agent for Python source and tests
 mcp/          pinned odoo-mcp source and tests
 bench/        ERP-Bench generator plus 300 executable Harbor tasks
 integration/  Python/native Pi adapters, request receipts, offline run reports
-odoo_runtime/ native Odoo reads, JSON-2 boundary, and World receipts (stage 3 accepted)
+odoo_runtime/ native Odoo reads, World receipts, and governed actions (stage 4 accepted)
 configs/      two single-case baselines and optional Docker proxy overlay
 patches/      the exact three-task Odoo 19 image-pin patch
 .runtime/     ignored local wheelhouse, jobs, logs, and environments
