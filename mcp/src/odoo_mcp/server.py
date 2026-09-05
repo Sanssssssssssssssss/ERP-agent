@@ -171,6 +171,7 @@ from .prompts_workflows import (
     prompt_expense_claim_review,
     prompt_invoice_approval_chain,
     prompt_po_to_receipt,
+    prompt_pre_migration_data_quality,
 )
 
 # Re-export legacy / backwards-compat symbols
@@ -327,6 +328,7 @@ __all__ = [
     # Workflow prompts
     "prompt_invoice_approval_chain",
     "prompt_po_to_receipt",
+    "prompt_pre_migration_data_quality",
     "prompt_customer_onboarding",
     "prompt_expense_claim_review",
     "prompt_accounting_close_checklist",

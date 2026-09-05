@@ -12,14 +12,11 @@ WORKFLOW_PROMPTS = {
     "customer_onboarding",
     "expense_claim_review",
     "accounting_close_checklist",
+    "pre_migration_data_quality",
 }
 
 # Prompts that actually perform writes must route through the gate.
-WRITE_BEARING = {
-    "invoice_approval_chain",
-    "customer_onboarding",
-    "expense_claim_review",
-}
+CRUD_WRITE_BEARING = {"customer_onboarding", "pre_migration_data_quality"}
 
 GATE_TOOLS = ("preview_write", "validate_write", "execute_approved_write")
 
@@ -48,8 +45,8 @@ def test_prompt_registry_has_eleven():
 
 def test_workflow_prompts_name_their_tools():
     texts = _prompt_texts()
-    # Each write-bearing workflow must reference the full gated write chain.
-    for name in WRITE_BEARING:
+    # CRUD write workflows reference the durable gate.
+    for name in CRUD_WRITE_BEARING:
         text = texts[name]
         for tool in GATE_TOOLS:
             assert tool in text, f"{name} missing gate tool {tool}"
@@ -66,14 +63,15 @@ def test_workflow_prompts_have_module_guards():
         ), f"{name} has no module guard"
 
 
-def test_no_workflow_prompt_instructs_ungated_writes():
+def test_business_transitions_use_methods_not_state_writes():
     texts = _prompt_texts()
-    # The whole point: no workflow prompt may steer an agent toward
-    # execute_method for create/write/unlink semantics.
-    for name in WORKFLOW_PROMPTS:
-        assert "execute_method" not in texts[name], (
-            f"{name} mentions execute_method; writes must go through the gate"
-        )
+    invoice = texts["invoice_approval_chain"]
+    expense = texts["expense_claim_review"]
+    assert "account.move.action_post" in invoice
+    assert "execute_method" in invoice
+    assert "writing state" in invoice
+    assert "execute_method" in expense
+    assert "Never change expense state with write" in expense
 
 
 def test_read_only_prompts_do_not_promise_writes():

@@ -7,6 +7,7 @@ import hashlib
 import json
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
@@ -32,7 +33,8 @@ def _world_failed(world: WorldStore, operation: str, error: BaseException) -> No
 def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                 world: WorldStore | None = None,
                 actions: NativeActions | None = None,
-                capabilities: NativeCapabilities | None = None):
+                capabilities: NativeCapabilities | None = None,
+                next_sequence: Callable[[], int] | None = None):
     """No MCP fallback on a native failure; business errors retain their envelope."""
     routed = []
     for tool in tools:
@@ -55,6 +57,7 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
             event = {
                 "tool_call_id": call_id, "tool": tool.name,
                 "backend": "native" if direct else "mcp", "event": "start",
+                "sequence": next_sequence() if next_sequence else None,
             }
             if capability_ready and not direct_capability:
                 event["deferred_capability"] = "index_knowledge"
@@ -168,7 +171,11 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                         except Exception as exc:
                             _world_failed(world, "invalidation", exc)
                 READ_CALL_ID.reset(token)
-                event.update(event="end", elapsed_seconds=time.monotonic() - started)
+                event.update(
+                    event="end",
+                    elapsed_seconds=time.monotonic() - started,
+                    end_sequence=next_sequence() if next_sequence else None,
+                )
                 try:
                     with log_path.open("a", encoding="utf-8") as stream:
                         stream.write(json.dumps(event) + "\n")

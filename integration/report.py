@@ -24,7 +24,7 @@ from integration.reward_adapter import adapt_erp_bench_reward
 from integration.trial_summary import _redact, build_trial_summary
 from odoo_runtime.actions import ACTION_TOOLS
 from odoo_runtime.capabilities import CAPABILITY_TOOLS
-from odoo_runtime.world import READ_TOOLS
+from odoo_runtime.world import READ_TOOLS, SIDE_EFFECT_TOOLS
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -394,6 +394,7 @@ def report_trial(trial: Path, destination: Path) -> dict:
     summary["identity"]["capability_backend"] = agent_options.get(
         "capability_backend", "mcp"
     )
+    summary["identity"]["sop_mode"] = agent_options.get("sop_mode", "off")
     summary["identity"]["world_mode"] = agent_options.get("world_mode", "off")
     snapshot_receipt = trial / "agent" / "snapshot-receipt.json"
     if snapshot_receipt.is_file():
@@ -449,7 +450,7 @@ def report_trial(trial: Path, destination: Path) -> dict:
                 continue
             if isinstance(metadata, dict) and metadata.get("type") == "run_metadata":
                 summary["run_contract"] = {key: metadata.get(key) for key in (
-                    "commit_sha", "readBackend", "actionBackend", "capabilityBackend", "toolContractSha256", "systemPromptSha256", "runtimeDate",
+                    "commit_sha", "readBackend", "actionBackend", "capabilityBackend", "sopMode", "toolContractSha256", "systemPromptSha256", "runtimeDate",
                     "worldMode", "maxTurns", "maxOutputTokens", "model", "reasoning")}
                 summary["identity"]["commit_sha"] = metadata.get("commit_sha")
                 break
@@ -552,6 +553,112 @@ def report_trial(trial: Path, destination: Path) -> dict:
             )
         summary["receipts"]["tool_backends"] = str(backend_log.resolve())
         write_json(destination / "tool_backends.json", backend_events)
+    sop_log = trial / "agent" / "sop-events.jsonl"
+    sop_events = []
+    sop_receipt_valid = False
+    sop_read_before_first_mutation = None
+    summary["actions"].update(
+        sop_calls=0,
+        sop_successful_lists=0,
+        sop_successful_reads=0,
+        sop_ids=[],
+        sop_receipt_valid=False,
+        sop_list_before_get=False,
+        sop_read_before_first_mutation=None,
+        unfinished_sop_dispatches=0,
+        unmatched_sop_completions=0,
+    )
+    if sop_log.is_file():
+        sop_events = [
+            json.loads(line) for line in sop_log.read_text().splitlines() if line.strip()
+        ]
+        sop_starts = [event for event in sop_events if event.get("event") == "start"]
+        sop_ends = [event for event in sop_events if event.get("event") == "end"]
+        sop_started_ids = Counter(event.get("tool_call_id") for event in sop_starts)
+        sop_ended_ids = Counter(event.get("tool_call_id") for event in sop_ends)
+        sop_ids = set(sop_started_ids)
+        starts_by_id = {event.get("tool_call_id"): event for event in sop_starts}
+        ends_by_id = {event.get("tool_call_id"): event for event in sop_ends}
+        sop_receipt_valid = (
+            bool(sop_events)
+            and len(sop_events) == len(sop_starts) + len(sop_ends)
+            and all(isinstance(call_id, str) and call_id for call_id in sop_ids)
+            and sop_started_ids == sop_ended_ids
+            and all(count == 1 for count in sop_started_ids.values())
+            and all(
+                starts_by_id[call_id].get("tool") == ends_by_id[call_id].get("tool")
+                and starts_by_id[call_id].get("tool")
+                in {"list_odoo_sops", "get_odoo_sop"}
+                and starts_by_id[call_id].get("sop_id")
+                == ends_by_id[call_id].get("sop_id")
+                and isinstance(starts_by_id[call_id].get("sequence"), int)
+                and isinstance(ends_by_id[call_id].get("end_sequence"), int)
+                and starts_by_id[call_id]["sequence"]
+                < ends_by_id[call_id]["end_sequence"]
+                for call_id in sop_ids
+            )
+        )
+        successful_lists = [
+            event for event in sop_ends
+            if event.get("tool") == "list_odoo_sops"
+            and event.get("success") is True
+            and isinstance(event.get("end_sequence"), int)
+        ]
+        successful_reads = [
+            event for event in sop_ends
+            if event.get("tool") == "get_odoo_sop"
+            and event.get("success") is True
+            and isinstance(event.get("end_sequence"), int)
+        ]
+        mutation_starts = [
+            event for event in starts
+            if event.get("tool", "").removeprefix("mcp_odoo_") in SIDE_EFFECT_TOOLS
+            and isinstance(event.get("sequence"), int)
+        ]
+        first_list_end = min(
+            (event["end_sequence"] for event in successful_lists), default=None
+        )
+        first_sop_start = min(
+            (event["sequence"] for event in successful_reads), default=None
+        )
+        first_sop_end = min(
+            (event["end_sequence"] for event in successful_reads), default=None
+        )
+        first_mutation = min(
+            (event["sequence"] for event in mutation_starts), default=None
+        )
+        list_before_get = (
+            first_list_end is not None
+            and first_sop_start is not None
+            and first_list_end < first_sop_start
+        )
+        sop_read_before_first_mutation = (
+            sop_receipt_valid
+            and list_before_get
+            and first_sop_end is not None
+            and (first_mutation is None or first_sop_end < first_mutation)
+        )
+        summary["actions"].update(
+            sop_calls=len(sop_starts),
+            sop_successful_lists=len(successful_lists),
+            sop_successful_reads=len(successful_reads),
+            sop_ids=sorted(
+                event["sop_id"]
+                for event in successful_reads
+                if isinstance(event.get("sop_id"), str)
+            ),
+            sop_receipt_valid=sop_receipt_valid,
+            sop_list_before_get=list_before_get,
+            first_sop_list_completed_sequence=first_list_end,
+            first_sop_read_started_sequence=first_sop_start,
+            first_sop_read_completed_sequence=first_sop_end,
+            first_mutation_started_sequence=first_mutation,
+            sop_read_before_first_mutation=sop_read_before_first_mutation,
+            unfinished_sop_dispatches=sum((sop_started_ids - sop_ended_ids).values()),
+            unmatched_sop_completions=sum((sop_ended_ids - sop_started_ids).values()),
+        )
+        summary["receipts"]["sop_events"] = str(sop_log.resolve())
+        write_json(destination / "sop_events.json", sop_events)
     world_summary_path = trial / "agent" / "world-summary.json"
     world_summary = None
     world_summary_error = None
@@ -678,6 +785,13 @@ def report_trial(trial: Path, destination: Path) -> dict:
         )
         or (agent_options.get("world_mode", "off") != "off"
             and not world_integrity["valid"])
+        or (
+            agent_options.get("sop_mode", "off") == "controlled"
+            and (
+                not sop_receipt_valid
+                or not sop_read_before_first_mutation
+            )
+        )
     ):
         natural_end = False
     elif (
@@ -691,6 +805,10 @@ def report_trial(trial: Path, destination: Path) -> dict:
         and (
             "capability_backend" not in agent_options
             or returned.get("capability_backend") == agent_options["capability_backend"]
+        )
+        and (
+            "sop_mode" not in agent_options
+            or returned.get("sop_mode") == agent_options["sop_mode"]
         )
         and ("world_mode" not in agent_options
              or returned.get("world_mode") == agent_options["world_mode"])

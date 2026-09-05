@@ -10,6 +10,7 @@ import json
 import os
 import sys
 from datetime import UTC, datetime
+from itertools import count
 from pathlib import Path
 
 from pi_agent.mcp import McpToolSet
@@ -31,6 +32,7 @@ from integration.world_context import project_messages
 from odoo_runtime.actions import NativeActions
 from odoo_runtime.capabilities import NativeCapabilities
 from odoo_runtime.reads import NativeReads
+from odoo_runtime.sops import build_sop_tools
 from odoo_runtime.store import ActionStore
 from odoo_runtime.world import WorldStore
 
@@ -42,6 +44,11 @@ MODEL_COMPAT = {
 MCP_ONLY_POLICY = (
     "Use mcp_odoo tools for every Odoo operation. Do not access Odoo through "
     "shell commands, direct HTTP, XML-RPC, JSON-2, PostgreSQL, or Python libraries."
+)
+SOP_POLICY = (
+    " Before the first Odoo mutation, call list_odoo_sops and read the closest "
+    "matching procedure with get_odoo_sop. A procedure is guidance, never write "
+    "authorization; current tool and host policy still decide."
 )
 
 
@@ -118,6 +125,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--read-backend", choices=("mcp", "native"), default="mcp")
     parser.add_argument("--action-backend", choices=("mcp", "native"), default="mcp")
     parser.add_argument("--capability-backend", choices=("mcp", "native"), default="mcp")
+    parser.add_argument("--sop-mode", choices=("off", "controlled"), default="off")
     parser.add_argument("--world-mode", choices=("off", "record", "project"), default="off")
     return parser.parse_args()
 
@@ -133,6 +141,9 @@ async def run(args: argparse.Namespace) -> None:
     world_mode = getattr(args, "world_mode", "off")
     if world_mode not in {"off", "record", "project"}:
         raise ValueError("world-mode must be off, record, or project")
+    sop_mode = getattr(args, "sop_mode", "off")
+    if sop_mode not in {"off", "controlled"}:
+        raise ValueError("sop-mode must be off or controlled")
 
     args.session_file.parent.mkdir(parents=True, exist_ok=True)
     args.usage_file.parent.mkdir(parents=True, exist_ok=True)
@@ -159,6 +170,7 @@ async def run(args: argparse.Namespace) -> None:
     capabilities = None
     try:
         async with McpToolSet(args.mcp_url) as toolset:
+            next_tool_sequence = count(1).__next__
             native_runtime = None
             if (getattr(args, "read_backend", "mcp") == "native"
                     or getattr(args, "action_backend", "mcp") == "native"
@@ -196,9 +208,17 @@ async def run(args: argparse.Namespace) -> None:
             toolset.tools = [
                 *route_tools(
                     toolset.tools, args.session_file.parent / "tool-backends.jsonl",
-                    native, world, actions, capabilities
+                    native, world, actions, capabilities, next_tool_sequence
                 ),
                 CURRENT_TIME_TOOL,
+                *(
+                    build_sop_tools(
+                        args.session_file.parent / "sop-events.jsonl",
+                        next_tool_sequence,
+                    )
+                    if sop_mode == "controlled"
+                    else ()
+                ),
             ]
             cwd = Path.cwd()
             provider_config = OpenAICompatibleProviderConfig(
@@ -244,7 +264,10 @@ async def run(args: argparse.Namespace) -> None:
                     runtime_provider_config=provider_config,
                     skills_enabled=False,
                     extensions_enabled=False,
-                    append_system_prompt=MCP_ONLY_POLICY,
+                    append_system_prompt=(
+                        MCP_ONLY_POLICY
+                        + (SOP_POLICY if sop_mode == "controlled" else "")
+                    ),
                     thinking_level=thinking,
                 )
             )
@@ -275,6 +298,7 @@ async def run(args: argparse.Namespace) -> None:
                             "readBackend": getattr(args, "read_backend", "mcp"),
                             "actionBackend": getattr(args, "action_backend", "mcp"),
                             "capabilityBackend": getattr(args, "capability_backend", "mcp"),
+                            "sopMode": sop_mode,
                             "worldMode": world_mode,
                             "runtimeDate": runtime_date,
                             "toolNames": [tool.name for tool in session.tools],
@@ -323,6 +347,7 @@ async def run(args: argparse.Namespace) -> None:
                     "worldMode": world_mode,
                     "actionBackend": getattr(args, "action_backend", "mcp"),
                     "capabilityBackend": getattr(args, "capability_backend", "mcp"),
+                    "sopMode": sop_mode,
                     "commitSha": os.environ.get("PI_ODOO_SOURCE_COMMIT"),
                 }
                 args.usage_file.write_text(json.dumps(usage), encoding="utf-8")

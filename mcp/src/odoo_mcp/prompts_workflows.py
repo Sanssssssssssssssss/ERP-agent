@@ -2,10 +2,9 @@
 Operational MCP workflow prompts for end-to-end Odoo business processes.
 
 Unlike the diagnostic prompts in :mod:`prompts`, these encode multi-step,
-often write-bearing procedures. Every write-bearing step routes through the
-gated workflow (preview_write -> validate_write -> execute_approved_write)
-or chatter_post -- never a direct create/write/unlink -- and each prompt
-names a human-escalation checkpoint and the modules it depends on.
+often write-bearing procedures. CRUD writes route through the gated workflow;
+business transitions use an exact reviewed method through execute_method.
+Neither path treats confirm=true as authorization.
 """
 
 from .server_core import mcp
@@ -36,13 +35,12 @@ def prompt_invoice_approval_chain(
         "a due date, or with a zero/negative total — do NOT post those.\n"
         "3. Present the validated batch to the human and STOP for explicit go-ahead "
         "before any posting.\n"
-        "4. For each approved invoice, post it through the gate: preview_write -> "
-        "validate_write -> execute_approved_write on account.move with the posting "
-        "action your validate step confirmed. Show the diff summary at each "
-        "execute_approved_write and require confirm=true.\n"
-        "5. Record an audit note per posted invoice with chatter_post. Never create, "
-        "write, or unlink invoices with a direct, ungated call — only through the "
-        "gate above."
+        "4. Post approved invoices with execute_method on "
+        "account.move.action_post using kwargs.ids. The exact method must be "
+        "allowlisted and authorized by the trusted host or human; confirm=true "
+        "alone never grants authorization. Never emulate posting by writing state.\n"
+        "5. Read each invoice again, then record an audit note with chatter_post "
+        "through its own preview/approval/confirm flow."
     )
 
 
@@ -128,10 +126,11 @@ def prompt_expense_claim_review(
         "submission, out-of-period date. Build an approve / refuse / needs-info list.\n"
         "3. STOP and present the triage to the human. Anything above the ceiling or "
         "failing a policy check requires explicit human decision.\n"
-        "4. Apply each approved decision through the gate: preview_write -> "
-        "validate_write -> execute_approved_write on hr.expense.sheet for the "
-        "approve/refuse state change, confirm=true, diff shown. Add the rationale "
-        "with chatter_post. Do not change expense state with a direct, ungated write."
+        "4. Verify the installed version's exact approve/refuse business method, "
+        "then use execute_method only when that model.method is allowlisted and "
+        "authorized by the trusted host or human. Never change expense state with "
+        "write. Read the resulting state and add rationale through chatter_post's "
+        "own approval flow."
     )
 
 
@@ -180,7 +179,8 @@ def prompt_pre_migration_data_quality(
         "confidently-wrong AI answers, so run this gate first.",
         "",
         "For EACH of these models: " + ", ".join(model_list) + ":",
-        "1. Call data_quality_report(model=<model>). For large databases run "
+        "1. Confirm the model exists with list_models, then call "
+        "data_quality_report(model=<model>). For large databases run "
         "it in the background via submit_async_task(operation="
         '"data_quality_report", params={"model": <model>}) and poll '
         "get_async_task.",

@@ -336,6 +336,75 @@ class ReportingTest(unittest.TestCase):
             self.assertEqual(complete["verifier_rules"]["passed"], 62)
 
             (trial / "config.json").write_text(json.dumps({"agent": {"kwargs": {
+                "read_backend": "mcp", "snapshot_sha256": "fixture",
+                "sop_mode": "controlled",
+            }}}))
+            host_result["agent_result"]["metadata"]["sop_mode"] = "controlled"
+            (trial / "result.json").write_text(json.dumps(host_result))
+            (trial / "agent/tool-backends.jsonl").write_text(
+                json.dumps({"event": "start", "backend": "mcp", "tool_call_id": "action",
+                            "tool": "mcp_odoo_execute_method", "sequence": 5}) + "\n"
+                + json.dumps({"event": "end", "backend": "mcp", "tool_call_id": "action",
+                              "tool": "mcp_odoo_execute_method", "sequence": 5,
+                              "end_sequence": 6}) + "\n"
+            )
+            sop_events = [
+                {"event": "start", "tool": "list_odoo_sops", "tool_call_id": "list",
+                 "sop_id": None, "sequence": 1},
+                {"event": "end", "tool": "list_odoo_sops", "tool_call_id": "list",
+                 "sop_id": None, "sequence": 1, "end_sequence": 2, "success": True},
+                {"event": "start", "tool": "get_odoo_sop", "tool_call_id": "sop",
+                 "sop_id": "safe_write_review", "sequence": 3},
+                {"event": "end", "tool": "get_odoo_sop", "tool_call_id": "sop",
+                 "sop_id": "safe_write_review", "sequence": 3,
+                 "end_sequence": 4, "success": True},
+            ]
+            (trial / "agent/sop-events.jsonl").write_text(
+                "\n".join(json.dumps(event) for event in sop_events) + "\n"
+            )
+            sop_ok = report_trial(trial, reports / "sop-ok")
+            self.assertTrue(sop_ok["actions"]["sop_receipt_valid"])
+            self.assertTrue(sop_ok["actions"]["sop_list_before_get"])
+            self.assertTrue(sop_ok["actions"]["sop_read_before_first_mutation"])
+            self.assertTrue(sop_ok["agent_termination"]["natural_end"])
+            (trial / "agent/sop-events.jsonl").unlink()
+            sop_missing = report_trial(trial, reports / "sop-missing")
+            self.assertFalse(sop_missing["actions"]["sop_receipt_valid"])
+            self.assertFalse(sop_missing["agent_termination"]["natural_end"])
+            no_list = sop_events[2:]
+            (trial / "agent/sop-events.jsonl").write_text(
+                "\n".join(json.dumps(event) for event in no_list) + "\n"
+            )
+            sop_no_list = report_trial(trial, reports / "sop-no-list")
+            self.assertFalse(sop_no_list["actions"]["sop_list_before_get"])
+            self.assertFalse(sop_no_list["agent_termination"]["natural_end"])
+            sop_events[-1]["end_sequence"] = 6
+            (trial / "agent/sop-events.jsonl").write_text(
+                "\n".join(json.dumps(event) for event in sop_events) + "\n"
+            )
+            sop_late = report_trial(trial, reports / "sop-late")
+            self.assertFalse(sop_late["actions"]["sop_read_before_first_mutation"])
+            self.assertFalse(sop_late["agent_termination"]["natural_end"])
+            sop_events[-1]["end_sequence"] = 4
+            for name, bad_event in (
+                ("pending", {"event": "start", "tool": "get_odoo_sop",
+                             "tool_call_id": "pending", "sequence": 7}),
+                ("orphan", {"event": "end", "tool": "get_odoo_sop",
+                            "tool_call_id": "orphan", "sequence": 7,
+                            "end_sequence": 8, "success": True}),
+                ("missing-id", {"event": "start", "tool": "get_odoo_sop",
+                                "tool_call_id": None, "sequence": 7}),
+            ):
+                with self.subTest(sop_receipt=name):
+                    damaged = [*sop_events, bad_event]
+                    (trial / "agent/sop-events.jsonl").write_text(
+                        "\n".join(json.dumps(event) for event in damaged) + "\n"
+                    )
+                    sop_bad = report_trial(trial, reports / f"sop-{name}")
+                    self.assertFalse(sop_bad["actions"]["sop_receipt_valid"])
+                    self.assertFalse(sop_bad["agent_termination"]["natural_end"])
+
+            (trial / "config.json").write_text(json.dumps({"agent": {"kwargs": {
                 "read_backend": "mcp", "snapshot_sha256": "fixture", "world_mode": "record",
             }}}))
             host_result["agent_result"]["metadata"]["world_mode"] = "record"
