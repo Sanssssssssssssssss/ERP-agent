@@ -134,6 +134,9 @@ class NativeCapabilitiesTest(unittest.TestCase):
             "scan_addons_source",
             "build_domain",
             "business_pack_report",
+            "index_knowledge",
+            "search_knowledge",
+            "knowledge_stats",
         }
         self.assertEqual(CAPABILITY_TOOLS, expected)
         policy = FieldPolicy(
@@ -220,7 +223,7 @@ class NativeCapabilitiesTest(unittest.TestCase):
         self.assertEqual(interrupted["status"], "interrupted")
         self.assertIn("before task completion", interrupted["error"])
 
-    def test_route_is_native_except_stage6_knowledge_job(self):
+    def test_route_includes_native_stage6_knowledge_job(self):
         async def check(root: Path):
             async def mcp_execute(*args, **kwargs):
                 return AgentToolResult(
@@ -266,7 +269,7 @@ class NativeCapabilitiesTest(unittest.TestCase):
             native = await routed["mcp_odoo_build_domain"].execute(
                 "native", {"conditions": []}
             )
-            deferred = await routed["mcp_odoo_submit_async_task"].execute(
+            knowledge = await routed["mcp_odoo_submit_async_task"].execute(
                 "knowledge", {"operation": "index_knowledge", "params": {}}
             )
             starts = [
@@ -277,14 +280,13 @@ class NativeCapabilitiesTest(unittest.TestCase):
                 if row["event"] == "start"
             ]
             capabilities.close()
-            return json.loads(native.text), json.loads(deferred.text), starts
+            return json.loads(native.text), json.loads(knowledge.text), starts
 
         with tempfile.TemporaryDirectory() as directory:
-            native, deferred, starts = asyncio.run(check(Path(directory)))
+            native, knowledge, starts = asyncio.run(check(Path(directory)))
         self.assertEqual(native["tool"], "build_domain")
-        self.assertEqual(deferred["backend"], "mcp")
-        self.assertEqual([row["backend"] for row in starts], ["native", "mcp"])
-        self.assertEqual(starts[1]["deferred_capability"], "index_knowledge")
+        self.assertEqual(knowledge["tool"], "submit_async_task")
+        self.assertEqual([row["backend"] for row in starts], ["native", "native"])
 
 
 if __name__ == "__main__":

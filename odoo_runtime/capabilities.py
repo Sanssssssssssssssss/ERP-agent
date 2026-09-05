@@ -75,6 +75,7 @@ from odoo_mcp.tool_helpers import (
 )
 from pydantic import ConfigDict, create_model
 
+from .knowledge import NativeKnowledge
 from .reads import NativeReads
 
 CAPABILITY_TOOLS = frozenset(
@@ -100,6 +101,9 @@ CAPABILITY_TOOLS = frozenset(
         "scan_addons_source",
         "build_domain",
         "business_pack_report",
+        "index_knowledge",
+        "search_knowledge",
+        "knowledge_stats",
     }
 )
 
@@ -111,6 +115,7 @@ ASYNC_OPERATIONS = frozenset(
         "search_across_instances",
         "aggregate_across_instances",
         "accounting_health_across_instances",
+        "index_knowledge",
     }
 )
 
@@ -467,6 +472,7 @@ class NativeCapabilities:
     def __init__(self, reads: NativeReads, *, task_path: Path):
         self.reads = reads
         self.tasks = _TaskStore(task_path)
+        self.knowledge = NativeKnowledge(reads)
 
     def close(self) -> None:
         self.tasks.close()
@@ -521,6 +527,31 @@ class NativeCapabilities:
             "tool": "accounting_health_summary",
             **build_unreconciled_summary(self._client(instance)),
         }
+
+    def index_knowledge(
+        self,
+        model: str,
+        domain: Any = None,
+        fields: list[str] | None = None,
+        limit: int = 500,
+        replace: bool = False,
+        instance: str | None = None,
+    ) -> dict[str, Any]:
+        return self.knowledge.index_knowledge(
+            model, domain, fields, limit, replace, instance
+        )
+
+    def search_knowledge(
+        self,
+        query: str,
+        model: str,
+        limit: int = 5,
+        instance: str | None = None,
+    ) -> dict[str, Any]:
+        return self.knowledge.search_knowledge(query, model, limit, instance)
+
+    def knowledge_stats(self) -> dict[str, Any]:
+        return self.knowledge.knowledge_stats()
 
     def submit_async_task(
         self,

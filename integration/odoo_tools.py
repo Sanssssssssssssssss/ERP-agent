@@ -47,20 +47,13 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                           *, tool=tool, name=name, capability_ready=capability_ready,
                           direct_read=direct_read, direct_action=direct_action):
             started = time.monotonic()
-            # Knowledge indexing remains on MCP until Stage 6; every other
-            # allowlisted background operation is native in Stage 5.
-            direct_capability = capability_ready and not (
-                name == "submit_async_task"
-                and arguments.get("operation") == "index_knowledge"
-            )
+            direct_capability = capability_ready
             direct = direct_read or direct_action or direct_capability
             event = {
                 "tool_call_id": call_id, "tool": tool.name,
                 "backend": "native" if direct else "mcp", "event": "start",
                 "sequence": next_sequence() if next_sequence else None,
             }
-            if capability_ready and not direct_capability:
-                event["deferred_capability"] = "index_knowledge"
             log_path.parent.mkdir(parents=True, exist_ok=True)
             with log_path.open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps(event) + "\n")

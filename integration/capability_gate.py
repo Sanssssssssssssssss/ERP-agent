@@ -1,4 +1,4 @@
-"""Zero-LLM Stage-5 capability gate against a disposable Odoo snapshot."""
+"""Zero-LLM Stage-5/6 capability gate against a disposable Odoo snapshot."""
 
 from __future__ import annotations
 
@@ -63,9 +63,26 @@ def run_gate() -> None:
     call("aggregate_across_instances", {"model": "res.partner", "group_by": ["company_id"], "measures": ["id:count"]})
     call("accounting_health_across_instances", {"top_partners": 2})
 
+    sample = reads.call(
+        "search_records",
+        {"model": "res.partner", "fields": ["name"], "limit": 1},
+    )
+    assert sample.get("success") and sample.get("result"), sample
+    sample_name = sample["result"][0]["name"]
+    call(
+        "index_knowledge",
+        {"model": "res.partner", "fields": ["name"], "limit": 20, "replace": True},
+    )
+    knowledge = call(
+        "search_knowledge",
+        {"model": "res.partner", "query": sample_name, "limit": 3},
+    )
+    assert knowledge["results"] and knowledge["results"][0]["revalidated_at"]
+    call("knowledge_stats", {})
+
     submitted = call("submit_async_task", {
-        "operation": "data_quality_report",
-        "params": {"model": "res.partner", "checks": ["format_anomalies"], "sample_limit": 10},
+        "operation": "index_knowledge",
+        "params": {"model": "res.partner", "fields": ["name"], "limit": 10, "replace": True},
     })
     for _ in range(300):
         status = capabilities.call("get_async_task", {"task_id": submitted["task_id"]})
@@ -131,8 +148,12 @@ def run_gate() -> None:
         "account.move.line": {"deny": ["amount_residual"]}
     }}}))
     denied = capabilities.call("receivable_payable_aging", {})
+    stale_knowledge = capabilities.call(
+        "search_knowledge", {"model": "res.partner", "query": sample_name}
+    )
     after = len(request_log.read_text().splitlines()) if request_log.is_file() else 0
     assert not denied.get("success") and "amount_residual" in denied.get("error", ""), denied
+    assert not stale_knowledge.get("success") and "run index_knowledge" in stale_knowledge.get("error", ""), stale_knowledge
     assert after == before, "restricted accounting analysis reached Odoo"
 
     assert set(results) == CAPABILITY_TOOLS, sorted(CAPABILITY_TOOLS - set(results))
@@ -142,7 +163,8 @@ def run_gate() -> None:
     summary = {
         "status": "passed", "llm_calls": 0,
         "native_capabilities": len(results), "field_policy_fail_closed": True,
-        "async_persistent": True, "knowledge_deferred": True,
+        "async_persistent": True, "knowledge_native": True,
+        "knowledge_candidate_revalidation": True,
         "dynamic_module_probe": "live", "dynamic_publish_and_withdraw": "in_process",
     }
     (root / "capability-gate-summary.json").write_text(json.dumps(summary, indent=2))
