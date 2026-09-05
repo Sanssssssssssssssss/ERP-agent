@@ -723,7 +723,7 @@ async def test_session_refreshes_provider_model_system_and_tools_between_tool_tu
         harness.config.provider = next_provider
         harness.config.model = "new-model"
         harness.config.system = "new-system"
-        harness.config.tools = [replacement_tool]
+        session_ref["session"].stage_tools_for_next_turn([replacement_tool])
         return AgentToolResult(content="switched")
 
     switch_tool = AgentTool(
@@ -734,13 +734,14 @@ async def test_session_refreshes_provider_model_system_and_tools_between_tool_tu
         execute_fn=switch_state,
     )
     call = ToolCall(id="call-1", name="switch", arguments={})
+    premature = ToolCall(id="call-2", name="replacement", arguments={})
     first_provider = FakeProvider(
         [
             [
                 assistant_start(model="old-model"),
                 assistant_done(
                     AssistantMessage(
-                        content=assistant_content("", [call]),
+                        content=assistant_content("", [call, premature]),
                         model="old-model",
                         stop_reason="toolUse",
                     )
@@ -766,6 +767,13 @@ async def test_session_refreshes_provider_model_system_and_tools_between_tool_tu
     model, system, _messages, tools = next_provider.calls[0]
     assert (model, system) == ("new-model", "new-system")
     assert [tool.name for tool in tools] == ["replacement"]
+    same_turn = next(
+        message
+        for message in session.messages
+        if isinstance(message, ToolResultMessage) and message.tool_call_id == "call-2"
+    )
+    assert same_turn.is_error is True
+    assert "Tool replacement not found" in same_turn.text
 
 
 @pytest.mark.anyio

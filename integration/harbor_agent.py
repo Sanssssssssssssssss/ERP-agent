@@ -178,6 +178,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         action_backend: str = "mcp",
         capability_backend: str = "mcp",
         sop_mode: str = "off",
+        tool_mode: str = "static",
         world_mode: str = "off",
         snapshot_sha256: str | None = None,
         runtime_timeout_seconds: int = 1770,
@@ -197,6 +198,10 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             raise ValueError("capability_backend must be mcp or native")
         if sop_mode not in {"off", "controlled"}:
             raise ValueError("sop_mode must be off or controlled")
+        if tool_mode not in {"static", "dynamic"}:
+            raise ValueError("tool_mode must be static or dynamic")
+        if tool_mode == "dynamic" and sop_mode != "controlled":
+            raise ValueError("dynamic tool_mode requires controlled sop_mode")
         if world_mode not in {"off", "record", "project"}:
             raise ValueError("world_mode must be off, record, or project")
         if type(runtime_timeout_seconds) is not int or runtime_timeout_seconds < 1:
@@ -207,6 +212,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         self._action_backend = action_backend
         self._capability_backend = capability_backend
         self._sop_mode = sop_mode
+        self._tool_mode = tool_mode
         self._world_mode = world_mode
         self._snapshot_sha256 = snapshot_sha256
         self._runtime_timeout_seconds = runtime_timeout_seconds
@@ -289,6 +295,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             f"--action-backend {self._action_backend} "
             f"--capability-backend {self._capability_backend} "
             f"--sop-mode {self._sop_mode} "
+            f"--tool-mode {self._tool_mode} "
             f"--world-mode {self._world_mode} "
             + (f"--max-turns {self._max_turns} " if self._max_turns is not None else "")
             + "2>&1 | stdbuf -oL tee /logs/agent/pi-agent-odoo-mcp.jsonl"
@@ -317,6 +324,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             "action_backend": self._action_backend,
             "capability_backend": self._capability_backend,
             "sop_mode": self._sop_mode,
+            "tool_mode": self._tool_mode,
             "world_mode": self._world_mode,
             "snapshot_sha256": self._snapshot_sha256,
             "runtime_timeout_seconds": self._runtime_timeout_seconds,

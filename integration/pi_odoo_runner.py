@@ -31,6 +31,7 @@ from integration.odoo_tools import route_tools
 from integration.world_context import project_messages
 from odoo_runtime.actions import NativeActions
 from odoo_runtime.capabilities import NativeCapabilities
+from odoo_runtime.dynamic_tools import DynamicToolController
 from odoo_runtime.reads import NativeReads
 from odoo_runtime.sops import build_sop_tools
 from odoo_runtime.store import ActionStore
@@ -49,6 +50,11 @@ SOP_POLICY = (
     " Before the first Odoo mutation, call list_odoo_sops and read the closest "
     "matching procedure with get_odoo_sop. A procedure is guidance, never write "
     "authorization; current tool and host policy still decide."
+)
+DYNAMIC_TOOL_POLICY = (
+    " Use list_odoo_capabilities before configure_odoo_tools. Select the complete "
+    "optional capability set needed for the task. A configured tool set appears "
+    "on the next model turn; a same-response call to a newly selected tool is rejected."
 )
 
 
@@ -126,6 +132,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--action-backend", choices=("mcp", "native"), default="mcp")
     parser.add_argument("--capability-backend", choices=("mcp", "native"), default="mcp")
     parser.add_argument("--sop-mode", choices=("off", "controlled"), default="off")
+    parser.add_argument("--tool-mode", choices=("static", "dynamic"), default="static")
     parser.add_argument("--world-mode", choices=("off", "record", "project"), default="off")
     return parser.parse_args()
 
@@ -144,6 +151,11 @@ async def run(args: argparse.Namespace) -> None:
     sop_mode = getattr(args, "sop_mode", "off")
     if sop_mode not in {"off", "controlled"}:
         raise ValueError("sop-mode must be off or controlled")
+    tool_mode = getattr(args, "tool_mode", "static")
+    if tool_mode not in {"static", "dynamic"}:
+        raise ValueError("tool-mode must be static or dynamic")
+    if tool_mode == "dynamic" and sop_mode != "controlled":
+        raise ValueError("dynamic tool mode requires controlled SOP mode")
 
     args.session_file.parent.mkdir(parents=True, exist_ok=True)
     args.usage_file.parent.mkdir(parents=True, exist_ok=True)
@@ -168,6 +180,7 @@ async def run(args: argparse.Namespace) -> None:
     world = None
     actions = None
     capabilities = None
+    dynamic_tools = None
     try:
         async with McpToolSet(args.mcp_url) as toolset:
             next_tool_sequence = count(1).__next__
@@ -205,7 +218,7 @@ async def run(args: argparse.Namespace) -> None:
                     )
                 except Exception as exc:  # noqa: BLE001 - optional world state must fail open
                     print(f"World initialization failed open: {type(exc).__name__}", file=sys.stderr)
-            toolset.tools = [
+            full_tools = [
                 *route_tools(
                     toolset.tools, args.session_file.parent / "tool-backends.jsonl",
                     native, world, actions, capabilities, next_tool_sequence
@@ -220,6 +233,15 @@ async def run(args: argparse.Namespace) -> None:
                     else ()
                 ),
             ]
+            if tool_mode == "dynamic":
+                dynamic_tools = DynamicToolController(
+                    full_tools,
+                    args.session_file.parent / "dynamic-tools.jsonl",
+                    next_tool_sequence,
+                )
+                toolset.tools = list(dynamic_tools.tools)
+            else:
+                toolset.tools = full_tools
             cwd = Path.cwd()
             provider_config = OpenAICompatibleProviderConfig(
                 name=provider_name,
@@ -267,10 +289,13 @@ async def run(args: argparse.Namespace) -> None:
                     append_system_prompt=(
                         MCP_ONLY_POLICY
                         + (SOP_POLICY if sop_mode == "controlled" else "")
+                        + (DYNAMIC_TOOL_POLICY if tool_mode == "dynamic" else "")
                     ),
                     thinking_level=thinking,
                 )
             )
+            if dynamic_tools is not None:
+                dynamic_tools.bind(session.stage_tools_for_next_turn)
             if world is not None and world_mode == "project":
                 existing_transform = session._harness.config.transform_context
 
@@ -299,6 +324,7 @@ async def run(args: argparse.Namespace) -> None:
                             "actionBackend": getattr(args, "action_backend", "mcp"),
                             "capabilityBackend": getattr(args, "capability_backend", "mcp"),
                             "sopMode": sop_mode,
+                            "toolMode": tool_mode,
                             "worldMode": world_mode,
                             "runtimeDate": runtime_date,
                             "toolNames": [tool.name for tool in session.tools],
@@ -348,6 +374,7 @@ async def run(args: argparse.Namespace) -> None:
                     "actionBackend": getattr(args, "action_backend", "mcp"),
                     "capabilityBackend": getattr(args, "capability_backend", "mcp"),
                     "sopMode": sop_mode,
+                    "toolMode": tool_mode,
                     "commitSha": os.environ.get("PI_ODOO_SOURCE_COMMIT"),
                 }
                 args.usage_file.write_text(json.dumps(usage), encoding="utf-8")

@@ -31,6 +31,8 @@ class CleanHarnessTest(unittest.TestCase):
         self.assertIn("project_resources_enabled=False", runner)
         self.assertIn("skills_enabled=False", runner)
         self.assertIn("extensions_enabled=False", runner)
+        self.assertIn("DynamicToolController", runner)
+        self.assertIn("stage_tools_for_next_turn", runner)
         self.assertEqual(
             lock["sources"]["agent"]["commit"],
             "2ee840c3e31a62c06237b4ac781c7f5863044d07",

@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
+from itertools import count
 from pathlib import Path
 
 
 def run_gate() -> None:
+    from pi_agent.tools import AgentTool, AgentToolResult
+
     from odoo_runtime.capabilities import CAPABILITY_TOOLS, NativeCapabilities
+    from odoo_runtime.dynamic_tools import (
+        BASE_TOOLS,
+        CAPABILITY_GROUPS,
+        DynamicToolController,
+    )
     from odoo_runtime.reads import NativeReads
 
     root = Path(os.environ.get("CAPABILITY_GATE_ROOT", "/logs/agent"))
@@ -23,8 +32,9 @@ def run_gate() -> None:
         "ODOO_ADDONS_PATHS": "/usr/lib/python3/dist-packages/odoo/addons",
         "PI_AGENT_SESSION_ID": "stage5-zero-llm-gate",
     })
+    reads = NativeReads.from_environment()
     capabilities = NativeCapabilities(
-        NativeReads.from_environment(), task_path=root / "capability-tasks.sqlite3"
+        reads, task_path=root / "capability-tasks.sqlite3"
     )
     results: dict[str, dict] = {}
 
@@ -73,6 +83,48 @@ def run_gate() -> None:
     assert cancelled.get("success") or "already succeeded" in cancelled.get("error", ""), cancelled
     results["cancel_async_task"] = cancelled
 
+    def build_tool(name: str) -> AgentTool:
+        async def execute(_call_id, arguments, _signal=None, _on_update=None):
+            payload = reads.call("search_records", arguments) if name == "search_records" else {"success": True}
+            return AgentToolResult(
+                content=json.dumps(payload),
+                details={"structuredContent": payload},
+            )
+
+        exposed = name if name in {"get_current_time", "list_odoo_sops", "get_odoo_sop"} else f"mcp_odoo_{name}"
+        return AgentTool(
+            name=exposed,
+            label=name,
+            description=name,
+            parameters={"type": "object"},
+            execute_fn=execute,
+        )
+
+    dynamic_names = BASE_TOOLS | {
+        name for group in CAPABILITY_GROUPS.values() for name in group["tools"]
+    }
+    dynamic = DynamicToolController(
+        [build_tool(name) for name in sorted(dynamic_names)],
+        root / "dynamic-tools.jsonl",
+        count(1).__next__,
+    )
+    published = []
+    dynamic.bind(lambda tools: published.append(tuple(tools)))
+    controls = {tool.name: tool for tool in dynamic.tools}
+    listed = asyncio.run(controls["list_odoo_capabilities"].execute("list", {})).details
+    assert listed["success"] and all(
+        row["status"] != "unknown" for row in listed["capabilities"]
+    ), listed
+    enabled = asyncio.run(controls["configure_odoo_tools"].execute(
+        "enable", {"capabilities": ["actions"]}
+    )).details
+    disabled = asyncio.run(controls["configure_odoo_tools"].execute(
+        "disable", {"capabilities": []}
+    )).details
+    assert enabled["success"] and disabled["success"] and len(published) == 2
+    assert "mcp_odoo_execute_approved_write" in enabled["published_tools"]
+    assert "mcp_odoo_execute_approved_write" not in disabled["published_tools"]
+
     request_log = Path(os.environ["ODOO_REQUEST_LOG"])
     before = len(request_log.read_text().splitlines()) if request_log.is_file() else 0
     policy.write_text(json.dumps({"field_acl": {"default": {
@@ -91,6 +143,7 @@ def run_gate() -> None:
         "status": "passed", "llm_calls": 0,
         "native_capabilities": len(results), "field_policy_fail_closed": True,
         "async_persistent": True, "knowledge_deferred": True,
+        "dynamic_module_probe": "live", "dynamic_publish_and_withdraw": "in_process",
     }
     (root / "capability-gate-summary.json").write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary), flush=True)

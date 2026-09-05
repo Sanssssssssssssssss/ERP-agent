@@ -20,6 +20,7 @@ from integration.report import (
     write_index,
 )
 from integration.trial_summary import _redact
+from odoo_runtime.dynamic_tools import tool_contract_sha256
 
 
 class ReportingTest(unittest.TestCase):
@@ -404,9 +405,104 @@ class ReportingTest(unittest.TestCase):
                     self.assertFalse(sop_bad["actions"]["sop_receipt_valid"])
                     self.assertFalse(sop_bad["agent_termination"]["natural_end"])
 
+            (trial / "agent/sop-events.jsonl").write_text(
+                "\n".join(json.dumps(event) for event in sop_events) + "\n"
+            )
+            published = [
+                "mcp_odoo_search_records",
+                "list_odoo_capabilities",
+                "configure_odoo_tools",
+                "mcp_odoo_execute_approved_write",
+            ]
+            published_contracts = [
+                {
+                    "name": name,
+                    "description": f"{name} description",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+                for name in published
+            ]
+            withdrawn = published[:-1]
+            withdrawn_contracts = published_contracts[:-1]
+            dynamic_events = [
+                {"event": "start", "tool": "list_odoo_capabilities",
+                 "tool_call_id": "dynamic-list", "sequence": 7},
+                {"event": "end", "tool": "list_odoo_capabilities",
+                 "tool_call_id": "dynamic-list", "sequence": 7,
+                 "end_sequence": 8, "success": True},
+                {"event": "start", "tool": "configure_odoo_tools",
+                 "tool_call_id": "dynamic-configure", "sequence": 9},
+                {"event": "end", "tool": "configure_odoo_tools",
+                 "tool_call_id": "dynamic-configure", "sequence": 9,
+                 "end_sequence": 10, "success": True, "active": ["actions"],
+                 "published_tools": published,
+                 "tool_contract_sha256": tool_contract_sha256(published_contracts)},
+                {"event": "start", "tool": "configure_odoo_tools",
+                 "tool_call_id": "dynamic-withdraw", "sequence": 11},
+                {"event": "end", "tool": "configure_odoo_tools",
+                 "tool_call_id": "dynamic-withdraw", "sequence": 11,
+                 "end_sequence": 12, "success": True, "active": [],
+                 "published_tools": withdrawn,
+                 "tool_contract_sha256": tool_contract_sha256(withdrawn_contracts)},
+            ]
+            (trial / "agent/dynamic-tools.jsonl").write_text(
+                "\n".join(json.dumps(event) for event in dynamic_events) + "\n"
+            )
+
+            def request_tools(names, tool_result_ids=()):
+                return {
+                    "messages": [
+                        {"role": "tool", "tool_call_id": call_id, "content": "ok"}
+                        for call_id in tool_result_ids
+                    ],
+                    "tools": [
+                        {"type": "function", "function": {
+                            "name": name,
+                            "description": f"{name} description",
+                            "parameters": {"type": "object", "properties": {}},
+                        }}
+                        for name in names
+                    ],
+                }
+
+            (requests / "0001.request.json").write_text(json.dumps(request_tools(
+                ["mcp_odoo_search_records", "list_odoo_capabilities", "configure_odoo_tools"]
+            )))
+            (requests / "0002.request.json").write_text(
+                json.dumps(request_tools(published, ["dynamic-configure"]))
+            )
+            (requests / "0002.response.json").write_text('{"status":200}')
+            (requests / "0003.request.json").write_text(
+                json.dumps(request_tools(
+                    withdrawn, ["dynamic-configure", "dynamic-withdraw"]
+                ))
+            )
+            (requests / "0003.response.json").write_text('{"status":200}')
+            (trial / "agent/pi-agent-usage.json").write_text('{"modelCalls":3}')
+            (trial / "config.json").write_text(json.dumps({"agent": {"kwargs": {
+                "read_backend": "mcp", "snapshot_sha256": "fixture",
+                "sop_mode": "controlled", "tool_mode": "dynamic",
+            }}}))
+            host_result["agent_result"]["metadata"]["model_calls"] = 3
+            host_result["agent_result"]["metadata"]["tool_mode"] = "dynamic"
+            (trial / "result.json").write_text(json.dumps(host_result))
+            dynamic_ok = report_trial(trial, reports / "dynamic-ok")
+            self.assertTrue(dynamic_ok["actions"]["dynamic_receipt_valid"])
+            self.assertTrue(dynamic_ok["actions"]["dynamic_publish_verified"])
+            self.assertEqual(dynamic_ok["actions"]["initial_tool_count"], 3)
+            self.assertEqual(dynamic_ok["actions"]["maximum_tool_count"], 4)
+            self.assertTrue(dynamic_ok["agent_termination"]["natural_end"])
+            tampered = request_tools(published, ["dynamic-configure"])
+            tampered["tools"][-1]["function"]["parameters"] = {"type": "array"}
+            (requests / "0002.request.json").write_text(json.dumps(tampered))
+            dynamic_bad = report_trial(trial, reports / "dynamic-bad")
+            self.assertFalse(dynamic_bad["actions"]["dynamic_publish_verified"])
+            self.assertFalse(dynamic_bad["agent_termination"]["natural_end"])
+
             (trial / "config.json").write_text(json.dumps({"agent": {"kwargs": {
                 "read_backend": "mcp", "snapshot_sha256": "fixture", "world_mode": "record",
             }}}))
+            host_result["agent_result"]["metadata"].pop("tool_mode")
             host_result["agent_result"]["metadata"]["world_mode"] = "record"
             (trial / "result.json").write_text(json.dumps(host_result))
             incomplete_world = report_trial(trial, reports / "incomplete-world")

@@ -24,6 +24,7 @@ from integration.reward_adapter import adapt_erp_bench_reward
 from integration.trial_summary import _redact, build_trial_summary
 from odoo_runtime.actions import ACTION_TOOLS
 from odoo_runtime.capabilities import CAPABILITY_TOOLS
+from odoo_runtime.dynamic_tools import tool_contract_sha256
 from odoo_runtime.world import READ_TOOLS, SIDE_EFFECT_TOOLS
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -72,6 +73,109 @@ def _typed_jsonl(path: Path, accepted: set[str]) -> tuple[list[dict], list[str]]
             errors.append(f"{path.name}:{number}:invalid_type")
             continue
         rows.append(row)
+    return rows, errors
+
+
+def _event_jsonl(path: Path) -> tuple[list[dict], list[str]]:
+    rows, errors = [], []
+    if not path.is_file():
+        return rows, errors
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as exc:
+        return rows, [f"{path.name}:{type(exc).__name__}"]
+    for number, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            errors.append(f"{path.name}:{number}:invalid_json")
+            continue
+        if not isinstance(row, dict):
+            errors.append(f"{path.name}:{number}:invalid_event")
+            continue
+        rows.append(row)
+    return rows, errors
+
+
+def _closed_tool_events(
+    events: list[dict], allowed_tools: set[str],
+) -> tuple[bool, list[dict], list[dict], Counter, Counter]:
+    starts = [event for event in events if event.get("event") == "start"]
+    ends = [event for event in events if event.get("event") == "end"]
+    started = Counter(event.get("tool_call_id") for event in starts)
+    ended = Counter(event.get("tool_call_id") for event in ends)
+    call_ids = set(started)
+    starts_by_id = {event.get("tool_call_id"): event for event in starts}
+    ends_by_id = {event.get("tool_call_id"): event for event in ends}
+    valid = (
+        bool(events)
+        and len(events) == len(starts) + len(ends)
+        and all(isinstance(call_id, str) and call_id for call_id in call_ids)
+        and started == ended
+        and all(count == 1 for count in started.values())
+        and all(
+            starts_by_id[call_id].get("tool") == ends_by_id[call_id].get("tool")
+            and starts_by_id[call_id].get("tool") in allowed_tools
+            and isinstance(starts_by_id[call_id].get("sequence"), int)
+            and isinstance(ends_by_id[call_id].get("end_sequence"), int)
+            and starts_by_id[call_id]["sequence"]
+            < ends_by_id[call_id]["end_sequence"]
+            for call_id in call_ids
+        )
+    )
+    return valid, starts, ends, started, ended
+
+
+def _request_tool_contracts(trial: Path) -> tuple[list[dict], list[str]]:
+    rows, errors = [], []
+    for path in sorted((trial / "agent" / "requests").glob("*.request.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            tools = payload.get("tools")
+            if not isinstance(tools, list):
+                raise TypeError("tools must be an array")
+            contracts = []
+            for item in tools:
+                if not isinstance(item, dict) or item.get("type") != "function":
+                    raise ValueError("invalid tool definition")
+                function = item.get("function")
+                if not isinstance(function, dict):
+                    raise TypeError("invalid function definition")
+                name = function.get("name")
+                description = function.get("description")
+                parameters = function.get("parameters")
+                if not (
+                    isinstance(name, str)
+                    and isinstance(description, str)
+                    and isinstance(parameters, dict)
+                ):
+                    raise TypeError("incomplete tool contract")
+                contracts.append({
+                    "name": name,
+                    "description": description,
+                    "parameters": parameters,
+                })
+            names = [contract["name"] for contract in contracts]
+            if len(names) != len(set(names)):
+                raise ValueError("duplicate tool names")
+            rows.append({
+                "request": path.stem.split(".", 1)[0],
+                "count": len(tools),
+                "schema_bytes": len(json.dumps(tools, separators=(",", ":")).encode()),
+                "names": names,
+                "contract_sha256": tool_contract_sha256(contracts),
+                "tool_result_ids": [
+                    message["tool_call_id"]
+                    for message in payload.get("messages", [])
+                    if isinstance(message, dict)
+                    and message.get("role") == "tool"
+                    and isinstance(message.get("tool_call_id"), str)
+                ],
+            })
+        except (OSError, UnicodeError, TypeError, ValueError) as exc:
+            errors.append(f"{path.name}:{type(exc).__name__}")
     return rows, errors
 
 
@@ -395,6 +499,7 @@ def report_trial(trial: Path, destination: Path) -> dict:
         "capability_backend", "mcp"
     )
     summary["identity"]["sop_mode"] = agent_options.get("sop_mode", "off")
+    summary["identity"]["tool_mode"] = agent_options.get("tool_mode", "static")
     summary["identity"]["world_mode"] = agent_options.get("world_mode", "off")
     snapshot_receipt = trial / "agent" / "snapshot-receipt.json"
     if snapshot_receipt.is_file():
@@ -450,7 +555,7 @@ def report_trial(trial: Path, destination: Path) -> dict:
                 continue
             if isinstance(metadata, dict) and metadata.get("type") == "run_metadata":
                 summary["run_contract"] = {key: metadata.get(key) for key in (
-                    "commit_sha", "readBackend", "actionBackend", "capabilityBackend", "sopMode", "toolContractSha256", "systemPromptSha256", "runtimeDate",
+                    "commit_sha", "readBackend", "actionBackend", "capabilityBackend", "sopMode", "toolMode", "toolContractSha256", "systemPromptSha256", "runtimeDate",
                     "worldMode", "maxTurns", "maxOutputTokens", "model", "reasoning")}
                 summary["identity"]["commit_sha"] = metadata.get("commit_sha")
                 break
@@ -553,6 +658,20 @@ def report_trial(trial: Path, destination: Path) -> dict:
             )
         summary["receipts"]["tool_backends"] = str(backend_log.resolve())
         write_json(destination / "tool_backends.json", backend_events)
+    tool_contracts, tool_contract_errors = _request_tool_contracts(trial)
+    tool_counts = [row["count"] for row in tool_contracts]
+    tool_schema_bytes = [row["schema_bytes"] for row in tool_contracts]
+    summary["actions"].update(
+        request_tool_contracts=len(tool_contracts),
+        initial_tool_count=tool_counts[0] if tool_counts else None,
+        minimum_tool_count=min(tool_counts) if tool_counts else None,
+        maximum_tool_count=max(tool_counts) if tool_counts else None,
+        initial_tool_schema_bytes=tool_schema_bytes[0] if tool_schema_bytes else None,
+        total_tool_schema_bytes=sum(tool_schema_bytes),
+    )
+    summary["receipts"]["request_tool_contract_errors"] = tool_contract_errors
+    if tool_contracts:
+        write_json(destination / "tool_contracts.json", tool_contracts)
     sop_log = trial / "agent" / "sop-events.jsonl"
     sop_events = []
     sop_receipt_valid = False
@@ -569,33 +688,19 @@ def report_trial(trial: Path, destination: Path) -> dict:
         unmatched_sop_completions=0,
     )
     if sop_log.is_file():
-        sop_events = [
-            json.loads(line) for line in sop_log.read_text().splitlines() if line.strip()
-        ]
-        sop_starts = [event for event in sop_events if event.get("event") == "start"]
-        sop_ends = [event for event in sop_events if event.get("event") == "end"]
-        sop_started_ids = Counter(event.get("tool_call_id") for event in sop_starts)
-        sop_ended_ids = Counter(event.get("tool_call_id") for event in sop_ends)
-        sop_ids = set(sop_started_ids)
+        sop_events, sop_event_errors = _event_jsonl(sop_log)
+        closed, sop_starts, sop_ends, sop_started_ids, sop_ended_ids = _closed_tool_events(
+            sop_events, {"list_odoo_sops", "get_odoo_sop"}
+        )
         starts_by_id = {event.get("tool_call_id"): event for event in sop_starts}
         ends_by_id = {event.get("tool_call_id"): event for event in sop_ends}
         sop_receipt_valid = (
-            bool(sop_events)
-            and len(sop_events) == len(sop_starts) + len(sop_ends)
-            and all(isinstance(call_id, str) and call_id for call_id in sop_ids)
-            and sop_started_ids == sop_ended_ids
-            and all(count == 1 for count in sop_started_ids.values())
+            not sop_event_errors
+            and closed
             and all(
-                starts_by_id[call_id].get("tool") == ends_by_id[call_id].get("tool")
-                and starts_by_id[call_id].get("tool")
-                in {"list_odoo_sops", "get_odoo_sop"}
-                and starts_by_id[call_id].get("sop_id")
+                starts_by_id[call_id].get("sop_id")
                 == ends_by_id[call_id].get("sop_id")
-                and isinstance(starts_by_id[call_id].get("sequence"), int)
-                and isinstance(ends_by_id[call_id].get("end_sequence"), int)
-                and starts_by_id[call_id]["sequence"]
-                < ends_by_id[call_id]["end_sequence"]
-                for call_id in sop_ids
+                for call_id in sop_started_ids
             )
         )
         successful_lists = [
@@ -658,7 +763,80 @@ def report_trial(trial: Path, destination: Path) -> dict:
             unmatched_sop_completions=sum((sop_ended_ids - sop_started_ids).values()),
         )
         summary["receipts"]["sop_events"] = str(sop_log.resolve())
+        summary["receipts"]["sop_event_errors"] = sop_event_errors
         write_json(destination / "sop_events.json", sop_events)
+    dynamic_log = trial / "agent" / "dynamic-tools.jsonl"
+    dynamic_events = []
+    dynamic_receipt_valid = False
+    dynamic_publish_verified = False
+    summary["actions"].update(
+        dynamic_calls=0,
+        dynamic_configurations=0,
+        dynamic_active_capabilities=[],
+        dynamic_receipt_valid=False,
+        dynamic_publish_verified=False,
+        unfinished_dynamic_dispatches=0,
+        unmatched_dynamic_completions=0,
+    )
+    if dynamic_log.is_file():
+        dynamic_events, dynamic_event_errors = _event_jsonl(dynamic_log)
+        closed, dynamic_starts, dynamic_ends, dynamic_started, dynamic_ended = _closed_tool_events(
+            dynamic_events, {"list_odoo_capabilities", "configure_odoo_tools"}
+        )
+        dynamic_receipt_valid = not dynamic_event_errors and closed
+        configurations = [
+            event for event in dynamic_ends
+            if event.get("tool") == "configure_odoo_tools"
+            and event.get("success") is True
+            and isinstance(event.get("published_tools"), list)
+            and all(isinstance(name, str) for name in event["published_tools"])
+        ]
+        configurations.sort(key=lambda event: event.get("end_sequence", -1))
+        latest = configurations[-1] if configurations else None
+        publish_checks = []
+        for configuration in configurations:
+            delivered = next(
+                (
+                    contract
+                    for contract in tool_contracts
+                    if configuration.get("tool_call_id")
+                    in contract["tool_result_ids"]
+                ),
+                None,
+            )
+            publish_checks.append({
+                "tool_call_id": configuration.get("tool_call_id"),
+                "expected_contract_sha256": configuration.get("tool_contract_sha256"),
+                "provider_request": delivered.get("request") if delivered else None,
+                "actual_contract_sha256": delivered.get("contract_sha256") if delivered else None,
+                "verified": bool(
+                    delivered
+                    and delivered["names"] == configuration["published_tools"]
+                    and delivered["contract_sha256"]
+                    == configuration.get("tool_contract_sha256")
+                ),
+            })
+        dynamic_publish_verified = bool(
+            dynamic_receipt_valid
+            and publish_checks
+            and all(check["verified"] for check in publish_checks)
+        )
+        summary["actions"].update(
+            dynamic_calls=len(dynamic_starts),
+            dynamic_configurations=len(configurations),
+            dynamic_active_capabilities=latest.get("active", []) if latest else [],
+            dynamic_receipt_valid=dynamic_receipt_valid,
+            dynamic_publish_verified=dynamic_publish_verified,
+            dynamic_publish_checks=publish_checks,
+            first_dynamic_publish_sequence=min(
+                (event["end_sequence"] for event in configurations), default=None
+            ),
+            unfinished_dynamic_dispatches=sum((dynamic_started - dynamic_ended).values()),
+            unmatched_dynamic_completions=sum((dynamic_ended - dynamic_started).values()),
+        )
+        summary["receipts"]["dynamic_tools"] = str(dynamic_log.resolve())
+        summary["receipts"]["dynamic_tool_event_errors"] = dynamic_event_errors
+        write_json(destination / "dynamic_tools.json", dynamic_events)
     world_summary_path = trial / "agent" / "world-summary.json"
     world_summary = None
     world_summary_error = None
@@ -792,6 +970,14 @@ def report_trial(trial: Path, destination: Path) -> dict:
                 or not sop_read_before_first_mutation
             )
         )
+        or (
+            agent_options.get("tool_mode", "static") == "dynamic"
+            and (
+                tool_contract_errors
+                or not dynamic_receipt_valid
+                or not dynamic_publish_verified
+            )
+        )
     ):
         natural_end = False
     elif (
@@ -809,6 +995,10 @@ def report_trial(trial: Path, destination: Path) -> dict:
         and (
             "sop_mode" not in agent_options
             or returned.get("sop_mode") == agent_options["sop_mode"]
+        )
+        and (
+            "tool_mode" not in agent_options
+            or returned.get("tool_mode") == agent_options["tool_mode"]
         )
         and ("world_mode" not in agent_options
              or returned.get("world_mode") == agent_options["world_mode"])

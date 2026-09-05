@@ -935,6 +935,15 @@ class CodingSession:
         """Return the tools available to the agent."""
         return tuple(self._harness.config.tools)
 
+    def stage_tools_for_next_turn(self, tools: Sequence[AgentTool]) -> None:
+        """Publish a complete tool snapshot for the next model turn."""
+        staged = list(tools)
+        names = [tool.name for tool in staged]
+        if len(names) != len(set(names)):
+            raise ValueError("Tool names must be unique")
+        self._harness.config.tools = staged
+        self._invalidate_context_usage_cache()
+
     @property
     def extension_tool_sources(self) -> dict[str, str]:
         """Map active extension-provided tools to their owning extension."""
