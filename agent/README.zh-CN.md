@@ -87,7 +87,8 @@ pi_ai      provider 适配器、流式响应、思考、用量、重试
 
 - 默认编程工具顺序 `read → bash → edit → write`；
 - 与 provider 无关的消息、流式响应、思考、用量和工具调用重放；
-- Agent 循环生命周期、steering/follow-up 队列、工具执行和取消；
+- Agent 循环生命周期、steering/follow-up 队列、工具执行、取消，以及对既无可见文本也无
+  工具调用的 provider 响应进行一次恢复尝试；
 - JSONL 会话重放、重试、压缩、分支摘要、资源和技能；
 - 已被明确测试的扩展钩子，以及 print、JSON、RPC 和 Textual 前端行为。
 

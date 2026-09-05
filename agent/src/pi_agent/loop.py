@@ -31,6 +31,7 @@ from pi_agent.messages import (
     TextContent,
     ToolCall,
     ToolResultMessage,
+    UserMessage,
     Usage,
 )
 from pi_agent.provider import CancellationToken, ModelProvider
@@ -181,6 +182,7 @@ async def run_agent_loop(
 
     turn = 1
     first_turn = True
+    retried_empty_response = False
     pending = await _poll_messages(get_steering_messages)
 
     while True:
@@ -259,6 +261,23 @@ async def run_agent_loop(
 
             tool_results: list[ToolResultMessage] = []
             calls = list(assistant.tool_calls)
+            empty_response = (
+                assistant.stop_reason == "stop" and not assistant.text.strip() and not calls
+            )
+            if empty_response and retried_empty_response:
+                error = _error_message(
+                    model,
+                    "Provider returned no visible response or tool call after one "
+                    "automatic continuation",
+                )
+                current_context.messages.append(error)
+                messages.append(error)
+                new_messages.append(error)
+                yield MessageStartEvent(message=error)
+                yield MessageEndEvent(message=error)
+                yield TurnEndEvent(message=error)
+                yield AgentEndEvent(messages=new_messages)
+                return
             has_more_tools = bool(calls)
             terminate = False
             if calls:
@@ -321,6 +340,18 @@ async def run_agent_loop(
                 return
             turn += 1
             pending = await _poll_messages(get_steering_messages)
+            if empty_response:
+                retried_empty_response = True
+                if not pending:
+                    pending = (
+                        UserMessage(
+                            content=(
+                                "Your previous response contained no visible answer or tool call. "
+                                "Continue the task now: use the available tools if work remains, "
+                                "or provide the final answer."
+                            )
+                        ),
+                    )
 
         follow_ups = await _poll_messages(get_follow_up_messages)
         if follow_ups:
