@@ -1,6 +1,6 @@
-# 第五阶段验收：原生业务能力与可靠运行上下文
+# 第五阶段阶段性验收：原生能力与受控 SOP
 
-更新：2026-09-05。结论：**第五阶段已验收，可以冻结；无需追加第二版修复。** 运行代码检查点为 `5a73ee4d9b16a9251a861952a89725022f50059e`。只做了 A/B；C 组和 Compiler 均未读取、移植或运行。
+更新：2026-09-05。结论：**5.1 原生能力与 5.2 受控 SOP 已验收；第五阶段尚未整体冻结，5.3 动态工具仍待实现。** 5.1 运行代码检查点为 `5a73ee4d9b16a9251a861952a89725022f50059e`，5.2 为 `3e8258ee37cb950599f1f84a6b1da1ba90890830`。只做了 A/B；C 组和 Compiler 均未读取、移植或运行。
 
 ## 已验收边界
 
@@ -46,3 +46,26 @@ B 在创建 PO 前遇到一次 provider HTTP 524；session 记录 `auto_retry_st
 r4 只证明 MCP/native capability 两条链路都能完成本 case，不证明 native 更省 token、更快或普遍更稳定。Stage 5 的强制 probe 指令相对 Stage 4 改变了模型输入，因此跨阶段分数仍不能作为纯后端因果比较。若以后评估质量稳定性，应保留原任务提示并做多次配对运行；当前不在安全层硬编码 Bench 答案。
 
 独立子 agent 对 r4 原始请求、时钟调用、后端闭包、异常、账本和 verifier 再次复核，最终结论为 `ACCEPT`。
+
+## 5.2：受控 SOP 验收
+
+runner 在 `sop_mode=controlled` 时只增加 `list_odoo_sops` 与 `get_odoo_sop` 两个只读工具，显式提供 11 份仓库内审核 SOP；项目 resources、skills 和 extensions 仍关闭。SOP 是数据与操作指导，不是授权。发票过账改为 allowlisted `account.move.action_post`，费用审批要求发现当前版本的真实业务方法；二者均禁止直接写 `state`。业务输入不进入 SOP 调用日志。
+
+报告器使用 SOP 与 Odoo 工具共享的单调序号，要求非空调用号、start/end 一一闭合、`list → get → 首次副作用` 的完成顺序；缺日志、孤立完成、悬空开始、缺调用号或顺序错误都会使 controlled trial 不能记为 natural end。实现修复后，根 Harness 为 **65 passed、1 个 Node-only skip**；相关 MCP workflow prompt 为 **16 passed**，独立 Linux `/tmp` 的完整 MCP 回归为 **933 passed**。Pi 上游全量额外得到 1952 passed、4 skipped；17 个失败来自本干净仓库未搬入的示例扩展、未安装的可选 `socksio`/`uv` 和源码运行版号，不涉及本次修改，也未被记为全量通过。
+
+真实 Job：`.runtime/jobs/stage5-controlled-sop-ab-20260905-r1`。A、B 使用同一 case 2262、提交、快照、模型/high reasoning、原生 read/action/capability 与 World record；配置唯一变量为 `sop_mode=off/controlled`。两边快照回执均为 `169886cd1c4fa78290816fe57288f0d00b68f596b15be7eaa7236acc324a8eb1`、550 张表、445 个文件。
+
+| 指标 | A：SOP off | B：SOP controlled |
+| --- | ---: | ---: |
+| trial | `xk9BQU3` | `eTbxtvW` |
+| 得分 / 适用规则 | 100 / 62/62 | 100 / 62/62 |
+| 结束 | natural stop | natural stop |
+| 模型请求 / HTTP | 38 / 38×200 | 38 / 38×200 |
+| 模型可见工具调用 | 100 | 84 |
+| token 合计 | 1,690,592 | 1,533,682 |
+| SOP 调用 | 0 | 4 |
+| SOP 收据与顺序 | 不适用 | 有效 |
+
+B 先在序号 1→2 成功列出 SOP，在 7→8 读取本题后续开票所需的 `invoice_approval_chain`。第一次读取 `safe_write_review` 因缺少 `model`、`operation` 在 9→10 被参数门禁拒绝；模型随后自行纠正，在 93→94 成功读取 `safe_write_review(sale.order, create)`，首次副作用 `execute_approved_write` 在 119→120 才开始并验证成功。SOP 收据没有悬空或孤立事件。B 的一次 MCP 分发是尚计划留到第七阶段处理的 `health_check`，不属于当前已迁 read/action/capability 集合，报告无后端错路由。
+
+独立子 agent 对配置、canonical session、HTTP、工具、SOP、动作账本、World 与 verifier 回执给出 `ACCEPT`。本次只能证明受控 SOP 可发现、可读取、写前顺序成立且没有损害此单题正确性；不能证明 SOP 提高得分、token 效率或总体可靠性。首次缺参也说明 SOP 使用并非完全无摩擦。下一步是独立的 5.3 动态可见工具集实验，不把本结果与动态选择混为一次改动。
