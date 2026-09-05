@@ -15,6 +15,6 @@ finish() {
 }
 trap finish EXIT
 
-DOCKER_BUILDKIT=1 docker build -q -t "$image" "$environment"
+docker build -q -t "$image" "$environment"
 docker run -d --name "$fixture" --label pi-odoo-harness-lab=stage3 "$image" >/dev/null
 ./integration/prepare_read_gate.sh "$fixture" stage3 "$case_name"
