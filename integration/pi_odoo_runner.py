@@ -196,6 +196,9 @@ async def run(args: argparse.Namespace) -> None:
                 NativeActions(
                     native_runtime,
                     store=ActionStore(args.session_file.parent / "odoo-actions.sqlite3"),
+                    # Bench high-reasoning turns can exceed the safe default between
+                    # validation and execution; prestate is still rechecked before send.
+                    approval_ttl_seconds=60 * 60,
                 )
                 if getattr(args, "action_backend", "mcp") == "native"
                 else None

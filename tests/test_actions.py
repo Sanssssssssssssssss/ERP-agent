@@ -178,6 +178,7 @@ def _actions(
     *,
     path: Path | None = None,
     approval_mode: str = "bench-auto",
+    approval_ttl_seconds: int = 10 * 60,
     runtime: _Runtime | None = None,
     writer: _Writer | None = None,
 ) -> tuple[NativeActions, _Writer, _Runtime]:
@@ -190,6 +191,7 @@ def _actions(
         store=ActionStore(path or Path(directory.name) / "actions.sqlite3"),
         clients={"default": writer},
         approval_mode=approval_mode,
+        approval_ttl_seconds=approval_ttl_seconds,
     )
     if directory is not None:
         actions._test_directory = directory
@@ -197,6 +199,19 @@ def _actions(
 
 
 class NativeActionCheckpointTests(unittest.TestCase):
+    def test_custom_approval_ttl_is_applied(self):
+        actions, _, _ = _actions(approval_ttl_seconds=3600)
+        validation = actions.validate_write(
+            "res.partner", "write", record_ids=[7], values={"name": "Ada"}
+        )
+        action = actions.store.get(validation["approval"]["action_id"])
+
+        self.assertIsNotNone(action)
+        self.assertEqual(validation["approval_status"]["expires_in_seconds"], 3600)
+        self.assertAlmostEqual(
+            action["expires_at"] - action["created_at"], 3600, delta=0.01
+        )
+
     def test_preview_is_exact_reference_contract(self):
         actions, _, _ = _actions()
         arguments = {

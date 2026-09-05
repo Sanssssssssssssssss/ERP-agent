@@ -238,7 +238,10 @@ class NativeActions:
         store: ActionStore,
         clients: dict[str, Any] | None = None,
         approval_mode: str | None = None,
+        approval_ttl_seconds: int = WRITE_APPROVAL_TTL_SECONDS,
     ) -> None:
+        if type(approval_ttl_seconds) is not int or approval_ttl_seconds < 1:
+            raise ValueError("approval_ttl_seconds must be a positive integer")
         self.reads = reads
         self.store = store
         self.clients = clients or {
@@ -248,6 +251,7 @@ class NativeActions:
         if set(self.clients) != set(reads.instances):
             raise ValueError("Native action clients must match native read instances")
         self.approval_mode = approval_mode
+        self.approval_ttl_seconds = approval_ttl_seconds
 
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if name not in ACTION_TOOLS:
@@ -364,7 +368,7 @@ class NativeActions:
             resource_key=self._resource_key(kind, payload),
             run_id=os.environ.get("HARBOR_TRIAL_ID", os.environ.get("PI_AGENT_SESSION_ID", "local")),
             session_id=os.environ.get("PI_AGENT_SESSION_ID", "local"),
-            expires_at=now + WRITE_APPROVAL_TTL_SECONDS,
+            expires_at=now + self.approval_ttl_seconds,
             approved=approved,
         )
 
@@ -960,7 +964,7 @@ class NativeActions:
                 approval = report["approval"]
                 now = time.time()
                 approval["validated_at"] = now
-                approval["expires_at"] = now + WRITE_APPROVAL_TTL_SECONDS
+                approval["expires_at"] = now + self.approval_ttl_seconds
                 payload = _approval_payload(approval)
                 identity = self._identity(name)
                 action = self._register(
@@ -978,7 +982,7 @@ class NativeActions:
                     "durable": action is not None,
                     "status": action["status"] if action else None,
                     "approval_source": action["approval_source"] if action else None,
-                    "expires_in_seconds": WRITE_APPROVAL_TTL_SECONDS,
+                    "expires_in_seconds": self.approval_ttl_seconds,
                     "source": source,
                 }
                 if trusted
