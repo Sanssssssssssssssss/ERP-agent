@@ -5,6 +5,7 @@ cd "$(dirname "$0")/.."
 snapshot=${1:?Pass the fixed snapshot directory}
 snapshot=$(realpath "$snapshot")
 test -f "$snapshot/manifest.json"
+snapshot_case=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["case"])' "$snapshot/manifest.json")
 expected=$(python3 -c 'import json; print(json.load(open("configs/stage4-actions-ab.json"))["agents"][0]["kwargs"]["snapshot_sha256"])')
 test "$(sha256sum "$snapshot/manifest.json" | cut -d' ' -f1)" = "$expected"
 image=sha256:c99d46e9d14c68b4951b316337b427e37173e49241aa9e9cfd2e865b8738916d
@@ -34,6 +35,7 @@ trap finish EXIT
 
 docker run -d --name "$fixture" --label pi-odoo-harness-lab=stage5 \
     -e PI_ODOO_LAB_SNAPSHOT=1 \
+    -e PI_ODOO_SNAPSHOT_CASE="$snapshot_case" \
     -v "$(pwd)/integration/snapshot_entrypoint.sh:/lab-snapshot-entrypoint.sh:ro" \
     -v "$(pwd)/integration/snapshot.py:/lab-snapshot.py:ro" \
     -v "$snapshot:/snapshot:ro" \

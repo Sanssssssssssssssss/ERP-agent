@@ -17,7 +17,14 @@ import time
 from pathlib import Path
 
 DATABASE = "bench"
-CASE = "2262_easy_26_buy_only_net_30_no_adjacent_data"
+CASE_ENV = "PI_ODOO_SNAPSHOT_CASE"
+
+
+def snapshot_case() -> str:
+    case = os.environ.get(CASE_ENV, "")
+    if not case or case in {".", ".."} or "/" in case or "\\" in case:
+        raise RuntimeError(f"{CASE_ENV} must be a single benchmark task directory name")
+    return case
 
 
 def pg(*args: str, input: str | None = None, stdout=None, stdin=None):
@@ -116,7 +123,7 @@ def capture(destination: Path) -> None:
             archive.add(filestore, arcname=DATABASE)
         (destination / "api_key").write_bytes(Path("/etc/odoo/api_key").read_bytes())
         manifest = {
-            "format": 1, "case": CASE, "database": DATABASE,
+            "format": 1, "case": snapshot_case(), "database": DATABASE,
             "captured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "fingerprint": state, "filestore_files": files,
             "sha256": {name: digest(destination / name)
@@ -130,7 +137,8 @@ def capture(destination: Path) -> None:
 
 def checked_manifest(source: Path) -> dict:
     manifest = json.loads((source / "manifest.json").read_text())
-    if (manifest.get("format"), manifest.get("database"), manifest.get("case")) != (1, DATABASE, CASE):
+    if (manifest.get("format"), manifest.get("database"), manifest.get("case")) != (
+            1, DATABASE, snapshot_case()):
         raise ValueError("Not an approved stage-1 benchmark snapshot")
     for name in ("database.dump", "filestore.tar", "api_key"):
         if digest(source / name) != manifest["sha256"][name]:
@@ -192,7 +200,8 @@ def restore(source: Path) -> None:
                           "sequences_match": actual["sequences_sha256"] == manifest["fingerprint"]["sequences_sha256"],
                           "database_match": actual["database"] == manifest["fingerprint"]["database"]}), flush=True)
         raise RuntimeError("Restored state differs from snapshot; agent must not start")
-    receipt = {"status": "verified", "case": CASE, "snapshot_sha256": digest(source / "manifest.json"),
+    receipt = {"status": "verified", "case": snapshot_case(),
+               "snapshot_sha256": digest(source / "manifest.json"),
                "tables": len(actual["tables"]), "files": len(manifest["filestore_files"])}
     Path("/logs/agent").mkdir(parents=True, exist_ok=True)
     Path("/logs/agent/snapshot-receipt.json").write_text(json.dumps(receipt, indent=2))

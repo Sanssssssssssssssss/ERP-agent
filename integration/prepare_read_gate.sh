@@ -4,8 +4,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 fixture=${1:?Pass the labelled disposable fixture container name}
 stage=${2:-stage1}
+case_name=${3:?Pass the benchmark task directory name}
 [[ "$stage" =~ ^stage[1-7]$ ]]
 [[ "$fixture" == pi-odoo-$stage-fixture-* ]]
+[[ "$case_name" =~ ^[a-z0-9][a-z0-9._-]+$ ]]
 test "$(docker inspect "$fixture" --format '{{index .Config.Labels "pi-odoo-harness-lab"}}')" = "$stage"
 stamp=$(date -u +%Y%m%dT%H%M%SZ)-$$
 run=.runtime/$stage/$stamp
@@ -39,7 +41,8 @@ docker exec "$fixture" uv pip install --python "$venv/bin/python" --no-index --f
 
 # Take the unmodified benchmark snapshot BEFORE making the separate security DB.
 remote_snapshot=/tmp/pi-odoo-snapshot-$stage-$stamp
-docker exec -e PI_ODOO_LAB_SNAPSHOT=1 "$fixture" python3 \
+docker exec -e PI_ODOO_LAB_SNAPSHOT=1 -e PI_ODOO_SNAPSHOT_CASE="$case_name" \
+    "$fixture" python3 \
     "$remote/integration/snapshot.py" capture "$remote_snapshot"
 docker cp "$fixture:$remote_snapshot/." "$run/snapshot/"
 docker inspect "$fixture" --format '{{.Image}}' > "$run/snapshot/image-id.txt"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -46,17 +47,34 @@ class SnapshotTest(unittest.TestCase):
             names = ("database.dump", "filestore.tar", "api_key")
             for name in names:
                 (root / name).write_text("test-only")
-            manifest = {"format": 1, "database": "bench", "case": snapshot.CASE,
+            manifest = {"format": 1, "database": "bench", "case": "case-a",
                         "sha256": {name: snapshot.digest(root / name) for name in names}}
             (root / "manifest.json").write_text(json.dumps(manifest))
-            self.assertEqual(snapshot.checked_manifest(root), manifest)
-            with patch.object(snapshot, "sql", return_value="1"), patch.object(snapshot, "pg") as pg:
-                with self.assertRaisesRegex(RuntimeError, "Refusing to overwrite"):
-                    snapshot.restore(root)
-                pg.assert_not_called()
-            (root / "database.dump").write_text("changed")
-            with self.assertRaisesRegex(ValueError, "checksum mismatch"):
-                snapshot.checked_manifest(root)
+            with patch.dict(os.environ, {snapshot.CASE_ENV: "case-a"}):
+                self.assertEqual(snapshot.checked_manifest(root), manifest)
+                with patch.object(snapshot, "sql", return_value="1"), patch.object(snapshot, "pg") as pg:
+                    with self.assertRaisesRegex(RuntimeError, "Refusing to overwrite"):
+                        snapshot.restore(root)
+                    pg.assert_not_called()
+                (root / "database.dump").write_text("changed")
+                with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+                    snapshot.checked_manifest(root)
+
+    def test_manifest_rejects_wrong_or_missing_case_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            names = ("database.dump", "filestore.tar", "api_key")
+            for name in names:
+                (root / name).write_text("test-only")
+            manifest = {"format": 1, "database": "bench", "case": "case-a",
+                        "sha256": {name: snapshot.digest(root / name) for name in names}}
+            (root / "manifest.json").write_text(json.dumps(manifest))
+            with patch.dict(os.environ, {snapshot.CASE_ENV: "case-b"}):
+                with self.assertRaisesRegex(ValueError, "approved"):
+                    snapshot.checked_manifest(root)
+            with patch.dict(os.environ, {snapshot.CASE_ENV: ""}):
+                with self.assertRaisesRegex(RuntimeError, snapshot.CASE_ENV):
+                    snapshot.checked_manifest(root)
 
 
 if __name__ == "__main__":

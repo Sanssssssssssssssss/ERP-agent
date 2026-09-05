@@ -14,6 +14,7 @@ export PI_ODOO_SOURCE_COMMIT="$(git -c safe.directory="$PWD" rev-parse HEAD)"
 config=${1:?Provide a baseline config}
 if grep -q 'configs/harbor-snapshot-compose.yml' "$config"; then
     snapshot_sha=$(python3 -c 'import json,sys; v={a["kwargs"]["snapshot_sha256"] for a in json.load(open(sys.argv[1]))["agents"]}; assert len(v)==1; print(v.pop())' "$config")
+    snapshot_case=$(python3 -c 'import json,pathlib,sys; tasks=json.load(open(sys.argv[1]))["tasks"]; assert len(tasks)==1; print(pathlib.PurePosixPath(tasks[0]["path"]).name)' "$config")
     mapfile -t snapshots < <(
         find .runtime/stage3 -path '*/snapshot/manifest.json' -type f -print0 \
             | while IFS= read -r -d '' manifest; do
@@ -22,8 +23,10 @@ if grep -q 'configs/harbor-snapshot-compose.yml' "$config"; then
             done
     )
     test "${#snapshots[@]}" = 1
+    test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["case"])' "${snapshots[0]}/manifest.json")" = "$snapshot_case"
     export PI_ODOO_LAB_ROOT="$PWD"
     export PI_ODOO_SNAPSHOT="$(realpath "${snapshots[0]}")"
+    export PI_ODOO_SNAPSHOT_CASE="$snapshot_case"
 fi
 if ! command -v harbor >/dev/null; then
     export PATH="$PWD/.runtime/harbor-wsl/bin:$PATH"

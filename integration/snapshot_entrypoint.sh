@@ -2,6 +2,7 @@
 # Restore before Odoo starts: no cached registry and no second scenario seeding.
 set -euo pipefail
 test "${PI_ODOO_LAB_SNAPSHOT:-}" = 1
+test -n "${PI_ODOO_SNAPSHOT_CASE:-}"
 test -f /snapshot/manifest.json
 mkdir -p /logs/agent
 pg_ctlcluster 18 main start
