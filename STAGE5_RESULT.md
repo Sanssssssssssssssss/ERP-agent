@@ -1,6 +1,6 @@
-# 第五阶段阶段性验收：原生能力与受控 SOP
+# 第五阶段阶段性验收：5.1/5.2 通过，5.3 暂停
 
-更新：2026-09-05。结论：**5.1 原生能力与 5.2 受控 SOP 已验收；第五阶段尚未整体冻结，5.3 动态工具仍待实现。** 5.1 运行代码检查点为 `5a73ee4d9b16a9251a861952a89725022f50059e`，5.2 为 `3e8258ee37cb950599f1f84a6b1da1ba90890830`。只做了 A/B；C 组和 Compiler 均未读取、移植或运行。
+更新：2026-09-05。结论：**5.1 原生能力与 5.2 受控 SOP 已验收；5.3 动态工具已实现，但真实 A/B 出现质量回退，暂不验收（HOLD）。** 5.1 运行代码检查点为 `5a73ee4d9b16a9251a861952a89725022f50059e`，5.2 为 `3e8258ee37cb950599f1f84a6b1da1ba90890830`，5.3 实现检查点为 `ac2edea99971d97ffe3df139c06e257464b0b6ef`。只做了 A/B；C 组和 Compiler 均未读取、移植或运行。第六至第七阶段尚未开始。
 
 ## 已验收边界
 
@@ -68,4 +68,39 @@ runner 在 `sop_mode=controlled` 时只增加 `list_odoo_sops` 与 `get_odoo_sop
 
 B 先在序号 1→2 成功列出 SOP，在 7→8 读取本题后续开票所需的 `invoice_approval_chain`。第一次读取 `safe_write_review` 因缺少 `model`、`operation` 在 9→10 被参数门禁拒绝；模型随后自行纠正，在 93→94 成功读取 `safe_write_review(sale.order, create)`，首次副作用 `execute_approved_write` 在 119→120 才开始并验证成功。SOP 收据没有悬空或孤立事件。B 的一次 MCP 分发是尚计划留到第七阶段处理的 `health_check`，不属于当前已迁 read/action/capability 集合，报告无后端错路由。
 
-独立子 agent 对配置、canonical session、HTTP、工具、SOP、动作账本、World 与 verifier 回执给出 `ACCEPT`。本次只能证明受控 SOP 可发现、可读取、写前顺序成立且没有损害此单题正确性；不能证明 SOP 提高得分、token 效率或总体可靠性。首次缺参也说明 SOP 使用并非完全无摩擦。下一步是独立的 5.3 动态可见工具集实验，不把本结果与动态选择混为一次改动。
+独立子 agent 对配置、canonical session、HTTP、工具、SOP、动作账本、World 与 verifier 回执给出 `ACCEPT`。本次只能证明受控 SOP 可发现、可读取、写前顺序成立且没有损害此单题正确性；不能证明 SOP 提高得分、token 效率或总体可靠性。首次缺参也说明 SOP 使用并非完全无摩擦。该结果与后续 5.3 动态选择实验保持独立，不混为一次改动。
+
+## 5.3：动态工具暂不验收（HOLD）
+
+动态模式保留 14 个基础工具，再按任务需要发布业务能力；本轮最多发布到 28 个工具。动态发布回执、schema 校验、后端闭包与 SOP 顺序均有效，没有 backend mismatch 或 contract error。实现后根 Harness 为 **70 passed、1 个 Node-only skip**；动作与 agent-loop 的聚焦检查分别为 **20 passed**、**13 passed**。
+
+旧 case 2008 的 static/dynamic 两组都出现 reasoning-only 的空最终响应：provider 返回 `stop`，但没有可见文本和工具调用，原生 Pi 循环会把它当作完成。提交 `53eda58` 增加一次通用续跑，第二次仍为空则明确失败；该修复不写入日期或 Bench 答案，也不无限重试。它通过确定性测试，但后续 2262 r3 没有触发，所以不能用 r3 宣称真实恢复收益。
+
+2262 r2 的 dynamic trial `Z3pLCkG` 暴露了另一项确定性运行参数问题：默认 10 分钟审批 TTL 小于 high-reasoning 轨迹中“校验到执行”的耗时，动作过期后模型反复取时、重新预览和审批。该次在人工终止前已有 260 次模型调用、363 次工具调用和 22,642,476 tokens，未进入 verifier。提交 `8a7febe` 只把本隔离 Bench runner 的 TTL 调为 1 小时；普通运行仍为 10 分钟，执行前的身份、策略摘要和 Odoo prestate 复核均保留。
+
+修复后的 Job 为 `.runtime/jobs/stage5-dynamic-tools-ab-20260905-r3`，两组使用同一 case 2262、干净快照、模型/high reasoning、原生 read/action/capability、受控 SOP 与 World record；唯一实验变量是工具模式。
+
+| 指标 | A：static | B：dynamic |
+| --- | ---: | ---: |
+| trial | `hTnw8Bb` | `kxBGNzU` |
+| 得分 / 适用规则 | 100 / 62/62 | 22.77 / 60/62 |
+| 结束 | natural stop | natural stop |
+| 模型请求 / HTTP | 63 / 63×200 | 49 / 49×200 |
+| 模型可见工具调用 | 122 | 113 |
+| token 合计 | 2,904,272 | 2,314,789 |
+| 工具定义字节合计 | 1,923,516 | 976,204 |
+| 可见工具数 | 44→44 | 14→28 |
+| 动作账本 | 19 verified | 11 verified + 2 known_failed |
+
+TTL 修复在 r3 生效：dynamic 不再出现 expired 动作或取时—重审批循环，并自然进入 verifier。因此本次低分不是 infra、动态发布或安全门执行故障。
+
+直接业务缺口只有 `po_delivery_schedule_compliance` 与其上游汇总规则 `supply_timing_feasible`。dynamic 正确计算出库存 29 件覆盖三张 9 月 11 日到期订单、Marble Movers 的 10 件采购在 `2026-09-12` 到货并覆盖 9 月 14 日到期的 Spark；但在 session JSONL 第 100 行无新证据地改口为“PO origin 必须关联所有 SO”，最终写入：
+
+```text
+date_planned = 2026-09-12 00:00:00
+origin = S00005, S00006, S00007, S00008
+```
+
+verifier 会逐个检查 `origin` 中每张销售单的 need date，因此该 PO 被判定为在服务三张 9 月 11 日订单却到货过晚。static 对照只关联真正需要晚到补货的 `S00004`，同样采购 10 件、单价 `$400.18`，因而通过 62/62。两组新增支出都达到最优值 `$4,001.80`；dynamic 的采购数量、供应商和价格均正确，失败来自模型最后写错业务关联，不是工具无法表达该字段。
+
+独立子 agent 复核 r2/r3 session、动作账本、动态发布收据和规则实现后给出同样结论：TTL 修复有效，直接责任在模型规划轨迹；安全门只验证授权、prestate 与执行闭环，不应硬编码 ERP-Bench 隐藏的 `origin` 业务答案。由于 dynamic 相对 static 出现明确质量回退，即使 schema 与 token 更少，也不能验收 5.3。按“首次修复后仍失败即报告”的约定，本轮未继续跑 case 2008，也未做第二次策略修复。
