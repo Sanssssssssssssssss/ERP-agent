@@ -17,14 +17,14 @@ logs=/logs/$stage-agent-$stamp
 mkdir -p "$run/snapshot" "$run/read-gate"
 for attempt in $(seq 1 150); do
     if docker exec "$fixture" test -f /tmp/saas_setup_complete \
-        && docker exec "$fixture" pgrep -fx '/usr/bin/python3 /usr/bin/odoo --config /etc/odoo/odoo.conf --http-port=8069 --max-cron-threads=0' >/dev/null; then
+        && docker exec "$fixture" curl -sf http://127.0.0.1:8069/web/database/selector >/dev/null; then
         break
     fi
     test "$(docker inspect "$fixture" --format '{{.State.Running}}')" = true
     sleep 2
 done
 docker exec "$fixture" test -f /tmp/saas_setup_complete
-docker exec "$fixture" pgrep -fx '/usr/bin/python3 /usr/bin/odoo --config /etc/odoo/odoo.conf --http-port=8069 --max-cron-threads=0' >/dev/null
+docker exec "$fixture" curl -sf http://127.0.0.1:8069/web/database/selector >/dev/null
 docker exec "$fixture" mkdir -p /tmp/pi-odoo-mcp-source "$remote/agent/src" "$logs"
 docker cp mcp/src/odoo_mcp "$fixture:/tmp/pi-odoo-mcp-source/"
 docker cp integration "$fixture:$remote/"
