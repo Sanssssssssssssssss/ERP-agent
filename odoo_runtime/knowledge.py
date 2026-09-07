@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from odoo_mcp.tool_helpers import (
+from odoo_runtime._odoo_core.tool_helpers import (
     MAX_SEARCH_LIMIT,
     clamp_limit,
     normalize_domain_input,

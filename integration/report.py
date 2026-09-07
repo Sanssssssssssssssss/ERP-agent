@@ -428,6 +428,7 @@ def report_trial(trial: Path, destination: Path) -> dict:
         (
             p
             for name in (
+                "pi-agent-odoo.jsonl",
                 "pi-agent-odoo-mcp.jsonl",
                 "pi-mcp-baseline.txt",
                 "tau-mcp-baseline.jsonl",
@@ -501,9 +502,34 @@ def report_trial(trial: Path, destination: Path) -> dict:
     summary["identity"]["sop_mode"] = agent_options.get("sop_mode", "off")
     summary["identity"]["tool_mode"] = agent_options.get("tool_mode", "static")
     summary["identity"]["world_mode"] = agent_options.get("world_mode", "off")
+    summary["identity"]["runtime_mode"] = agent_options.get("runtime_mode", "mcp")
     snapshot_receipt = trial / "agent" / "snapshot-receipt.json"
     if snapshot_receipt.is_file():
         summary["receipts"]["snapshot"] = read_json(snapshot_receipt)
+    native_runtime_receipt = trial / "agent" / "native-runtime-receipt.json"
+    native_runtime = {}
+    if native_runtime_receipt.is_file():
+        native_runtime = read_json(native_runtime_receipt)
+        summary["receipts"]["native_runtime"] = native_runtime
+    native_runtime_required = summary["identity"]["runtime_mode"] == "native"
+    native_runtime_errors = []
+    if native_runtime_required:
+        if native_runtime.get("status") != "verified":
+            native_runtime_errors.append("status:not_verified")
+        importable = native_runtime.get("installed_or_importable", {})
+        for module in ("mcp", "mcp_types", "odoo_mcp"):
+            if importable.get(module) is not False:
+                native_runtime_errors.append(f"{module}:not_confirmed_absent")
+        if native_runtime.get("installed_mcp_distributions") != []:
+            native_runtime_errors.append("mcp_distribution_present")
+        for field in ("mcp_process", "mcp_port_8000_open", "mcp_pid_file"):
+            if native_runtime.get(field) is not False:
+                native_runtime_errors.append(f"{field}:not_false")
+    summary["receipts"]["native_runtime_integrity"] = {
+        "required": native_runtime_required,
+        "valid": not native_runtime_errors,
+        "errors": native_runtime_errors,
+    }
     ledger_required = summary["identity"]["action_backend"] == "native"
     ledger_summary_path = trial / "agent" / "action-ledger-summary.json"
     ledger_database_path = trial / "agent" / "odoo-actions.sqlite3"
@@ -946,6 +972,10 @@ def report_trial(trial: Path, destination: Path) -> dict:
         or actions.get("action_backend_mismatches")
         or actions.get("capability_backend_mismatches")
         or (
+            native_runtime_required
+            and summary["receipts"]["native_runtime_integrity"]["valid"] is not True
+        )
+        or (
             agent_options.get("action_backend", "mcp") == "native"
             and (
                 not ledger_integrity["valid"]
@@ -1000,6 +1030,10 @@ def report_trial(trial: Path, destination: Path) -> dict:
             "tool_mode" not in agent_options
             or returned.get("tool_mode") == agent_options["tool_mode"]
         )
+        and (
+            "runtime_mode" not in agent_options
+            or returned.get("runtime_mode") == agent_options["runtime_mode"]
+        )
         and ("world_mode" not in agent_options
              or returned.get("world_mode") == agent_options["world_mode"])
         and bool(agent_options.get("snapshot_sha256"))
@@ -1007,6 +1041,10 @@ def report_trial(trial: Path, destination: Path) -> dict:
         == returned.get("snapshot_sha256")
         == summary["receipts"].get("snapshot", {}).get("snapshot_sha256")
         and summary["receipts"].get("snapshot", {}).get("status") == "verified"
+        and (
+            not native_runtime_required
+            or summary["receipts"]["native_runtime_integrity"]["valid"] is True
+        )
         and isinstance(returned.get("model_calls"), int)
         and returned["model_calls"] == closure.get("modelCalls")
         == actions.get("model_http_request_records")

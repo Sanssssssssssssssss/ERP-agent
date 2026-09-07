@@ -15,32 +15,31 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from odoo_mcp.agent_tools import (
+from odoo_runtime._odoo_core.agent_tools import (
     build_approval_token,
     build_write_preview_report,
     validate_write_report,
     verify_write_approval,
 )
-from odoo_mcp.audit import record_write_event
-from odoo_mcp.diagnostics import (
+from odoo_runtime._odoo_core.audit import record_write_event
+from odoo_runtime._odoo_core.diagnostics import (
     DESTRUCTIVE_METHODS,
     JSON2_POSITIONAL_ARG_MAP,
     READ_ONLY_METHODS,
     classify_method_safety,
 )
-from odoo_mcp.odoo_client import OdooClient, OdooJson2Error
-from odoo_mcp.rate_limit import check_rate
-from odoo_mcp.tool_helpers import (
+from odoo_runtime._odoo_core.odoo_client import OdooClient, OdooJson2Error
+from odoo_runtime._odoo_core.rate_limit import check_rate
+from odoo_runtime._odoo_core.tool_helpers import (
     max_attachment_upload_bytes,
     normalize_domain_input,
     validate_method_name,
     validate_model_name,
 )
-from odoo_mcp.write_policy import (
+from odoo_runtime._odoo_core.write_policy import (
     allowed_side_effect_methods,
     writes_enabled,
 )
-
 from odoo_runtime.reads import NativeReads
 from odoo_runtime.store import ActionStore
 

@@ -12,10 +12,10 @@ from typing import ClassVar
 from unittest.mock import patch
 
 from odoo_mcp.field_policy import FieldPolicy, ModelFieldRule
-from odoo_mcp.odoo_client import OdooClient
 from pi_agent.tools import AgentTool, AgentToolResult
 
 from integration.odoo_tools import route_tools
+from odoo_runtime._odoo_core.odoo_client import OdooClient
 from odoo_runtime.capabilities import CAPABILITY_TOOLS, NativeCapabilities, _TaskStore
 from odoo_runtime.gateway import Json2ReadClient
 from odoo_runtime.reads import NativeReads

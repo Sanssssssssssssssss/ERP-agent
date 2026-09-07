@@ -21,20 +21,36 @@ from typing import Any, get_type_hints
 
 from pydantic import create_model
 
-from odoo_mcp.field_policy import FieldPolicy, FieldPolicyError, _parse_field_policy, field_policy_file_path
-from odoo_mcp.field_ranking import (
+from odoo_runtime._odoo_core.audit import audit_posture
+from odoo_runtime._odoo_core.field_policy import (
+    FieldPolicy,
+    FieldPolicyError,
+    _parse_field_policy,
+    field_policy_file_path,
+    field_policy_posture,
+)
+from odoo_runtime._odoo_core.field_ranking import (
     DEFAULT_MAX_RELEVANT_FIELDS,
     build_text_query_domain,
     rank_relevant_fields,
     select_smart_fields,
 )
-from odoo_mcp.odoo_client import build_odoo_client, list_configured_instances, load_instances_config
-from odoo_mcp.rate_limit import SlidingWindowRateTracker, check_rate, rate_report
-from odoo_mcp.schema_cache import _build_schema_cache
-from odoo_mcp.schemas import (
+from odoo_runtime._odoo_core.odoo_client import (
+    build_odoo_client,
+    list_configured_instances,
+    load_instances_config,
+)
+from odoo_runtime._odoo_core.rate_limit import (
+    SlidingWindowRateTracker,
+    check_rate,
+    rate_report,
+)
+from odoo_runtime._odoo_core.schema_cache import _build_schema_cache
+from odoo_runtime._odoo_core.schemas import (
+    AggregateRecordsResponse,
     GetModelFieldsResponse,
     GetOdooProfileResponse,
-    AggregateRecordsResponse,
+    HealthCheckResponse,
     ListInstancesResponse,
     ListModelsResponse,
     ReadAttachmentResponse,
@@ -42,7 +58,9 @@ from odoo_mcp.schemas import (
     SchemaCatalogResponse,
     SearchRecordsResponse,
 )
-from odoo_mcp.tool_helpers import (
+from odoo_runtime._odoo_core.tool_helpers import (
+    SearchEmployeeResponse,
+    SearchHolidaysResponse,
     clamp_limit,
     formatted_read_group_missing,
     max_attachment_bytes,
@@ -50,10 +68,15 @@ from odoo_mcp.tool_helpers import (
     normalize_domain_input,
     odoo_major_version,
     parse_measure_spec,
-    SearchEmployeeResponse,
-    SearchHolidaysResponse,
     validate_model_name,
 )
+from odoo_runtime._odoo_core.write_policy import (
+    allowed_side_effect_methods,
+    chatter_direct_enabled,
+    load_side_effect_policy,
+    writes_enabled,
+)
+
 from .gateway import Json2ReadClient, read_context
 
 READ_RESPONSES = {
@@ -69,6 +92,7 @@ READ_RESPONSES = {
     "search_employee": SearchEmployeeResponse,
     "search_holidays": SearchHolidaysResponse,
 }
+NATIVE_READ_RESPONSES = {**READ_RESPONSES, "health_check": HealthCheckResponse}
 
 
 @cache
@@ -79,7 +103,7 @@ def _read_arguments_model(name: str):
         key: (hints[key], ... if param.default is inspect.Parameter.empty else param.default)
         for key, param in inspect.signature(function).parameters.items() if key != "self"
     }
-    if name != "list_instances":
+    if name not in {"health_check", "list_instances"}:
         fields["instance"] = (str | None, None)
     return create_model(f"{name}Arguments", **fields)
 
@@ -139,7 +163,7 @@ class NativeReads:
         return root
 
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        if name not in READ_RESPONSES:
+        if name not in NATIVE_READ_RESPONSES:
             raise ValueError(f"Not a native read tool: {name}")
         try:
             args = dict(arguments)
@@ -151,6 +175,8 @@ class NativeReads:
                 )
             runtime = self.instances[instance]
             with runtime._lock:
+                if name == "health_check":
+                    return runtime.health_check()
                 runtime._refresh_scope()
                 if name in {"search_records", "read_record", "aggregate_records"}:
                     refusal = check_rate(runtime.instance, name)
@@ -176,6 +202,78 @@ class NativeReads:
             "n_plus_one": [entry for runtime in runtimes
                            for entry in runtime._single_reads.report()["busiest"] if entry["calls_in_window"] >= 10],
             "rate_limits": rate_report(),
+        }
+
+    def health_check(self) -> dict[str, Any]:
+        """Report the native runtime boundary without opening Odoo."""
+        policy = load_side_effect_policy()
+        env_methods = [
+            value.strip()
+            for value in os.environ.get(
+                "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS", ""
+            ).split(",")
+            if value.strip()
+        ]
+        return {
+            "success": True,
+            "tool": "health_check",
+            "server": {
+                "name": "Odoo native Harness",
+                "instructions": "Direct Odoo capabilities without MCP transport",
+                "tool_count": 41,
+                "resource_count": 4,
+                "prompt_count": 11,
+            },
+            "runtime": {
+                "transport": "direct-json2",
+                "host": None,
+                "port": None,
+                "streamable_http_path": None,
+                "remote_http_allowed": False,
+                "mcp_sdk": False,
+                "mcp_sidecar": False,
+                "write_execution_enabled": writes_enabled(),
+                "unknown_execute_method_enabled": False,
+                "chatter_direct_enabled": False,
+                "configured_mcp_chatter_direct_enabled": chatter_direct_enabled(),
+                "allowed_side_effect_methods": allowed_side_effect_methods(),
+                "side_effect_policy": {
+                    "file": policy["path"],
+                    "file_method_count": len(policy["methods"]),
+                    "env_method_count": len(env_methods),
+                    "error": policy["error"],
+                },
+                "broad_unknown_method_mode": {
+                    "enabled": False,
+                    "risk": "off",
+                    "recommendation": (
+                        "Use exact ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS entries."
+                    ),
+                },
+                "allowed_hosts": None,
+                "allowed_origins": None,
+                "odoo_instances": {
+                    "instance_count": len(self.instances),
+                    "default_instance": self.instance,
+                },
+                "audit_log": audit_posture(),
+                "oauth": {
+                    "enabled": False,
+                    "status": "not_applicable_to_in_process_runtime",
+                },
+                "field_acl": field_policy_posture(),
+                "notes": [
+                    "No MCP SDK, sidecar, tools/list, or tools/call is used.",
+                    "Native actions retain preview, approval, policy, ledger, and verification gates.",
+                ],
+            },
+            "rate_limits": rate_report(),
+            "plugins": {
+                "enabled": [],
+                "loaded": [],
+                "failed": {},
+                "tools_filtered": [],
+            },
         }
 
     def identity_context(self, instance: str | None = None) -> dict[str, Any]:

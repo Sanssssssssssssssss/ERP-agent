@@ -16,18 +16,30 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.error import HTTPError
 
+from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import CallToolResult, TextContent
 from odoo_mcp import server, tools_read
 from odoo_mcp.field_policy import FieldPolicy, ModelFieldRule
-from odoo_mcp.odoo_client import OdooClient, build_odoo_client, load_instances_config
+from odoo_mcp.odoo_client import (
+    OdooClient as ReferenceOdooClient,
+)
+from odoo_mcp.odoo_client import (
+    build_odoo_client,
+    load_instances_config,
+)
 from odoo_mcp.schema_cache import _build_schema_cache
 from pi_agent.mcp import _agent_tool
 from pi_agent.tools import AgentTool, AgentToolResult
-from mcp.server.mcpserver.exceptions import ToolError
-from mcp.types import CallToolResult, TextContent
 
-from odoo_runtime.reads import Json2ReadClient, NativeReads, READ_RESPONSES
+from integration.odoo_tools import native_tool_catalog, route_tools
+from odoo_runtime._odoo_core.odoo_client import OdooClient
 from odoo_runtime.gateway import OdooResponseLimitError
-from integration.odoo_tools import route_tools
+from odoo_runtime.reads import (
+    NATIVE_READ_RESPONSES,
+    READ_RESPONSES,
+    Json2ReadClient,
+    NativeReads,
+)
 
 
 class FakeOdoo:
@@ -39,7 +51,7 @@ class FakeOdoo:
     timeout = 10
     verify_ssl = True
     json2_database_header = True
-    get_profile = OdooClient.get_profile
+    get_profile = ReferenceOdooClient.get_profile
     get_installed_modules = lambda self, limit=100: [{"name": "base"}]
     get_server_version = lambda self: {"server_version": "19"}
     get_user_context = lambda self: {"lang": "en_US", "allowed_company_ids": [1]}
@@ -100,6 +112,58 @@ class FakeOdoo:
 
 
 class NativeReadsTest(unittest.TestCase):
+    def test_native_health_has_no_mcp_fallback(self):
+        async def check(directory: Path):
+            native = NativeReads(FakeOdoo())
+            routed = route_tools(
+                native_tool_catalog(), directory / "routes.jsonl", native,
+                native_health=True,
+            )
+            health = next(
+                tool for tool in routed if tool.name == "mcp_odoo_health_check"
+            )
+            return await health.execute("health", {})
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            policy = root / "policy.json"
+            policy.write_text(json.dumps({
+                "allowed_side_effect_methods": ["stock.picking.button_validate"],
+            }))
+            environment = {
+                "ODOO_URL": "http://fixture",
+                "ODOO_DB": "bench",
+                "ODOO_USERNAME": "admin",
+                "ODOO_API_KEY": "test-only",
+                "ODOO_TRANSPORT": "json2",
+                "ODOO_MCP_ENABLE_WRITES": "1",
+                "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": "sale.order.action_confirm",
+                "ODOO_MCP_POLICY_FILE": str(policy),
+                "ODOO_MCP_AUDIT_LOG": str(root / "audit.jsonl"),
+            }
+            with patch.dict(os.environ, environment, clear=True):
+                result = asyncio.run(check(root))
+            starts = [
+                json.loads(line)
+                for line in (root / "routes.jsonl").read_text().splitlines()
+                if json.loads(line)["event"] == "start"
+            ]
+        payload = NATIVE_READ_RESPONSES["health_check"].model_validate_json(
+            result.text
+        )
+        self.assertEqual(starts[0]["backend"], "native")
+        self.assertEqual(payload.runtime["transport"], "direct-json2")
+        self.assertFalse(payload.runtime["mcp_sdk"])
+        self.assertFalse(payload.runtime["mcp_sidecar"])
+        self.assertEqual(
+            payload.runtime["allowed_side_effect_methods"],
+            ["sale.order.action_confirm", "stock.picking.button_validate"],
+        )
+        self.assertEqual(payload.runtime["side_effect_policy"]["file_method_count"], 1)
+        self.assertEqual(payload.runtime["side_effect_policy"]["env_method_count"], 1)
+        self.assertTrue(payload.runtime["audit_log"]["enabled"])
+        self.assertIn("field_acl", payload.runtime)
+
     def test_world_identity_is_credential_scoped_without_recording_credentials(self):
         environment = {
             "ODOO_URL": "http://fixture", "ODOO_DB": "bench", "ODOO_USERNAME": "admin",
@@ -135,7 +199,11 @@ class NativeReadsTest(unittest.TestCase):
         }
         for overrides in ({}, {"ODOO_TIMEOUT": "37", "ODOO_LOCALE": "fr_FR",
                                "ODOO_VERIFY_SSL": "0", "ODOO_JSON2_DATABASE_HEADER": "0"}):
-            with patch.dict(os.environ, {**environment, **overrides}, clear=True), patch.object(OdooClient, "_connect"):
+            with (
+                patch.dict(os.environ, {**environment, **overrides}, clear=True),
+                patch.object(OdooClient, "_connect"),
+                patch.object(ReferenceOdooClient, "_connect"),
+            ):
                 name, instances = load_instances_config()
                 reference = build_odoo_client(instances[name])
                 candidate = NativeReads.from_environment().client
@@ -149,12 +217,15 @@ class NativeReadsTest(unittest.TestCase):
 import importlib.abc, sys
 class NoMcp(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split('.')[0] in {'mcp', 'mcp_types'}:
+        if fullname.split('.')[0] in {'mcp', 'mcp_types', 'odoo_mcp'}:
             raise AssertionError('MCP dependency imported: ' + fullname)
 sys.meta_path.insert(0, NoMcp())
+import pi_agent
+from integration import pi_odoo_runner
 from odoo_runtime.reads import NativeReads, Json2ReadClient
 from odoo_runtime.world import WorldStore
-assert 'odoo_mcp.server' not in sys.modules
+assert 'pi_agent.mcp' not in sys.modules
+assert not any(name == 'odoo_mcp' or name.startswith('odoo_mcp.') for name in sys.modules)
 print('MCP_FREE_CORE_IMPORT_OK')
 '''
         result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)

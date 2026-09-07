@@ -11,15 +11,49 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from odoo_mcp.odoo_client import READ_CALL_ID
 from pi_agent.messages import TextContent
-from pi_agent.tools import AgentToolResult
+from pi_agent.tools import AgentTool, AgentToolResult
 from pydantic_core import to_json
 
+from odoo_runtime._odoo_core.odoo_client import READ_CALL_ID
 from odoo_runtime.actions import ACTION_TOOLS, NativeActions
 from odoo_runtime.capabilities import CAPABILITY_TOOLS, NativeCapabilities
-from odoo_runtime.reads import READ_RESPONSES, NativeReads, normalize_read_arguments
+from odoo_runtime.reads import (
+    NATIVE_READ_RESPONSES,
+    READ_RESPONSES,
+    NativeReads,
+    normalize_read_arguments,
+)
 from odoo_runtime.world import SIDE_EFFECT_TOOLS, WorldStore
+
+
+async def _unrouted_native_tool(*_args, **_kwargs):
+    raise RuntimeError("Native Odoo tool was not routed to its implementation")
+
+
+def native_tool_catalog() -> list[AgentTool]:
+    """Load the fixed Stage-6 contract without MCP discovery."""
+    payload = json.loads(
+        Path(__file__).with_name("native_tool_catalog.json").read_text(encoding="utf-8")
+    )
+    rows = payload.get("tools")
+    if not isinstance(rows, list):
+        raise RuntimeError("Native Odoo tool catalog is invalid")
+    tools = [
+        AgentTool(
+            name=row["name"],
+            label=row["label"],
+            description=row["description"],
+            parameters=row["parameters"],
+            execute_fn=_unrouted_native_tool,
+        )
+        for row in rows
+    ]
+    names = [tool.name.removeprefix("mcp_odoo_") for tool in tools]
+    expected = set(NATIVE_READ_RESPONSES) | set(ACTION_TOOLS) | set(CAPABILITY_TOOLS)
+    if len(names) != len(set(names)) or set(names) != expected:
+        raise RuntimeError("Native Odoo tool catalog does not match native capabilities")
+    return tools
 
 
 def _world_failed(world: WorldStore, operation: str, error: BaseException) -> None:
@@ -34,12 +68,14 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                 world: WorldStore | None = None,
                 actions: NativeActions | None = None,
                 capabilities: NativeCapabilities | None = None,
-                next_sequence: Callable[[], int] | None = None):
+                next_sequence: Callable[[], int] | None = None, *,
+                native_health: bool = False):
     """No MCP fallback on a native failure; business errors retain their envelope."""
     routed = []
+    native_reads = NATIVE_READ_RESPONSES if native_health else READ_RESPONSES
     for tool in tools:
         name = tool.name.removeprefix("mcp_odoo_")
-        direct_read = native is not None and name in READ_RESPONSES
+        direct_read = native is not None and name in native_reads
         direct_action = actions is not None and name in ACTION_TOOLS
         capability_ready = capabilities is not None and name in CAPABILITY_TOOLS
 
@@ -79,7 +115,7 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                 if direct_read:
                     normalized = normalize_read_arguments(name, dict(arguments))
                     raw = await asyncio.to_thread(native.call, name, normalized)
-                    structured = READ_RESPONSES[name].model_validate(raw).model_dump(
+                    structured = native_reads[name].model_validate(raw).model_dump(
                         mode="json", by_alias=True
                     )
                     result = AgentToolResult(
@@ -109,12 +145,23 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                         stream.write(json.dumps({"tool_call_id": call_id, "result": result.model_dump(mode="json")}) + "\n")
                     result = result.model_copy(deep=True)
                     payload = json.loads(result.text)
-                    for data in (payload, (result.details or {}).get("structuredContent")):
+                    for data in (
+                        payload,
+                        (result.details or {}).get("structuredContent"),
+                    ):
                         if isinstance(data, dict):
-                            data.get("runtime", {}).pop("n_plus_one", None)
-                            for key in ("busiest", "over_budget_totals"):
-                                data.get("rate_limits", {}).pop(key, None)
-                    result.content = [TextContent(text=to_json(payload, fallback=str, indent=2).decode())]
+                            runtime = data.get("runtime")
+                            if isinstance(runtime, dict):
+                                runtime.pop("n_plus_one", None)
+                            rates = data.get("rate_limits")
+                            if isinstance(rates, dict):
+                                for key in ("busiest", "over_budget_totals"):
+                                    rates.pop(key, None)
+                    result.content = [
+                        TextContent(
+                            text=to_json(payload, fallback=str, indent=2).decode()
+                        )
+                    ]
                 event["result_sha256"] = hashlib.sha256(result.text.encode()).hexdigest()
                 if observation is not None:
                     completed = observation
@@ -182,14 +229,17 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
         ))
     if native is not None:
         present = {tool.name.removeprefix("mcp_odoo_") for tool in tools}
-        if not READ_RESPONSES.keys() <= present:
-            raise RuntimeError("MCP discovery is missing a required native read tool")
+        required_reads = NATIVE_READ_RESPONSES if native_health else READ_RESPONSES
+        if not required_reads.keys() <= present:
+            raise RuntimeError("Advertised catalog is missing a required native read tool")
     if actions is not None:
         present = {tool.name.removeprefix("mcp_odoo_") for tool in tools}
         if not ACTION_TOOLS <= present:
-            raise RuntimeError("MCP discovery is missing a required native action tool")
+            raise RuntimeError("Advertised catalog is missing a required native action tool")
     if capabilities is not None:
         present = {tool.name.removeprefix("mcp_odoo_") for tool in tools}
         if not CAPABILITY_TOOLS <= present:
-            raise RuntimeError("MCP discovery is missing a required native capability tool")
+            raise RuntimeError(
+                "Advertised catalog is missing a required native capability tool"
+            )
     return routed

@@ -15,10 +15,10 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from odoo_mcp.agent_tools import build_write_preview_report
-from odoo_mcp.odoo_client import OdooClient, OdooJson2Error
 from pi_agent.tools import AgentTool, AgentToolResult
 
 from integration.odoo_tools import route_tools
+from odoo_runtime._odoo_core.odoo_client import OdooClient, OdooJson2Error
 from odoo_runtime.actions import ACTION_TOOLS, NativeActions
 from odoo_runtime.store import ActionStore
 

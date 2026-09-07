@@ -246,9 +246,46 @@ class ReportingTest(unittest.TestCase):
             self.assertEqual(routed["actions"]["action_ledger_status_counts"], {"verified": 1})
             self.assertEqual(routed["identity"]["read_backend"], "native")
             self.assertEqual(routed["identity"]["action_backend"], "native")
+            self.assertEqual(routed["identity"]["runtime_mode"], "mcp")
             self.assertEqual(routed["identity"]["world_mode"], "off")
+            self.assertFalse(routed["receipts"]["native_runtime_integrity"]["required"])
+            self.assertTrue(routed["receipts"]["native_runtime_integrity"]["valid"])
             self.assertIn("world_observations", routed["receipts"])
             self.assertEqual(routed["receipts"]["snapshot"]["snapshot_sha256"], "fixture")
+            (trial / "config.json").write_text(json.dumps({"agent": {"kwargs": {
+                "runtime_mode": "native", "read_backend": "native",
+                "action_backend": "native", "capability_backend": "native",
+            }}}))
+            native_receipt = {
+                "status": "verified",
+                "installed_or_importable": {
+                    "mcp": False,
+                    "mcp_types": False,
+                    "odoo_mcp": False,
+                },
+                "installed_mcp_distributions": [],
+                "mcp_process": False,
+                "mcp_port_8000_open": False,
+                "mcp_pid_file": False,
+            }
+            (trial / "agent/native-runtime-receipt.json").write_text(
+                json.dumps(native_receipt)
+            )
+            native = report_trial(trial, reports / "native-runtime")
+            self.assertTrue(native["receipts"]["native_runtime_integrity"]["required"])
+            self.assertTrue(native["receipts"]["native_runtime_integrity"]["valid"])
+            native_receipt["status"] = "failed"
+            (trial / "agent/native-runtime-receipt.json").write_text(
+                json.dumps(native_receipt)
+            )
+            rejected_native = report_trial(trial, reports / "rejected-native-runtime")
+            self.assertFalse(
+                rejected_native["receipts"]["native_runtime_integrity"]["valid"]
+            )
+            self.assertIsNot(rejected_native["agent_termination"]["natural_end"], True)
+            (trial / "config.json").write_text(json.dumps({"agent": {"kwargs": {
+                "read_backend": "native", "action_backend": "native",
+            }}}))
             blocked_ledger = json.loads(
                 (trial / "agent/action-ledger-summary.json").read_text()
             )

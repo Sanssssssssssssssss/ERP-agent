@@ -1,4 +1,4 @@
-"""Run one Pi CodingSession with only tools from an Odoo MCP server."""
+"""Run one Pi CodingSession with the fixed Odoo tool contract."""
 
 from __future__ import annotations
 
@@ -9,11 +9,11 @@ import inspect
 import json
 import os
 import sys
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from itertools import count
 from pathlib import Path
 
-from pi_agent.mcp import McpToolSet
 from pi_agent.messages import AssistantMessage
 from pi_agent.session import JsonlSessionStorage
 from pi_agent.tools import AgentTool, AgentToolResult
@@ -27,7 +27,7 @@ from pi_coding.provider_config import (
 from pi_coding.resources import PiResourcePaths
 from pi_coding.session import CodingSession, CodingSessionConfig
 
-from integration.odoo_tools import route_tools
+from integration.odoo_tools import native_tool_catalog, route_tools
 from integration.world_context import project_messages
 from odoo_runtime.actions import NativeActions
 from odoo_runtime.capabilities import NativeCapabilities
@@ -56,6 +56,7 @@ DYNAMIC_TOOL_POLICY = (
     "optional capability set needed for the task. A configured tool set appears "
     "on the next model turn; a same-response call to a newly selected tool is rejected."
 )
+McpToolSet = None
 
 
 async def _get_current_time(_call_id, _arguments, _signal=None, _on_update=None):
@@ -80,6 +81,18 @@ CURRENT_TIME_TOOL = AgentTool(
     parameters={"type": "object", "properties": {}, "additionalProperties": False},
     execute_fn=_get_current_time,
 )
+
+
+@asynccontextmanager
+async def _source_tools(args):
+    if getattr(args, "runtime_mode", "mcp") == "native":
+        yield native_tool_catalog()
+        return
+    toolset_class = McpToolSet
+    if toolset_class is None:
+        from pi_agent.mcp import McpToolSet as toolset_class
+    async with toolset_class(args.mcp_url) as toolset:
+        yield toolset.tools
 
 
 class RequestReceipts:
@@ -127,6 +140,7 @@ def arguments() -> argparse.Namespace:
         default=Path("/logs/agent/pi-agent-session.jsonl"),
     )
     parser.add_argument("--mcp-url", default="http://127.0.0.1:8000/mcp")
+    parser.add_argument("--runtime-mode", choices=("mcp", "native"), default="mcp")
     parser.add_argument("--max-turns", type=int, default=None)
     parser.add_argument("--read-backend", choices=("mcp", "native"), default="mcp")
     parser.add_argument("--action-backend", choices=("mcp", "native"), default="mcp")
@@ -156,6 +170,12 @@ async def run(args: argparse.Namespace) -> None:
         raise ValueError("tool-mode must be static or dynamic")
     if tool_mode == "dynamic" and sop_mode != "controlled":
         raise ValueError("dynamic tool mode requires controlled SOP mode")
+    runtime_mode = getattr(args, "runtime_mode", "mcp")
+    if runtime_mode == "native" and any(
+        getattr(args, name, "mcp") != "native"
+        for name in ("read_backend", "action_backend", "capability_backend")
+    ):
+        raise ValueError("native runtime mode requires every Odoo backend to be native")
 
     args.session_file.parent.mkdir(parents=True, exist_ok=True)
     args.usage_file.parent.mkdir(parents=True, exist_ok=True)
@@ -182,7 +202,7 @@ async def run(args: argparse.Namespace) -> None:
     capabilities = None
     dynamic_tools = None
     try:
-        async with McpToolSet(args.mcp_url) as toolset:
+        async with _source_tools(args) as source_tools:
             next_tool_sequence = count(1).__next__
             native_runtime = None
             if (getattr(args, "read_backend", "mcp") == "native"
@@ -223,8 +243,9 @@ async def run(args: argparse.Namespace) -> None:
                     print(f"World initialization failed open: {type(exc).__name__}", file=sys.stderr)
             full_tools = [
                 *route_tools(
-                    toolset.tools, args.session_file.parent / "tool-backends.jsonl",
-                    native, world, actions, capabilities, next_tool_sequence
+                    source_tools, args.session_file.parent / "tool-backends.jsonl",
+                    native, world, actions, capabilities, next_tool_sequence,
+                    native_health=runtime_mode == "native",
                 ),
                 CURRENT_TIME_TOOL,
                 *(
@@ -242,9 +263,9 @@ async def run(args: argparse.Namespace) -> None:
                     args.session_file.parent / "dynamic-tools.jsonl",
                     next_tool_sequence,
                 )
-                toolset.tools = list(dynamic_tools.tools)
+                session_tools = list(dynamic_tools.tools)
             else:
-                toolset.tools = full_tools
+                session_tools = full_tools
             cwd = Path.cwd()
             provider_config = OpenAICompatibleProviderConfig(
                 name=provider_name,
@@ -276,7 +297,7 @@ async def run(args: argparse.Namespace) -> None:
                     model=model,
                     storage=JsonlSessionStorage(args.session_file),
                     cwd=cwd,
-                    tools=list(toolset.tools),
+                    tools=list(session_tools),
                     max_turns=args.max_turns,
                     resource_paths=PiResourcePaths(
                         root=args.session_file.parent / ".pi-agent",
@@ -318,11 +339,19 @@ async def run(args: argparse.Namespace) -> None:
                     json.dumps(
                         {
                             "type": "run_metadata",
-                            "entrant": "pi-agent-odoo-mcp",
+                            "entrant": (
+                                "pi-agent-odoo-native"
+                                if runtime_mode == "native"
+                                else "pi-agent-odoo-mcp"
+                            ),
                             "commit_sha": os.environ.get("PI_ODOO_SOURCE_COMMIT"),
                             "model": model,
                             "reasoning": thinking,
-                            "mcpToolCount": len(toolset.tools),
+                            "mcpToolCount": (
+                                0 if runtime_mode == "native" else len(source_tools)
+                            ),
+                            "odooToolCount": len(source_tools),
+                            "runtimeMode": runtime_mode,
                             "readBackend": getattr(args, "read_backend", "mcp"),
                             "actionBackend": getattr(args, "action_backend", "mcp"),
                             "capabilityBackend": getattr(args, "capability_backend", "mcp"),
@@ -339,7 +368,7 @@ async def run(args: argparse.Namespace) -> None:
                             "toolContractSha256": hashlib.sha256(json.dumps([
                                 {"name": tool.name, "description": tool.description,
                                  "parameters": tool.parameters}
-                                for tool in toolset.tools
+                                for tool in session_tools
                             ], sort_keys=True).encode()).hexdigest(),
                             "runtime": "CodingSession",
                             "sessionFile": str(args.session_file),
@@ -378,6 +407,7 @@ async def run(args: argparse.Namespace) -> None:
                     "capabilityBackend": getattr(args, "capability_backend", "mcp"),
                     "sopMode": sop_mode,
                     "toolMode": tool_mode,
+                    "runtimeMode": runtime_mode,
                     "commitSha": os.environ.get("PI_ODOO_SOURCE_COMMIT"),
                 }
                 args.usage_file.write_text(json.dumps(usage), encoding="utf-8")

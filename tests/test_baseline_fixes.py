@@ -26,6 +26,34 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class BaselineFixTest(unittest.TestCase):
+    def test_native_install_excludes_mcp_and_system_site_packages(self):
+        async def check():
+            agent = SimpleNamespace(
+                exec_as_agent=AsyncMock(),
+                exec_as_root=AsyncMock(),
+            )
+            environment = SimpleNamespace(
+                upload_dir=AsyncMock(),
+                upload_file=AsyncMock(),
+            )
+            await harbor_agent._install_task_runtime(
+                agent, environment, native_only=True
+            )
+            commands = " ".join(
+                call.kwargs["command"] for call in agent.exec_as_root.await_args_list
+            )
+            uploads = " ".join(
+                str(call.args) for call in environment.upload_dir.await_args_list
+            )
+            self.assertNotIn("--system-site-packages", commands)
+            self.assertNotIn("odoo-mcp==", commands)
+            self.assertNotIn("mcp==", commands)
+            self.assertNotIn("pi-odoo-mcp-source", uploads)
+            self.assertIn("wheelhouse-native-py312", uploads)
+            self.assertIn("httpx[socks]==0.28.1", commands)
+
+        asyncio.run(check())
+
     def test_current_time_is_a_tool_not_system_prompt_data(self):
         result = asyncio.run(pi_odoo_runner.CURRENT_TIME_TOOL.execute("clock", {}))
         payload = json.loads(result.text)

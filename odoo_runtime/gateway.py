@@ -15,9 +15,18 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from odoo_mcp.diagnostics import sanitize_odoo_error
-from odoo_mcp.odoo_client import OdooClient, OdooJson2Error, _retry_attempts, _retry_backoff_seconds
-from odoo_mcp.tool_helpers import max_attachment_bytes, normalize_domain_input, validate_model_name
+from odoo_runtime._odoo_core.diagnostics import sanitize_odoo_error
+from odoo_runtime._odoo_core.odoo_client import (
+    OdooClient,
+    OdooJson2Error,
+    _retry_attempts,
+    _retry_backoff_seconds,
+)
+from odoo_runtime._odoo_core.tool_helpers import (
+    max_attachment_bytes,
+    normalize_domain_input,
+    validate_model_name,
+)
 
 _PARAMETERS = {
     "fields_get": {"allfields", "attributes"},

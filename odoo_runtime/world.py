@@ -13,7 +13,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from odoo_mcp.odoo_client import load_instances_config, normalize_transport
+from odoo_runtime._odoo_core.odoo_client import (
+    load_instances_config,
+    normalize_transport,
+)
 
 READ_TOOLS = frozenset({
     "get_odoo_profile", "get_model_fields", "search_records", "read_record",

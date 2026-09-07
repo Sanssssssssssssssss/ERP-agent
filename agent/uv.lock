@@ -614,8 +614,6 @@ dependencies = [
     { name = "anyio" },
     { name = "httpx", extra = ["socks"] },
     { name = "jsonschema" },
-    { name = "mcp" },
-    { name = "mcp-types" },
     { name = "packaging" },
     { name = "pathspec" },
     { name = "pillow" },
@@ -625,6 +623,12 @@ dependencies = [
     { name = "rich" },
     { name = "textual" },
     { name = "typer" },
+]
+
+[package.optional-dependencies]
+mcp = [
+    { name = "mcp" },
+    { name = "mcp-types" },
 ]
 
 [package.dev-dependencies]
@@ -639,8 +643,8 @@ requires-dist = [
     { name = "anyio", specifier = ">=4.0" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.27" },
     { name = "jsonschema", specifier = ">=4.23" },
-    { name = "mcp", specifier = "==2.0.0" },
-    { name = "mcp-types", specifier = "==2.0.0" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = "==2.0.0" },
+    { name = "mcp-types", marker = "extra == 'mcp'", specifier = "==2.0.0" },
     { name = "packaging", specifier = ">=24.0" },
     { name = "pathspec", specifier = ">=0.12" },
     { name = "pillow", specifier = ">=11.0" },
@@ -651,6 +655,7 @@ requires-dist = [
     { name = "textual", specifier = ">=8.2.8" },
     { name = "typer", specifier = ">=0.12" },
 ]
+provides-extras = ["mcp"]
 
 [package.metadata.requires-dev]
 dev = [

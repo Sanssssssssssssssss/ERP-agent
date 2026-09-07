@@ -91,11 +91,39 @@
     "destination": "odoo_runtime",
     "source_checkpoint": "da229bf12475c2aef38a8dc027c0f2ed66a972a6",
     "stage1_checkpoint": "40d98198a2f3e3ed13717b9000f304bb3a34b121",
-    "accepted_stage": 3,
+    "stage6_checkpoint": "8d7a4d6ea0715a379f894e095ddc95a5f4d97709",
+    "accepted_stage": 6,
     "source_files": ["integration/native_reads.py", "mcp/src/odoo_mcp/tools_read.py", "mcp/src/odoo_mcp/server_core.py", "odoo_runtime/world.py", "integration/world_context.py"],
     "license": "MIT",
     "license_path": "mcp/LICENSE",
-    "note": "Stage 3 accepted: all 11 advertised read tools are implemented in the application package, with a closed JSON-2 gateway, bounded private caches, unified field-policy checks, and an identity-scoped append-only World record core. Context projection remains opt-in and default-off because the accepted A/B produced no compaction. Pinned pure MCP helpers are still reused until stage 7. No MCP service or SDK imports in this package."
+    "note": "Stages 1-6 are accepted. Stage 7 extracts the pinned pure Odoo helpers and fixed tool contract into the native runtime; final acceptance is pending one same-case B run. No Compiler is included."
+  },
+  "stage7_extraction": {
+    "status": "candidate_pending_model",
+    "source_commit": "76ec136e0c89c414811a12629eb2903d2dc27357",
+    "destination": "odoo_runtime/_odoo_core",
+    "source_files": [
+      "access_helpers.py",
+      "accounting_tools.py",
+      "agent_tools.py",
+      "audit.py",
+      "cross_instance.py",
+      "data_quality.py",
+      "diagnostics.py",
+      "field_policy.py",
+      "field_ranking.py",
+      "odoo_client.py",
+      "rate_limit.py",
+      "schema_cache.py",
+      "schemas.py",
+      "tool_helpers.py",
+      "write_policy.py",
+      "data/odoo_renames.json"
+    ],
+    "tool_catalog": "integration/native_tool_catalog.json",
+    "license": "MIT",
+    "license_path": "mcp/LICENSE",
+    "note": "Pure Odoo business helpers only; MCP SDK, server, transport, prompts, and resources are not part of the native runtime. agent_tools.py changes only its package-resource root."
   },
   "reporting_infra": {
     "source_repository": "erp-agent-odoo",
@@ -134,5 +162,14 @@
     "file_count": 51,
     "tracked_in_git": false,
     "note": "Linux CPython 3.12 MCP/task dependency supplement, published with the snapshot release; not a complete standalone agent environment. The task image supplied legacy httpx/httpcore. Host reporting must install agent dependencies from agent/uv.lock; never reuse the old repository's editable virtualenv."
+  },
+  "native_runtime_bundle": {
+    "path": ".runtime/wheelhouse-native-py312.zip",
+    "release_asset": "wheelhouse-native-py312.zip",
+    "release_tag": "baseline-fixes-2026-09-03",
+    "sha256": "d70852fc7232c817347df41f23c74aadbe96613dd49b291caa4f99f6f14bed1e",
+    "file_count": 36,
+    "tracked_in_git": false,
+    "note": "Complete Linux CPython 3.12 dependency wheelhouse for the Stage 7 native Pi plus Odoo runtime. It contains no mcp, mcp-types, or odoo-mcp wheel and is installed without system site packages."
   }
 }
