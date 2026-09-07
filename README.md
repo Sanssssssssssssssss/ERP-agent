@@ -4,9 +4,9 @@ This is the clean, standalone research surface for the completed Python Pi-style
 
 ## 当前计划与状态（中文）
 
-完整的[七阶段实现与 A/B 验收路线图](EXPERIMENT.md)已按代码整理：每阶段包括迁移文件、实现要求、验收方法、方案级反例和回退边界。普通实现错误继续修到通过，不再把“第一轮修复失败”一概当作移植方案失败。只做 A/B，Compiler 仅保留未来接口规划。
+完整的[七阶段实现与 A/B 验收路线图](experiments/README.md)已按代码整理：每阶段包括迁移文件、实现要求、验收方法、方案级反例和回退边界。普通实现错误继续修到通过，不再把“第一轮修复失败”一概当作移植方案失败。只做 A/B，Compiler 仅保留未来接口规划。
 
-**七个迁移阶段已完成。** 当前形态是“不含 Compiler 的 Odoo 原生 Harness”：Pi 会话、token/HTTP/工具观测、原生 Odoo 读写/能力/SOP/知识和 ERP-Bench 评分已闭环；真实同题 B 得分 100、62/62，运行环境没有 MCP SDK、进程、端口或协议调用。5.3 动态工具仍暂停，生产实验保持 static；不做 C，也未读取、移植或运行 Compiler。阶段证据见 [STAGE1_RESULT.md](STAGE1_RESULT.md) 至 [STAGE7_RESULT.md](STAGE7_RESULT.md)。
+**七个迁移阶段已完成。** 当前形态是“不含 Compiler 的 Odoo 原生 Harness”：Pi 会话、token/HTTP/工具观测、原生 Odoo 读写/能力/SOP/知识和 ERP-Bench 评分已闭环；真实同题 B 得分 100、62/62，运行环境没有 MCP SDK、进程、端口或协议调用。5.3 动态工具仍暂停，生产实验保持 static；不做 C，也未读取、移植或运行 Compiler。阶段证据见 [STAGE1_RESULT.md](experiments/STAGE1_RESULT.md) 至 [STAGE7_RESULT.md](experiments/STAGE7_RESULT.md)。
 
 ## What is here
 
