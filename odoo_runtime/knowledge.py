@@ -309,22 +309,19 @@ class NativeKnowledge:
         }
         return runtime, scope, public_scope
 
-    def index_knowledge(
-        self,
+    @staticmethod
+    def _paged_records(
+        runtime: NativeReads,
+        *,
         model: str,
-        domain: Any = None,
-        fields: list[str] | None = None,
-        limit: int = 500,
-        replace: bool = False,
-        instance: str | None = None,
+        domain: list[Any],
+        fields: list[str] | None,
+        limit: int,
     ) -> dict[str, Any]:
-        validate_model_name(model)
-        limit = clamp_limit(limit, maximum=MAX_INDEX_FETCH)
-        domain = normalize_domain_input(domain)
-        runtime, scope, public_scope = self._scope(instance)
         records: list[dict[str, Any]] = []
         resolved_fields = fields
         redacted_fields: set[str] = set()
+        response: dict[str, Any] = {"success": True}
         while len(records) < limit:
             page_limit = min(MAX_SEARCH_LIMIT, limit - len(records))
             response = runtime.call(
@@ -339,10 +336,13 @@ class NativeKnowledge:
                 },
             )
             if not response.get("success"):
-                raise ValueError(response.get("error", "Knowledge source read failed"))
+                return response
             page = response.get("result")
             if not isinstance(page, list):
-                raise ValueError("Knowledge source returned a non-list result")
+                return {
+                    "success": False,
+                    "error": "Knowledge source returned a non-list result",
+                }
             records.extend(page)
             page_fields = response.get("fields_used")
             if isinstance(page_fields, list):
@@ -350,6 +350,45 @@ class NativeKnowledge:
             redacted_fields.update(response.get("redacted_fields") or [])
             if len(page) < page_limit:
                 break
+        combined = dict(response)
+        combined.update(
+            {
+                "success": True,
+                "count": len(records),
+                "result": records,
+                "fields_used": resolved_fields,
+            }
+        )
+        if redacted_fields:
+            combined["redacted_fields"] = sorted(redacted_fields)
+        else:
+            combined.pop("redacted_fields", None)
+        return combined
+
+    def index_knowledge(
+        self,
+        model: str,
+        domain: Any = None,
+        fields: list[str] | None = None,
+        limit: int = 500,
+        replace: bool = False,
+        instance: str | None = None,
+    ) -> dict[str, Any]:
+        validate_model_name(model)
+        limit = clamp_limit(limit, maximum=MAX_INDEX_FETCH)
+        domain = normalize_domain_input(domain)
+        runtime, scope, public_scope = self._scope(instance)
+        response = self._paged_records(
+            runtime,
+            model=model,
+            domain=domain,
+            fields=fields,
+            limit=limit,
+        )
+        if not response.get("success"):
+            raise ValueError(response.get("error", "Knowledge source read failed"))
+        records = response["result"]
+        resolved_fields = response.get("fields_used")
         coverage = {
             "domain": domain,
             "fields": resolved_fields,
@@ -377,8 +416,8 @@ class NativeKnowledge:
             "coverage": coverage,
             **outcome,
         }
-        if redacted_fields:
-            result["redacted_fields"] = sorted(redacted_fields)
+        if response.get("redacted_fields"):
+            result["redacted_fields"] = response["redacted_fields"]
         return result
 
     def search_knowledge(
@@ -414,14 +453,12 @@ class NativeKnowledge:
         errors: list[dict[str, Any]] = []
         for field_key, record_ids in groups.items():
             fields = list(field_key) if field_key is not None else None
-            current = runtime.call(
-                "search_records",
-                {
-                    "model": model,
-                    "domain": [["id", "in", record_ids]],
-                    "fields": fields,
-                    "limit": len(record_ids),
-                },
+            current = self._paged_records(
+                runtime,
+                model=model,
+                domain=[["id", "in", record_ids]],
+                fields=fields,
+                limit=len(record_ids),
             )
             rows = current.get("result") if current.get("success") else []
             by_id = {

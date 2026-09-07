@@ -108,6 +108,34 @@ class NativeKnowledgeTest(unittest.TestCase):
         self.assertFalse(indexed["coverage"]["possibly_truncated"])
         self.assertEqual(client.search_offsets, [0, 100])
 
+    def test_search_revalidates_more_than_one_page_of_candidates(self):
+        client = FakeOdoo()
+        client.rows = {
+            record_id: {
+                "id": record_id,
+                "name": f"Azure Partner {record_id}",
+                "note": "",
+            }
+            for record_id in range(1, 151)
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            capabilities = self.capabilities(client, Path(directory))
+            capabilities.call(
+                "index_knowledge",
+                {"model": "res.partner", "fields": ["name"], "limit": 150},
+            )
+            client.search_offsets.clear()
+            found = capabilities.call(
+                "search_knowledge",
+                {"model": "res.partner", "query": "azure", "limit": 50},
+            )
+            capabilities.close()
+        self.assertEqual(len(found["results"]), 50)
+        self.assertEqual(found["freshness"]["candidate_records_revalidated"], 150)
+        self.assertEqual(found["freshness"]["stale_records_removed"], 0)
+        self.assertEqual(found["freshness"]["errors"], [])
+        self.assertEqual(client.search_offsets, [0, 100])
+
     def test_search_revalidates_update_delete_and_new_record(self):
         client = FakeOdoo()
         with tempfile.TemporaryDirectory() as directory:
