@@ -115,24 +115,8 @@ def _pure_executor(name: str):
 
         arguments = normalize_capability_arguments(name, dict(arguments))
         if name == "generate_json2_payload":
-            expected = {
-                "model": "sale.order",
-                "method": "search_read",
-                "args": None,
-                "kwargs": {
-                    "domain": [["state", "=", "draft"]],
-                    "fields": ["id", "name", "state"],
-                    "limit": 2,
-                },
-            }
-            values = {key: arguments.get(key) for key in expected}
-            values["args"] = None if values["args"] in (None, []) else values["args"]
-            if values != expected:
-                return _result({"success": False, "error": "module_slice_arguments_mismatch", "expected": expected})
-            return _result(generate_json2_payload_report(**values))
+            return _result(generate_json2_payload_report(**arguments))
         if name == "lookup_model_history":
-            if arguments.get("name") != "account.invoice":
-                return _result({"success": False, "error": "module_slice_arguments_mismatch"})
             return _result(lookup_model_history_report(arguments["name"]))
         return _result({"success": False, "error": "offline_experiment_tool_disabled"})
 
@@ -303,6 +287,10 @@ async def _self_check_async() -> None:
             raise AssertionError("budget gate did not fail closed")
         payload = generate_json2_payload_report(model="sale.order", method="search_read", kwargs={"domain": [["state", "=", "draft"]], "fields": ["id", "name", "state"], "limit": 2}, args=[])
         assert payload["model"] == "sale.order" and payload["body"]["domain"] == [["state", "=", "draft"]]
+        mixed = generate_json2_payload_report(model="sale.order", method="search_read", args=[["state", "=", "draft"]], kwargs={"domain": [["state", "=", "draft"]], "fields": ["id", "name", "state"], "limit": 2})
+        assert mixed["body"]["domain"] == [["state", "=", "draft"]] and mixed["body"]["limit"] == 2
+        pure_result = await _pure_executor("generate_json2_payload")("check", {"model": "sale.order", "method": "search_read", "kwargs": {"domain": [["state", "=", "draft"]], "fields": ["id", "name", "state"], "limit": 2}})
+        assert pure_result.details["body"]["fields"] == ["id", "name", "state"]
         history = lookup_model_history_report("account.invoice")
         assert history["success"] is True and history["query"] == "account.invoice"
         history_result = await _pure_executor("lookup_model_history")("check", {"name": "account.invoice"})
