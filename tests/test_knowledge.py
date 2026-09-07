@@ -26,6 +26,7 @@ class FakeOdoo:
         self.context = {"allowed_company_ids": [1]}
         self.credential_scope = "credential-a"
         self.fail_reads = False
+        self.search_offsets = []
         self.rows = {
             1: {"id": 1, "name": "Azure Interior", "note": "priority invoice"},
             2: {"id": 2, "name": "Deco Addict", "note": "warehouse delivery"},
@@ -46,11 +47,13 @@ class FakeOdoo:
             raise PermissionError("read access revoked")
         fields = kwargs.get("fields")
         limit = kwargs.get("limit", 100)
+        offset = kwargs.get("offset", 0)
+        self.search_offsets.append(offset)
         rows = list(self.rows.values())
         for leaf in kwargs.get("domain") or []:
             if isinstance(leaf, list) and leaf[:2] == ["id", "in"]:
                 rows = [row for row in rows if row["id"] in leaf[2]]
-        return [self._select(row, fields) for row in rows][:limit]
+        return [self._select(row, fields) for row in rows][offset : offset + limit]
 
     def read_records(self, _model: str, ids: list[int], fields=None):
         if self.fail_reads:
@@ -86,6 +89,24 @@ class NativeKnowledgeTest(unittest.TestCase):
             [(row["record_id"], row["score"]) for row in native.search("overdue invoice", 3)],
             [(row["record_id"], row["score"]) for row in reference.search("overdue invoice", 3)],
         )
+
+    def test_index_paginates_beyond_read_tool_cap(self):
+        client = FakeOdoo()
+        client.rows = {
+            record_id: {"id": record_id, "name": f"Partner {record_id}", "note": ""}
+            for record_id in range(1, 110)
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            capabilities = self.capabilities(client, Path(directory))
+            indexed = capabilities.call(
+                "index_knowledge",
+                {"model": "res.partner", "fields": ["name"], "limit": 200},
+            )
+            capabilities.close()
+        self.assertEqual(indexed["fetched"], 109)
+        self.assertEqual(indexed["indexed"], 109)
+        self.assertFalse(indexed["coverage"]["possibly_truncated"])
+        self.assertEqual(client.search_offsets, [0, 100])
 
     def test_search_revalidates_update_delete_and_new_record(self):
         client = FakeOdoo()

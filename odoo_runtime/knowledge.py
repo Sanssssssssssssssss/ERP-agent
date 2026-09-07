@@ -19,7 +19,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from odoo_mcp.tool_helpers import clamp_limit, normalize_domain_input, validate_model_name
+from odoo_mcp.tool_helpers import (
+    MAX_SEARCH_LIMIT,
+    clamp_limit,
+    normalize_domain_input,
+    validate_model_name,
+)
 
 from .reads import NativeReads
 
@@ -317,18 +322,34 @@ class NativeKnowledge:
         limit = clamp_limit(limit, maximum=MAX_INDEX_FETCH)
         domain = normalize_domain_input(domain)
         runtime, scope, public_scope = self._scope(instance)
-        response = runtime.call(
-            "search_records",
-            {"model": model, "domain": domain, "fields": fields, "limit": limit},
-        )
-        if not response.get("success"):
-            raise ValueError(response.get("error", "Knowledge source read failed"))
-        records = response.get("result")
-        if not isinstance(records, list):
-            raise ValueError("Knowledge source returned a non-list result")
-        resolved_fields = response.get("fields_used")
-        if not isinstance(resolved_fields, list):
-            resolved_fields = fields
+        records: list[dict[str, Any]] = []
+        resolved_fields = fields
+        redacted_fields: set[str] = set()
+        while len(records) < limit:
+            page_limit = min(MAX_SEARCH_LIMIT, limit - len(records))
+            response = runtime.call(
+                "search_records",
+                {
+                    "model": model,
+                    "domain": domain,
+                    "fields": fields,
+                    "limit": page_limit,
+                    "offset": len(records),
+                    "order": "id asc",
+                },
+            )
+            if not response.get("success"):
+                raise ValueError(response.get("error", "Knowledge source read failed"))
+            page = response.get("result")
+            if not isinstance(page, list):
+                raise ValueError("Knowledge source returned a non-list result")
+            records.extend(page)
+            page_fields = response.get("fields_used")
+            if isinstance(page_fields, list):
+                resolved_fields = page_fields
+            redacted_fields.update(response.get("redacted_fields") or [])
+            if len(page) < page_limit:
+                break
         coverage = {
             "domain": domain,
             "fields": resolved_fields,
@@ -356,8 +377,8 @@ class NativeKnowledge:
             "coverage": coverage,
             **outcome,
         }
-        if response.get("redacted_fields"):
-            result["redacted_fields"] = response["redacted_fields"]
+        if redacted_fields:
+            result["redacted_fields"] = sorted(redacted_fields)
         return result
 
     def search_knowledge(
