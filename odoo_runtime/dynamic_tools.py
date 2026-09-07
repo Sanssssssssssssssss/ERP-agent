@@ -89,7 +89,7 @@ CAPABILITY_GROUPS = {
         "required_models": ["hr.employee"],
     },
     "knowledge": {
-        "description": "Index, search, and inspect the current MCP-backed knowledge store; native migration is Stage 6.",
+        "description": "Index, search, and inspect the local Odoo knowledge store.",
         "tools": ["index_knowledge", "search_knowledge", "knowledge_stats"],
         "required_models": [],
     },
@@ -245,9 +245,7 @@ class DynamicToolController:
             "notice": "Configure the complete desired optional set. Changes appear next model turn.",
         }
 
-    def _configure(self, requested: Any) -> dict[str, Any]:
-        if self._availability is None:
-            return {"success": False, "error": "Call list_odoo_capabilities first."}
+    async def _configure(self, call_id: str, requested: Any) -> dict[str, Any]:
         if not isinstance(requested, list) or any(
             not isinstance(item, str) for item in requested
         ):
@@ -261,13 +259,22 @@ class DynamicToolController:
                 "error": "capabilities must not contain duplicates.",
             }
         unknown = sorted(set(requested) - set(CAPABILITY_GROUPS))
+        if unknown:
+            return {
+                "success": False,
+                "error": "Invalid dynamic tool selection.",
+                "unknown": unknown,
+                "module_missing": [],
+            }
+        if self._availability is None:
+            await self._list(call_id)
         blocked = sorted(
             group_id
             for group_id in requested
             if group_id in self._availability
             and self._availability[group_id]["status"] == "module_missing"
         )
-        if unknown or blocked:
+        if blocked:
             return {
                 "success": False,
                 "error": "Invalid dynamic tool selection.",
@@ -352,7 +359,7 @@ class DynamicToolController:
             return await self._execute(
                 "configure_odoo_tools",
                 call_id,
-                lambda: self._configure(arguments.get("capabilities")),
+                lambda: self._configure(call_id, arguments.get("capabilities")),
             )
 
         return (
@@ -376,6 +383,11 @@ class DynamicToolController:
                     "type": "object",
                     "properties": {
                         "capabilities": {
+                            "description": "Groups: "
+                            + "; ".join(
+                                f"{group_id} ({spec['description'].rstrip('.')})"
+                                for group_id, spec in CAPABILITY_GROUPS.items()
+                            ),
                             "type": "array",
                             "items": {
                                 "type": "string",

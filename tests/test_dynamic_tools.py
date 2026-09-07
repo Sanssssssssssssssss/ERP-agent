@@ -17,13 +17,17 @@ from odoo_runtime.dynamic_tools import (
 )
 
 
-def fake_tools(installed_models: set[str]) -> list[AgentTool]:
+def fake_tools(
+    installed_models: set[str], calls: list[str] | None = None
+) -> list[AgentTool]:
     names = BASE_TOOLS | {
         name for group in CAPABILITY_GROUPS.values() for name in group["tools"]
     }
 
     def build(name: str) -> AgentTool:
         async def execute(_call_id, _arguments, _signal=None, _on_update=None):
+            if calls is not None:
+                calls.append(name)
             payload = {"success": True}
             if name == "search_records":
                 payload["result"] = [
@@ -135,6 +139,33 @@ class DynamicToolsTest(unittest.TestCase):
             )
             self.assertEqual(events[-1]["active"], ["actions", "accounting"])
 
+    def test_first_configure_checks_availability_and_publishes_next_turn(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            calls: list[str] = []
+            controller = DynamicToolController(
+                fake_tools({"account.move"}, calls),
+                Path(directory) / "dynamic-tools.jsonl",
+                count(1).__next__,
+            )
+            published = []
+            controller.bind(lambda tools: published.append(tuple(tools)))
+            controls = {tool.name: tool for tool in controller.tools}
+
+            configured = asyncio.run(
+                controls["configure_odoo_tools"].execute(
+                    "configure", {"capabilities": ["accounting"]}
+                )
+            ).details
+
+            self.assertTrue(configured["success"])
+            self.assertEqual(calls, ["search_records"])
+            self.assertEqual(len(published), 1)
+            description = controls["configure_odoo_tools"].parameters["properties"][
+                "capabilities"
+            ]["description"]
+            self.assertIn("accounting", description)
+            self.assertIn("receivable", description.lower())
+
     def test_missing_module_is_distinct_and_not_published(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             controller = DynamicToolController(
@@ -156,6 +187,55 @@ class DynamicToolsTest(unittest.TestCase):
             ).details
             self.assertFalse(rejected["success"])
             self.assertEqual(rejected["module_missing"], ["accounting"])
+            self.assertEqual(published, [])
+
+    def test_first_configure_rejects_missing_module(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            calls: list[str] = []
+            controller = DynamicToolController(
+                fake_tools({"hr.employee"}, calls),
+                Path(directory) / "dynamic-tools.jsonl",
+                count(1).__next__,
+            )
+            published = []
+            controller.bind(lambda tools: published.append(tuple(tools)))
+            controls = {tool.name: tool for tool in controller.tools}
+
+            rejected = asyncio.run(
+                controls["configure_odoo_tools"].execute(
+                    "configure", {"capabilities": ["accounting"]}
+                )
+            ).details
+
+            self.assertFalse(rejected["success"])
+            self.assertEqual(rejected["module_missing"], ["accounting"])
+            self.assertEqual(calls, ["search_records"])
+            self.assertEqual(published, [])
+
+    def test_invalid_configure_rejects_before_availability_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            calls: list[str] = []
+            controller = DynamicToolController(
+                fake_tools({"account.move"}, calls),
+                Path(directory) / "dynamic-tools.jsonl",
+                count(1).__next__,
+            )
+            published = []
+            controller.bind(lambda tools: published.append(tuple(tools)))
+            configure = {
+                tool.name: tool for tool in controller.tools
+            }["configure_odoo_tools"]
+
+            for capabilities in (None, ["actions", "actions"], ["unknown"]):
+                with self.subTest(capabilities=capabilities):
+                    rejected = asyncio.run(
+                        configure.execute(
+                            "invalid", {"capabilities": capabilities}
+                        )
+                    ).details
+                    self.assertFalse(rejected["success"])
+
+            self.assertEqual(calls, [])
             self.assertEqual(published, [])
 
 

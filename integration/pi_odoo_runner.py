@@ -52,9 +52,11 @@ SOP_POLICY = (
     "authorization; current tool and host policy still decide."
 )
 DYNAMIC_TOOL_POLICY = (
-    " Use list_odoo_capabilities before configure_odoo_tools. Select the complete "
-    "optional capability set needed for the task. A configured tool set appears "
-    "on the next model turn; a same-response call to a newly selected tool is rejected."
+    " Use configure_odoo_tools directly when you know the needed capability groups; "
+    "call list_odoo_capabilities when you need to discover group availability. "
+    "Select the complete optional capability set needed for the task. A configured "
+    "tool set appears on the next model turn; a same-response call to a newly "
+    "selected tool is rejected."
 )
 McpToolSet = None
 
