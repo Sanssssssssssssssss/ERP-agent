@@ -1,6 +1,6 @@
-# 第六阶段阶段性结果：实现完成，最终复验暂停
+# 第六阶段验收结果：原生知识通过
 
-更新：2026-09-07。结论：**Stage 6 当前为 HOLD（等待有效样本），不是代码回退。** 原生知识实现检查点为 `54370d57a527306098c457e6acbcbcc8dae96a01`；第七阶段尚未开始，Compiler 未读取、移植或运行。
+更新：2026-09-07。结论：**Stage 6 已验收（ACCEPT）。** 原生知识运行代码检查点为 `54370d57a527306098c457e6acbcbcc8dae96a01`；B-only 复验配置检查点为 `0d1f0a51598b5afbef6023a424d34c532835371a`，两者之间只增加文档和运行配置，没有运行时代码变化。第七阶段尚未开始，Compiler 未读取、移植或运行。
 
 ## 已完成的实现
 
@@ -49,8 +49,25 @@ B 的 native knowledge 路径正常：索引 10/10、`possibly_truncated=false`�
 Provider returned no visible response or tool call after one automatic continuation
 ```
 
-相同的 provider 行为在早于 `54370d5` 的 r5 已发生过。因此当前没有证据把 r7 的 0 分归因于知识分页修复，也不应为它修改确定性业务代码；但按“两案例且每组自然完成”的验收规则，这次不是有效 B 样本，Stage 6 不能标为 ACCEPT。
+相同的 provider 行为在早于 `54370d5` 的 r5 已发生过。因此没有证据把 r7 的 0 分归因于知识分页修复，也没有为它修改确定性业务代码。该轨迹保留为 provider 无效样本，不计入业务效果结论。
 
-## 独立复核与停止点
+## B-only 有效复验
 
-独立子 agent 结论同样是 `HOLD（等待有效样本）`：不回退、不修代码。最小下一步是在同一提交、同一冻结快照只重跑失败的 native B 一次；若自然结束，再运行 case 2008。按用户约定，本轮已经停在第一次失败报告：没有启动 r7 case 2008，没有进入第七阶段，也没有触碰 Compiler。
+用户随后指定不再重复运行 A，只重跑同一 native B。配置 `configs/stage6-knowledge-native-b.json` 使用相同 case 2262、冻结快照、static 工具、controlled SOP、high reasoning 和原生 read/action/capability。Job 为 `.runtime/jobs/stage6-knowledge-native-b-20260907-r8`，trial 为 `jFjUnDb`。
+
+| 指标 | r8 native B |
+| --- | ---: |
+| 得分 / 规则 | 100 / 62/62 |
+| 终止 | natural STOP，有最终可见回答 |
+| Agent / Job 时间 | 18.2 分钟 / 23 分 55 秒 |
+| 模型请求 / HTTP | 38 / 38×200 |
+| token | 1,713,326 |
+| 工具调用 | 101 |
+| native capability 调用 | 9 |
+| 动作账本 | 16 verified |
+
+请求响应 gap、未报告失败调用、后端 mismatch、backend error 和未完成调用均为 0；SOP、动作账本和 World 完整性均有效。知识索引为 10/10；两次检索分别命中 Clearwater Collective 和 Nimbus Bureau，每次重新验证 1 个候选，`stale=0`、`errors=[]`，stats 为 10 条。唯一工具错误是模型调用了未发布的 `mcp_odoo_get_current_time`，随后使用已发布的时钟工具恢复，不影响业务结果。
+
+## 独立复核与结论
+
+独立子 agent 核对 r8 的 session、HTTP、native knowledge、动作账本、World 和 verifier 回执后给出 `ACCEPT`：r8 足以将 r7 B=0 判定为 provider 无效样本。Stage 6 因此完成；没有补跑 A 或 r7 case 2008，没有回退或修改知识代码，也没有触碰 Compiler。
