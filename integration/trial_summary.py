@@ -500,6 +500,25 @@ def _failure(maps: list[Mapping[str, Any]], result: Mapping[str, Any]) -> dict[s
     error_class = exception.get("exception_type")
     code = exception.get("code")
     detail = exception.get("exception_message") or result.get("error")
+    if (
+        not detail
+        and not error_class
+        and code is None
+        and (_stop_reason(maps, result) or "").casefold()
+        in {
+            "stop",
+            "end_turn",
+            "complete",
+            "completed",
+        }
+    ):
+        return {
+            "layer": None,
+            "error_class": None,
+            "code": None,
+            "fingerprint": None,
+            "retry_amplification": None,
+        }
     if not detail:
         for item in maps:
             if str(item.get("status") or "").casefold() not in {"error", "failed", "failure"} and not item.get("error"):

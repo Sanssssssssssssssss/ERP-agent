@@ -1,12 +1,12 @@
-# Pi + Odoo MCP + ERP-Bench Harness Lab
+# Pi + Odoo Native Harness + ERP-Bench Lab
 
-This is the clean, standalone research surface for one experiment: run the completed Python Pi-style agent loop against Odoo exclusively through MCP, then score the resulting Odoo state with ERP-Bench. It deliberately does not include the ERP compiler or modify any source repository.
+This is the clean, standalone research surface for the completed Python Pi-style agent loop, a native Odoo 19 runtime, and ERP-Bench scoring. The pinned MCP source remains only as a development control and provenance reference. It deliberately does not include the ERP compiler or modify any source repository.
 
 ## 当前计划与状态（中文）
 
 完整的[七阶段实现与 A/B 验收路线图](EXPERIMENT.md)已按代码整理：每阶段包括迁移文件、实现要求、验收方法、方案级反例和回退边界。普通实现错误继续修到通过，不再把“第一轮修复失败”一概当作移植方案失败。只做 A/B，Compiler 仅保留未来接口规划。
 
-**第四阶段已验收，开始第五阶段。** 读取、World 记录和统一原生动作门控现已可用；动作通过 SQLite 持久化，发送后未知结果进入待对账，执行后必须从 Odoo 验证。真实零模型 gate 为 11/11；同提交的固定 A 与补跑 B 均自然结束、100 分、62/62 条适用规则通过。一次 B=22.77 的采购规划失败完整保留，证据显示不是动作转换故障。当前仍是混合运行：诊断、业务封装、SOP、知识等能力尚待迁移，并非最终无 MCP Harness。仍只做 A/B，不做 C 或 Compiler。证据见 [STAGE1_RESULT.md](STAGE1_RESULT.md)、[STAGE2_RESULT.md](STAGE2_RESULT.md)、[STAGE3_RESULT.md](STAGE3_RESULT.md) 和 [STAGE4_RESULT.md](STAGE4_RESULT.md)。后面的英文内容是已有基线和运行说明。
+**七个迁移阶段已完成。** 当前形态是“不含 Compiler 的 Odoo 原生 Harness”：Pi 会话、token/HTTP/工具观测、原生 Odoo 读写/能力/SOP/知识和 ERP-Bench 评分已闭环；真实同题 B 得分 100、62/62，运行环境没有 MCP SDK、进程、端口或协议调用。5.3 动态工具仍暂停，生产实验保持 static；不做 C，也未读取、移植或运行 Compiler。阶段证据见 [STAGE1_RESULT.md](STAGE1_RESULT.md) 至 [STAGE7_RESULT.md](STAGE7_RESULT.md)。
 
 ## What is here
 
@@ -15,7 +15,7 @@ agent/        pinned Pi Agent for Python source and tests
 mcp/          pinned odoo-mcp source and tests
 bench/        ERP-Bench generator plus 300 executable Harbor tasks
 integration/  Python/native Pi adapters, request receipts, offline run reports
-odoo_runtime/ native Odoo reads, World receipts, and governed actions (stage 4 accepted)
+odoo_runtime/ native Odoo reads, actions, capabilities, SOP support, and knowledge
 configs/      two single-case baselines and optional Docker proxy overlay
 patches/      the exact three-task Odoo 19 image-pin patch
 .runtime/     ignored local wheelhouse, jobs, logs, and environments
@@ -27,7 +27,7 @@ The Python harness is layered as follows:
 - `pi_agent`: the actual agent loop, messages, tools, events, persistence, and MCP adapter.
 - `pi_coding`: the higher-level coding session, resource loading, compaction, CLI, and TUI.
 
-All three stay together because `pi_coding.CodingSession` is the completed harness entry point and depends on the other two. The experiment runner disables skills, extensions, project resources, and ordinary coding tools; the model receives only the 41 tools advertised by Odoo MCP.
+All three stay together because `pi_coding.CodingSession` is the completed harness entry point and depends on the other two. The experiment runner disables skills, extensions, project resources, and ordinary coding tools; the model receives a fixed compatible contract containing 41 Odoo tools plus the controlled time/SOP tools.
 
 Pinned source identities and the exact selection/exclusion rules are in [`sources.lock.json`](sources.lock.json). The important exclusions are intentional:
 
@@ -43,10 +43,10 @@ Use Python 3.12 and keep the environment under the ignored `.runtime` directory:
 
 ```powershell
 uv venv .runtime/venv --python 3.12
-uv pip install --python .runtime/venv/Scripts/python.exe -e ./agent -e ./mcp
+uv pip install --python .runtime/venv/Scripts/python.exe -e ./agent
 ```
 
-For the pinned Linux wheels used inside Harbor, download the `wheelhouse-mcp-py312.zip` asset from the `snapshot-2026-09-03` GitHub release and expand it to `.runtime/wheelhouse-py312`. Verify its SHA-256 against `sources.lock.json`.
+That is the native environment and does not install an MCP SDK. Only the historical MCP control needs `-e ./agent[mcp] -e ./mcp` in a separate environment. For Harbor, restore `wheelhouse-native-py312.zip` (native) or `wheelhouse-mcp-py312.zip` (control) from release `baseline-fixes-2026-09-03`, and verify its SHA-256 against `sources.lock.json`.
 
 ## Run the bounded Harbor experiment
 

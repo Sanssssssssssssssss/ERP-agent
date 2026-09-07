@@ -19,11 +19,22 @@ from integration.report import (
     tool_failed,
     write_index,
 )
-from integration.trial_summary import _redact
+from integration.trial_summary import _failure, _redact
 from odoo_runtime.dynamic_tools import tool_contract_sha256
 
 
 class ReportingTest(unittest.TestCase):
+    def test_recovered_intermediate_error_is_not_a_terminal_failure(self) -> None:
+        failure = _failure(
+            [
+                {"status": "error", "error": "Invalid SOP inputs"},
+                {"role": "assistant", "stopReason": "stop"},
+            ],
+            {},
+        )
+        self.assertIsNone(failure["layer"])
+        self.assertIsNone(failure["fingerprint"])
+
     def test_stale_generation_target_is_not_counted_as_world_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             trial = Path(directory)
