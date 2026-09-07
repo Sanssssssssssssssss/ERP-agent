@@ -353,6 +353,38 @@ class NativeActionCheckpointTests(unittest.TestCase):
         self.assertEqual(result["verification"]["status"], "satisfied")
         self.assertEqual(len(writer.calls), 1)
 
+    def test_datetime_date_input_verifies_against_odoo_midnight(self):
+        class DatetimeReader(_Reader):
+            def __init__(self):
+                super().__init__()
+                self.metadata["commitment_date"] = {
+                    "type": "datetime",
+                    "readonly": False,
+                }
+
+        class DatetimeWriter(_Writer):
+            def execute_method(self, model, method, *args, **kwargs):
+                result = super().execute_method(model, method, *args, **kwargs)
+                if (model, method) == ("sale.order", "create"):
+                    self.reader.records[model][result]["commitment_date"] += " 00:00:00"
+                return result
+
+        runtime = _Runtime()
+        runtime.client = DatetimeReader()
+        writer = DatetimeWriter(runtime.client)
+        actions, _, _ = _actions(runtime=runtime, writer=writer)
+        approval = actions.validate_write(
+            "sale.order",
+            "create",
+            values={"name": "SO-DATE", "commitment_date": "2026-09-12"},
+        )["approval"]
+
+        with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1"}):
+            result = actions.execute_approved_write(approval, confirm=True)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["action_status"], "verified")
+
     def test_attachment_is_digest_bound_and_only_bytes_reach_odoo(self):
         actions, writer, _ = _actions()
         inline = actions.validate_write(

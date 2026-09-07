@@ -161,6 +161,7 @@ def run_gate() -> None:
         "create",
         values={
             "partner_id": fixture["customer"],
+            "commitment_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             "order_line": [
                 [
                     0,

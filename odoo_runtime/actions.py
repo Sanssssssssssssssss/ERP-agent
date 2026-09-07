@@ -10,6 +10,7 @@ import re
 import stat
 import time
 import xmlrpc.client
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -460,7 +461,7 @@ class NativeActions:
         return []
 
     @staticmethod
-    def _matches(actual: Any, expected: Any) -> bool:
+    def _matches(actual: Any, expected: Any, field_type: str | None = None) -> bool:
         if isinstance(actual, (list, tuple)) and len(actual) == 2 and type(actual[0]) is int:
             return expected == actual[0]
         if (
@@ -471,6 +472,11 @@ class NativeActions:
             and expected[0][0] == 6
         ):
             return sorted(actual or []) == sorted(expected[0][2])
+        if field_type == "datetime" and isinstance(actual, str) and isinstance(expected, str):
+            try:
+                return datetime.fromisoformat(actual) == datetime.fromisoformat(expected)
+            except ValueError:
+                pass
         return actual == expected
 
     def _created_relation_matches(
@@ -494,20 +500,27 @@ class NativeActions:
             )
         ):
             return None
-        metadata = self.reads.instances[instance]._metadata(model)
+        runtime = self.reads.instances[instance]
+        metadata = runtime._metadata(model)
         relation = (metadata.get(field) or {}).get("relation")
         if not relation or len(actual) != len(expected):
             return False
         values = [command[2] for command in expected]
         fields = sorted({"id", *(key for row in values for key in row)})
         records = self._read_rows(instance, relation, [int(value) for value in actual], fields)
+        relation_metadata = runtime._metadata(relation)
         unmatched = list(records)
         for wanted in values:
             match = next(
                 (
                     row
                     for row in unmatched
-                    if all(self._matches(row.get(key), value) for key, value in wanted.items())
+                    if all(
+                        self._matches(
+                            row.get(key), value, (relation_metadata.get(key) or {}).get("type")
+                        )
+                        for key, value in wanted.items()
+                    )
                 ),
                 None,
             )
@@ -555,6 +568,7 @@ class NativeActions:
             if model == "ir.attachment" and row["file_digests"]:
                 fields.extend(name for name in ("checksum", "file_size") if name not in fields)
             records = self._read_rows(instance, model, ids, fields)
+            metadata = self.reads.instances[instance]._metadata(model)
             by_id = {int(item["id"]): item for item in records}
             mismatches = []
             for index, record_id in enumerate(ids):
@@ -570,7 +584,10 @@ class NativeActions:
                         instance, model, field, actual.get(field), value
                     )
                     if relation_match is False or (
-                        relation_match is None and not self._matches(actual.get(field), value)
+                        relation_match is None
+                        and not self._matches(
+                            actual.get(field), value, (metadata.get(field) or {}).get("type")
+                        )
                     ):
                         mismatches.append(
                             {"id": record_id, "field": field, "actual": actual.get(field)}
