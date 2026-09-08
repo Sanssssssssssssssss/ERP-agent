@@ -229,6 +229,8 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         sop_mode: str = "off",
         tool_mode: str = "static",
         world_mode: str = "off",
+        max_model_requests: int | None = None,
+        max_output_tokens: int | None = None,
         snapshot_sha256: str | None = None,
         runtime_timeout_seconds: int = 1770,
         **kwargs: Any,
@@ -239,6 +241,12 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             )
         if max_turns is not None and max_turns < 1:
             raise ValueError("max_turns must be positive")
+        for name, value in (
+            ("max_model_requests", max_model_requests),
+            ("max_output_tokens", max_output_tokens),
+        ):
+            if value is not None and (type(value) is not int or value < 1):
+                raise ValueError(f"{name} must be a positive integer")
         if read_backend not in {"mcp", "native"}:
             raise ValueError("read_backend must be mcp or native")
         if action_backend not in {"mcp", "native"}:
@@ -273,6 +281,8 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         self._sop_mode = sop_mode
         self._tool_mode = tool_mode
         self._world_mode = world_mode
+        self._max_model_requests = max_model_requests
+        self._max_output_tokens = max_output_tokens
         self._snapshot_sha256 = snapshot_sha256
         self._runtime_timeout_seconds = runtime_timeout_seconds
         super().__init__(*args, version=version, **kwargs)
@@ -397,6 +407,10 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             f"--tool-mode {self._tool_mode} "
             f"--world-mode {self._world_mode} "
             + (f"--max-turns {self._max_turns} " if self._max_turns is not None else "")
+            + (f"--max-model-requests {self._max_model_requests} "
+               if self._max_model_requests is not None else "")
+            + (f"--max-output-tokens {self._max_output_tokens} "
+               if self._max_output_tokens is not None else "")
             + "2>&1 | stdbuf -oL tee /logs/agent/"
             + ("pi-agent-odoo.jsonl" if native_only else "pi-agent-odoo-mcp.jsonl")
         )
@@ -429,6 +443,8 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             "world_mode": self._world_mode,
             "snapshot_sha256": self._snapshot_sha256,
             "runtime_timeout_seconds": self._runtime_timeout_seconds,
+            "max_model_requests": self._max_model_requests,
+            "max_output_tokens": self._max_output_tokens,
             "commit_sha": os.environ.get("PI_ODOO_SOURCE_COMMIT") or None,
         }
 

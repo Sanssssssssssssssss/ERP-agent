@@ -100,11 +100,25 @@ async def _source_tools(args):
 class RequestReceipts:
     """Keep actual model request bodies locally; never persist auth headers."""
 
-    def __init__(self, directory: Path) -> None:
+    def __init__(
+        self, directory: Path, max_model_requests: int | None = None
+    ) -> None:
+        if max_model_requests is not None and (
+            type(max_model_requests) is not int or max_model_requests < 1
+        ):
+            raise ValueError("max_model_requests must be a positive integer")
         self.directory = directory
+        self.max_model_requests = max_model_requests
         self.number = 0
 
     async def before_provider_request(self, payload: object) -> object:
+        if (
+            self.max_model_requests is not None
+            and self.number >= self.max_model_requests
+        ):
+            raise RuntimeError(
+                f"max_model_requests ({self.max_model_requests}) exceeded"
+            )
         self.number += 1
         self.directory.mkdir(parents=True, exist_ok=True)
         (self.directory / f"{self.number:04d}.request.json").write_text(
@@ -144,6 +158,8 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--mcp-url", default="http://127.0.0.1:8000/mcp")
     parser.add_argument("--runtime-mode", choices=("mcp", "native"), default="mcp")
     parser.add_argument("--max-turns", type=int, default=None)
+    parser.add_argument("--max-model-requests", type=int, default=None)
+    parser.add_argument("--max-output-tokens", type=int, default=None)
     parser.add_argument("--read-backend", choices=("mcp", "native"), default="mcp")
     parser.add_argument("--action-backend", choices=("mcp", "native"), default="mcp")
     parser.add_argument("--capability-backend", choices=("mcp", "native"), default="mcp")
@@ -161,6 +177,19 @@ async def run(args: argparse.Namespace) -> None:
         raise RuntimeError("LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL are required")
     if args.max_turns is not None and args.max_turns < 1:
         raise ValueError("max-turns must be positive")
+    max_model_requests = getattr(args, "max_model_requests", None)
+    if max_model_requests is not None and (
+        type(max_model_requests) is not int or max_model_requests < 1
+    ):
+        raise ValueError("max-model-requests must be a positive integer")
+    max_output_tokens = getattr(args, "max_output_tokens", None)
+    if max_output_tokens is not None and (
+        type(max_output_tokens) is not int or max_output_tokens < 1
+    ):
+        raise ValueError("max-output-tokens must be a positive integer")
+    budget_enabled = (
+        max_model_requests is not None or max_output_tokens is not None
+    )
     world_mode = getattr(args, "world_mode", "off")
     if world_mode not in {"off", "record", "project"}:
         raise ValueError("world-mode must be off, record, or project")
@@ -183,7 +212,10 @@ async def run(args: argparse.Namespace) -> None:
     args.usage_file.parent.mkdir(parents=True, exist_ok=True)
     provider_name = os.environ.get("LLM_PROVIDER", "openai-compatible")
     thinking = os.environ.get("LLM_THINKING_TYPE", "high")
-    receipts = RequestReceipts(args.session_file.parent / "requests")
+    receipts = RequestReceipts(
+        args.session_file.parent / "requests",
+        max_model_requests=max_model_requests,
+    )
     provider = OpenAICompatibleProvider(
         OpenAICompatibleConfig(
             api_key=api_key,
@@ -194,7 +226,7 @@ async def run(args: argparse.Namespace) -> None:
             provider_name=provider_name,
             timeout_seconds=180,
             max_retries=0,
-            max_tokens=None,
+            max_tokens=max_output_tokens,
             infer_api_from_model=False,
             provider_hooks=receipts,
         )
@@ -317,6 +349,8 @@ async def run(args: argparse.Namespace) -> None:
                         + (SOP_POLICY if sop_mode == "controlled" else "")
                         + (DYNAMIC_TOOL_POLICY if tool_mode == "dynamic" else "")
                     ),
+                    auto_compact_enabled=not budget_enabled,
+                    retry_enabled=not budget_enabled,
                     thinking_level=thinking,
                 )
             )
@@ -362,7 +396,8 @@ async def run(args: argparse.Namespace) -> None:
                             "worldMode": world_mode,
                             "runtimeDate": runtime_date,
                             "toolNames": [tool.name for tool in session.tools],
-                            "maxOutputTokens": None,
+                            "maxOutputTokens": max_output_tokens,
+                            "maxModelRequests": max_model_requests,
                             "requestReceipts": str(
                                 args.session_file.parent / "requests"
                             ),
@@ -403,6 +438,8 @@ async def run(args: argparse.Namespace) -> None:
                         message.usage.reasoning or 0 for message in assistant
                     ),
                     "modelCalls": receipts.number,
+                    "maxOutputTokens": max_output_tokens,
+                    "maxModelRequests": max_model_requests,
                     "assistantEntries": len(assistant),
                     "worldMode": world_mode,
                     "actionBackend": getattr(args, "action_backend", "mcp"),

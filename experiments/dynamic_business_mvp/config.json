@@ -1,0 +1,40 @@
+{
+  "job_name": "dynamic-business-mvp-20260908-r1",
+  "jobs_dir": ".runtime/jobs",
+  "agent_setup_timeout_multiplier": 4.0,
+  "environment_build_timeout_multiplier": 4.0,
+  "n_concurrent_trials": 1,
+  "quiet": true,
+  "environment": {
+    "type": "docker",
+    "extra_docker_compose": [
+      "configs/harbor-proxy-compose.yml",
+      "experiments/dynamic_business_mvp/compose.yml"
+    ]
+  },
+  "agents": [
+    {
+      "name": "experiments.dynamic_business_mvp.agent:MvpAgent",
+      "model_name": "openai/deepseek/deepseek-v4-flash",
+      "override_timeout_sec": 930,
+      "kwargs": {
+        "thinking": "high",
+        "max_turns": 24,
+        "max_model_requests": 24,
+        "max_output_tokens": 4096,
+        "read_backend": "native",
+        "action_backend": "native",
+        "capability_backend": "native",
+        "runtime_mode": "native",
+        "sop_mode": "controlled",
+        "tool_mode": "dynamic",
+        "world_mode": "record",
+        "runtime_timeout_seconds": 900,
+        "snapshot_sha256": "169886cd1c4fa78290816fe57288f0d00b68f596b15be7eaa7236acc324a8eb1"
+      }
+    }
+  ],
+  "tasks": [
+    {"path": "experiments/dynamic_business_mvp"}
+  ]
+}
