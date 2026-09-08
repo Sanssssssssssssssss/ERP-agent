@@ -65,7 +65,8 @@ class RunnerBudgetTest(unittest.TestCase):
         context = SimpleNamespace()
         with patch.object(harbor_agent, "_start_task_mcp", new=AsyncMock()):
             asyncio.run(agent._run("do work", object(), context))
-        command = agent.exec_as_agent.await_args_list[0].kwargs["command"]
+        command = next(call.kwargs["command"] for call in agent.exec_as_agent.await_args_list
+                       if "--max-model-requests" in call.kwargs["command"])
         self.assertIn("--max-model-requests 2", command)
         self.assertIn("--max-output-tokens 64", command)
         self.assertEqual(context.metadata["max_model_requests"], 2)

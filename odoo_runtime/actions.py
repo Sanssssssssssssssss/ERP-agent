@@ -59,6 +59,11 @@ _KNOWN_METHOD_STATES = {
     ("sale.order", "action_confirm"): ("state", {"sale", "done"}),
     ("purchase.order", "button_confirm"): ("state", {"purchase", "done"}),
     ("account.move", "action_post"): ("state", {"posted"}),
+    ("sale.order", "action_cancel"): ("state", {"cancel"}),
+    ("purchase.order", "button_cancel"): ("state", {"cancel"}),
+    ("purchase.order", "button_approve"): ("state", {"purchase", "done"}),
+    ("mrp.production", "action_confirm"): ("state", {"confirmed", "progress", "to_close", "done"}),
+    ("mrp.production", "action_cancel"): ("state", {"cancel"}),
 }
 
 

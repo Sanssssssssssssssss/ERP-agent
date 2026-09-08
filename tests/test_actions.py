@@ -199,6 +199,39 @@ def _actions(
 
 
 class NativeActionCheckpointTests(unittest.TestCase):
+    def test_benchmark_manufacturing_and_cancel_require_verified_state(self):
+        cases = [
+            ("sale.order", "action_cancel", "sale", "cancel"),
+            ("purchase.order", "button_cancel", "purchase", "cancel"),
+            ("purchase.order", "button_approve", "to approve", "purchase"),
+            ("mrp.production", "action_confirm", "draft", "confirmed"),
+            ("mrp.production", "action_cancel", "confirmed", "cancel"),
+        ]
+        for model, method, before, after in cases:
+            with self.subTest(model=model, method=method):
+                actions, writer, runtime = _actions()
+                runtime.client.records[model] = {7: {"id": 7, "state": before}}
+                with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1", "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": ""}):
+                    self.assertFalse(actions.execute_method(model, method, kwargs={"ids": [7]})["success"])
+                    self.assertEqual(writer.calls, [])
+                def apply_state(*args, **kwargs):
+                    runtime.client.records[model][7]["state"] = after
+                    return True
+                with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1", "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": f"{model}.{method}"}):
+                    self.assertFalse(actions.execute_method(model, method, kwargs={"ids": []})["success"])
+                    with patch.object(writer, "execute_method", return_value=True) as noop:
+                        failed = actions.execute_method(model, method, kwargs={"ids": [7]})
+                        self.assertFalse(failed["success"])
+                        self.assertEqual(noop.call_count, 1)
+                    # An uncertain action reconciles first; use a fresh ledger for a new trial.
+                    actions2, writer2, _ = _actions(runtime=runtime)
+                    with patch.object(writer2, "execute_method", side_effect=apply_state) as send:
+                        result = actions2.execute_method(model, method, kwargs={"ids": [7]})
+                        self.assertTrue(result["success"])
+                        self.assertEqual(result["action_status"], "verified")
+                        self.assertTrue(actions2.execute_method(model, method, kwargs={"ids": [7]})["success"])
+                        self.assertEqual(send.call_count, 1)
+
     def test_custom_approval_ttl_is_applied(self):
         actions, _, _ = _actions(approval_ttl_seconds=3600)
         validation = actions.validate_write(

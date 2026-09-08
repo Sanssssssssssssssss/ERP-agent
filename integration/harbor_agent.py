@@ -19,6 +19,11 @@ BENCH_SIDE_EFFECT_METHODS = (
     "purchase.order.button_confirm",
     "sale.advance.payment.inv.create_invoices",
     "account.move.action_post",
+    "sale.order.action_cancel",
+    "purchase.order.button_cancel",
+    "purchase.order.button_approve",
+    "mrp.production.action_confirm",
+    "mrp.production.action_cancel",
 )
 MCP_ONLY_POLICY = (
     "Use mcp_odoo tools for every Odoo operation. Do not access Odoo through "
@@ -295,6 +300,23 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         await _install_task_runtime(
             self, environment, native_only=self._native_only
         )
+        await self._capture_bench_state(environment, "initial")
+
+    async def _capture_bench_state(self, environment: BaseEnvironment, phase: str) -> None:
+        if phase not in {"initial", "final"}:
+            raise ValueError("invalid state capture phase")
+        await self.exec_as_root(
+            environment,
+            command=(
+                "set -euo pipefail; mkdir -p /logs/agent/state; "
+                "su postgres -s /bin/bash -c "
+                "'pg_dump -d bench --no-owner --exclude-table-data=res_users_apikeys' "
+                f"| gzip -n > /logs/agent/state/{phase}.sql.gz; "
+                f"sha256sum /logs/agent/state/{phase}.sql.gz > /logs/agent/state/{phase}.sha256; "
+                "date -u -r /tmp/saas_setup_complete +%Y-%m-%d > /logs/agent/state/scenario-date.txt"
+            ),
+            timeout_sec=60,
+        )
 
     @with_prompt_template
     async def run(
@@ -305,6 +327,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
     ) -> None:
         try:
             await self._run(instruction, environment, context)
+            await self._capture_bench_state(environment, "final")
         except BaseException:
             # Docker exec cancellation does not stop its remote processes.
             # Stop this disposable service before Harbor can enter verification.
@@ -320,6 +343,13 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
     async def _run(self, instruction: str, environment: BaseEnvironment,
                    context: AgentContext) -> None:
         deadline = time.monotonic() + self._runtime_timeout_seconds
+        anchor = await self.exec_as_agent(
+            environment, command="cat /logs/agent/state/scenario-date.txt"
+        )
+        instruction += (
+            "\n\nScenario date anchor (UTC): " + (anchor.stdout or "").strip()
+            + ". Interpret the task's relative day counts from this seeded scenario date."
+        )
         if self._snapshot_sha256:
             result = await self.exec_as_agent(
                 environment, command="cat /logs/agent/snapshot-receipt.json",

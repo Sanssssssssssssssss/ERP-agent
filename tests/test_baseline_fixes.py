@@ -87,7 +87,7 @@ class BaselineFixTest(unittest.TestCase):
                 stopping.set()
                 await release.wait()
                 stopped.set()
-            agent = SimpleNamespace(_run=run_body)
+            agent = SimpleNamespace(_run=run_body, _capture_bench_state=AsyncMock())
             environment = SimpleNamespace(stop_service=stop_service)
             run = inspect.unwrap(harbor_agent.PiAgentMcpBaseline.run)
             task = asyncio.create_task(run(agent, "test", environment, None))

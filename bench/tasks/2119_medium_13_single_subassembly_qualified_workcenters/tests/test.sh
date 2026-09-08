@@ -362,7 +362,7 @@ if optimality_path.exists():
     except Exception:
         pass
 
-with open("/logs/verifier/reward.json", "w") as f:
+with open("/logs/verifier/verifier_details.json", "w") as f:
     json.dump(payload, f, indent=2)
 PY
 
