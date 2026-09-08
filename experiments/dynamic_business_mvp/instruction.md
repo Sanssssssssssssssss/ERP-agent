@@ -10,6 +10,9 @@ one small customer-sales workflow for Nimbus Bureau only:
 3. Create exactly one regular customer invoice linked to that order and post
    it. The invoice must use 30 Days terms and contain the one sold product line.
 
-Do not create or modify purchase orders, manufacturing orders, payments,
-deliveries, or unrelated records. Use the native Odoo business workflow and
-its controlled SOP. Finish after the posted invoice is linked to the order.
+Do not create, modify, or delete purchase orders, manufacturing orders, or
+payments. Confirming this sale may create the one normal outgoing picking that
+Odoo links to this order; leave that picking pending and do not complete or
+cancel it. Do not create extra or unrelated pickings, or modify any existing
+pickings or stock moves. Use the native Odoo business workflow and its
+controlled SOP. Finish after the posted invoice is linked to the order.

@@ -198,6 +198,48 @@ def _materialize_uploads(
     return values, values_list
 
 
+def _collect_related_metadata(
+    client: Any,
+    fields_metadata: dict[str, Any],
+    rows: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Load metadata needed to validate nested create/write relation commands."""
+    related: dict[str, dict[str, Any]] = {}
+
+    def walk(metadata: dict[str, Any], current_rows: list[dict[str, Any]]) -> None:
+        for row in current_rows:
+            for field_name, value in row.items():
+                field = metadata.get(field_name)
+                if not isinstance(field, dict) or not field.get("relation"):
+                    continue
+                nested_rows = [
+                    command[2]
+                    for command in (value if isinstance(value, (list, tuple)) else [])
+                    if (
+                        isinstance(command, (list, tuple))
+                        and len(command) == 3
+                        and command[0] in {0, 1}
+                        and isinstance(command[2], dict)
+                    )
+                ]
+                if not nested_rows:
+                    continue
+                relation = str(field["relation"])
+                if relation not in related:
+                    child = client.get_model_fields(relation)
+                    if not isinstance(child, dict) or not child or "error" in child:
+                        raise ValueError(
+                            f"trusted fields_get metadata unavailable for {relation}"
+                        )
+                    related[relation] = child
+                # Cache metadata, but walk every payload subtree: later batch
+                # rows can carry fields absent from the first row.
+                walk(related[relation], nested_rows)
+
+    walk(fields_metadata, rows)
+    return related
+
+
 def _strip_html(value: Any) -> str:
     return html.unescape(re.sub(r"<[^>]*>", "", str(value or ""))).strip()
 
@@ -973,6 +1015,15 @@ class NativeActions:
                 fields_metadata=fields_metadata,
                 metadata_source=source,
                 instance=name,
+                related_metadata=(
+                    _collect_related_metadata(
+                        runtime.client,
+                        fields_metadata or {},
+                        [values or {}, *(values_list or [])],
+                    )
+                    if source == "server" and fields_metadata
+                    else None
+                ),
             )
             trusted = source == "server" and bool(fields_metadata)
             action = None

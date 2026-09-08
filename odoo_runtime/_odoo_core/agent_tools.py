@@ -13,6 +13,7 @@ import json
 import os
 import re
 import time
+from datetime import datetime
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -312,6 +313,7 @@ def _metadata_issues_for_values(
     fields_metadata: dict[str, Any],
     *,
     label: str = "",
+    related_metadata: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
     """Check one values dict against fields_get metadata."""
     issues: list[dict[str, str]] = []
@@ -341,6 +343,16 @@ def _metadata_issues_for_values(
                     ),
                 }
             )
+        elif field_type in {"date", "datetime"}:
+            issue = _temporal_field_issue(values[field_name], field_type)
+            if issue:
+                issues.append(
+                    {
+                        "code": f"invalid_{field_type}_format",
+                        "severity": "error",
+                        "message": f"{prefix}{field_name!r} {issue}",
+                    }
+                )
         elif field_type == "many2one":
             hints.append(
                 {
@@ -365,7 +377,51 @@ def _metadata_issues_for_values(
                         "hint": "relational values should use Odoo command lists.",
                     }
                 )
+                relation = str(meta.get("relation") or "")
+                if relation and related_metadata is not None and relation in related_metadata:
+                    child_metadata = related_metadata[relation]
+                    for command_index, command in enumerate(values[field_name]):
+                        if not (
+                            isinstance(command, (list, tuple))
+                            and len(command) == 3
+                            and command[0] in {0, 1}
+                            and isinstance(command[2], dict)
+                        ):
+                            continue
+                        child_issues, child_hints = _metadata_issues_for_values(
+                            command[2],
+                            child_metadata,
+                            label=f"{prefix}{field_name}[{command_index}][2]",
+                            related_metadata=related_metadata,
+                        )
+                        issues.extend(child_issues)
+                        hints.extend(child_hints)
     return issues, hints
+
+
+def _temporal_field_issue(value: Any, field_type: str) -> str | None:
+    """Require Odoo's UTC-naive wire format before durable approval."""
+    if value is None or value is False:
+        return None
+    accepted = {
+        "date": ((r"[0-9]{4}-[0-9]{2}-[0-9]{2}", "%Y-%m-%d"),),
+        # Odoo historically accepts a date for datetime fields and fills midnight.
+        "datetime": (
+            (r"[0-9]{4}-[0-9]{2}-[0-9]{2}", "%Y-%m-%d"),
+            (r"[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}", "%Y-%m-%d %H:%M:%S"),
+        ),
+    }
+    expected = "YYYY-MM-DD" if field_type == "date" else "YYYY-MM-DD or YYYY-MM-DD HH:MM:SS (UTC)"
+    if not isinstance(value, str):
+        return f"must be a string in Odoo format {expected}, or false/null to clear it."
+    for pattern, fmt in accepted[field_type]:
+        if re.fullmatch(pattern, value, flags=re.ASCII):
+            try:
+                datetime.strptime(value, fmt)
+            except ValueError:
+                break
+            return None
+    return f"must use Odoo format {expected}; ISO T, timezone suffixes, and invalid dates are rejected."
 
 
 def validate_write_report(
@@ -379,6 +435,7 @@ def validate_write_report(
     fields_metadata: dict[str, Any] | None = None,
     metadata_source: str = "none",
     instance: str = "default",
+    related_metadata: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Validate write payload shape against optional fields_get metadata."""
     preview = build_write_preview_report(
@@ -399,13 +456,18 @@ def validate_write_report(
                 if not isinstance(entry, dict):
                     continue  # preview already flagged the entry shape
                 entry_issues, entry_hints = _metadata_issues_for_values(
-                    entry, fields_metadata, label=f"values_list[{index}]"
+                    entry,
+                    fields_metadata,
+                    label=f"values_list[{index}]",
+                    related_metadata=related_metadata,
                 )
                 issues.extend(entry_issues)
                 field_hints.extend(entry_hints)
         else:
             value_issues, value_hints = _metadata_issues_for_values(
-                normalized_values, fields_metadata
+                normalized_values,
+                fields_metadata,
+                related_metadata=related_metadata,
             )
             issues.extend(value_issues)
             field_hints.extend(value_hints)

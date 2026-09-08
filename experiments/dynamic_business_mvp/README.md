@@ -15,9 +15,48 @@ ERP-Bench task score and does not claim full 2262 coverage.
 
 Latest complete run: [r2 results and round table](RESULTS_R2.md),
 [full tool details](ROUND_DETAILS_R2.md), [CSV](ROUND_DETAILS_R2.csv).
-It naturally finished in 29 model rounds and passed 7/7 business checks.
-The report also retains the datetime prevalidation defect and verifier coverage
-limits; this does not promote dynamic tools to the default configuration.
+It naturally finished in 29 model rounds and passed 7/7 business checks under
+the historical verifier contract. That result is retained as recorded; it is
+not relabeled as a pass under the newer contract below.
+
+The current verifier contract is version 2, with 10 checks. It snapshots selected payment
+fields (`state`, `amount`, `date`, `partner_id`, `memo`, `write_date`) and
+selected picking/move fields before and after the run. It rejects any payment
+addition, deletion, or observed-field change; preserves existing pickings and
+moves; and allows only the one outgoing picking in the expected linked state
+for the new order, customer, exact sale line, product, and quantity while its
+picking and move remain pending. A reserved move is allowed when it is still in an
+allowed nonterminal state and `picked` is false. The gate also requires a
+posted invoice with `payment_state=not_paid` and a full `amount_residual`.
+These state and snapshot checks establish the frozen business conditions, not
+complete action provenance or an audit of every Odoo field. Older baselines
+without the version-2 records fail closed.
+
+Native write validation now rejects ISO `T`, timezone suffixes, and invalid
+calendar dates before durable approval, including batch and nested relation
+writes. Date fields accept `YYYY-MM-DD`; datetime fields also accept
+`YYYY-MM-DD HH:MM:SS` in UTC. The existing date-only-to-midnight behavior and
+false/null clearing remain supported. Approved values are sent unchanged.
+Related live metadata is loaded only for live validation, once per related
+model within that validation; unavailable metadata prevents approval.
+
+Offline regression on 2026-09-08 after these fixes:
+
+| Check | Result |
+| --- | --- |
+| Project `pytest tests` | 98 passed, 47 subtests passed; 1 Node check skipped in WSL |
+| Exact skipped JavaScript test, using installed Windows Node | Passed (`NATIVE_EXTENSION_OK`) |
+| Clean native environment: layout, dynamic tools, runner budget | 14 passed |
+| Dynamic module self-check and verifier self-check | Both passed |
+| Real model API requests | 0 |
+
+The project suite includes 23 action tests and 8 verifier tests, with valid
+pending deliveries, payment changes, invoice reconciliation, delivery state and
+link violations, record deletion, and incomplete baselines. WSL receipts are
+in ignored `.runtime/mvp-fix-regression-hKdFno/`. These are offline regressions;
+the stronger 10-check contract has not been run against a new live business
+trial. The historical r2 defect report remains unchanged. Dynamic tools remain
+an experiment and are not promoted to the default configuration.
 
 Run `bash experiments/dynamic_business_mvp/run.sh` in the existing WSL
 environment from a clean commit. The wrapper verifies the frozen manifest hash

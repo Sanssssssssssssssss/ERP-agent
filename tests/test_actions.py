@@ -316,6 +316,7 @@ class NativeActionCheckpointTests(unittest.TestCase):
                     "name": {"type": "char", "readonly": False},
                     "product_id": {"type": "many2one", "readonly": False},
                     "product_uom_qty": {"type": "float", "readonly": False},
+                    "event_at": {"type": "datetime", "readonly": False},
                 }
 
         class RelationalWriter(_Writer):
@@ -341,7 +342,16 @@ class NativeActionCheckpointTests(unittest.TestCase):
         values = {
             "name": "SO-GATE",
             "order_line": [
-                [0, 0, {"name": "line", "product_id": 2, "product_uom_qty": 8}]
+                [
+                    0,
+                    0,
+                    {
+                        "name": "line",
+                        "product_id": 2,
+                        "product_uom_qty": 8,
+                        "event_at": "2026-09-12 08:30:00",
+                    },
+                ]
             ],
         }
         approval = actions.validate_write("sale.order", "create", values=values)[
@@ -384,6 +394,142 @@ class NativeActionCheckpointTests(unittest.TestCase):
 
         self.assertTrue(result["success"])
         self.assertEqual(result["action_status"], "verified")
+
+    def test_temporal_values_require_canonical_odoo_formats(self):
+        class DatetimeReader(_Reader):
+            def __init__(self):
+                super().__init__()
+                self.metadata["commitment_date"] = {"type": "datetime", "readonly": False}
+                self.metadata["order_date"] = {"type": "date", "readonly": False}
+
+        runtime = _Runtime()
+        runtime.client = DatetimeReader()
+        writer = _Writer(runtime.client)
+        actions, _, _ = _actions(runtime=runtime, writer=writer)
+        for value in (
+            "2026-09-12T08:30:00",
+            "2026-09-12 08:30:00+00:00",
+            "2026-02-30 08:30:00",
+            "2026-9-12 08:30:00",
+            "2026-09-12 08:30:00.000",
+            0,
+            True,
+        ):
+            validation = actions.validate_write(
+                "sale.order", "create", values={"name": "SO-BAD", "commitment_date": value}
+            )
+            self.assertFalse(validation["success"])
+            self.assertIn("invalid_datetime_format", str(validation))
+            self.assertEqual(validation["approval_status"]["stored"], False)
+        for operation, kwargs in (
+            ("write", {"record_ids": [7], "values": {"order_date": "2026-02-29"}}),
+            ("create", {"values_list": [
+                {"order_date": "2024-02-29"}, {"order_date": "2026-02-29"}
+            ]}),
+        ):
+            validation = actions.validate_write("sale.order", operation, **kwargs)
+            self.assertFalse(validation["success"])
+            self.assertIsNone(validation["approval"])
+            self.assertIn("invalid_date_format", str(validation))
+        self.assertEqual(actions.store.summary()["actions"], 0)
+        self.assertEqual(writer.calls, [])
+        validation = actions.validate_write(
+            "sale.order",
+            "create",
+            values_list=[
+                {
+                    "name": "SO-GOOD-1",
+                    "commitment_date": "2026-09-12 08:30:00",
+                    "order_date": "2026-09-12",
+                },
+                {
+                    "name": "SO-GOOD-2",
+                    "commitment_date": "2026-09-13 08:30:00",
+                    "order_date": False,
+                },
+            ],
+        )
+        self.assertTrue(validation["success"])
+        self.assertTrue(validation["approval_status"]["stored"])
+
+        with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1"}):
+            result = actions.execute_approved_write(validation["approval"], confirm=True)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["action_status"], "verified")
+        self.assertEqual(len(writer.calls), 1)
+        self.assertEqual(
+            writer.calls[0][2][0],
+            [
+                {
+                    "name": "SO-GOOD-1",
+                    "commitment_date": "2026-09-12 08:30:00",
+                    "order_date": "2026-09-12",
+                },
+                {
+                    "name": "SO-GOOD-2",
+                    "commitment_date": "2026-09-13 08:30:00",
+                    "order_date": False,
+                },
+            ],
+        )
+
+    def test_invalid_nested_datetime_is_rejected_before_durable_approval(self):
+        class RelationalReader(_Reader):
+            def get_model_fields(self, model):
+                if model == "sale.order":
+                    return {
+                        "name": {"type": "char", "readonly": False},
+                        "order_line": {
+                            "type": "one2many",
+                            "relation": "sale.order.line",
+                            "readonly": False,
+                        },
+                    }
+                return {
+                    "event_at": {"type": "datetime", "readonly": False},
+                    "children": {"type": "one2many", "relation": "mail.message"},
+                }
+
+        runtime = _Runtime()
+        runtime.client = RelationalReader()
+        writer = _Writer(runtime.client)
+        actions, _, _ = _actions(runtime=runtime, writer=writer)
+        validation = actions.validate_write(
+            "sale.order",
+            "create",
+            values={
+                "name": "SO-NESTED-BAD",
+                "order_line": [[0, 0, {"event_at": "2026-09-12T08:30:00"}]],
+            },
+        )
+        self.assertFalse(validation["success"])
+        self.assertIn("invalid_datetime_format", str(validation))
+        self.assertFalse(validation["approval_status"]["stored"])
+        self.assertEqual(actions.store.summary()["actions"], 0)
+        self.assertEqual(writer.calls, [])
+
+        rows = [
+            {"order_line": [[0, 0, {"event_at": "2026-09-12 08:30:00"}]]},
+            {"order_line": [[0, 0, {"children": [
+                [0, 0, {"event_at": "2026-09-12T08:30:00"}]
+            ]}]]},
+        ]
+        validation = actions.validate_write("sale.order", "create", values_list=rows)
+        self.assertFalse(validation["success"])
+        self.assertIn("values_list[1]", str(validation))
+        self.assertIn("invalid_datetime_format", str(validation))
+        self.assertEqual(actions.store.summary()["actions"], 0)
+        with patch.object(runtime.client, "get_model_fields", return_value={}) as fields_get:
+            metadata = RelationalReader().get_model_fields("sale.order")
+            report = actions.validate_write(
+                "sale.order", "create", values=rows[0], fields_metadata=metadata
+            )
+            self.assertFalse(report["approval_status"]["stored"])
+            fields_get.assert_not_called()
+            report = actions.validate_write("sale.order", "create", values=rows[0])
+            self.assertFalse(report["success"])
+        self.assertEqual(actions.store.summary()["actions"], 0)
 
     def test_attachment_is_digest_bound_and_only_bytes_reach_odoo(self):
         actions, writer, _ = _actions()
