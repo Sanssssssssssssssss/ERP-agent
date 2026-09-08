@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'">
+  <title>业务工作台 · 交互原型</title>
+  <link rel="stylesheet" href="prototype.css">
+</head>
+<body>
+  <div class="prototype-banner" role="status">
+    <span class="banner-dot" aria-hidden="true"></span>
+    <strong>交互原型</strong><span>示例数据</span><span>不连接 Odoo</span>
+  </div>
+
+  <div class="app-shell" id="appShell">
+    <aside class="session-rail" id="sessionRail" aria-label="会话与状态">
+      <div class="rail-head">
+        <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div class="brand-copy"><strong>业务工作台</strong><span>Operations desk</span></div>
+        <button class="icon-button" id="railToggle" type="button" aria-label="收起会话栏" title="收起会话栏">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 4.5 7 10l5.5 5.5M7 10h8"/></svg>
+        </button>
+      </div>
+      <div class="rail-section-label">会话</div>
+      <div class="session-row selected" aria-current="true" aria-label="当前会话 Nimbus Bureau">
+        <span class="session-icon"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4.5h12v8H9l-3.5 3v-3H4z"/><path d="M7 7.5h6M7 10h3"/></svg></span>
+        <span class="session-copy"><strong>Nimbus Bureau</strong><small>销售与开票</small></span>
+        <span class="session-state-dot" aria-label="示例会话"></span>
+      </div>
+      <div class="rail-section-label state-label">状态示例</div>
+      <div class="state-switcher" role="tablist" aria-label="业务状态">
+        <button type="button" class="state-tab" data-state="ready" role="tab" aria-label="待执行" title="待执行"><span class="status-icon neutral" aria-hidden="true">○</span><span>待执行</span></button>
+        <button type="button" class="state-tab" data-state="running" role="tab" aria-label="执行中" title="执行中"><span class="status-icon blue" aria-hidden="true">◌</span><span>执行中</span></button>
+        <button type="button" class="state-tab" data-state="approval" role="tab" aria-label="待审批" title="待审批"><span class="status-icon amber" aria-hidden="true">!</span><span>待审批</span></button>
+        <button type="button" class="state-tab" data-state="success" role="tab" aria-label="成功" title="成功"><span class="status-icon green" aria-hidden="true">✓</span><span>成功</span></button>
+        <button type="button" class="state-tab" data-state="failed" role="tab" aria-label="失败" title="失败"><span class="status-icon red" aria-hidden="true">×</span><span>失败</span></button>
+        <button type="button" class="state-tab" data-state="uncertain" role="tab" aria-label="写入待核对" title="写入待核对"><span class="status-icon purple" aria-hidden="true">?</span><span>写入待核对</span></button>
+      </div>
+      <div class="rail-foot"><span class="local-dot"></span><span>离线原型</span><button class="tiny-link" id="resetDemo" type="button">重置</button></div>
+    </aside>
+
+    <main class="business-main">
+      <header class="business-header">
+        <div class="business-tabs" role="tablist" aria-label="业务工作区">
+          <button class="business-tab active" type="button" data-business="sales" role="tab" aria-selected="true">
+            <span class="tab-file" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M5 3.5h7l3 3v10H5z"/><path d="M12 3.5v3h3M7.5 10h5M7.5 13h4"/></svg></span>
+            <span><strong>销售与开票</strong><small>Nimbus Bureau</small></span>
+          </button>
+          <button class="business-tab" type="button" data-business="readonly" role="tab" aria-selected="false">
+            <span class="tab-file muted-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M5 3.5h7l3 3v10H5z"/><path d="M12 3.5v3h3M7.5 10h5M7.5 13h4"/></svg></span>
+            <span><strong>费用核对</strong><small>只读</small></span>
+          </button>
+          <button class="add-tab" type="button" disabled aria-label="添加业务（示例不可用）" title="示例中不可添加"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg></button>
+        </div>
+        <div class="header-tools">
+          <span class="sample-clock">示例开始 · 2026-09-08 09:30</span>
+          <button class="icon-button" id="assistantToggle" type="button" aria-label="收起会话辅助面板" title="收起会话辅助面板"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5.5h12v9H9l-3.5 2v-2H4z"/><path d="M7 8.5h6M7 11.5h4"/></svg></button>
+        </div>
+      </header>
+
+      <section class="workspace-heading">
+        <div class="heading-row">
+          <div><div class="heading-title"><h1 id="businessTitle">Nimbus Bureau</h1><span id="modeLabel" class="heading-state">待执行</span></div><p id="businessGoal">为客户创建 Open-Plan Noise Barrier Wall 销售单并关联一张客户发票。</p></div>
+          <button class="outline-button" id="instructionToggle" type="button" aria-expanded="false">查看原始指令 <span aria-hidden="true">⌄</span></button>
+        </div>
+        <div class="raw-instruction" id="rawInstruction" hidden><strong>示例任务边界</strong><p>确认 1 件 Open-Plan Noise Barrier Wall，使用 list price 与 30 Days 付款条件，填写明确 commitment 日期；关联创建并过账一张客户发票。只读客户与商品 notes，不做采购、制造、付款或交付。</p><span>原型固定示例 · 不会提交到 Odoo</span></div>
+      </section>
+
+      <nav class="page-tabs" role="tablist" aria-label="业务页面">
+        <button type="button" class="page-tab active" data-page="execution" role="tab" aria-selected="true"><span class="page-tab-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M4 4h12v12H4z"/><path d="M7 8h6M7 11h4"/></svg></span>执行台</button>
+        <button type="button" class="page-tab" data-page="documents" role="tab" aria-selected="false"><span class="page-tab-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M5 3.5h7l3 3v10H5z"/><path d="M12 3.5v3h3M7.5 10h5M7.5 13h4"/></svg></span>单据与文件</button>
+        <button type="button" class="page-tab" data-page="approval" role="tab" aria-selected="false"><span class="page-tab-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M4 10.5 8 14l8-8"/></svg></span>变更与审批</button>
+        <button type="button" class="page-tab" data-page="trace" role="tab" aria-selected="false"><span class="page-tab-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><circle cx="5" cy="5" r="1.5"/><circle cx="5" cy="15" r="1.5"/><path d="M8 5h7M8 15h7M5 6.5v7"/></svg></span>运行详情</button>
+      </nav>
+
+      <div class="content-scroll" id="content" tabindex="-1"></div>
+    </main>
+
+    <aside class="assistant-panel" id="assistantPanel" aria-label="会话辅助">
+      <div class="assistant-head"><div><strong>会话</strong><span>本地示例记录</span></div><button class="icon-button" id="assistantClose" type="button" aria-label="收起会话辅助面板" title="收起"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 6 8 8M14 6l-8 8"/></svg></button></div>
+      <div class="assistant-context"><span class="context-icon"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5h12v10H4z"/><path d="M7 8h6M7 11h4"/></svg></span><div><strong>业务目标</strong><p>销售单 + 客户发票</p></div></div>
+      <div class="message-list" id="messageList" aria-live="polite"></div>
+      <form class="composer" id="composer"><label for="messageInput">补充说明 <span>仅追加本地示例消息</span></label><textarea id="messageInput" rows="3" placeholder="输入一条示例消息…"></textarea><div class="composer-foot"><span class="no-network"><span class="local-dot"></span>不会调用模型或 Odoo</span><button class="primary-button small" type="submit">添加消息</button></div></form>
+    </aside>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <script src="prototype.js"></script>
+</body>
+</html>
