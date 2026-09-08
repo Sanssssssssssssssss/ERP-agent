@@ -1,0 +1,746 @@
+"""Small durable stdio host for the desktop workbench."""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import threading
+import time
+import uuid
+from collections import deque
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable
+
+from .sale_view import business_detail, collect_documents, refresh_business as readback_business
+from .storage import StateStore
+from .worker import child_environment, worker_command
+
+_SECRET = re.compile(r"(?i)(token|secret|password|api[_-]?key|authorization|cookie)")
+_HIDDEN = {"reasoning_content", "reasoningContent", "thinking", "thought_signature", "thoughtSignature"}
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def uid(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex}"
+
+
+def _safe(value: Any, depth: int = 0) -> Any:
+    if isinstance(value, dict):
+        return {str(k): ("<redacted>" if _SECRET.search(str(k)) else _safe(v, depth + 1))
+                for k, v in value.items() if str(k) not in _HIDDEN}
+    if isinstance(value, (list, tuple)):
+        return [_safe(v, depth + 1) for v in value]
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def _structured(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    details = value.get("details", value)
+    if not isinstance(details, dict):
+        return {}
+    result = details.get("structuredContent", details)
+    return _safe(result) if isinstance(result, dict) else {}
+
+
+def _approval_marker(payload: dict[str, Any]) -> tuple[str | None, str | None, dict[str, Any]]:
+    """Normalize all native approval envelopes without trusting model text."""
+    approval = payload.get("approval") if isinstance(payload.get("approval"), dict) else {}
+    status_obj = payload.get("approval_status") if isinstance(payload.get("approval_status"), dict) else {}
+    action_status = payload.get("action_status")
+    action_id = payload.get("action_id") or approval.get("action_id")
+    status = status_obj.get("status") or action_status or approval.get("status")
+    if status == "pending_approval" and isinstance(action_id, str) and action_id:
+        return action_id, "pending_approval", approval
+    if payload.get("approval_required") is True and isinstance(action_id, str) and action_id:
+        return action_id, "pending_approval", approval
+    return None, None, approval
+
+
+def _arguments(value: Any) -> dict[str, Any]:
+    return _safe(value) if isinstance(value, dict) else {}
+
+
+def _visible_content(message: dict[str, Any]) -> str:
+    return "".join(str(block.get("text", "")) for block in message.get("content", [])
+                   if isinstance(block, dict) and block.get("type") == "text")
+
+
+def _must_bool(value: Any, name: str) -> bool:
+    if type(value) is not bool:
+        raise ValueError(f"{name} must be boolean")
+    return value
+
+
+def public_message(row: dict[str, Any]) -> dict[str, Any]:
+    return {key: row[key] for key in ("id", "role", "text", "created_at", "business_id", "proposal") if key in row}
+
+
+class Workbench:
+    def __init__(self, data_dir: str | Path, repo: str | Path | None = None,
+                 event_sink: Callable[[dict[str, Any]], None] | None = None):
+        self.store = StateStore(data_dir)
+        self.root = Path(repo or Path(__file__).resolve().parents[1])
+        self._lock = threading.RLock()
+        self._processes: dict[str, subprocess.Popen[str]] = {}
+        self._threads: dict[str, threading.Thread] = {}
+        self._closing = False
+        self._event_sink = event_sink
+        self._recover_on_start()
+
+    def _ledger_statuses(self, run: dict[str, Any]) -> dict[str, str]:
+        from odoo_runtime.store import ActionStore
+        path = self.store.root / "runs" / run["id"] / "odoo-actions.sqlite3"
+        if not path.exists():
+            if run.get("pending_approval_action_ids") or any(tool.get("action_id") for tool in run.get("tools", [])):
+                raise RuntimeError("action ledger is missing")
+            return {}
+        ledger = ActionStore(path)
+        try:
+            return {row["action_id"]: row["status"] for row in ledger.summary()["receipts"]}
+        finally:
+            ledger.close()
+
+    def _finalize_run(self, run: dict[str, Any], status: str, error: str | None = None) -> None:
+        try:
+            statuses = self._ledger_statuses(run)
+            if any(value in {"sending", "executing", "needs_reconciliation"} for value in statuses.values()):
+                status, error = "needs_reconciliation", "write_state_uncertain"
+            else:
+                for action_id, value in statuses.items():
+                    if value in {"pending_approval", "approved"}:
+                        self._terminalize_action(run, action_id, "run ended before this action executed")
+                        approval = self.store.data["approvals"].get(action_id)
+                        if approval and approval.get("status") in {"pending_approval", "approved"}:
+                            approval["status"] = "not_executed" if status == "completed" else status
+        except Exception:
+            status, error = "needs_reconciliation", "action_ledger_unreadable"
+        run["error"] = error
+        run.pop("_stop_status", None)
+        if run.get("assistant_text"):
+            run["summary"] = run["assistant_text"]
+        for tool in run.get("tools", []):
+            if tool.get("status") == "running":
+                tool["status"] = "interrupted"
+        pending_ids = list(run.get("pending_approval_action_ids", []))
+        if pending_ids and status in {"completed", "failed", "cancelled", "interrupted"}:
+            # Only hide the pending list after every corresponding ledger row
+            # is terminal.  An uncertain row must remain visible for review.
+            try:
+                terminal = self._ledger_statuses(run)
+            except Exception:
+                terminal = {}
+            if all(terminal.get(action_id) in {"verified", "known_failed"} for action_id in pending_ids):
+                run.pop("pending_approval_action_ids", None)
+        # A worker can exit before producing its first model round (for example
+        # during Pi session initialization after Popen succeeded).  In that
+        # narrow, side-effect-free case the original user messages are safe to
+        # submit on a retry.  Keep markers for any run with model/tool activity
+        # or a non-retryable terminal state.
+        if status == "failed" and run.get("model_rounds", 0) == 0 and not run.get("tools"):
+            for message in self.store.data["messages"].get(run["session_id"], []):
+                if (message.get("role") == "user" and
+                        message.get("business_id") == run["business_id"] and
+                        message.get("submitted_run_id") == run["id"]):
+                    message.pop("submitted_run_id", None)
+        self._clear_active(run, status)
+
+    def _recover_on_start(self) -> None:
+        """Never resume a worker or approval after the owning host exits."""
+        for run in self.store.data["runs"].values():
+            if run.get("status") in {"running", "awaiting_approval", "cancel_requested"}:
+                self._finalize_run(run, "interrupted", "host_restarted")
+        self.store.save()
+
+    def close(self) -> None:
+        with self._lock:
+            self._closing = True
+            self._event_sink = None
+            processes = list(self._processes.values())
+            threads = list(self._threads.values())
+            for run in self.store.data["runs"].values():
+                if run.get("status") in {"running", "awaiting_approval", "cancel_requested"}:
+                    run["_stop_status"] = "interrupted"
+            self.store.save()
+        for proc in processes:
+            if proc.poll() is None:
+                proc.terminate()
+        for proc in processes:
+            try:
+                proc.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=1)
+        for thread in threads:
+            thread.join(timeout=1)
+        with self._lock:
+            self._recover_on_start()
+            self.store.close()
+
+    def _event(self, name: str, data: dict[str, Any]) -> dict[str, Any]:
+        if data.get("run_id") in self.store.data["runs"]:
+            run = self.store.data["runs"][data["run_id"]]
+            data = {"session_id": run["session_id"], "business_id": run["business_id"], **data}
+        state_event = name in {"session_changed", "business_changed", "business_proposal_decided", "message_added", "run_changed", "approval_changed", "business_refreshed"}
+        wire_name = "changed" if state_event else name
+        wire_data = {"type": name, **_safe(data)} if state_event else _safe(data)
+        row = self.store.event(wire_name, wire_data)
+        if self._event_sink:
+            self._event_sink({"event": wire_name, "data": {**row["data"], "sequence": row["sequence"]}})
+        return row
+
+    def _session(self, session_id: str) -> dict[str, Any]:
+        row = self.store.data["sessions"].get(session_id)
+        if row is None:
+            raise KeyError("unknown session")
+        return row
+
+    def _business(self, session_id: str, business_id: str) -> dict[str, Any]:
+        row = self.store.data["businesses"].get(business_id)
+        if row is None or row.get("session_id") != session_id:
+            raise KeyError("business does not belong to session")
+        return row
+
+    @staticmethod
+    def _summary(row: dict[str, Any]) -> dict[str, Any]:
+        return {key: row.get(key) for key in ("id", "title", "created_at", "updated_at", "archived", "status")}
+
+    def list_sessions(self) -> list[dict[str, Any]]:
+        return [self._summary(row) for row in self.store.data["sessions"].values()]
+
+    def create_session(self, title: str | None = None) -> dict[str, Any]:
+        if title is not None and (not isinstance(title, str) or not 1 <= len(title.strip()) <= 200):
+            raise ValueError("title must be 1..200 characters")
+        session_id, stamp = uid("s"), now()
+        row = {"id": session_id, "title": title.strip() if title else "新会话", "created_at": stamp,
+               "updated_at": stamp, "archived": False, "status": "idle", "active_run_id": None}
+        self.store.data["sessions"][session_id] = row
+        self.store.data["messages"][session_id] = []
+        self._event("session_changed", {"session_id": session_id})
+        return self._summary(row)
+
+    def rename_session(self, session_id: str, title: str) -> dict[str, Any]:
+        row = self._session(session_id)
+        title = str(title).strip()
+        if not title or len(title) > 200:
+            raise ValueError("title must be 1..200 characters")
+        row["title"], row["updated_at"] = title, now()
+        self._event("session_changed", {"session_id": session_id})
+        return self._summary(row)
+
+    def archive_session(self, session_id: str) -> dict[str, bool]:
+        row = self._session(session_id)
+        if row.get("active_run_id"):
+            raise RuntimeError("cannot archive a session with an active run")
+        row["archived"], row["updated_at"] = True, now()
+        self._event("session_changed", {"session_id": session_id})
+        return {"ok": True}
+
+    def get_session(self, session_id: str) -> dict[str, Any]:
+        session = self._session(session_id)
+        businesses = [row for row in self.store.data["businesses"].values() if row["session_id"] == session_id]
+        businesses.sort(key=lambda row: (row["created_at"], row["id"]))
+        return {"session": session, "messages": [public_message(row) for row in self.store.data["messages"].get(session_id, [])], "businesses": businesses}
+
+    def send_message(self, session_id: str, text: str, business_id: str | None = None) -> dict[str, bool]:
+        self._session(session_id)
+        text = str(text).strip()
+        if not text or len(text) > 20_000:
+            raise ValueError("text must be 1..20000 characters")
+        proposal = None
+        if business_id is None:
+            proposal = {"id": uid("p"), "type": "sale_invoice", "title": "销售订单与发票", "goal": text, "status": "pending"}
+        else:
+            self._business(session_id, business_id)
+            if self.store.data["sessions"][session_id].get("active_run_id"):
+                raise RuntimeError("host already has an active run")
+        self.store.data["messages"].setdefault(session_id, []).append({"id": uid("m"), "role": "user", "text": text,
+            "created_at": now(), "business_id": business_id, **({"proposal": proposal} if proposal else {})})
+        self._event("message_added", {"session_id": session_id, "business_id": business_id})
+        return {"ok": True}
+
+    def confirm_business(self, session_id: str, proposal_id: str, confirmed: bool) -> dict[str, Any] | None:
+        self._session(session_id)
+        for message in reversed(self.store.data["messages"].get(session_id, [])):
+            proposal = message.get("proposal")
+            if proposal and proposal.get("id") == proposal_id:
+                if proposal["status"] != "pending":
+                    raise ValueError("proposal already decided")
+                proposal["status"] = "confirmed" if confirmed else "rejected"
+                if not confirmed:
+                    self._event("business_proposal_decided", {"session_id": session_id, "proposal_id": proposal_id, "confirmed": False})
+                    return None
+                business_id, stamp = uid("b"), now()
+                ordinal = 1 + sum(1 for row in self.store.data["businesses"].values() if row.get("session_id") == session_id)
+                business = {"id": business_id, "session_id": session_id, "type": "sale_invoice", "title": f"销售与开票 · {ordinal}",
+                            "goal": proposal["goal"], "status": "ready", "created_at": stamp, "updated_at": stamp, "active_run_id": None}
+                self.store.data["businesses"][business_id] = business
+                message["business_id"] = business_id
+                self._event("business_changed", {"session_id": session_id, "business_id": business_id})
+                return business
+        raise KeyError("unknown proposal")
+
+    def _instruction(self, business: dict[str, Any], run_id: str) -> Path:
+        path = self.store.root / "runs" / run_id / "instruction.txt"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            return path
+        messages = [m for m in self.store.data["messages"].get(business["session_id"], []) if m.get("business_id") == business["id"] and m.get("role") == "user" and not m.get("submitted_run_id")]
+        text = "\n".join(m["text"] for m in messages) or "Continue the existing business goal. Re-read current state; do not repeat completed writes."
+        path.write_text("Complete the confirmed sale_invoice business task for this workspace.\n" +
+                        "New user instructions:\n" + text +
+                        "\nUse native Odoo tools only. Before any ERP write, wait for trusted host approval. After writes, read resulting documents and report facts briefly.\n", encoding="utf-8")
+        for message in messages:
+            message["submitted_run_id"] = run_id
+        return path
+
+    def start_run(self, session_id: str, business_id: str) -> dict[str, Any]:
+        session, business = self._session(session_id), self._business(session_id, business_id)
+        if self._closing or self._processes or session.get("active_run_id") or any(row.get("status") in {"running", "awaiting_approval", "cancel_requested"} for row in self.store.data["runs"].values()):
+            raise RuntimeError("only one active run is allowed on this host")
+        for previous in self.store.data["runs"].values():
+            if previous.get("business_id") != business_id:
+                continue
+            try:
+                statuses = self._ledger_statuses(previous)
+            except Exception:
+                statuses = {"unknown": "needs_reconciliation"}
+            if previous.get("status") == "needs_reconciliation" or any(value in {"sending", "executing", "needs_reconciliation"} for value in statuses.values()):
+                business["status"] = "blocked"
+                raise RuntimeError("business is blocked by an unresolved write; refresh and reconcile first")
+        run_id, stamp = uid("r"), now()
+        run = {"id": run_id, "business_id": business_id, "session_id": session_id, "status": "running", "started_at": stamp,
+               "ended_at": None, "error": None, "usage": None, "tool_count": 0, "model_rounds": 0, "elapsed_seconds": None,
+               "rounds": [], "tools": [], "events": [], "documents": [], "checks": [], "stale": False}
+        self.store.data["runs"][run_id] = run
+        session["active_run_id"], business["active_run_id"], business["status"] = run_id, run_id, "running"
+        session["status"], session["updated_at"] = "running", stamp
+        self._event("run_changed", {"session_id": session_id, "business_id": business_id, "run_id": run_id, "status": "running"})
+        self._launch(run, continue_run=False)
+        return run
+
+    def _launch(self, run: dict[str, Any], *, continue_run: bool) -> None:
+        try:
+            if self._closing or self._processes:
+                raise RuntimeError("host is busy or stopping")
+            if any(not os.environ.get(key) for key in ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL")):
+                raise RuntimeError("explicit model settings are required")
+            if not continue_run:
+                probe = self._native_reads().call("search_records", {"model": "res.partner", "domain": [], "fields": ["id"], "limit": 1})
+                if probe.get("success") is not True:
+                    raise RuntimeError("Odoo connection preflight failed; check connection settings")
+            instruction = self._instruction(self._business(run["session_id"], run["business_id"]), run["id"])
+            usage = self.store.root / "runs" / run["id"] / ("usage-%d.json" % len(run["events"]))
+            session_file = self.store.root / "sessions" / run["business_id"] / "pi-agent-session.jsonl"
+            session_file.parent.mkdir(parents=True, exist_ok=True)
+            runtime_home = self.store.root / "runtime-home"
+            runtime_home.mkdir(exist_ok=True)
+            proc = subprocess.Popen(worker_command(self.root, instruction, usage, session_file, continue_run=continue_run), cwd=self.root,
+                                    env={**child_environment(run["session_id"], run["id"]), "USERPROFILE": str(runtime_home), "HOME": str(runtime_home)}, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", bufsize=1)
+        except Exception as exc:
+            self._finalize_run(run, "failed", f"worker_launch_{type(exc).__name__}")
+            self._event("run_changed", {"run_id": run["id"], "status": run["status"]})
+            raise
+        self._processes[run["id"]] = proc
+        thread = threading.Thread(target=self._consume_worker, args=(run["id"], proc, usage), daemon=True)
+        self._threads[run["id"]] = thread
+        thread.start()
+
+    def _trace(self, run: dict[str, Any], kind: str, data: dict[str, Any]) -> None:
+        row = {"type": kind, **_safe(data)}
+        run["events"].append(row)
+        self._event("run_trace", {"session_id": run["session_id"], "business_id": run["business_id"], "run_id": run["id"], **row})
+
+    def _action_row(self, run: dict[str, Any], action_id: str) -> dict[str, Any] | None:
+        try:
+            from odoo_runtime.store import ActionStore
+            store = ActionStore(self.store.root / "runs" / run["id"] / "odoo-actions.sqlite3")
+            try: return store.get(action_id)
+            finally: store.close()
+        except Exception: return None
+
+    def _set_approval(self, run: dict[str, Any], action_id: str, result: dict[str, Any]) -> None:
+        row = self._action_row(run, action_id)
+        if not row or row.get("session_id") != run["session_id"] or row.get("run_id") != run["id"] or row.get("action_id") != action_id:
+            run["error"] = "approval_ledger_missing_or_out_of_scope"
+            return
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        approval = result.get("approval") if isinstance(result.get("approval"), dict) else {}
+        kwargs = payload.get("kwargs") if isinstance(payload.get("kwargs"), dict) else {}
+        record_ids = payload.get("record_ids", kwargs.get("ids", result.get("record_ids", [])))
+        operation = payload.get("operation", payload.get("method", result.get("operation", result.get("method"))))
+        values = payload.get("values") or ({"values_list": payload["values_list"]} if payload.get("values_list") else kwargs)
+        if isinstance(values, dict) and "ids" in values:
+            values = {key: value for key, value in values.items() if key != "ids"}
+        approval = {"id": uid("approval"), "action_id": action_id, "session_id": run["session_id"], "business_id": run["business_id"],
+                    "run_id": run["id"], "status": "pending_approval", "created_at": now(), "expires_at": row.get("expires_at"),
+                    "title": payload.get("title", approval.get("title", result.get("title", "ERP write approval"))),
+                    "model": payload.get("model", approval.get("model", result.get("model"))), "operation": operation,
+                    "record_ids": record_ids, "values": _safe(values), "prestate": _safe(row.get("prestate")),
+                    "source": row.get("approval_source"), "result": _safe(result), "verification": _safe(row.get("verification"))}
+        existing = self.store.data["approvals"].get(action_id)
+        if existing and existing.get("status") in {"approved", "verified", "known_failed"}:
+            return
+        self.store.data["approvals"][action_id] = approval
+        pending = run.setdefault("pending_approval_action_ids", [])
+        if action_id not in pending:
+            pending.append(action_id)
+        self._trace(run, "approval_required", {"action_id": action_id, "status": "pending_approval"})
+
+    def _tool_start(self, run: dict[str, Any], event: dict[str, Any]) -> None:
+        call_id, args = str(event.get("tool_call_id", event.get("toolCallId", ""))), _arguments(event.get("args"))
+        run["tools"].append({"id": call_id, "tool_call_id": call_id, "name": str(event.get("tool_name", event.get("toolName", ""))), "round": run["model_rounds"] + 1, "arguments": args, "status": "running", "started_at": now(), "result": None, "action_id": None})
+        run["tool_count"] += 1
+        self._trace(run, "tool_start", {"tool_call_id": call_id, "tool_name": str(event.get("tool_name", event.get("toolName", ""))), "arguments": args})
+
+    def _tool_end(self, run: dict[str, Any], event: dict[str, Any]) -> None:
+        call_id = str(event.get("tool_call_id", event.get("toolCallId", "")))
+        tool = next((row for row in reversed(run["tools"]) if row.get("tool_call_id") == call_id), None)
+        if tool is None:
+            self._tool_start(run, {"tool_call_id": call_id, "tool_name": event.get("tool_name", event.get("toolName", "")), "args": {}})
+            tool = run["tools"][-1]
+        payload = _structured(event.get("result"))
+        ended = now()
+        try:
+            elapsed = max(0.0, (datetime.fromisoformat(ended.replace("Z", "+00:00")) - datetime.fromisoformat(tool["started_at"].replace("Z", "+00:00"))).total_seconds())
+        except (KeyError, ValueError):
+            elapsed = None
+        action_id, approval_status, _ = _approval_marker(payload)
+        action_id = action_id or payload.get("action_id")
+        failed = bool(event.get("is_error", event.get("isError", False))) or payload.get("success") is False
+        tool.update({"status": "awaiting_approval" if approval_status else "error" if failed else "completed", "ended_at": ended, "elapsed_seconds": elapsed, "result": _safe(payload)})
+        if isinstance(action_id, str): tool["action_id"] = action_id
+        if approval_status == "pending_approval" and isinstance(action_id, str): self._set_approval(run, action_id, payload)
+        tool_name = str(event.get("tool_name", event.get("toolName", "")))
+        for doc in collect_documents(tool_name, tool.get("arguments", {}), payload):
+            doc["observed_at"] = now()
+            run["documents"] = [old for old in run["documents"] if (old.get("model"), old.get("id")) != (doc.get("model"), doc.get("id"))]
+            run["documents"].append(doc)
+        self._trace(run, "tool_end", {"tool_call_id": call_id, "tool_name": tool["name"], "is_error": failed and not approval_status, "action_id": action_id})
+
+    def _round_end(self, run: dict[str, Any], event: dict[str, Any]) -> None:
+        message = event.get("message") if isinstance(event.get("message"), dict) else {}
+        usage = message.get("usage") if isinstance(message.get("usage"), dict) else {}
+        stop_reason = message.get("stop_reason", message.get("stopReason"))
+        start = int(run.get("_round_tool_start", len(run["tools"])))
+        timing = message.get("timing") if isinstance(message.get("timing"), dict) else {}
+        row = {"index": run["model_rounds"] + 1, "status": "error" if stop_reason in {"error", "aborted"} or message.get("error_message") else "completed", "text": _visible_content(message), "stop_reason": stop_reason, "error": message.get("error_message", message.get("errorMessage")),
+               "usage": {"input": usage.get("input"), "cache_read": usage.get("cacheRead", usage.get("cache_read")), "output": usage.get("output"), "reasoning": usage.get("reasoning"), "total": usage.get("totalTokens", usage.get("total_tokens")), "input_semantics": "uncached"}, "elapsed_seconds": (timing.get("totalDurationMs") / 1000 if isinstance(timing.get("totalDurationMs"), (int, float)) else None), "tool_ids": [t.get("id") for t in run["tools"][start:]]}
+        run["rounds"].append(row); run["model_rounds"] += 1
+        run["last_stop_reason"] = stop_reason
+        run["_round_tool_start"] = len(run["tools"])
+        self._trace(run, "round_end", {"round": row["index"], "stop_reason": row["stop_reason"], "error": row["error"]})
+
+    @staticmethod
+    def _round_usage(rounds: list[dict[str, Any]]) -> dict[str, Any] | None:
+        if not rounds:
+            return None
+        result: dict[str, Any] = {"input": None, "cache_read": None, "output": None, "reasoning": None, "total": None}
+        for field in result:
+            values = [row.get("usage", {}).get(field) for row in rounds if isinstance(row.get("usage"), dict)]
+            if len(values) == len(rounds) and all(type(value) in {int, float} for value in values):
+                result[field] = sum(values)
+        result["input_semantics"] = "uncached"
+        return result
+
+    def _consume_worker(self, run_id: str, proc: subprocess.Popen[str], usage_path: Path) -> None:
+        run = self.store.data["runs"][run_id]
+        finished, timed_out = threading.Event(), threading.Event()
+        diagnostics: deque[str] = deque(maxlen=4)
+        def watchdog() -> None:
+            if not finished.wait(3600) and proc.poll() is None:
+                timed_out.set()
+                proc.kill()
+        def drain_errors() -> None:
+            if proc.stderr:
+                while chunk := proc.stderr.read(4096):
+                    diagnostics.append(chunk)
+        threading.Thread(target=watchdog, daemon=True).start()
+        stderr_thread = threading.Thread(target=drain_errors, daemon=True)
+        stderr_thread.start()
+        failure = None
+        try:
+            if proc.stdout:
+                for line in proc.stdout:
+                    event = json.loads(line)
+                    if not isinstance(event, dict):
+                        raise ValueError("invalid_worker_event")
+                    with self._lock:
+                        if run.get("_stop_status"):
+                            continue
+                        kind = event.get("type")
+                        if kind == "tool_execution_start":
+                            run.setdefault("_round_tool_start", len(run["tools"]))
+                            self._tool_start(run, event)
+                        elif kind == "tool_execution_end":
+                            self._tool_end(run, event)
+                        elif kind == "turn_end":
+                            self._round_end(run, event)
+                            run["usage"] = self._round_usage(run["rounds"])
+                        elif kind == "run_metadata":
+                            run["metadata"] = {key: event.get(key) for key in ("model", "runtimeMode", "toolMode", "worldMode", "odooToolCount", "toolNames", "maxOutputTokens", "maxModelRequests")}
+                        elif kind == "message_end" and isinstance(event.get("message"), dict) and event["message"].get("role") == "assistant":
+                            text = _visible_content(event["message"])
+                            run["assistant_text"] = text
+                            if text:
+                                self.store.data["messages"].setdefault(run["session_id"], []).append({"id": uid("m"), "role": "assistant", "text": text, "created_at": now(), "business_id": run["business_id"]})
+                                self._event("message_added", {"session_id": run["session_id"], "business_id": run["business_id"]})
+            code = proc.wait()
+        except Exception as exc:
+            failure = type(exc).__name__
+            if proc.poll() is None:
+                proc.kill()
+            code = proc.wait()
+        finally:
+            finished.set()
+            stderr_thread.join(timeout=1)
+        with self._lock:
+            if self._processes.get(run_id) is not proc:
+                return
+            self._processes.pop(run_id)
+            self._threads.pop(run_id, None)
+            run["usage"] = self._round_usage(run.get("rounds", []))
+            pending_ids = run.get("pending_approval_action_ids", [])
+            valid_pending = all((self._action_row(run, action_id) or {}).get("status") == "pending_approval" for action_id in pending_ids)
+            if run.get("_stop_status"):
+                status, failure = run.pop("_stop_status"), "execution_stopped"
+            elif timed_out.is_set():
+                status, failure = "failed", "worker_timeout"
+            elif failure or code != 0:
+                status, failure = "failed", failure or f"worker_exit_{code}"
+            elif run.get("error"):
+                status, failure = "failed", run["error"]
+            elif pending_ids and valid_pending:
+                status = "awaiting_approval"
+            elif pending_ids:
+                status, failure = "failed", "approval_ledger_missing_or_not_pending"
+            elif run.get("last_stop_reason") == "stop" and run.get("model_rounds", 0) > 0:
+                status = "completed"
+            else:
+                status, failure = "failed", "model_did_not_finish"
+            if status == "awaiting_approval":
+                run["status"] = status
+                self.store.data["businesses"][run["business_id"]]["status"] = status
+                session = self.store.data["sessions"].get(run["session_id"])
+                if session:
+                    session["status"], session["updated_at"] = status, now()
+            else:
+                self._finalize_run(run, status, failure)
+            if failure:
+                detail = "".join(diagnostics)[-4096:]
+                for key in ("LLM_API_KEY", "ODOO_API_KEY", "ODOO_PASSWORD"):
+                    if os.environ.get(key):
+                        detail = detail.replace(os.environ[key], "<redacted>")
+                run["error_detail"] = detail
+            self._event("run_changed", {"run_id": run_id, "status": run["status"]})
+
+    def get_business(self, session_id: str, business_id: str) -> dict[str, Any]:
+        self._business(session_id, business_id)
+        for run in self.store.data["runs"].values():
+            if run.get("business_id") != business_id:
+                continue
+            for action_id, approval in self.store.data["approvals"].items():
+                if approval.get("run_id") != run.get("id"):
+                    continue
+                row = self._action_row(run, action_id)
+                if row and row.get("status") in {"verified", "known_failed", "needs_reconciliation"}:
+                    if approval.get("status") in {"pending_approval", "approved"}:
+                        approval["status"] = row["status"]
+                    approval["result"], approval["verification"] = _safe(row.get("result")), _safe(row.get("verification"))
+        return business_detail(self.store.data, business_id)
+
+    def _native_reads(self):
+        from odoo_runtime.gateway import Json2ReadClient
+        from odoo_runtime.reads import NativeReads
+        required = ("ODOO_URL", "ODOO_DB", "ODOO_USERNAME", "ODOO_API_KEY")
+        if any(not os.environ.get(key) for key in required):
+            raise RuntimeError("explicit Odoo connection settings are required")
+        # Explicit construction prevents any legacy config-file or home fallback.
+        client = Json2ReadClient(url=os.environ["ODOO_URL"], db=os.environ["ODOO_DB"],
+            username=os.environ["ODOO_USERNAME"], password=os.environ["ODOO_API_KEY"],
+            api_key=os.environ["ODOO_API_KEY"], transport="json2", timeout=10)
+        return NativeReads(client)
+
+    def refresh_business(self, session_id: str, business_id: str) -> dict[str, Any]:
+        business = self._business(session_id, business_id)
+        if business.get("active_run_id"):
+            raise RuntimeError("wait for the active run to finish before independent readback")
+        try:
+            reads = self._native_reads()
+        except Exception as exc:
+            # Record a failed readback rather than preserving an earlier green check.
+            error_type = type(exc).__name__
+            reads = lambda *_args: {"success": False, "error": error_type}
+        detail = readback_business(self.store.data, business_id, reads)
+        self._event("business_refreshed", {"session_id": session_id, "business_id": business_id})
+        return detail
+
+    def get_trace(self, session_id: str, business_id: str, run_id: str | None = None) -> dict[str, Any]:
+        self._business(session_id, business_id)
+        runs = [r for r in self.store.data["runs"].values() if r.get("business_id") == business_id and (run_id is None or r["id"] == run_id)]
+        if run_id is not None and not runs: raise KeyError("unknown run")
+        runs.sort(key=lambda row: (str(row.get("started_at") or ""), str(row.get("id") or "")))
+        run = runs[-1] if run_id is None and runs else (runs[0] if runs else None)
+        if run is None: return {"run": None, "rounds": [], "tools": [], "events": []}
+        public_run = {key: value for key, value in run.items() if key not in {"rounds", "tools", "events", "_round_tool_start", "assistant_text"}}
+        if isinstance(public_run.get("usage"), dict):
+            usage = public_run["usage"]
+            public_run["usage"] = {"input": usage.get("input"), "cache_read": usage.get("cache_read", usage.get("cacheRead")), "output": usage.get("output"), "reasoning": usage.get("reasoning"), "total": usage.get("total")}
+        rounds = [{key: value for key, value in row.items() if key != "stop_reason"} for row in run.get("rounds", [])]
+        tools = [{key: value for key, value in row.items() if key not in {"tool_call_id", "started_at", "ended_at"}} for row in run.get("tools", [])]
+        return {"run": _safe(public_run), "rounds": _safe(rounds), "tools": _safe(tools), "events": _safe(run.get("events", []))}
+
+    def _action_for_approval(self, run: dict[str, Any], action_id: str) -> dict[str, Any] | None:
+        from odoo_runtime.store import ActionStore
+        store = ActionStore(self.store.root / "runs" / run["id"] / "odoo-actions.sqlite3")
+        try: return store.get(action_id)
+        finally: store.close()
+
+    def _terminalize_action(self, run: dict[str, Any], action_id: str, error: str) -> None:
+        from odoo_runtime.store import ActionStore
+        store = ActionStore(self.store.root / "runs" / run["id"] / "odoo-actions.sqlite3")
+        try:
+            row = store.get(action_id)
+            if row and row.get("status") not in {"verified", "known_failed", "needs_reconciliation"}:
+                store.finish(action_id, "known_failed", error=error)
+        finally:
+            store.close()
+
+    def _clear_active(self, run: dict[str, Any], status: str) -> None:
+        run["status"] = status
+        run["ended_at"] = run.get("ended_at") or now()
+        try:
+            run["elapsed_seconds"] = max(0.0, (datetime.fromisoformat(run["ended_at"].replace("Z", "+00:00")) - datetime.fromisoformat(run["started_at"].replace("Z", "+00:00"))).total_seconds())
+        except (KeyError, ValueError, TypeError):
+            run["elapsed_seconds"] = None
+        session = self.store.data["sessions"].get(run["session_id"])
+        business = self.store.data["businesses"].get(run["business_id"])
+        if session: session["active_run_id"], session["status"] = None, status
+        if business: business["active_run_id"], business["status"] = None, status
+
+    def _approval_prestate_matches(self, row, store) -> bool:
+        from odoo_runtime.actions import NativeActions
+        return NativeActions(self._native_reads(), store=store)._current_prestate_matches(row)
+
+    def decide_approval(self, session_id: str, business_id: str, run_id: str, action_id: str, decision: str) -> dict[str, Any]:
+        if decision not in {"approve", "reject"}: raise ValueError("decision must be approve or reject")
+        approved = decision == "approve"
+        run = self.store.data["runs"].get(run_id); self._business(session_id, business_id)
+        approval = self.store.data["approvals"].get(action_id)
+        pending_ids = set(run.get("pending_approval_action_ids", [])) if run else set()
+        if not run or run.get("session_id") != session_id or run.get("business_id") != business_id or run.get("status") != "awaiting_approval" or run_id in self._processes or action_id not in pending_ids or not approval or approval.get("run_id") != run_id or approval.get("status") != "pending_approval": raise ValueError("approval scope is invalid")
+        row = self._action_for_approval(run, action_id)
+        if not row or row.get("session_id") != session_id or row.get("run_id") != run_id or row.get("status") != "pending_approval": raise ValueError("action scope or state is invalid")
+        if float(row.get("expires_at", 0)) < time.time():
+            for item in run.get("pending_approval_action_ids", [action_id]):
+                item_row = self._action_row(run, item)
+                if item_row and item_row.get("status") in {"pending_approval", "approved"}:
+                    self._terminalize_action(run, item, "desktop approval expired")
+                if item in self.store.data["approvals"]:
+                    self.store.data["approvals"][item]["status"] = "expired" if item == action_id else "cancelled"
+            run["error"] = "approval_expired"
+            self._finalize_run(run, "failed", "approval_expired")
+            self._event("approval_changed", {"session_id": session_id, "business_id": business_id, "run_id": run_id, "action_id": action_id, "status": "expired"})
+            return {"ok": False, "status": "expired"}
+        from odoo_runtime.store import ActionStore
+        store = ActionStore(self.store.root / "runs" / run_id / "odoo-actions.sqlite3")
+        try:
+            if row.get("prestate_sha256") != ActionStore.digest(row.get("prestate")): raise ValueError("prestate integrity check failed")
+            if approved:
+                if not self._approval_prestate_matches(row, store):
+                    approval["status"] = "stale"
+                    self._finalize_run(run, "failed", "approval_prestate_changed")
+                    self._event("approval_changed", {"run_id": run_id, "action_id": action_id, "status": "stale"})
+                    return {"ok": False, "status": "stale"}
+                if not store.approve(action_id, "desktop_host"): raise ValueError("action was not pending approval")
+                approval["status"] = "approved"
+                approval["source"] = "desktop_host"
+                remaining = [item for item in run.get("pending_approval_action_ids", []) if item != action_id and self.store.data["approvals"].get(item, {}).get("status") == "pending_approval"]
+                if remaining:
+                    self.store.data["sessions"][session_id]["status"] = "awaiting_approval"
+                    self.store.data["sessions"][session_id]["updated_at"] = now()
+                    self._event("approval_changed", {"session_id": session_id, "business_id": business_id, "run_id": run_id, "action_id": action_id, "status": "approved", "remaining_action_ids": remaining})
+                    return {"ok": True, "status": "approved", "run_id": run_id, "action_id": action_id, "awaiting_action_ids": remaining}
+                run["status"] = "running"
+                self.store.data["businesses"][business_id]["status"] = "running"
+                self.store.data["sessions"][session_id]["status"] = "running"
+                self.store.data["sessions"][session_id]["updated_at"] = now()
+                run.pop("pending_approval_action_ids", None)
+                self._event("approval_changed", {"session_id": session_id, "business_id": business_id, "run_id": run_id, "action_id": action_id, "status": "approved"})
+                self._launch(run, continue_run=True)
+                return {"ok": True, "status": "approved", "run_id": run_id, "action_id": action_id}
+            for item in run.get("pending_approval_action_ids", [action_id]):
+                item_row = self._action_row(run, item)
+                if item_row and item_row.get("status") in {"pending_approval", "approved"}:
+                    self._terminalize_action(run, item, "desktop approval rejected")
+                if item in self.store.data["approvals"]:
+                    self.store.data["approvals"][item]["status"] = "rejected" if item == action_id else "cancelled"
+            run["error"] = "approval_rejected"
+            self._finalize_run(run, "failed", "approval_rejected")
+            self._event("approval_changed", {"session_id": session_id, "business_id": business_id, "run_id": run_id, "action_id": action_id, "status": "rejected"})
+            return {"ok": True, "status": "rejected", "run_id": run_id, "action_id": action_id}
+        finally: store.close()
+
+    def cancel_run(self, session_id: str, business_id: str, run_id: str) -> dict[str, Any]:
+        self._business(session_id, business_id)
+        run = self.store.data["runs"].get(run_id)
+        if not run or run.get("session_id") != session_id or run.get("business_id") != business_id:
+            raise ValueError("run scope is invalid")
+        if run["status"] not in {"running", "awaiting_approval"}:
+            raise ValueError("run is already terminal or stopping")
+        proc = self._processes.get(run_id)
+        if proc and proc.poll() is None:
+            run["_stop_status"], run["status"] = "cancelled", "cancel_requested"
+            self.store.data["businesses"][business_id]["status"] = "cancel_requested"
+            proc.terminate()
+        else:
+            self._finalize_run(run, "cancelled", "cancelled_by_user")
+        self._event("run_changed", {"run_id": run_id, "status": run["status"]})
+        return {"ok": True, "status": run["status"], "run_id": run_id}
+
+    def health(self) -> dict[str, Any]:
+        active = next((r["id"] for r in self.store.data["runs"].values() if r.get("status") in {"running", "awaiting_approval", "cancel_requested"}), None)
+        return {"host_ready": True, "odoo_status": "configured" if os.environ.get("ODOO_URL") and os.environ.get("ODOO_DB") else "unknown", "model_configured": bool(os.environ.get("LLM_API_KEY") and os.environ.get("LLM_BASE_URL") and os.environ.get("LLM_MODEL")), "environment": "configured" if os.environ.get("LLM_API_KEY") else "demo", "active_run_id": active}
+
+    def _dispatch(self, method: str, params: dict[str, Any]) -> Any:
+        methods = {"list_sessions": lambda: self.list_sessions(), "create_session": lambda: self.create_session(params.get("title")), "rename_session": lambda: self.rename_session(params["session_id"], params["title"]), "archive_session": lambda: self.archive_session(params["session_id"]), "get_session": lambda: self.get_session(params["session_id"]), "send_message": lambda: self.send_message(params["session_id"], params["text"], params.get("business_id")), "confirm_business": lambda: self.confirm_business(params["session_id"], params["proposal_id"], _must_bool(params["confirmed"], "confirmed")), "start_run": lambda: self.start_run(params["session_id"], params["business_id"]), "decide_approval": lambda: self.decide_approval(params["session_id"], params["business_id"], params["run_id"], params["action_id"], params["decision"]), "cancel_run": lambda: self.cancel_run(params["session_id"], params["business_id"], params["run_id"]), "get_business": lambda: self.get_business(params["session_id"], params["business_id"]), "refresh_business": lambda: self.refresh_business(params["session_id"], params["business_id"]), "get_trace": lambda: self.get_trace(params["session_id"], params["business_id"], params.get("run_id")), "health": self.health}
+        if method not in methods: raise KeyError("unknown method")
+        return methods[method]()
+
+    def call(self, method: str, params: dict[str, Any]) -> Any:
+        if not isinstance(params, dict):
+            raise ValueError("params must be an object")
+        with self._lock:
+            return _safe(self._dispatch(method, params))
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(); parser.add_argument("--data-dir", type=Path, required=True); parser.add_argument("--repo", type=Path, default=None); args = parser.parse_args()
+    output_lock = threading.Lock()
+    def emit(value: dict[str, Any]) -> None:
+        with output_lock: print(json.dumps(value, ensure_ascii=False, separators=(",", ":")), flush=True)
+    host = Workbench(args.data_dir, repo=args.repo, event_sink=emit)
+    try:
+        for line in sys.stdin:
+            if not line.strip(): continue
+            request_id = None
+            try:
+                request = json.loads(line); request_id = request.get("id"); emit({"id": request_id, "result": _safe(host.call(str(request.get("method")), request.get("params") or {}))})
+            except Exception as exc: emit({"id": request_id, "error": {"code": type(exc).__name__, "message": str(exc)[:500]}})
+    finally:
+        host.close()
+
+
+if __name__ == "__main__": main()

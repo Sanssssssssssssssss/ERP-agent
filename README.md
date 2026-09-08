@@ -10,12 +10,18 @@ This is the clean, standalone research surface for the completed Python Pi-style
 
 ## What is here
 
+Windows 业务工作台的使用、构建和修改入口见 [desktop/README.md](desktop/README.md)。
+桌面版本采用原生动态工具、逐项主机审批和独立业务回读；历史 Stage 7 的 static
+验收边界保持不变。当前桌面验收记录见 [ACCEPTANCE.md](experiments/desktop_workbench/ACCEPTANCE.md)。
+
 ```text
 agent/        pinned Pi Agent for Python source and tests
 mcp/          pinned odoo-mcp source and tests
 bench/        ERP-Bench generator plus 300 executable Harbor tasks
 integration/  Python/native Pi adapters, request receipts, offline run reports
 odoo_runtime/ native Odoo reads, actions, capabilities, SOP support, and knowledge
+workbench/    durable desktop sessions, host approvals, and sales fact projection
+desktop/      Windows Electron app, shared protocol, and packaged Python sidecar
 configs/      two single-case baselines and optional Docker proxy overlay
 patches/      the exact three-task Odoo 19 image-pin patch
 .runtime/     ignored local wheelhouse, jobs, logs, and environments

@@ -31,7 +31,7 @@ from integration.odoo_tools import native_tool_catalog, route_tools
 from integration.world_context import project_messages
 from odoo_runtime.actions import NativeActions
 from odoo_runtime.capabilities import NativeCapabilities
-from odoo_runtime.dynamic_tools import DynamicToolController
+from odoo_runtime.dynamic_tools import CAPABILITY_GROUPS, DynamicToolController
 from odoo_runtime.reads import NativeReads
 from odoo_runtime.sops import build_sop_tools
 from odoo_runtime.store import ActionStore
@@ -109,7 +109,15 @@ class RequestReceipts:
             raise ValueError("max_model_requests must be a positive integer")
         self.directory = directory
         self.max_model_requests = max_model_requests
-        self.number = 0
+        # A resumed worker shares the receipt directory with the initial
+        # worker.  Continue numbering so a continuation never overwrites the
+        # request that established the pending action.
+        existing = [
+            int(path.stem.split(".", 1)[0])
+            for path in directory.glob("*.request.json")
+            if path.stem.split(".", 1)[0].isdigit()
+        ]
+        self.number = max(existing, default=0)
 
     async def before_provider_request(self, payload: object) -> object:
         if (
@@ -155,6 +163,7 @@ def arguments() -> argparse.Namespace:
         type=Path,
         default=Path("/logs/agent/pi-agent-session.jsonl"),
     )
+    parser.add_argument("--receipt-dir", type=Path, default=None)
     parser.add_argument("--mcp-url", default="http://127.0.0.1:8000/mcp")
     parser.add_argument("--runtime-mode", choices=("mcp", "native"), default="mcp")
     parser.add_argument("--max-turns", type=int, default=None)
@@ -166,7 +175,51 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--sop-mode", choices=("off", "controlled"), default="off")
     parser.add_argument("--tool-mode", choices=("static", "dynamic"), default="static")
     parser.add_argument("--world-mode", choices=("off", "record", "project"), default="off")
+    parser.add_argument("--continue-run", action="store_true")
+    parser.add_argument("--pause-on-approval", action="store_true")
     return parser.parse_args()
+
+
+def _approval_required(result: object) -> bool:
+    """Read the native approval marker without coupling the runner to a tool."""
+    details = getattr(result, "details", None)
+    if details is None and isinstance(result, dict):
+        details = result.get("details", result)
+    if hasattr(details, "model_dump"):
+        details = details.model_dump()
+    if isinstance(details, dict):
+        structured = details.get("structuredContent", details)
+        if isinstance(structured, dict):
+            if structured.get("approval_required") is True:
+                return True
+            for key in ("approval_status", "action_status"):
+                marker = structured.get(key)
+                if isinstance(marker, dict) and marker.get("status") == "pending_approval":
+                    return True
+                if marker == "pending_approval":
+                    return True
+            if structured.get("status") == "pending_approval":
+                return True
+    structured = getattr(result, "structuredContent", None)
+    return isinstance(structured, dict) and structured.get("approval_required") is True
+
+
+def _next_receipt_sequence(directory: Path):
+    """Continue the shared tool chronology across approval worker restarts."""
+    latest = 0
+    for name in ("tool-backends.jsonl", "sop-events.jsonl", "dynamic-tools.jsonl"):
+        path = directory / name
+        if not path.exists():
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            for key in ("sequence", "end_sequence"):
+                value = row.get(key)
+                if type(value) is int:
+                    latest = max(latest, value)
+    return count(latest + 1).__next__
 
 
 async def run(args: argparse.Namespace) -> None:
@@ -210,10 +263,12 @@ async def run(args: argparse.Namespace) -> None:
 
     args.session_file.parent.mkdir(parents=True, exist_ok=True)
     args.usage_file.parent.mkdir(parents=True, exist_ok=True)
+    receipt_dir = getattr(args, "receipt_dir", None) or args.session_file.parent
+    receipt_dir.mkdir(parents=True, exist_ok=True)
     provider_name = os.environ.get("LLM_PROVIDER", "openai-compatible")
     thinking = os.environ.get("LLM_THINKING_TYPE", "high")
     receipts = RequestReceipts(
-        args.session_file.parent / "requests",
+        receipt_dir / "requests",
         max_model_requests=max_model_requests,
     )
     provider = OpenAICompatibleProvider(
@@ -237,19 +292,19 @@ async def run(args: argparse.Namespace) -> None:
     dynamic_tools = None
     try:
         async with _source_tools(args) as source_tools:
-            next_tool_sequence = count(1).__next__
+            next_tool_sequence = _next_receipt_sequence(receipt_dir)
             native_runtime = None
             if (getattr(args, "read_backend", "mcp") == "native"
                     or getattr(args, "action_backend", "mcp") == "native"
                     or getattr(args, "capability_backend", "mcp") == "native"):
-                os.environ["ODOO_REQUEST_LOG"] = str(args.session_file.parent / "odoo-native-requests.jsonl")
+                os.environ["ODOO_REQUEST_LOG"] = str(receipt_dir / "odoo-native-requests.jsonl")
                 os.environ["ODOO_REQUEST_BACKEND"] = "native"
                 native_runtime = NativeReads.from_environment()
             native = native_runtime if getattr(args, "read_backend", "mcp") == "native" else None
             actions = (
                 NativeActions(
                     native_runtime,
-                    store=ActionStore(args.session_file.parent / "odoo-actions.sqlite3"),
+                    store=ActionStore(receipt_dir / "odoo-actions.sqlite3"),
                     # Bench high-reasoning turns can exceed the safe default between
                     # validation and execution; prestate is still rechecked before send.
                     approval_ttl_seconds=60 * 60,
@@ -262,7 +317,7 @@ async def run(args: argparse.Namespace) -> None:
             capabilities = (
                 NativeCapabilities(
                     native_runtime,
-                    task_path=args.session_file.parent / "capability-tasks.sqlite3",
+                    task_path=receipt_dir / "capability-tasks.sqlite3",
                 )
                 if getattr(args, "capability_backend", "mcp") == "native"
                 else None
@@ -270,21 +325,21 @@ async def run(args: argparse.Namespace) -> None:
             if world_mode != "off":
                 try:
                     world = WorldStore(
-                        args.session_file.parent / "world-observations.jsonl",
-                        projection_path=args.session_file.parent / "world-projections.jsonl",
+                        receipt_dir / "world-observations.jsonl",
+                        projection_path=receipt_dir / "world-projections.jsonl",
                     )
                 except Exception as exc:  # noqa: BLE001 - optional world state must fail open
                     print(f"World initialization failed open: {type(exc).__name__}", file=sys.stderr)
             full_tools = [
                 *route_tools(
-                    source_tools, args.session_file.parent / "tool-backends.jsonl",
+                    source_tools, receipt_dir / "tool-backends.jsonl",
                     native, world, actions, capabilities, next_tool_sequence,
                     native_health=runtime_mode == "native",
                 ),
                 CURRENT_TIME_TOOL,
                 *(
                     build_sop_tools(
-                        args.session_file.parent / "sop-events.jsonl",
+                        receipt_dir / "sop-events.jsonl",
                         next_tool_sequence,
                     )
                     if sop_mode == "controlled"
@@ -294,7 +349,7 @@ async def run(args: argparse.Namespace) -> None:
             if tool_mode == "dynamic":
                 dynamic_tools = DynamicToolController(
                     full_tools,
-                    args.session_file.parent / "dynamic-tools.jsonl",
+                    receipt_dir / "dynamic-tools.jsonl",
                     next_tool_sequence,
                 )
                 session_tools = list(dynamic_tools.tools)
@@ -334,8 +389,8 @@ async def run(args: argparse.Namespace) -> None:
                     tools=list(session_tools),
                     max_turns=args.max_turns,
                     resource_paths=PiResourcePaths(
-                        root=args.session_file.parent / ".pi-agent",
-                        agents_root=args.session_file.parent / ".agents",
+                        root=receipt_dir / ".pi-agent",
+                        agents_root=receipt_dir / ".agents",
                         project_resources_enabled=False,
                     ),
                     session_id=os.environ.get("PI_AGENT_SESSION_ID"),
@@ -355,7 +410,32 @@ async def run(args: argparse.Namespace) -> None:
                 )
             )
             if dynamic_tools is not None:
+                # A paused worker is a fresh process.  Restore the controller's
+                # last published set from its append-only receipt before the
+                # continuation model turn is built.
+                dynamic_log = receipt_dir / "dynamic-tools.jsonl"
+                try:
+                    rows = [json.loads(line) for line in dynamic_log.read_text(encoding="utf-8").splitlines() if line.strip()]
+                    active = next((row.get("active") for row in reversed(rows) if isinstance(row.get("active"), list)), None)
+                    if active is not None:
+                        if any(group not in CAPABILITY_GROUPS for group in active):
+                            raise RuntimeError("Invalid saved dynamic tool selection")
+                        dynamic_tools._active = tuple(active)
+                        # The session was constructed with the base set before
+                        # the receipt was read; replace its next provider
+                        # context explicitly for a continuation.
+                        session.stage_tools_for_next_turn(dynamic_tools.tools)
+                except (OSError, json.JSONDecodeError):
+                    pass
                 dynamic_tools.bind(session.stage_tools_for_next_turn)
+            if getattr(args, "pause_on_approval", False):
+                async def stop_after_approval(turn):
+                    return any(_approval_required(result) for result in turn.tool_results)
+
+                # The hook runs after the tool result has been persisted and
+                # before the next model request.  It therefore pauses at the
+                # safe boundary without an extra paid request.
+                session._harness.config.should_stop_after_turn = stop_after_approval
             if world is not None and world_mode == "project":
                 existing_transform = session._harness.config.transform_context
 
@@ -399,7 +479,7 @@ async def run(args: argparse.Namespace) -> None:
                             "maxOutputTokens": max_output_tokens,
                             "maxModelRequests": max_model_requests,
                             "requestReceipts": str(
-                                args.session_file.parent / "requests"
+                                receipt_dir / "requests"
                             ),
                             "maxTurns": args.max_turns,
                             "toolContractSha256": hashlib.sha256(json.dumps([
@@ -417,8 +497,24 @@ async def run(args: argparse.Namespace) -> None:
                     ),
                     flush=True,
                 )
-                instruction = args.instruction_file.read_text(encoding="utf-8")
-                async for event in session.prompt(instruction):
+                assistant_before = sum(
+                    isinstance(message, AssistantMessage) for message in session.messages
+                )
+                if getattr(args, "continue_run", False) and getattr(args, "pause_on_approval", False):
+                    # Persist the host notification in the same Pi session. The
+                    # native action ledger remains the execution authority.
+                    source = session.prompt(
+                        "The desktop host has completed human approval of the pending actions. "
+                        "Resume the existing business goal. Check durable action status and execute only "
+                        "the approved actions; approval itself does not mean execution. "
+                        "Do not repeat completed writes or request the same approval again.",
+                        source="extension", custom_type="odoo_approval_resume",
+                    )
+                elif getattr(args, "continue_run", False):
+                    source = session.continue_()
+                else:
+                    source = session.prompt(args.instruction_file.read_text(encoding="utf-8"))
+                async for event in source:
                     if event.type != "message_update":
                         print(event.model_dump_json(by_alias=True), flush=True)
 
@@ -426,17 +522,22 @@ async def run(args: argparse.Namespace) -> None:
                     message
                     for message in session.messages
                     if isinstance(message, AssistantMessage)
-                ]
+                ][assistant_before:]
+                def usage_sum(field):
+                    if not assistant:
+                        return None
+                    values = [getattr(message.usage, field, None) for message in assistant]
+                    if all(value is None for value in values):
+                        return None
+                    return sum(value or 0 for value in values)
+
                 usage = {
-                    "input": sum(message.usage.input for message in assistant),
-                    "output": sum(message.usage.output for message in assistant),
-                    "cacheRead": sum(message.usage.cache_read for message in assistant),
-                    "cacheWrite": sum(
-                        message.usage.cache_write for message in assistant
-                    ),
-                    "reasoning": sum(
-                        message.usage.reasoning or 0 for message in assistant
-                    ),
+                    "input": usage_sum("input"),
+                    "output": usage_sum("output"),
+                    "total": usage_sum("total_tokens"),
+                    "cacheRead": usage_sum("cache_read"),
+                    "cacheWrite": usage_sum("cache_write"),
+                    "reasoning": usage_sum("reasoning"),
                     "modelCalls": receipts.number,
                     "maxOutputTokens": max_output_tokens,
                     "maxModelRequests": max_model_requests,
@@ -456,7 +557,7 @@ async def run(args: argparse.Namespace) -> None:
         if actions is not None:
             try:
                 summary = actions.store.summary()
-                (args.session_file.parent / "action-ledger-summary.json").write_text(
+                (receipt_dir / "action-ledger-summary.json").write_text(
                     json.dumps(summary, sort_keys=True), encoding="utf-8"
                 )
             except Exception as exc:  # noqa: BLE001 - preserve the agent result on receipt failure
@@ -467,7 +568,7 @@ async def run(args: argparse.Namespace) -> None:
             capabilities.close()
         if world is not None:
             try:
-                world.write_summary(args.session_file.parent / "world-summary.json")
+                world.write_summary(receipt_dir / "world-summary.json")
             except Exception as exc:  # noqa: BLE001 - derived receipts must not mask the run result
                 print(f"Derived world summary unavailable: {type(exc).__name__}", file=sys.stderr)
         await provider.aclose()

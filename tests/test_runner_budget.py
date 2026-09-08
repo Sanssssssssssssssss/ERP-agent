@@ -20,6 +20,16 @@ from pi_ai.openai_compatible import OpenAICompatibleProvider
 
 
 class RunnerBudgetTest(unittest.TestCase):
+    def test_resumed_receipts_keep_request_and_tool_chronology(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "0003.request.json").write_text("{}", encoding="utf-8")
+            self.assertEqual(pi_odoo_runner.RequestReceipts(root).number, 3)
+            (root / "tool-backends.jsonl").write_text('{"sequence":1,"end_sequence":4}\n', encoding="utf-8")
+            (root / "dynamic-tools.jsonl").write_text('{"sequence":5,"end_sequence":6}\n', encoding="utf-8")
+            next_sequence = pi_odoo_runner._next_receipt_sequence(root)
+            self.assertEqual((next_sequence(), next_sequence()), (7, 8))
+
     def test_receipts_enforce_max_model_requests_before_writing(self):
         async def check(root: Path) -> None:
             receipts = pi_odoo_runner.RequestReceipts(root, max_model_requests=1)
