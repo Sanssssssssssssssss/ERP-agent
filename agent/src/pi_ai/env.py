@@ -46,7 +46,7 @@ class OpenAICompatibleConfig:
     api_key: str = field(repr=False)
     base_url: str = DEFAULT_OPENAI_COMPATIBLE_BASE_URL
     headers: Mapping[str, str] | None = field(default=None, repr=False)
-    timeout_seconds: float = DEFAULT_OPENAI_COMPATIBLE_TIMEOUT_SECONDS
+    timeout_seconds: float | None = DEFAULT_OPENAI_COMPATIBLE_TIMEOUT_SECONDS
     max_retries: int = DEFAULT_OPENAI_COMPATIBLE_MAX_RETRIES
     max_retry_delay_seconds: float = DEFAULT_OPENAI_COMPATIBLE_MAX_RETRY_DELAY_SECONDS
     api: str = "openai-completions"

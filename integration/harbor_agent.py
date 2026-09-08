@@ -237,7 +237,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         max_model_requests: int | None = None,
         max_output_tokens: int | None = None,
         snapshot_sha256: str | None = None,
-        runtime_timeout_seconds: int = 1770,
+        runtime_timeout_seconds: int | None = 1770,
         **kwargs: Any,
     ) -> None:
         if version != PI_AGENT_COMMIT:
@@ -274,7 +274,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             raise ValueError("dynamic tool_mode requires controlled sop_mode")
         if world_mode not in {"off", "record", "project"}:
             raise ValueError("world_mode must be off, record, or project")
-        if type(runtime_timeout_seconds) is not int or runtime_timeout_seconds < 1:
+        if runtime_timeout_seconds is not None and (type(runtime_timeout_seconds) is not int or runtime_timeout_seconds < 1):
             raise ValueError("runtime_timeout_seconds must be a positive integer")
         self._max_turns = max_turns
         self._thinking = thinking
@@ -342,7 +342,8 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
 
     async def _run(self, instruction: str, environment: BaseEnvironment,
                    context: AgentContext) -> None:
-        deadline = time.monotonic() + self._runtime_timeout_seconds
+        deadline = (time.monotonic() + self._runtime_timeout_seconds
+                    if self._runtime_timeout_seconds is not None else None)
         anchor = await self.exec_as_agent(
             environment, command="cat /logs/agent/state/scenario-date.txt"
         )
@@ -444,12 +445,12 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             + "2>&1 | stdbuf -oL tee /logs/agent/"
             + ("pi-agent-odoo.jsonl" if native_only else "pi-agent-odoo-mcp.jsonl")
         )
-        remaining = int(deadline - time.monotonic())
+        remaining = int(deadline - time.monotonic()) if deadline is not None else None
         await self.exec_as_agent(
             environment,
             command=deadline_command(command, remaining),
             env=env,
-            timeout_sec=max(1, remaining) + 10,
+            timeout_sec=max(1, remaining) + 10 if remaining is not None else None,
         )
         usage_result = await self.exec_as_agent(
             environment,
@@ -479,8 +480,10 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         }
 
 
-def deadline_command(command: str, seconds: int) -> str:
+def deadline_command(command: str, seconds: int | None) -> str:
     """GNU timeout owns the remote process group even if the host disappears."""
+    if seconds is None:
+        return f"bash -c {shlex.quote(command)}"
     if seconds < 1:
         raise TimeoutError("Agent runtime budget exhausted before model startup")
     return (f"timeout --signal=TERM --kill-after=5s {seconds}s "

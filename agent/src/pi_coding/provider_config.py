@@ -125,7 +125,7 @@ class OpenAICompatibleProviderConfig:
     headers: dict[str, str] = field(default_factory=dict)
     compat: dict[str, Any] = field(default_factory=dict)
     model_metadata: dict[str, ProviderModelMetadata] = field(default_factory=dict)
-    timeout_seconds: float = DEFAULT_OPENAI_COMPATIBLE_TIMEOUT_SECONDS
+    timeout_seconds: float | None = DEFAULT_OPENAI_COMPATIBLE_TIMEOUT_SECONDS
     max_retries: int = DEFAULT_OPENAI_COMPATIBLE_MAX_RETRIES
     max_retry_delay_seconds: float = DEFAULT_OPENAI_COMPATIBLE_MAX_RETRY_DELAY_SECONDS
     thinking_levels: tuple[ThinkingLevel, ...] | None = None
@@ -1293,10 +1293,10 @@ def _apply_provider_preference(
         else provider.headers
     )
     timeout_seconds = (
-        _positive_float(
+        (None if value.get("timeout_seconds") is None else _positive_float(
             value.get("timeout_seconds"),
             f"provider_preferences.{provider.name}.timeout_seconds",
-        )
+        ))
         if "timeout_seconds" in value
         else provider.timeout_seconds
     )
@@ -2008,8 +2008,9 @@ def _provider_from_json(data: object) -> ProviderConfig:
         models,
         f"providers[{name}].model_metadata",
     )
-    timeout_seconds = _positive_float(
-        data.get("timeout_seconds", DEFAULT_OPENAI_COMPATIBLE_TIMEOUT_SECONDS),
+    timeout_value = data.get("timeout_seconds", DEFAULT_OPENAI_COMPATIBLE_TIMEOUT_SECONDS)
+    timeout_seconds = None if timeout_value is None else _positive_float(
+        timeout_value,
         f"providers[{name}].timeout_seconds",
     )
     max_retries = _non_negative_int(
@@ -2132,11 +2133,11 @@ def _api_key_from_provider(
 
 def _validate_provider_numbers(
     *,
-    timeout_seconds: float,
+    timeout_seconds: float | None,
     max_retries: int,
     max_retry_delay_seconds: float,
 ) -> None:
-    if isinstance(timeout_seconds, bool) or timeout_seconds <= 0:
+    if timeout_seconds is not None and (isinstance(timeout_seconds, bool) or timeout_seconds <= 0):
         raise ProviderConfigError("Provider timeout_seconds must be greater than 0")
     if not isinstance(max_retries, int) or isinstance(max_retries, bool) or max_retries < 0:
         raise ProviderConfigError("Provider max_retries must be 0 or greater")

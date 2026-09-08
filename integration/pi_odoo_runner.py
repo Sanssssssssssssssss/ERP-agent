@@ -224,7 +224,7 @@ async def run(args: argparse.Namespace) -> None:
             thinking_format="openai",
             compat=MODEL_COMPAT,
             provider_name=provider_name,
-            timeout_seconds=180,
+            timeout_seconds=None,
             max_retries=0,
             max_tokens=max_output_tokens,
             infer_api_from_model=False,
@@ -315,7 +315,7 @@ async def run(args: argparse.Namespace) -> None:
                         context_window=CONTEXT_WINDOW,
                     )
                 },
-                timeout_seconds=180,
+                timeout_seconds=None,
                 max_retries=0,
                 thinking_levels=(thinking,),
                 thinking_models=(model,),
