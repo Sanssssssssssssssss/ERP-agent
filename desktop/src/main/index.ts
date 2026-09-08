@@ -1,14 +1,17 @@
-import { app, BrowserWindow, ipcMain, session } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
+import { randomUUID } from "node:crypto";
+import { rename, unlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { HostClient } from "./host";
 import { publicSettings, saveSettings } from "./settings";
-import { assertRequest, canChangeSettings, METHODS } from "./ipc-security";
+import { assertRequest, businessScope, canChangeSettings, METHODS, observedRecordUrl } from "./ipc-security";
 import { runSelfCheck } from "./self-check";
-import type { SettingsInput, WorkbenchMethod } from "../shared/protocol";
+import type { BusinessDetail, SettingsInput, WorkbenchMethod } from "../shared/protocol";
 
 const host = new HostClient();
 let settingsChanging = false;
+let exportInProgress = false;
 let mainWindow: BrowserWindow | undefined;
 function configureUserDataDir(): void {
   const inline = process.argv.find((value) => value.startsWith("--user-data-dir="));
@@ -80,6 +83,39 @@ function registerIpc(): void {
       }
     }
     if (settingsChanging) throw new Error("CONFIG_BUSY");
+    if (request.method === "export_business_report" || request.method === "open_odoo_record") {
+      const params = request.params ?? {};
+      const scope = businessScope(params);
+      const detail = await host.call("get_business", scope) as BusinessDetail;
+      if (detail.business.id !== scope.business_id || detail.business.session_id !== scope.session_id) throw new Error("BUSINESS_SCOPE_MISMATCH");
+      if (request.method === "open_odoo_record") {
+        const settings = await publicSettings();
+        await shell.openExternal(observedRecordUrl(settings.odoo_url, detail.documents, params.model, params.record_id));
+        return { opened: true };
+      }
+      if (exportInProgress) throw new Error("EXPORT_BUSY");
+      exportInProgress = true;
+      let temporary: string | undefined;
+      try {
+        const run = scope.run_id ? detail.runs.find(item => item.id === scope.run_id) : detail.runs[0];
+        if (scope.run_id && !run) throw new Error("RUN_SCOPE_MISMATCH");
+        const trace = run ? await host.call("get_trace", { ...scope, run_id: run.id }) : null;
+        const window = BrowserWindow.fromWebContents(event.sender);
+        if (!window) throw new Error("WINDOW_CLOSED");
+        const result = await dialog.showSaveDialog(window, { title: "导出业务回执", defaultPath: `odoo-business-${scope.business_id}.json`,
+          filters: [{ name: "业务回执 JSON", extensions: ["json"] }] });
+        if (result.canceled || !result.filePath) return { cancelled: true };
+        temporary = `${result.filePath}.${randomUUID()}.tmp`;
+        await writeFile(temporary, JSON.stringify({ schema_version: 1, exported_at: new Date().toISOString(),
+          scope: { ...scope, run_id: run?.id ?? null }, business: detail, trace }, null, 2), { encoding: "utf8", flag: "wx", mode: 0o600 });
+        await rename(temporary, result.filePath);
+        temporary = undefined;
+        return { cancelled: false, path: result.filePath };
+      } finally {
+        exportInProgress = false;
+        if (temporary) await unlink(temporary).catch(() => undefined);
+      }
+    }
     if (!METHODS.has(request.method)) throw new Error("METHOD_NOT_ALLOWED");
     return host.call(request.method, request.params ?? {});
   });

@@ -751,11 +751,32 @@ class NativeActionCheckpointTests(unittest.TestCase):
         )["approval"]
         with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1"}):
             first = actions.execute_approved_write(approval, confirm=True)
-            reconciled = actions.execute_approved_write(approval, confirm=True)
+        with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "0"}):
+            reconciled = actions.reconcile(approval["action_id"])
         self.assertEqual(first["action_status"], "needs_reconciliation")
         self.assertTrue(reconciled["success"])
         self.assertTrue(reconciled["reconciled"])
         self.assertEqual(len(writer.calls), 1)
+
+    def test_host_reconciliation_refuses_unsent_actions_and_changed_identity(self):
+        actions, writer, runtime = _actions(approval_mode="host")
+        self.addCleanup(actions.store.close)
+        approval = actions.validate_write("res.partner", "write", record_ids=[7], values={"name": "Ada"})["approval"]
+        action_id = approval["action_id"]
+        with patch.object(actions, "_reconcile", side_effect=AssertionError("unexpected readback")):
+            self.assertFalse(actions.reconcile(action_id)["success"])
+            self.assertTrue(actions.store.approve(action_id, "desktop_host"))
+            self.assertFalse(actions.reconcile(action_id)["success"])
+            actions.store.finish(action_id, "needs_reconciliation")
+            runtime.client.db = "another_database"
+            self.assertEqual(actions.reconcile(action_id)["error"], "action identity changed")
+        self.assertEqual(writer.calls, [])
+        runtime.client.db = "bench"
+        with patch.object(actions, "_verify", side_effect=ConnectionError("offline")):
+            result = actions.reconcile(action_id)
+        self.assertFalse(result["success"])
+        self.assertEqual(actions.store.get(action_id)["status"], "needs_reconciliation")
+        self.assertEqual(writer.calls, [])
 
     def test_uncertain_method_failure_blocks_same_sale_order_resource(self):
         class CommitThenRuntimeError(_Writer):
@@ -987,6 +1008,87 @@ class NativeActionCheckpointTests(unittest.TestCase):
         self.assertNotEqual(
             first["approval"]["action_id"], second["approval"]["action_id"]
         )
+
+    def test_method_prestate_rejects_unknown_targets_and_invalid_invoice_relations(self):
+        actions, writer, runtime = _actions()
+        self.addCleanup(actions.store.close)
+        allowed = ",".join([
+            "sale.order.action_confirm",
+            "account.move.action_post",
+            "sale.advance.payment.inv.create_invoices",
+        ])
+        with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1", "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": allowed}):
+            for model, method, record_id in (
+                ("sale.order", "action_confirm", 999),
+                ("account.move", "action_post", 999),
+                ("sale.advance.payment.inv", "create_invoices", 1),
+            ):
+                result = actions.execute_method(model, method, kwargs={"ids": [record_id]})
+                self.assertFalse(result["success"])
+                self.assertIn("does not exist", result["error"])
+            runtime.client.records["sale.advance.payment.inv"][13] = {"id": 13, "sale_order_ids": []}
+            empty_relation = actions.execute_method(
+                "sale.advance.payment.inv", "create_invoices", kwargs={"ids": [13]}
+            )
+            self.assertFalse(empty_relation["success"])
+            self.assertIn("read/create the correct wizard", empty_relation["error"])
+
+            runtime.client.records["sale.advance.payment.inv"][14] = {"id": 14, "sale_order_ids": [7, 999]}
+            partial_relation = actions.execute_method(
+                "sale.advance.payment.inv", "create_invoices", kwargs={"ids": [14]}
+            )
+            self.assertFalse(partial_relation["success"])
+            self.assertIn("missing sale order", partial_relation["error"])
+            self.assertIn("999", partial_relation["error"])
+        self.assertEqual(actions.store.summary()["actions"], 0)
+        self.assertEqual(writer.calls, [])
+
+    def test_method_prestate_requires_exact_id_set_when_reader_returns_wrong_id(self):
+        class WrongIdReader(_Reader):
+            def read_records(self, model, ids, fields=None):
+                if model == "sale.order" and ids == [999] and fields == ["id", "state"]:
+                    return [{"id": 998, "state": "draft"}]
+                return super().read_records(model, ids, fields)
+
+        runtime = _Runtime()
+        runtime.client = WrongIdReader()
+        writer = _Writer(runtime.client)
+        actions, _, _ = _actions(runtime=runtime, writer=writer)
+        self.addCleanup(actions.store.close)
+        with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1", "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": "sale.order.action_confirm"}):
+            result = actions.execute_method("sale.order", "action_confirm", kwargs={"ids": [999]})
+        self.assertFalse(result["success"])
+        self.assertIn("does not exist", result["error"])
+        self.assertEqual(actions.store.summary()["actions"], 0)
+        self.assertEqual(writer.calls, [])
+
+    def test_method_prestate_accepts_valid_invoice_wizard_fixture(self):
+        actions, writer, _ = _actions()
+        self.addCleanup(actions.store.close)
+        with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1", "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": "sale.advance.payment.inv.create_invoices"}):
+            result = actions.execute_method(
+                "sale.advance.payment.inv", "create_invoices", kwargs={"ids": [9]}
+            )
+        self.assertTrue(result["success"])
+        self.assertEqual(result["action_status"], "verified")
+        self.assertEqual(len(writer.calls), 1)
+
+    def test_removed_method_target_after_approval_is_stale_without_send(self):
+        actions, writer, runtime = _actions(approval_mode="host")
+        self.addCleanup(actions.store.close)
+        with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1", "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": "sale.order.action_confirm"}):
+            pending = actions.execute_method("sale.order", "action_confirm", kwargs={"ids": [7]})
+        self.assertTrue(pending["approval_required"])
+        row = actions.store.get(pending["action_id"])
+        self.assertIsNotNone(row)
+        self.assertTrue(actions._current_prestate_matches(row))
+        runtime.client.records["sale.order"].pop(7)
+        self.assertFalse(actions._current_prestate_matches(row))
+        with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1", "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": "sale.order.action_confirm"}):
+            result = actions._execute_row(row, lambda: writer.execute_method("sale.order", "action_confirm", ids=[7]))
+        self.assertFalse(result["success"])
+        self.assertIn("state changed", result["error"])
+        self.assertEqual(writer.calls, [])
 
     def test_route_keeps_contract_uses_no_mcp_fallback_and_serializes_actions(self):
         async def check(directory: Path) -> None:

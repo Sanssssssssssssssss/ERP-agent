@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { publicSettings, saveSettings } from "./settings";
-import { assertRequest, canChangeSettings } from "./ipc-security";
+import { assertRequest, businessScope, canChangeSettings, observedRecordUrl } from "./ipc-security";
 
 export async function runSelfCheck(): Promise<void> {
   // Even a manually invoked packaged --self-check must not overwrite settings.
@@ -52,6 +52,16 @@ export async function runSelfCheck(): Promise<void> {
   assert.doesNotThrow(() => assertRequest({ method: "get_settings" }));
   assert.throws(() => assertRequest({ method: "shell_exec" }), /METHOD_NOT_ALLOWED/);
   assert.throws(() => assertRequest({ method: "health", params: [] }), /INVALID_PARAMS/);
+  assert.doesNotThrow(() => assertRequest({ method: "export_business_report", params: { session_id: "s_a", business_id: "b_a" } }));
+  assert.deepEqual(businessScope({ session_id: "s_a", business_id: "b_a", path: "ignored" }), { session_id: "s_a", business_id: "b_a" });
+  assert.throws(() => businessScope({ session_id: "s_a", business_id: "../b" }), /INVALID_BUSINESS_SCOPE/);
+  assert.throws(() => businessScope({ session_id: "s_a", business_id: "b_a", run_id: null }), /INVALID_BUSINESS_SCOPE/);
+  const documents = [{ id: "42", model: "sale.order", name: "SO42", state: "sale", fields: {}, source: "native_read_receipt" }];
+  assert.equal(observedRecordUrl("http://127.0.0.1:18069", documents, "sale.order", 42), "http://127.0.0.1:18069/web#id=42&model=sale.order&view_type=form");
+  assert.throws(() => observedRecordUrl("https://odoo.example", documents, "account.move", 42), /RECORD_NOT_OBSERVED/);
+  assert.throws(() => observedRecordUrl("https://odoo.example", documents, "sale.order", 43), /RECORD_NOT_OBSERVED/);
+  assert.throws(() => observedRecordUrl("file:///C:/Windows", documents, "sale.order", 42), /PROTOCOL_INVALID/);
+  assert.throws(() => observedRecordUrl("https://odoo.example/?secret=x", documents, "sale.order", 42), /CREDENTIALS_INVALID/);
   console.log("desktop self-check: PASS (settings, secrets, busy guard, IPC allowlist)");
   } finally {
     app.setPath("userData", previous);

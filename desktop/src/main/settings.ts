@@ -23,7 +23,7 @@ const DEFAULTS: StoredSettings = {
   odoo_username: "admin",
 };
 
-function validateEndpoint(name: string, value: string): void {
+export function validateEndpoint(name: string, value: string): void {
   if (!value) return;
   let parsed: URL;
   try {

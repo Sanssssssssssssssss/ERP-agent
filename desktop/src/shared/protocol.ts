@@ -74,13 +74,16 @@ export interface Approval {
 }
 
 export interface Document {
-  id: string;
+  id: string | number;
   model: string;
   name: string;
-  state: string;
+  state?: string;
   fields: Record<string, unknown>;
   observed_at?: string;
+  source_observed_at?: string;
   source: string;
+  source_run_id?: string;
+  source_tool_id?: string;
 }
 
 export interface Check {
@@ -89,6 +92,39 @@ export interface Check {
   status: "passed" | "failed" | "unknown";
   detail?: string;
   source?: string;
+}
+
+export type BusinessStageId = "read" | "quote" | "confirm" | "invoice" | "verify";
+export type BusinessStageStatus = "pending" | "active" | "awaiting_approval" | "observed" | "verified" | "failed" | "unknown";
+
+export interface BusinessEvidence {
+  run_id: string;
+  kind?: "tool" | "action" | "readback";
+  tool_id?: string;
+  action_id?: string;
+  observed_at?: string;
+  label: string;
+}
+
+export interface BusinessStage {
+  id: BusinessStageId;
+  label: string;
+  status: BusinessStageStatus;
+  detail: string;
+  evidence: BusinessEvidence[];
+}
+
+export interface BusinessExecution {
+  run_id?: string;
+  current_stage_id?: BusinessStageId;
+  stages: BusinessStage[];
+}
+
+export interface BusinessOutcome {
+  status: "unknown" | "passed" | "failed";
+  label: string;
+  detail: string;
+  scope: string;
 }
 
 export interface Usage {
@@ -128,10 +164,13 @@ export interface BusinessDetail {
   observed_at?: string;
   stale: boolean;
   summary?: string;
+  execution?: BusinessExecution;
+  outcome?: BusinessOutcome;
   activity?: {
     phase: string;
     label: string;
     detail: string;
+    intent?: string;
     at?: string;
     tool_name?: string;
     round?: number;
@@ -186,8 +225,11 @@ export type WorkbenchMethod =
   | "start_run"
   | "decide_approval"
   | "cancel_run"
+  | "reconcile_action"
   | "get_trace"
   | "refresh_business"
+  | "export_business_report"
+  | "open_odoo_record"
   | "get_settings"
   | "save_settings"
   | "check_connection"

@@ -461,19 +461,48 @@ class NativeActions:
         ids = [int(value) for value in payload.get("kwargs", {}).get("ids") or []]
         state = _KNOWN_METHOD_STATES.get((model, str(payload.get("method"))))
         if state:
-            return {"records": self._read_rows(instance, model, ids, ["id", state[0]])}
+            records = self._read_rows(instance, model, ids, ["id", state[0]])
+            requested_ids = {int(value) for value in ids}
+            returned_ids = {int(row["id"]) for row in records if type(row.get("id")) is int}
+            if returned_ids != requested_ids:
+                missing_ids = sorted(requested_ids - returned_ids)
+                raise ValueError(f"native action target does not exist: {model} {missing_ids}")
+            return {"records": records}
         if (model, payload.get("method")) == (
             "sale.advance.payment.inv",
             "create_invoices",
         ):
             wizard = self._read_rows(instance, model, ids, ["id", "sale_order_ids"])
+            requested_wizard_ids = {int(value) for value in ids}
+            returned_wizard_ids = {int(row["id"]) for row in wizard if type(row.get("id")) is int}
+            if returned_wizard_ids != requested_wizard_ids:
+                missing_ids = sorted(requested_wizard_ids - returned_wizard_ids)
+                raise ValueError(f"native action target does not exist: {model} {missing_ids}")
+            empty_relations = [row.get("id") for row in wizard if not row.get("sale_order_ids")]
+            if empty_relations:
+                raise ValueError(
+                    "create_invoices wizard has no linked sale order; "
+                    "read/create the correct wizard before create_invoices"
+                )
             order_ids = [int(value) for row in wizard for value in row.get("sale_order_ids") or []]
             orders = self._read_rows(instance, "sale.order", order_ids, ["id", "invoice_ids"])
+            requested_order_ids = {int(value) for value in order_ids}
+            returned_order_ids = {int(row["id"]) for row in orders if type(row.get("id")) is int}
+            if returned_order_ids != requested_order_ids:
+                missing_ids = sorted(requested_order_ids - returned_order_ids)
+                raise ValueError(
+                    "create_invoices wizard references missing sale order(s); "
+                    f"read/create the correct wizard before create_invoices: {missing_ids}"
+                )
             return {"wizard": wizard, "orders": orders}
         raise ValueError(f"native action has no verifier for {model}.{payload.get('method')}")
 
     def _current_prestate_matches(self, row: dict[str, Any]) -> bool:
-        return self._prestate(row["kind"], row["payload"]) == row["prestate"]
+        try:
+            return self._prestate(row["kind"], row["payload"]) == row["prestate"]
+        except ValueError:
+            # A target removed after approval is stale; transport/read failures still propagate.
+            return False
 
     def _send(
         self,
@@ -730,6 +759,26 @@ class NativeActions:
     @staticmethod
     def _known_failure(exc: BaseException) -> bool:
         return isinstance(exc, OdooJson2Error) and bool(exc.odoo_error)
+
+    def reconcile(self, action_id: str) -> dict[str, Any]:
+        """Trusted host readback for a previously sent action; never sends a write."""
+        row = self.store.get(action_id)
+        if row is None:
+            raise ValueError("unknown action")
+        if row["status"] not in {"sending", "needs_reconciliation", "verified"}:
+            return {"success": False, "action_id": action_id, "action_status": row["status"],
+                    "error": "only previously sent actions can be reconciled"}
+        if row["identity_sha256"] != ActionStore.digest(self._identity(str(row["payload"]["instance"]))):
+            return {"success": False, "action_id": action_id, "action_status": row["status"],
+                    "error": "action identity changed"}
+        if row["status"] == "verified":
+            return {"success": True, "action_id": action_id, "action_status": "verified",
+                    "reconciled": True, "cached": True, "result": row.get("result"), "verification": row.get("verification")}
+        try:
+            return self._reconcile(row)
+        except Exception as exc:  # read failure cannot establish success or authorize retry
+            return {"success": False, "action_id": action_id, "action_status": row["status"],
+                    "error": f"readback failed: {type(exc).__name__}"}
 
     def _reconcile(self, row: dict[str, Any]) -> dict[str, Any]:
         verification = self._verify(row, row.get("result"))

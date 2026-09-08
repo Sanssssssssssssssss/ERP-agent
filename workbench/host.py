@@ -498,8 +498,15 @@ class Workbench:
         if isinstance(action_id, str): tool["action_id"] = action_id
         if approval_status == "pending_approval" and isinstance(action_id, str): self._set_approval(run, action_id, payload)
         tool_name = str(event.get("tool_name", event.get("toolName", "")))
-        for doc in collect_documents(tool_name, tool.get("arguments", {}), payload):
+        for doc in collect_documents(
+            tool_name,
+            tool.get("arguments", {}),
+            payload,
+            source_run_id=run.get("id"),
+            source_tool_id=tool.get("id"),
+        ):
             doc["observed_at"] = now()
+            doc["source_observed_at"] = doc["observed_at"]
             run["documents"] = [old for old in run["documents"] if (old.get("model"), old.get("id")) != (doc.get("model"), doc.get("id"))]
             run["documents"].append(doc)
         self._trace(run, "tool_end", {"tool_call_id": call_id, "tool_name": tool["name"], "is_error": failed and not approval_status, "action_id": action_id})
@@ -784,12 +791,61 @@ class Workbench:
         self._event("run_changed", {"run_id": run_id, "status": run["status"]})
         return {"ok": True, "status": run["status"], "run_id": run_id}
 
+    def reconcile_action(self, session_id: str, business_id: str, run_id: str, action_id: str) -> dict[str, Any]:
+        """Read-only reconciliation for one uncertain ledger action."""
+        self._business(session_id, business_id)
+        run = self.store.data["runs"].get(run_id)
+        if not run or run.get("session_id") != session_id or run.get("business_id") != business_id:
+            raise ValueError("run scope is invalid")
+        if run_id in self._processes or run.get("status") in {"running", "awaiting_approval", "cancel_requested"}:
+            raise RuntimeError("stop the active run before reconciliation")
+        if any(other_id != run_id and other.get("status") in {"running", "awaiting_approval", "cancel_requested"}
+               for other_id, other in self.store.data["runs"].items()) or any(other_id != run_id for other_id in self._processes):
+            raise RuntimeError("another run is active on this host")
+        approval = self.store.data["approvals"].get(action_id)
+        if not approval or approval.get("run_id") != run_id or approval.get("business_id") != business_id:
+            raise ValueError("approval scope is invalid")
+        from odoo_runtime.store import ActionStore
+        path = self.store.root / "runs" / run_id / "odoo-actions.sqlite3"
+        if not path.exists():
+            raise RuntimeError("action ledger is missing")
+        store = ActionStore(path)
+        try:
+            row = store.get(action_id)
+            if not row or row.get("session_id") != session_id or row.get("run_id") != run_id or row.get("action_id") != action_id:
+                raise ValueError("action scope is invalid")
+            if row.get("approval_source") != approval.get("source"):
+                raise ValueError("approval source does not match action ledger")
+            if row.get("status") not in {"sending", "needs_reconciliation", "verified"}:
+                raise ValueError("action is not uncertain; reconciliation refused")
+            from odoo_runtime.actions import NativeActions
+            was_uncertain = run.get("status") in {"needs_reconciliation", "blocked"}
+            result = NativeActions(self._native_reads(), store=store).reconcile(action_id)
+            result = _safe(result)
+            action_status = result.get("action_status")
+            approval["status"] = action_status if action_status in {"verified", "known_failed", "needs_reconciliation"} else "needs_reconciliation"
+            if "result" in result:
+                approval["result"] = result["result"]
+            if "verification" in result:
+                approval["verification"] = result["verification"]
+            self._trace(run, "reconciliation", {"action_id": action_id, "action_status": approval["status"], "verification": result.get("verification")})
+            if approval["status"] == "verified":
+                statuses = self._ledger_statuses(run)
+                if was_uncertain and statuses and all(value in {"verified", "known_failed"} for value in statuses.values()):
+                    self._clear_active(run, "interrupted")
+                    run["error"] = "reconciled_write_state"
+                    run.pop("pending_approval_action_ids", None)
+                    self._event("run_changed", {"run_id": run_id, "status": "interrupted"})
+            return self.get_business(session_id, business_id)
+        finally:
+            store.close()
+
     def health(self) -> dict[str, Any]:
         active = next((r["id"] for r in self.store.data["runs"].values() if r.get("status") in {"running", "awaiting_approval", "cancel_requested"}), None)
         return {"host_ready": True, "odoo_status": "configured" if os.environ.get("ODOO_URL") and os.environ.get("ODOO_DB") else "unknown", "model_configured": bool(os.environ.get("LLM_API_KEY") and os.environ.get("LLM_BASE_URL") and os.environ.get("LLM_MODEL")), "environment": "configured" if os.environ.get("LLM_API_KEY") else "demo", "active_run_id": active, "odoo": dict(self._odoo_health)}
 
     def _dispatch(self, method: str, params: dict[str, Any]) -> Any:
-        methods = {"list_sessions": lambda: self.list_sessions(), "create_session": lambda: self.create_session(params.get("title")), "rename_session": lambda: self.rename_session(params["session_id"], params["title"]), "archive_session": lambda: self.archive_session(params["session_id"]), "get_session": lambda: self.get_session(params["session_id"]), "send_message": lambda: self.send_message(params["session_id"], params["text"], params.get("business_id")), "confirm_business": lambda: self.confirm_business(params["session_id"], params["proposal_id"], _must_bool(params["confirmed"], "confirmed")), "start_run": lambda: self.start_run(params["session_id"], params["business_id"]), "decide_approval": lambda: self.decide_approval(params["session_id"], params["business_id"], params["run_id"], params["action_id"], params["decision"]), "cancel_run": lambda: self.cancel_run(params["session_id"], params["business_id"], params["run_id"]), "get_business": lambda: self.get_business(params["session_id"], params["business_id"]), "refresh_business": lambda: self.refresh_business(params["session_id"], params["business_id"]), "get_trace": lambda: self.get_trace(params["session_id"], params["business_id"], params.get("run_id")), "health": self.health, "check_connection": self.check_connection}
+        methods = {"list_sessions": lambda: self.list_sessions(), "create_session": lambda: self.create_session(params.get("title")), "rename_session": lambda: self.rename_session(params["session_id"], params["title"]), "archive_session": lambda: self.archive_session(params["session_id"]), "get_session": lambda: self.get_session(params["session_id"]), "send_message": lambda: self.send_message(params["session_id"], params["text"], params.get("business_id")), "confirm_business": lambda: self.confirm_business(params["session_id"], params["proposal_id"], _must_bool(params["confirmed"], "confirmed")), "start_run": lambda: self.start_run(params["session_id"], params["business_id"]), "decide_approval": lambda: self.decide_approval(params["session_id"], params["business_id"], params["run_id"], params["action_id"], params["decision"]), "cancel_run": lambda: self.cancel_run(params["session_id"], params["business_id"], params["run_id"]), "reconcile_action": lambda: self.reconcile_action(params["session_id"], params["business_id"], params["run_id"], params["action_id"]), "get_business": lambda: self.get_business(params["session_id"], params["business_id"]), "refresh_business": lambda: self.refresh_business(params["session_id"], params["business_id"]), "get_trace": lambda: self.get_trace(params["session_id"], params["business_id"], params.get("run_id")), "health": self.health, "check_connection": self.check_connection}
         if method not in methods: raise KeyError("unknown method")
         return methods[method]()
 

@@ -2,6 +2,9 @@ import type {
   Approval,
   Business,
   BusinessDetail,
+  BusinessEvidence,
+  BusinessExecution,
+  BusinessOutcome,
   BusinessProposal,
   Check,
   Document,
@@ -20,6 +23,9 @@ export type {
   Approval,
   Business,
   BusinessDetail,
+  BusinessEvidence,
+  BusinessExecution,
+  BusinessOutcome,
   BusinessProposal,
   Check,
   Document,
@@ -34,7 +40,19 @@ export type {
   WorkbenchEvent
 } from '../shared/protocol'
 
-export type BusinessTab = 'overview' | 'documents' | 'approvals' | 'verification' | 'trace'
+export type BusinessTab = 'execution' | 'documents' | 'approvals' | 'trace'
+
+export interface BusinessReadback {
+  latest_run_id?: string
+  observed_at?: string
+  stale?: boolean
+  checks?: Check[]
+  documents?: Document[]
+}
+
+export type BusinessDetailProjection = BusinessDetail & {
+  business: Business & { readback?: BusinessReadback }
+}
 
 export interface SessionDetail {
   session: SessionSummary
@@ -45,7 +63,7 @@ export interface SessionDetail {
 export type ToolReceipt = Tool
 
 export interface TraceBundle {
-  run: Run
+  run: Run | null
   rounds: Round[]
   tools: ToolReceipt[]
   events?: Array<Record<string, unknown>>

@@ -31,6 +31,9 @@ def collect_documents(
     tool: str,
     arguments: dict[str, Any],
     payload: dict[str, Any] | None = None,
+    *,
+    source_run_id: str | None = None,
+    source_tool_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Project the native read response using the actual tool arguments.
 
@@ -59,11 +62,16 @@ def collect_documents(
             continue
         if isinstance(requested_id, int) and row["id"] != requested_id:
             continue
-        documents.append({
+        document = {
             "id": row["id"], "model": model, "name": _text(row.get("name") or row.get("display_name") or row["id"]),
             "state": row.get("state"), "fields": {str(k): v for k, v in row.items() if k not in {"id", "name", "display_name", "state"}},
             "source": "native_read_receipt",
-        })
+        }
+        if isinstance(source_run_id, str) and source_run_id:
+            document["source_run_id"] = source_run_id
+        if isinstance(source_tool_id, str) and source_tool_id:
+            document["source_tool_id"] = source_tool_id
+        documents.append(document)
     return documents
 
 
@@ -162,6 +170,14 @@ def _activity(runs: list[dict[str, Any]], approvals: list[dict[str, Any]]) -> di
         "tool_count": run.get("tool_count", len(tools)),
         "model_rounds": run.get("model_rounds", len(run.get("rounds", [])) if isinstance(run.get("rounds"), list) else 0),
     }
+    rounds = run.get("rounds") if isinstance(run.get("rounds"), list) else []
+    latest_public_text = next(
+        (row.get("text", "").strip()[:1200] for row in reversed(rounds)
+         if isinstance(row, dict) and isinstance(row.get("text"), str) and row.get("text", "").strip()),
+        None,
+    )
+    if latest_public_text:
+        activity["intent"] = latest_public_text
     if latest_tool:
         if isinstance(latest_tool.get("name"), str) and latest_tool.get("name"):
             activity["tool_name"] = latest_tool["name"]
@@ -183,6 +199,281 @@ def _activity(runs: list[dict[str, Any]], approvals: list[dict[str, Any]]) -> di
 
 def _check(name: str, label: str, status: str, detail: str) -> dict[str, Any]:
     return {"name": name, "label": label, "status": status, "detail": detail, "source": "native_readback"}
+
+
+STAGES = (
+    ("read", "读取当前状态"),
+    ("quote", "销售报价"),
+    ("confirm", "确认销售订单"),
+    ("invoice", "关联并过账发票"),
+    ("verify", "独立核验"),
+)
+
+
+def _evidence(document: dict[str, Any], label: str) -> dict[str, Any] | None:
+    run_id, tool_id = document.get("source_run_id"), document.get("source_tool_id")
+    if not isinstance(run_id, str) or not run_id:
+        return None
+    kind = "readback" if document.get("source") == "refresh_native_read" else "tool"
+    item: dict[str, Any] = {"run_id": run_id, "kind": kind, "label": "独立回读快照" if kind == "readback" else label}
+    if document.get("source") == "native_read_receipt" and isinstance(tool_id, str) and tool_id:
+        item["tool_id"] = tool_id
+    if isinstance(document.get("observed_at"), str):
+        item["observed_at"] = document["observed_at"]
+    return item
+
+
+def _action_stage(model: Any, operation: Any) -> str | None:
+    model, operation = str(model or "").lower(), str(operation or "").lower()
+    if model == "sale.order" and operation == "action_confirm":
+        return "confirm"
+    if model == "sale.order" and operation == "create":
+        return "quote"
+    if (model == "account.move" and operation in {"create", "action_post"}) or (model == "sale.advance.payment.inv" and operation in {"create", "create_invoices"}):
+        return "invoice"
+    return None
+
+
+def _tool_stage(tool: dict[str, Any]) -> str | None:
+    arguments = tool.get("arguments") if isinstance(tool.get("arguments"), dict) else {}
+    result = tool.get("result") if isinstance(tool.get("result"), dict) else {}
+    candidates = [result]
+    result_approval = result.get("approval") if isinstance(result.get("approval"), dict) else None
+    argument_approval = arguments.get("approval") if isinstance(arguments.get("approval"), dict) else None
+    if result_approval:
+        candidates.append(result_approval)
+    if argument_approval:
+        candidates.append(argument_approval)
+    candidates.append(arguments)
+    for candidate in candidates:
+        stage = _action_stage(candidate.get("model"), candidate.get("operation") or candidate.get("method"))
+        if stage:
+            return stage
+    model = next((candidate.get("model") for candidate in candidates if candidate.get("model")), None)
+    operation = next((candidate.get("operation") or candidate.get("method") for candidate in candidates if candidate.get("operation") or candidate.get("method")), None)
+    return "read" if model in {"sale.order", "account.move"} and operation in {None, "read_record", "search_records"} else None
+
+
+def _tool_action_fields(tool: dict[str, Any]) -> tuple[Any, Any]:
+    arguments = tool.get("arguments") if isinstance(tool.get("arguments"), dict) else {}
+    result = tool.get("result") if isinstance(tool.get("result"), dict) else {}
+    candidates = [result]
+    for container in (result, arguments):
+        nested = container.get("approval") if isinstance(container.get("approval"), dict) else None
+        if nested:
+            candidates.append(nested)
+    candidates.append(arguments)
+    for candidate in candidates:
+        model = candidate.get("model")
+        operation = candidate.get("operation") or candidate.get("method")
+        if _action_stage(model, operation):
+            return model, operation
+    return None, None
+
+
+def _run_has_relevant_evidence(
+    run: dict[str, Any], readback_documents: list[dict[str, Any]] | None = None
+) -> bool:
+    documents = run.get("documents") if isinstance(run.get("documents"), list) else []
+    orders = [doc for doc in documents if isinstance(doc, dict) and doc.get("model") == "sale.order" and doc.get("source_run_id") == run.get("id")]
+    if not orders:
+        return False
+    observed_order_ids = {doc.get("id") for doc in orders if type(doc.get("id")) is int}
+    observed_invoice_ids = {
+        doc.get("id") for doc in documents
+        if isinstance(doc, dict) and doc.get("model") == "account.move"
+        and doc.get("source_run_id") == run.get("id") and type(doc.get("id")) is int
+    }
+    invoice_ids: set[int] = set()
+    for order in orders:
+        fields = order.get("fields") if isinstance(order.get("fields"), dict) else {}
+        invoice_ids.update(_relation_ids(fields.get("invoice_ids")))
+    if invoice_ids & observed_invoice_ids:
+        return True
+    if not readback_documents:
+        return False
+    for document in readback_documents:
+        if not isinstance(document, dict) or document.get("source") != "refresh_native_read":
+            continue
+        if document.get("model") != "sale.order" or document.get("id") not in observed_order_ids:
+            continue
+        fields = document.get("fields") if isinstance(document.get("fields"), dict) else {}
+        linked_ids = set(_relation_ids(fields.get("invoice_ids")))
+        if linked_ids & observed_invoice_ids:
+            return True
+    return False
+
+
+def _execution_projection(
+    runs: list[dict[str, Any]],
+    documents: list[dict[str, Any]],
+    checks: list[dict[str, Any]],
+    outcome_status: str,
+    approvals: list[dict[str, Any]] | None = None,
+    readback_documents: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    evidence_by_stage: dict[str, list[dict[str, Any]]] = {stage_id: [] for stage_id, _ in STAGES}
+    observed_by_stage: dict[str, bool] = {stage_id: False for stage_id, _ in STAGES}
+    awaiting_stage_ids: set[str] = set()
+    for document in documents:
+        label = f"读取 {document.get('model', '单据')} {document.get('name') or document.get('id')}"
+        item = _evidence(document, label)
+        model = document.get("model")
+        fields = document.get("fields") if isinstance(document.get("fields"), dict) else {}
+        relevant = model in {"sale.order", "account.move"}
+        if relevant:
+            observed_by_stage["read"] = True
+        if item is None:
+            if model == "sale.order":
+                observed_by_stage["quote"] |= fields.get("amount_total") is not None or fields.get("order_line") is not None
+                observed_by_stage["confirm"] = True
+            elif model == "account.move":
+                observed_by_stage["invoice"] = True
+            continue
+        evidence_by_stage["read"].append(item)
+        if model == "sale.order":
+            if fields.get("amount_total") is not None or fields.get("order_line") is not None:
+                evidence_by_stage["quote"].append(item)
+            evidence_by_stage["confirm"].append(item)
+        elif model == "account.move":
+            evidence_by_stage["invoice"].append(item)
+
+    verified_actions: dict[str, list[dict[str, Any]]] = {stage_id: [] for stage_id, _ in STAGES}
+    for run in runs:
+        tools = run.get("tools") if isinstance(run.get("tools"), list) else []
+        for tool in tools:
+            result = tool.get("result") if isinstance(tool, dict) and isinstance(tool.get("result"), dict) else {}
+            verification = result.get("verification") if isinstance(result.get("verification"), dict) else {}
+            if result.get("action_status") != "verified" or verification.get("status") != "satisfied":
+                continue
+            arguments = tool.get("arguments") if isinstance(tool.get("arguments"), dict) else {}
+            model, operation = _tool_action_fields(tool)
+            stage_id = _action_stage(model, operation)
+            if not stage_id or not isinstance(run.get("id"), str):
+                continue
+            verified_actions[stage_id].append({"run_id": run["id"], "tool_id": tool.get("id"), "action_id": tool.get("action_id") or result.get("action_id"), "kind": "action", "model": model, "operation": operation, "label": "结构化 ERP 动作已核验"})
+
+    for approval in approvals or []:
+        if approval.get("status") != "pending_approval" or not isinstance(approval.get("run_id"), str):
+            continue
+        operation = str(approval.get("operation") or approval.get("method") or "")
+        stage_id = _action_stage(approval.get("model"), operation)
+        if not stage_id:
+            continue
+        item = {"run_id": approval["run_id"], "action_id": approval.get("action_id"), "kind": "action", "label": "等待主机审批的 ERP 动作"}
+        evidence_by_stage[stage_id].append({key: value for key, value in item.items() if value})
+        awaiting_stage_ids.add(stage_id)
+
+    for approval in approvals or []:
+        verification = approval.get("verification") if isinstance(approval.get("verification"), dict) else {}
+        if approval.get("status") != "verified" or verification.get("status") != "satisfied":
+            continue
+        stage_id = _action_stage(approval.get("model"), approval.get("operation"))
+        if stage_id and isinstance(approval.get("run_id"), str):
+            verified_actions[stage_id].append({"run_id": approval["run_id"], "action_id": approval.get("action_id"), "kind": "action", "model": approval.get("model"), "operation": approval.get("operation") or approval.get("method"), "label": "结构化 ERP 动作已核验"})
+
+    for stage_id, items in verified_actions.items():
+        evidence_by_stage[stage_id].extend({key: value for key, value in item.items() if value} for item in items)
+
+    evidence_by_stage["verify"] = list(evidence_by_stage["read"])
+    evidence_by_stage["verify"].extend(item for stage_id in ("confirm", "invoice") for item in verified_actions[stage_id])
+    observed_by_stage["verify"] = observed_by_stage["read"]
+
+    check_by_name = {row.get("name"): row for row in checks if isinstance(row, dict)}
+    current_run_id = runs[0].get("id") if runs else None
+    stages: list[dict[str, Any]] = []
+    for stage_id, label in STAGES:
+        evidence = evidence_by_stage[stage_id]
+        current_evidence = [row for row in evidence if not current_run_id or row.get("run_id") == current_run_id]
+        status = "pending"
+        detail = "尚未观测到结构化证据。"
+        if evidence:
+            status = "observed"
+            detail = f"已由 {len(evidence)} 条结构化读取证据观测。"
+        elif observed_by_stage[stage_id]:
+            status = "unknown"
+            detail = "存在历史单据，但缺少可关联运行证据。"
+        if stage_id in awaiting_stage_ids:
+            status, detail = "awaiting_approval", "存在待处理的结构化 ERP 动作审批。"
+        elif stage_id == "confirm" and evidence:
+            check = check_by_name.get("order_confirmed", {})
+            if current_run_id and not current_evidence:
+                status, detail = "observed", "仅有历史运行证据，当前运行尚未确认销售订单。"
+            elif any(item.get("kind") == "action" for item in current_evidence):
+                status, detail = "verified", "结构化销售订单确认动作已核验。"
+            else:
+                status = {"passed": "verified", "failed": "failed", "unknown": "unknown"}.get(check.get("status"), "unknown")
+                detail = check.get("detail", detail)
+        elif stage_id == "invoice" and evidence:
+            check = check_by_name.get("invoice_posted", {})
+            if current_run_id and not current_evidence:
+                status, detail = "observed", "仅有历史运行证据，当前运行尚未确认发票状态。"
+            elif any(item.get("kind") == "action" for item in current_evidence):
+                current_run = runs[0] if runs else None
+                current_relevant = _run_has_relevant_evidence(current_run, readback_documents) if current_run else False
+                check_complete = check_by_name.get("invoice_posted", {}).get("status") == "passed" and check_by_name.get("invoice_linked_to_order", {}).get("status") == "passed" and current_relevant
+                if check_complete:
+                    status, detail = "verified", "结构化发票过账动作及关联回读已核验。"
+                else:
+                    status, detail = "observed", "已核验发票动作，但仍缺少当前运行的过账及关联回读。"
+            else:
+                status = {"passed": "verified", "failed": "failed", "unknown": "unknown"}.get(check.get("status"), "unknown")
+                detail = check.get("detail", detail)
+        elif stage_id == "verify":
+            current_read = [row for row in evidence_by_stage["read"] if not current_run_id or row.get("run_id") == current_run_id]
+            current_run = runs[0] if runs else None
+            current_relevant = _run_has_relevant_evidence(current_run, readback_documents) if current_run else False
+            if outcome_status == "passed" and current_relevant:
+                status, detail = "verified", "销售订单和关联发票的基础检查均通过。"
+            elif outcome_status == "failed" and current_relevant:
+                status, detail = "failed", "基础销售开票检查未通过。"
+            elif outcome_status in {"passed", "failed"} and evidence_by_stage["read"]:
+                status, detail = "unknown", "已有历史读取证据，但当前运行尚未完成核验。"
+            elif evidence_by_stage["read"]:
+                status, detail = "unknown", "已有读取证据，但基础检查尚未完整通过。"
+        stages.append({"id": stage_id, "label": label, "status": status, "detail": detail, "evidence": evidence})
+
+    current_run = runs[0] if runs else None
+    current_stage_id = None
+    if current_run and current_run.get("status") == "awaiting_approval":
+        pending = set(current_run.get("pending_approval_action_ids") or [])
+        pending_stages = [
+            _action_stage(row.get("model"), row.get("operation"))
+            for row in approvals or []
+            if row.get("action_id") in pending and row.get("status") == "pending_approval"
+        ]
+        current_stage_id = next((stage for stage in pending_stages if stage), None)
+    elif current_run and current_run.get("status") == "running":
+        tools = current_run.get("tools") if isinstance(current_run.get("tools"), list) else []
+        current_stage_id = next((_tool_stage(tool) for tool in reversed(tools) if isinstance(tool, dict) and _tool_stage(tool)), None)
+        if not current_stage_id:
+            pending = set(current_run.get("pending_approval_action_ids") or [])
+            current_stage_id = next((_action_stage(row.get("model"), row.get("operation") or row.get("method")) for row in approvals or [] if row.get("action_id") in pending), None)
+    result: dict[str, Any] = {"stages": stages}
+    if isinstance(current_run_id, str):
+        result["run_id"] = current_run_id
+    if current_stage_id:
+        result["current_stage_id"] = current_stage_id
+    return result
+
+
+def _outcome(checks: list[dict[str, Any]]) -> dict[str, str]:
+    required = {"observed_order", "observed_customer", "observed_payment_term", "observed_document_states", "order_confirmed", "invoice_linked_to_order", "invoice_posted"}
+    by_name = {row.get("name"): row for row in checks if isinstance(row, dict)}
+    statuses = [by_name.get(name, {}).get("status") for name in required]
+    linked = required.issubset(by_name) and all(by_name[name].get("source") == "native_readback" for name in required)
+    if not linked or any(status == "failed" for status in statuses):
+        status = "failed" if "failed" in statuses else "unknown"
+    elif all(status == "passed" for status in statuses):
+        status = "passed"
+    else:
+        status = "unknown"
+    detail = {
+        "passed": "销售订单已确认，关联发票已过账。",
+        "failed": "销售订单或关联发票的基础检查未通过。",
+        "unknown": "缺少足够的结构化读取证据，暂不能判断销售开票结果。",
+    }[status]
+    return {"status": status, "label": "销售与开票基础检查", "detail": detail, "scope": "sale_invoice_basic_checks"}
 
 
 def refresh_business(
@@ -226,6 +517,14 @@ def refresh_business(
             failures[(model, record_id)] = "native read result could not be projected"
             continue
         document = projected[0]
+        previous = observations.get((model, record_id), {})
+        for key in ("source_run_id", "source_tool_id"):
+            if key in previous:
+                document[key] = previous[key]
+        if "source_observed_at" in previous:
+            document["source_observed_at"] = previous["source_observed_at"]
+        elif isinstance(previous.get("observed_at"), str):
+            document["source_observed_at"] = previous["observed_at"]
         document["observed_at"], document["source"] = _now(), "refresh_native_read"
         observations[(model, record_id)] = document
         fresh.add((model, record_id))
@@ -271,6 +570,15 @@ def refresh_business(
     invoice_states = [doc.get("state") for doc in linked_invoices]
     states_known = bool(order_state) and bool(invoice_states) and all(bool(value) for value in invoice_states)
     checks.append(_check("observed_document_states", "已读取单据状态", "passed" if states_known else "unknown", "订单和关联发票状态均已观测。" if states_known else "订单或关联发票状态未完整观测。"))
+    order_confirmed_status = (
+        "passed" if order and order_state == "sale"
+        else "failed" if order and order_state is not None
+        else "unknown"
+    )
+    checks.append(_check("order_confirmed", "销售订单已确认", order_confirmed_status,
+                         "销售订单状态为 sale。" if order_confirmed_status == "passed" else
+                         "销售订单存在但尚未处于 sale 状态。" if order_confirmed_status == "failed" else
+                         "没有足够读取结果确认销售订单状态。"))
     linked_status = "passed" if linked_invoices else "unknown"
     checks.append(_check("invoice_linked_to_order", "发票关联销售订单", linked_status, "销售订单的 invoice_ids 包含已读取发票。" if linked_invoices else "未从读取结果确认销售订单与发票关联。"))
     invoice_state_values = [doc.get("state") for doc in linked_invoices]
@@ -295,6 +603,7 @@ def refresh_business(
         "stale": bool(failures),
         "latest_run_id": runs[-1].get("id") if runs else None,
         "verification_status": verification_status,
+        "outcome": _outcome(checks),
     }
     return business_detail(state, business_id)
 
@@ -325,15 +634,11 @@ def business_detail(state: dict[str, Any], business_id: str) -> dict[str, Any]:
     current_run_id = runs[0].get("id") if runs else None
     readback_run_id = readback.get("latest_run_id") if isinstance(readback, dict) else None
     readback_current = isinstance(readback, dict) and readback_run_id == current_run_id
-    if checks and not readback_current and isinstance(readback, dict):
-        checks = {
-            name: {
-                **check,
-                "status": "unknown",
-                "detail": "新运行尚未完成当前业务回读核验。",
-            }
-            for name, check in checks.items()
-        }
+    readback_documents = readback.get("documents", []) if isinstance(readback, dict) and isinstance(readback.get("documents"), list) else []
+    readback_fresh = readback_current and not readback.get("stale") and not any(
+        document.get("observed_at", "") > readback.get("observed_at", "") for document in docs.values()
+    )
+    matching_readback_documents = readback_documents if readback_fresh else None
     public_runs = []
     for run in runs:
         public = {key: value for key, value in run.items() if key not in {"_round_tool_start", "assistant_text", "rounds", "tools", "events"}}
@@ -341,28 +646,43 @@ def business_detail(state: dict[str, Any], business_id: str) -> dict[str, Any]:
         if isinstance(usage, dict):
             public["usage"] = {"input": usage.get("input"), "cache_read": usage.get("cache_read", usage.get("cacheRead")),
                                 "output": usage.get("output"), "reasoning": usage.get("reasoning"), "total": usage.get("total")}
+        linked_evidence = _run_has_relevant_evidence(run, matching_readback_documents)
         if isinstance(readback, dict) and run.get("id") == readback_run_id:
             public["verification_status"] = (
-                readback.get("verification_status", "unknown")
-                if readback_current else "unknown"
+                _outcome(list(checks.values()))["status"]
+                if readback_fresh and linked_evidence else "unknown"
             )
+        elif isinstance(readback, dict) and run.get("id") == current_run_id:
+            public["verification_status"] = "unknown"
         public_runs.append(public)
     if isinstance(readback, dict):
-        for document in readback.get("documents", []):
+        for document in readback_documents:
             if isinstance(document, dict) and isinstance(document.get("model"), str) and isinstance(document.get("id"), int):
                 key = (document["model"], document["id"])
                 if document.get("observed_at", "") >= docs.get(key, {}).get("observed_at", ""):
                     docs[key] = document
     detail_stale = bool(readback.get("stale")) if isinstance(readback, dict) else bool(runs and runs[0].get("stale", False))
-    if isinstance(readback, dict) and not readback_current and runs:
+    if isinstance(readback, dict) and not readback_fresh:
         detail_stale = True
     observed_at = (
         readback.get("observed_at") if isinstance(readback, dict)
         else max((doc.get("observed_at", "") for doc in docs.values()), default=None)
     )
+    factual_checks = list(checks.values())
+    outcome = _outcome(factual_checks)
+    if isinstance(readback, dict) and not readback_fresh:
+        outcome = {**outcome, "status": "unknown", "detail": "存在较新的运行、单据观察或不完整回读，请重新读取状态。"}
+    execution = _execution_projection(
+        runs,
+        list(docs.values()),
+        [] if detail_stale else factual_checks,
+        outcome.get("status", "unknown"),
+        approvals,
+        matching_readback_documents,
+    )
     return {"business": business, "runs": public_runs, "approvals": approvals,
-            "documents": list(docs.values()), "checks": list(checks.values()),
+            "documents": list(docs.values()), "checks": factual_checks,
             "observed_at": observed_at,
             "stale": detail_stale,
             "summary": next((run.get("summary") for run in runs if run.get("summary")), None),
-            "activity": _activity(runs, approvals)}
+            "activity": _activity(runs, approvals), "execution": execution, "outcome": outcome}

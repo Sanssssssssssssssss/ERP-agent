@@ -57,6 +57,8 @@ class SaleViewReadbackTests(unittest.TestCase):
 
     def test_refresh_reads_relations_and_latest_observation_wins(self):
         state = _state()
+        for document in state["runs"]["r2"]["documents"]:
+            document["source_run_id"] = "r2"
         original_runs = deepcopy(state["runs"])
         reads = NativeReadFixture(RECORDS)
         detail = refresh_business(state, "b1", reads)
@@ -76,6 +78,9 @@ class SaleViewReadbackTests(unittest.TestCase):
         self.assertTrue(all(row["status"] == "passed" for row in detail["checks"]))
         self.assertFalse(detail["stale"])
         self.assertEqual(state["runs"], original_runs)
+        readback_evidence = next(stage for stage in detail["execution"]["stages"] if stage["id"] == "verify")["evidence"]
+        self.assertTrue(readback_evidence)
+        self.assertTrue(any(item["kind"] == "readback" for item in readback_evidence))
 
     def test_new_run_invalidates_previous_readback_without_mutating_history(self):
         state = _state()
@@ -90,14 +95,169 @@ class SaleViewReadbackTests(unittest.TestCase):
 
         self.assertTrue(detail["stale"])
         self.assertTrue(detail["checks"])
-        self.assertTrue(all(check["status"] == "unknown" for check in detail["checks"]))
+        # Current facts survive a refresh; the new empty run remains unverified.
+        self.assertTrue(all(check["status"] == "passed" for check in detail["checks"]))
+        self.assertEqual(detail["outcome"]["status"], "unknown")
         self.assertEqual(detail["runs"][0]["id"], "r3")
-        self.assertEqual(detail["runs"][0].get("verification_status"), None)
+        self.assertEqual(detail["runs"][0].get("verification_status"), "unknown")
+        self.assertEqual(next(stage for stage in detail["execution"]["stages"] if stage["id"] == "verify")["status"], "unknown")
         self.assertEqual(state["runs"]["r1"], historical_runs["r1"])
         self.assertEqual(state["runs"]["r2"], historical_runs["r2"])
         state["runs"]["r3"]["documents"] = [{"model": "sale.order", "id": 7, "observed_at": "2999-01-01T00:00:00Z", "fields": {"amount_total": 240}}]
         latest = business_detail(state, "b1")
         self.assertEqual(next(doc for doc in latest["documents"] if doc["model"] == "sale.order")["fields"]["amount_total"], 240)
+
+    def test_draft_order_with_posted_invoice_fails_sale_completion(self):
+        records = deepcopy(RECORDS)
+        records[("sale.order", 7)] = {**records[("sale.order", 7)], "state": "draft"}
+        state = _state()
+        state["runs"]["r2"]["documents"][0].update({"source_run_id": "r2", "source_tool_id": "read-order"})
+        detail = refresh_business(state, "b1", NativeReadFixture(records))
+        checks = {row["name"]: row for row in detail["checks"]}
+        self.assertEqual(checks["invoice_posted"]["status"], "passed")
+        self.assertEqual(checks["order_confirmed"]["status"], "failed")
+        self.assertEqual(detail["outcome"]["status"], "failed")
+        self.assertEqual(detail["execution"]["stages"][2]["status"], "failed")
+
+    def test_stage_projection_ignores_legacy_docs_and_tool_name_only(self):
+        state = _state()
+        state["runs"]["r2"]["tools"] = [{"name": "account.move.action_post", "result": {"success": True}}]
+        detail = business_detail(state, "b1")
+        stages = {row["id"]: row for row in detail["execution"]["stages"]}
+        self.assertEqual(stages["invoice"]["status"], "pending")
+        self.assertEqual(stages["verify"]["status"], "unknown")
+        self.assertEqual(detail["outcome"]["status"], "unknown")
+
+    def test_verified_action_receipt_is_stage_evidence(self):
+        state = _state()
+        state["runs"]["r2"].update({
+            "tools": [{"id": "tool-confirm", "action_id": "a-confirm", "name": "execute_method", "arguments": {"model": "sale.order", "method": "action_confirm"},
+                       "result": {"action_status": "verified", "model": "sale.order", "operation": "action_confirm", "verification": {"status": "satisfied"}}}],
+        })
+        detail = business_detail(state, "b1")
+        confirm = next(stage for stage in detail["execution"]["stages"] if stage["id"] == "confirm")
+        self.assertEqual(confirm["status"], "verified")
+        self.assertEqual(confirm["evidence"][0]["action_id"], "a-confirm")
+        self.assertEqual(confirm["evidence"][0]["kind"], "action")
+
+    def test_account_move_create_is_observed_only_and_does_not_verify_invoice_stage(self):
+        state = _state()
+        state["runs"]["r2"]["documents"] = [{"id": 31, "model": "account.move", "state": "draft", "source_run_id": "r2", "fields": {}}]
+        state["runs"]["r2"]["tools"] = [{
+            "id": "tool-create-invoice", "action_id": "a-create", "name": "execute_method",
+            "arguments": {"model": "account.move", "method": "create"},
+            "result": {"action_status": "verified", "model": "account.move", "operation": "create", "verification": {"status": "satisfied"}},
+        }]
+        detail = business_detail(state, "b1")
+        invoice = next(stage for stage in detail["execution"]["stages"] if stage["id"] == "invoice")
+        self.assertNotEqual(invoice["status"], "verified")
+        self.assertTrue(any(item.get("kind") == "action" for item in invoice["evidence"]))
+
+    def test_pending_wizard_create_is_classified_as_invoice_approval(self):
+        state = _state()
+        state["runs"]["r2"].update({"status": "awaiting_approval", "pending_approval_action_ids": ["a-wizard"]})
+        state["approvals"]["a-wizard"] = {
+            "action_id": "a-wizard", "run_id": "r2", "business_id": "b1",
+            "status": "pending_approval", "model": "sale.advance.payment.inv", "operation": "create",
+        }
+        detail = business_detail(state, "b1")
+        execution = detail["execution"]
+        self.assertEqual(execution["current_stage_id"], "invoice")
+        invoice = next(stage for stage in execution["stages"] if stage["id"] == "invoice")
+        self.assertEqual(invoice["status"], "awaiting_approval")
+
+    def test_current_unrelated_readback_cannot_reuse_historical_green_verification(self):
+        state = _state()
+        refresh_business(state, "b1", NativeReadFixture(RECORDS))
+        state["runs"]["r3"] = {
+            "id": "r3", "business_id": "b1", "started_at": "2026-01-03T00:00:00Z",
+            "documents": [{"id": 10, "model": "res.partner", "source_run_id": "r3", "source": "refresh_native_read", "fields": {}}],
+            "checks": [], "stale": False,
+        }
+        detail = business_detail(state, "b1")
+        verify = next(stage for stage in detail["execution"]["stages"] if stage["id"] == "verify")
+        self.assertEqual(verify["status"], "unknown")
+        self.assertEqual(detail["outcome"]["status"], "unknown")
+
+    def test_posted_unrelated_invoice_does_not_verify_the_linked_draft(self):
+        state = _state()
+        state["runs"]["r2"].update({
+            "documents": [
+                {"model": "sale.order", "id": 7, "source_run_id": "r2", "fields": {"invoice_ids": [31]}},
+                {"model": "account.move", "id": 31, "source_run_id": "r2", "state": "draft", "fields": {}},
+                {"model": "account.move", "id": 32, "source_run_id": "r2", "state": "posted", "fields": {}},
+            ],
+            "tools": [{"id": "post-32", "arguments": {"model": "account.move", "method": "action_post", "record_ids": [32]},
+                       "result": {"action_status": "verified", "verification": {"status": "satisfied"}}}],
+        })
+        invoice = next(row for row in business_detail(state, "b1")["execution"]["stages"] if row["id"] == "invoice")
+        self.assertNotEqual(invoice["status"], "verified")
+
+    def test_partial_tool_fields_can_use_fresh_readback_link_for_same_observed_order(self):
+        state = _state()
+        state["runs"]["r2"]["documents"] = [
+            {"id": 7, "model": "sale.order", "source_run_id": "r2", "fields": {"amount_total": 120}},
+            {"id": 31, "model": "account.move", "source_run_id": "r2", "fields": {}},
+        ]
+        detail = refresh_business(state, "b1", NativeReadFixture(RECORDS))
+        self.assertEqual(detail["runs"][0]["verification_status"], "passed")
+        self.assertEqual(next(stage for stage in detail["execution"]["stages"] if stage["id"] == "verify")["status"], "verified")
+
+    def test_current_customer_or_mismatched_order_readback_cannot_supply_link(self):
+        for replacement in ("customer", "mismatched_order"):
+            with self.subTest(replacement=replacement):
+                state = _state()
+                state["runs"]["r2"]["documents"] = [
+                    {"id": 7, "model": "sale.order", "source_run_id": "r2", "fields": {"amount_total": 120}},
+                    {"id": 31, "model": "account.move", "source_run_id": "r2", "fields": {}},
+                ]
+                refresh_business(state, "b1", NativeReadFixture(RECORDS))
+                if replacement == "customer":
+                    state["businesses"]["b1"]["readback"]["documents"] = [{
+                        "id": 10, "model": "res.partner", "source": "refresh_native_read", "source_run_id": "r2",
+                        "observed_at": "2999-01-01T00:00:00Z", "fields": {},
+                    }]
+                else:
+                    state["businesses"]["b1"]["readback"]["documents"] = [{
+                        "id": 8, "model": "sale.order", "source": "refresh_native_read", "source_run_id": "r2",
+                        "observed_at": "2999-01-01T00:00:00Z", "fields": {"invoice_ids": [31]},
+                    }, {
+                        "id": 31, "model": "account.move", "source": "refresh_native_read", "source_run_id": "r2",
+                        "observed_at": "2999-01-01T00:00:00Z", "state": "posted", "fields": {},
+                    }]
+                detail = business_detail(state, "b1")
+                self.assertEqual(detail["runs"][0]["verification_status"], "unknown")
+                self.assertEqual(next(stage for stage in detail["execution"]["stages"] if stage["id"] == "verify")["status"], "unknown")
+
+    def test_running_current_stage_uses_nested_structured_approval(self):
+        state = _state()
+        state["runs"]["r2"].update({
+            "status": "running",
+            "tools": [{"id": "tool-approval", "arguments": {"approval": {"model": "sale.order", "operation": "action_confirm"}}, "result": {}}],
+        })
+        detail = business_detail(state, "b1")
+        self.assertEqual(detail["execution"]["current_stage_id"], "confirm")
+
+    def test_newer_same_run_observation_and_incomplete_cached_checks_cannot_remain_green(self):
+        for change in ("new_observation", "missing_check"):
+            with self.subTest(change=change):
+                state = _state()
+                state["runs"]["r2"]["documents"] = [
+                    {"id": record_id, "model": model, "source_run_id": "r2", "fields": RECORDS[(model, record_id)]}
+                    for model, record_id in (("sale.order", 7), ("account.move", 31))
+                ]
+                initial = refresh_business(state, "b1", NativeReadFixture(RECORDS))
+                self.assertEqual(initial["runs"][0]["verification_status"], "passed")
+                if change == "new_observation":
+                    state["runs"]["r2"]["documents"][1].update({"state": "draft", "observed_at": "9999-01-01T00:00:00Z"})
+                else:
+                    state["businesses"]["b1"]["readback"]["checks"] = [
+                        row for row in state["businesses"]["b1"]["readback"]["checks"] if row["name"] != "order_confirmed"
+                    ]
+                detail = business_detail(state, "b1")
+                self.assertEqual(detail["outcome"]["status"], "unknown")
+                self.assertEqual(detail["runs"][0]["verification_status"], "unknown")
+                self.assertNotEqual(detail["execution"]["stages"][-1]["status"], "verified")
 
     def test_failed_readback_is_stale_and_unknown(self):
         reads = NativeReadFixture(RECORDS, {("account.move", 31)})
@@ -153,6 +313,26 @@ class SaleViewReadbackTests(unittest.TestCase):
         self.assertEqual(detail["activity"]["phase"], "completed")
         self.assertEqual(detail["activity"]["at"], run["ended_at"])
         self.assertNotIn("round", detail["activity"])
+
+    def test_activity_exposes_latest_public_intent_for_current_run_only(self):
+        state = _state()
+        state["runs"]["r1"]["rounds"] = [{"text": "historical plan must stay hidden"}]
+        state["runs"]["r2"].update({
+            "status": "running",
+            "rounds": [
+                {"text": "older current plan"},
+                {"text": "   ", "reasoning": "secret reasoning must never appear"},
+                {"text": "Found seeded customer, reading Internal Notes next.", "reasoning": "secret reasoning must never appear"},
+            ],
+        })
+        detail = business_detail(state, "b1")
+        self.assertEqual(detail["activity"]["intent"], "Found seeded customer, reading Internal Notes next.")
+        self.assertLessEqual(len(detail["activity"]["intent"]), 1200)
+        self.assertNotIn("secret reasoning", detail["activity"]["intent"])
+
+        state["runs"]["r2"]["rounds"] = [{"text": "", "reasoning": "current hidden reasoning"}]
+        detail = business_detail(state, "b1")
+        self.assertNotIn("intent", detail["activity"])
 
 
 if __name__ == "__main__":

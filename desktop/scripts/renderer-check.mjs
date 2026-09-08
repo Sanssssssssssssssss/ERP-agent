@@ -34,20 +34,22 @@ const bridgeScript = String.raw`
     let failInitialConnectionCheck = true
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
     const session = (id, title, businesses) => ({ id, title, created_at: '2026-09-08T08:00:00Z', updated_at: '2026-09-08T09:00:00Z', archived: false, status: 'idle', businesses })
-    const business = (id, session_id, title, status = 'idle') => ({ id, session_id, type: 'sale_invoice', title, goal: '处理订单与发票', status, created_at: '2026-09-08T08:00:00Z', updated_at: '2026-09-08T09:00:00Z', active_run_id: id + '-run' })
+    const business = (id, session_id, title, status = 'idle', goal = '处理订单与发票') => ({ id, session_id, type: 'sale_invoice', title, goal, status, created_at: '2026-09-08T08:00:00Z', updated_at: '2026-09-08T09:00:00Z', active_run_id: id + '-run' })
     const b1 = business('business-b1', 'session-b', 'Business B1')
     const b2 = business('business-b2', 'session-b', 'Business B2', 'awaiting_approval')
-    const sessions = [session('session-a', 'Session A', [business('business-a1', 'session-a', 'Business A1')]), session('session-b', 'Session B', [b1, b2])]
+    const b3 = business('business-b3', 'session-b', 'Business B3', 'needs_reconciliation', '核对中断写入是否已经落库，并保留当前运行与历史单据证据。')
+    const b4 = business('business-b4', 'session-b', 'Business B4', 'completed')
+    const sessions = [session('session-a', 'Session A', [business('business-a1', 'session-a', 'Business A1')]), session('session-b', 'Session B', [b1, b2, b3, b4])]
     const details = (b) => ({
-      business: b,
-      runs: [{ id: b.id + '-old-run', business_id: b.id, session_id: b.session_id, status: 'completed', started_at: '2026-09-08T08:00:00Z', tool_count: 1, model_rounds: 1, elapsed_seconds: 0.8, verification_status: 'passed', usage: { input: null, cache_read: null, output: null, reasoning: null, total: null } }, { id: b.id + '-run', business_id: b.id, session_id: b.session_id, status: b.id === 'business-b2' ? 'awaiting_approval' : 'completed', started_at: '2026-09-08T08:30:00Z', tool_count: 2, model_rounds: 2, elapsed_seconds: 1.2, verification_status: b.id === 'business-b2' ? '未知' : 'passed', usage: { input: null, cache_read: null, output: null, reasoning: null, total: null } }],
-      approvals: b.id === 'business-b2' ? [{ action_id: 'action-b2', run_id: 'business-b2-run', business_id: 'business-b2', status: 'pending_approval', title: 'ERP write approval', model: 'account.move', operation: 'create', record_ids: [42], values: { state: 'posted' }, prestate: { state: 'draft' }, result: { ok: true, preflight: true }, expires_at: Math.floor(Date.now() / 1000) + 60 }] : [],
+      business: b.id === 'business-b2' ? { ...b, readback: { latest_run_id: 'business-b2-run', observed_at: '2026-09-08T08:49:00Z', stale: false, checks: [{ name: 'invoice_readback', label: '客户发票回读', status: 'passed', detail: '当前运行后的 Odoo 快照已返回。', source: 'odoo' }] } } : b,
+      runs: [{ id: b.id + '-old-run', business_id: b.id, session_id: b.session_id, status: 'completed', started_at: '2026-09-08T08:00:00Z', tool_count: 1, model_rounds: 1, elapsed_seconds: 0.8, verification_status: 'passed', usage: { input: null, cache_read: null, output: null, reasoning: null, total: null } }, { id: b.id + '-run', business_id: b.id, session_id: b.session_id, status: b.id === 'business-b2' ? 'awaiting_approval' : b.id === 'business-b3' ? 'needs_reconciliation' : 'completed', started_at: '2026-09-08T08:30:00Z', tool_count: 2, model_rounds: 2, elapsed_seconds: 1.2, verification_status: b.id === 'business-b2' || b.id === 'business-b3' ? '未知' : 'passed', usage: { input: null, cache_read: null, output: null, reasoning: null, total: null } }],
+      approvals: b.id === 'business-b2' ? [{ action_id: 'action-b2', run_id: 'business-b2-run', business_id: 'business-b2', status: 'pending_approval', title: 'ERP write approval', model: 'account.move', operation: 'create', record_ids: [42], values: { client_order_ref: 'PI-DYNAMIC-MVP-20260908', commitment_date: '2026-09-16 08:00:00', order_line: [[0, 0, { product_id: 2, product_uom_qty: 1, price_unit: 695.22 }]], partner_id: 10, payment_term_id: 4 }, prestate: { records: [] }, result: { ok: true, preflight: true }, expires_at: Math.floor(Date.now() / 1000) + 60 }] : b.id === 'business-b3' ? [{ action_id: 'action-b3', run_id: 'business-b3-run', business_id: 'business-b3', status: 'needs_reconciliation', title: '执行客户发票写入', model: 'account.move', operation: 'create', record_ids: [99], values: { state: 'posted' }, prestate: { state: 'draft' }, result: { status: 'unknown', retryable: false, detail: '主机中断，无法确认写入是否落库' }, expires_at: Math.floor(Date.now() / 1000) + 60 }] : b.id === 'business-b4' ? [{ action_id: 'action-b4-verified', run_id: 'business-b4-run', business_id: 'business-b4', status: 'verified', title: '客户发票写入', model: 'account.move', operation: 'create', record_ids: [101], values: { state: 'posted' }, prestate: { state: 'draft' }, result: { ok: true, executed: true }, expires_at: Math.floor(Date.now() / 1000) - 60 }, { action_id: 'action-b4-rejected', run_id: 'business-b4-run', business_id: 'business-b4', status: 'rejected', title: '重复发票写入', model: 'account.move', operation: 'create', record_ids: [102], values: { state: 'posted' }, prestate: { state: 'posted' }, result: { ok: false, reason: 'approval_rejected' }, expires_at: Math.floor(Date.now() / 1000) - 60 }] : [],
       documents: b.id === 'business-b2' ? [
         { id: '1', model: 'sale.order', name: 'SO-B2', state: 'sale', source: 'odoo', observed_at: '2026-09-08T08:45:00Z', fields: { partner_name: 'Nimbus Bureau', amount_total: 695.22, currency: 'USD', invoice_status: 'invoiced', delivery_status: 'pending' } },
         { id: '2', model: 'sale.order', name: 'SO-B2-SECOND', state: 'draft', source: 'odoo', observed_at: '2026-09-08T08:45:30Z', fields: { partner_name: 'Nimbus Bureau', amount_total: 10, currency: 'USD', invoice_status: 'to invoice' } },
         { id: '1', model: 'account.move', name: 'INV-B2', state: 'posted', source: 'odoo', observed_at: '2026-09-08T08:46:00Z', fields: { partner_name: 'Nimbus Bureau', amount_total: 695.22, currency: 'USD', payment_state: 'not_paid', amount_residual: 695.22 } }
-      ] : [],
-      checks: [], stale: false, observed_at: '2026-09-08T08:46:00Z', summary: '主机已返回业务回执'
+      ] : b.id === 'business-b3' ? [{ id: '7', model: 'sale.order', name: 'SO-B3-HISTORY', state: 'sale', source: 'odoo', observed_at: '2026-09-08T08:40:00Z', fields: { partner_name: 'Nimbus Bureau', amount_total: 99, currency: 'USD', invoice_status: 'to invoice' } }] : [],
+      checks: b.id === 'business-b3' ? [{ name: 'invoice_write', label: '客户发票写入状态', status: 'unknown', detail: '未观察到可确认的 Odoo 写入结果；需要人工核对。', source: 'odoo' }] : [], stale: false, observed_at: '2026-09-08T08:46:00Z', summary: b.id === 'business-b3' ? '写入结果待核对，系统不会自动重试' : '主机已返回业务回执', activity: b.id === 'business-b3' ? { phase: 'reconciliation', label: '写入结果待核对', detail: '主机中断后无法确认写入是否落库；请核对 Odoo 后再决定。', tool_name: 'execute_approved_write', round: 2, tool_count: 2, model_rounds: 2, at: '2026-09-08T08:46:00Z' } : b.id === 'business-b2' ? { phase: 'approval', label: '等待确认', detail: '客户发票写入动作等待人工审批。', tool_name: 'mcp_odoo_validate_write', round: 2, tool_count: 2, model_rounds: 2, at: '2026-09-08T08:46:00Z' } : { phase: 'idle', label: '待执行', detail: '尚未开始。' }, execution: b.id === 'business-b2' ? { run_id: 'business-b2-run', current_stage_id: 'approval', stages: [{ id: 'plan', label: '读取订单', status: 'completed', detail: '已读取 Odoo 销售订单。', evidence: [{ run_id: 'business-b2-old-run', kind: 'readback', label: '查看独立回读快照', observed_at: '2026-09-08T08:45:00Z' }, { run_id: 'business-b2-run', tool_id: 'tool-b2', label: '查看订单读取回执', observed_at: '2026-09-08T08:45:00Z' }] }, { id: 'approval', label: '等待审批', status: 'awaiting_approval', detail: '客户发票写入等待人工确认。', evidence: [{ run_id: 'business-b2-run', tool_id: 'tool-b2', action_id: 'action-b2', label: '查看审批前回执', observed_at: '2026-09-08T08:46:00Z' }] }] } : b.id === 'business-b3' ? { run_id: 'business-b3-run', current_stage_id: 'reconcile', stages: [{ id: 'reconcile', label: '写入结果待核对', status: 'unknown', detail: '没有确认写入是否落库。', evidence: [{ run_id: 'business-b3-run', tool_id: 'tool-b3-unknown-write', action_id: 'action-b3', label: '查看未知写入回执', observed_at: '2026-09-08T08:46:00Z' }] }] } : { run_id: b.id + '-run', current_stage_id: 'start', stages: [{ id: 'start', label: '待执行', status: 'pending', detail: '尚未开始。' }] }, outcome: b.id === 'business-b3' ? { status: 'unknown', label: '结果待核对', detail: '写入结果未知，系统不会自动重试。', scope: '客户发票' } : b.id === 'business-b2' ? { status: 'awaiting_approval', label: '等待审批', detail: '批准只允许恢复本轮流程，不代表写入已经执行。', scope: '客户发票' } : { status: 'unknown', label: '尚未执行', detail: '没有业务结果。', scope: '销售发票' }
     })
     const sessionDetails = {
       'session-a': { session: sessions[0], messages: [], businesses: sessions[0].businesses },
@@ -79,9 +81,16 @@ const bridgeScript = String.raw`
         if (method === 'get_trace') {
           await wait(params.business_id === 'business-b1' ? 12 : 220)
           if (params.business_id === 'business-b1') return { run: details(b1).runs[0], rounds: [], tools: [] }
+          if (params.business_id === 'business-b3') {
+            const historical = params.run_id === 'business-b3-old-run'
+            const run = details(b3).runs[historical ? 0 : 1]
+            const tool = historical ? { id: 'tool-b3-old', name: 'read_business_records', round: 1, status: 'completed', arguments: { model: 'sale.order', ids: [7] }, result: { count: 1, source: 'odoo' }, elapsed_seconds: 0.2 } : { id: 'tool-b3-unknown-write', name: 'execute_approved_write', round: 2, status: 'unknown', arguments: { model: 'account.move', operation: 'create', ids: [99] }, result: null, elapsed_seconds: null, action_id: 'action-b3' }
+            return { run, rounds: [{ index: tool.round, status: tool.status, text: historical ? '读取历史业务单据' : '写入结果无法确认', elapsed_seconds: tool.elapsed_seconds, usage: { input: null, cache_read: null, output: null, reasoning: null, total: null }, tool_ids: [tool.id] }], tools: [tool] }
+          }
           traceVersion += 1
           window.__traceVersion = traceVersion
-          return { run: details(b2).runs[0], rounds: [{ index: 1, status: 'completed', text: '公开业务摘要 '.repeat(500), elapsed_seconds: null, usage: { input: null, cache_read: null, output: null, reasoning: null, total: null }, tool_ids: ['tool-b2'] }], tools: [{ id: 'tool-b2', name: 'read_business_records', status: 'completed', arguments: { model: 'sale.order' }, result: { count: 2, version: traceVersion }, elapsed_seconds: null }] }
+          const selectedRun = details(b2).runs.find((run) => run.id === params.run_id) ?? details(b2).runs[1]
+          return { run: selectedRun, rounds: [{ index: 1, status: 'completed', text: '公开业务摘要 '.repeat(500), elapsed_seconds: null, usage: { input: null, cache_read: null, output: null, reasoning: null, total: null }, tool_ids: ['tool-b2', 'tool-b2-active', 'tool-b2-executed'] }], tools: [{ id: 'tool-b2', name: 'read_business_records', round: 1, status: 'completed', arguments: { model: 'sale.order' }, result: { count: 2, version: traceVersion }, elapsed_seconds: null, action_id: 'action-b2' }, { id: 'tool-b2-active', name: 'mcp_odoo_validate_write', round: 1, status: 'running', arguments: { model: 'account.move', operation: 'create', ids: [42] }, result: null, elapsed_seconds: null, action_id: 'action-b2' }, { id: 'tool-b2-executed', name: 'execute_approved_write', round: 1, status: 'executed', arguments: { model: 'account.move', operation: 'create', ids: [42] }, result: { ok: true, write_id: 42, state: 'posted' }, elapsed_seconds: 0.4, action_id: 'action-b2' }] }
         }
         if (method === 'decide_approval') return { ok: true }
         if (method === 'get_settings') return { model: 'deepseek/deepseek-v4-flash/high', base_url: 'http://model.invalid', odoo_url: 'http://odoo.invalid', odoo_db: 'demo', odoo_username: 'admin', has_model_key: false, has_odoo_key: false, environment: 'demo' }
@@ -89,6 +98,9 @@ const bridgeScript = String.raw`
           if (saveBlocked) { saveBlocked = false; throw new Error("Error invoking remote method 'workbench:call': Error: CONFIG_BUSY") }
           return { model: 'deepseek/deepseek-v4-flash/high', base_url: 'http://model.invalid', odoo_url: 'http://odoo.invalid', odoo_db: 'demo', odoo_username: 'admin', has_model_key: false, has_odoo_key: false, environment: 'demo' }
         }
+        if (method === 'export_business_report') return { cancelled: false, path: 'C:\\runtime\\business-b2-receipt.json' }
+        if (method === 'open_odoo_record') return { opened: true }
+        if (method === 'reconcile_action') return details(b3)
         if (method === 'send_message') {
           if (params.text === 'delayed mutation') await wait(180)
           return null
@@ -102,7 +114,7 @@ const bridgeScript = String.raw`
 `
 
 const browser = await chromium.launch({ headless: true })
-const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
 await context.addInitScript({ content: bridgeScript })
 const page = await context.newPage()
 const pageErrors = []
@@ -238,7 +250,20 @@ assert.ok((await page.locator('.business-facts').textContent()).includes('已确
 assert.ok((await page.locator('.business-facts').textContent()).includes('已过账'))
 assert.ok((await page.locator('.business-facts').textContent()).includes('2 张'))
 assert.ok((await page.locator('.business-facts').textContent()).includes('SO-B2-SECOND'))
-await page.getByRole('tab', { name: /^概览/ }).click()
+await page.getByRole('tab', { name: /^单据/ }).click()
+await page.getByRole('button', { name: '导出业务回执' }).click()
+await page.getByRole('status').getByText('C:\\runtime\\business-b2-receipt.json').waitFor()
+const exportCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'export_business_report'))
+assert.deepEqual(exportCalls.map(({ params }) => params), [{ session_id: 'session-b', business_id: 'business-b2', run_id: 'business-b2-run' }])
+await page.getByRole('button', { name: '在 Odoo 打开' }).first().click()
+const openRecordCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'open_odoo_record'))
+assert.deepEqual(openRecordCalls.map(({ params }) => params), [{ session_id: 'session-b', business_id: 'business-b2', model: 'sale.order', record_id: 1 }])
+await page.getByRole('tab', { name: /Business B1/ }).click()
+await page.getByRole('heading', { name: 'Business B1' }).waitFor()
+assert.equal(await page.getByText('C:\\runtime\\business-b2-receipt.json', { exact: true }).count(), 0)
+await page.getByRole('tab', { name: /Business B2/ }).click()
+await page.getByRole('heading', { name: 'Business B2' }).waitFor()
+await page.getByRole('tab', { name: /^执行台/ }).click()
 const cancelButton = page.getByRole('button', { name: '取消运行' })
 await cancelButton.waitFor()
 await page.evaluate(() => {
@@ -249,19 +274,21 @@ await page.waitForTimeout(30)
 const cancelCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'cancel_run'))
 assert.equal(cancelCalls.length, 1)
 await page.getByRole('tab', { name: /^单据/ }).click()
-const documentRows = page.locator('.document-table tbody tr')
-const secondOrderText = await documentRows.nth(1).textContent()
-const invoiceText = await documentRows.nth(2).textContent()
+await page.getByRole('button', { name: /SO-B2-SECOND/ }).click()
+const secondOrderText = await page.locator('.resource-preview').textContent()
 assert.ok(secondOrderText?.includes('开票:待开票'))
 assert.ok(!secondOrderText?.includes('付款'))
+await page.getByRole('button', { name: /INV-B2/ }).click()
+await page.getByRole('heading', { name: 'INV-B2' }).waitFor()
+const invoiceText = await page.locator('.resource-preview').textContent()
 assert.ok(invoiceText?.includes('付款:未付款'))
 await page.getByRole('tab', { name: /Business B2/ }).click()
 await page.waitForTimeout(30)
 assert.equal(await page.locator('.business-header h2').textContent(), 'Business B2')
 assert.equal(await page.getByText('正在读取业务状态…').count(), 0)
-await page.getByRole('tab', { name: /^Trace/ }).click()
+await page.getByRole('tab', { name: /^运行详情/ }).click()
 await page.locator('.trace-toolbar select').selectOption('business-b2-old-run')
-await page.getByRole('tab', { name: /^概览/ }).click()
+await page.getByRole('tab', { name: /^执行台/ }).click()
 await page.getByRole('button', { name: '取消运行' }).waitFor()
 
 // An unrelated changed event refreshes the session list, but does not steal the active business.
@@ -273,12 +300,53 @@ await page.waitForTimeout(30)
 assert.equal(await page.locator('.business-header h2').textContent(), 'Business B2')
 
 // Verify both approval decisions carry the currently selected business and its run.
-await page.getByRole('tab', { name: /^审批/ }).click()
+await page.getByRole('tab', { name: /^变更与审批/ }).click()
 await page.getByText('创建客户发票', { exact: true }).waitFor()
 await page.getByText('查看拟提交值与执行前状态').click()
 await page.getByText('拟提交值', { exact: true }).waitFor()
 await page.getByText('执行前状态', { exact: true }).waitFor()
 await page.getByText('预检 / 动作回执（未执行）').waitFor()
+// Production create approvals use direct proposed values and an empty
+// prestate records[] envelope. The field diff must keep the three columns
+// distinct without inventing a visible `records` business field, while the
+// expanded raw view must retain the original prestate shape.
+const approvalDiff = page.locator('.approval-row').first().locator('.field-diff')
+await approvalDiff.waitFor()
+const diffHeader = approvalDiff.locator('.field-diff-head > span')
+assert.deepEqual(await diffHeader.allTextContents(), ['字段', '执行前', '拟提交'])
+const diffText = await approvalDiff.textContent()
+assert.ok(diffText?.includes('client_order_ref'))
+assert.ok(diffText?.includes('新建 / 无前态'))
+assert.ok(diffText?.includes('PI-DYNAMIC-MVP-20260908'))
+assert.equal(diffText?.includes('记录（records）'), false)
+const rawPrestate = await page.locator('.approval-row').first().locator(':scope > details').first().locator('pre').nth(1).textContent()
+assert.ok(rawPrestate?.includes('"records": []'))
+
+// The approval and its completed write share action_id. Receipt navigation
+// must select the latest matching executed tool, rather than the active
+// validation or the earlier read tool.
+await page.getByRole('button', { name: '查看关联运行回执' }).first().click()
+await page.locator('.trace-page .loading-line').waitFor({ state: 'hidden' })
+assert.equal(await page.locator('.trace-toolbar select').inputValue(), 'business-b2-run')
+await page.getByRole('heading', { name: 'execute_approved_write', exact: true }).waitFor()
+const executedReceipt = await page.locator('.trace-detail-panel').textContent()
+assert.ok(executedReceipt?.includes('executed'))
+assert.ok(executedReceipt?.includes('"write_id": 42'))
+assert.equal(executedReceipt?.includes('回执尚未到达'), false)
+// Selecting the Run node, then changing runs, clears the old action target
+// and restores the selected run summary.
+await page.locator('.trace-tree > .trace-node').first().click()
+await page.getByRole('heading', { name: '运行总览', exact: true }).waitFor()
+assert.ok((await page.locator('.trace-detail-panel').textContent())?.includes('等待审批'))
+await page.locator('.trace-toolbar select').selectOption('business-b2-old-run')
+await page.locator('.trace-page .loading-line').waitFor({ state: 'hidden' })
+assert.equal(await page.locator('.trace-toolbar select').inputValue(), 'business-b2-old-run')
+await page.getByRole('heading', { name: '运行总览', exact: true }).waitFor()
+const historicalRunSummary = await page.locator('.trace-detail-panel').textContent()
+assert.ok(historicalRunSummary?.includes('本轮结束'), historicalRunSummary)
+assert.equal(historicalRunSummary?.includes('动作回执不可用'), false)
+await page.getByRole('tab', { name: /^变更与审批/ }).click()
+await page.getByText('创建客户发票', { exact: true }).waitFor()
 const approvalButton = page.getByRole('button', { name: '批准这项业务动作' })
 await approvalButton.waitFor()
 await page.waitForFunction(() => {
@@ -295,6 +363,7 @@ const repeatedApproveCalls = await page.evaluate(() => window.__bridgeCalls.filt
 const repeatedRejectCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'decide_approval' && params.decision === 'reject'))
 assert.equal(repeatedApproveCalls.length, 1)
 assert.equal(repeatedRejectCalls.length, 0)
+assert.equal(await page.evaluate(() => window.__bridgeCalls.some(({ method }) => method === 'execute_approved_write')), false)
 await page.getByRole('button', { name: '拒绝' }).click()
 await page.waitForTimeout(30)
 const approvalCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'decide_approval'))
@@ -304,37 +373,42 @@ assert.deepEqual(approvalCalls.map(({ params }) => params), [
 ])
 
 // A delayed trace must not leak into another business; the final trace displays null usage as unknown.
-await page.getByRole('tab', { name: /^Trace/ }).click()
+await page.getByRole('tab', { name: /^运行详情/ }).click()
 await page.locator('.trace-toolbar select').selectOption('business-b2-run')
 await page.getByRole('tab', { name: /Business B1/ }).click()
 await page.getByRole('heading', { name: 'Business B1' }).waitFor()
 assert.equal(await page.locator('.trace-page').count(), 0)
 await page.waitForTimeout(250)
-await page.getByRole('tab', { name: /^Trace/ }).click()
+await page.getByRole('tab', { name: /^运行详情/ }).click()
 await page.locator('.trace-page .loading-line').waitFor({ state: 'hidden' })
 assert.equal(await page.locator('.trace-page .trace-toolbar select').inputValue(), 'business-b1-run')
 await page.getByRole('tab', { name: /Business B2/ }).click()
 await page.getByRole('heading', { name: 'Business B2' }).waitFor()
-await page.getByRole('tab', { name: /^Trace/ }).click()
+await page.getByRole('tab', { name: /^运行详情/ }).click()
 await page.locator('.trace-toolbar select').selectOption('business-b2-run')
-await page.getByText('未知 tokens').first().waitFor()
+await page.getByText('未缓存输入 未知').first().waitFor()
 const traceText = await page.locator('.trace-page').textContent()
-assert.ok(traceText.includes('未知 tokens'))
-assert.ok((await page.locator('.round-card').first().textContent()).length > 1500)
+assert.ok(traceText.includes('未缓存输入 未知'))
+assert.ok(traceText.includes('mcp_odoo_validate_write'))
+assert.equal(await page.locator('.trace-tool-node').filter({ hasText: 'mcp_odoo_validate_write' }).count(), 1)
+await page.getByRole('button', { name: /第 1 轮/ }).click()
+assert.ok((await page.locator('.trace-detail-panel').textContent()).length > 1500)
+await page.getByRole('button', { name: /mcp_odoo_validate_write/ }).click()
+const activeToolDetail = await page.locator('.trace-detail-panel').textContent()
+assert.ok(activeToolDetail.includes('running'))
+assert.ok(activeToolDetail.includes('未知'))
 for (const label of ['未缓存输入 未知', '缓存命中 未知', '输出（含推理） 未知', '推理 未知', '总计 未知']) assert.ok(traceText.includes(label), `missing usage label: ${label}`)
 
 // A trace event for the same run refreshes the visible trace without changing tabs or run scope.
 const traceCallsBefore = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'get_trace' && params.business_id === 'business-b2').length)
 const traceVersionBefore = await page.evaluate(() => window.__traceVersion)
-const roundCard = page.locator('.round-card').first()
-await roundCard.locator(':scope > summary').click()
-await roundCard.locator(':scope .tool-row').first().click()
 await page.evaluate(() => window.__emitWorkbench({ event: 'run_trace', data: { session_id: 'session-b', business_id: 'business-b2', run_id: 'business-b2-run' } }))
 await page.waitForFunction((before) => window.__traceVersion > before, traceVersionBefore)
 const traceCallsAfter = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'get_trace' && params.business_id === 'business-b2').length)
 assert.ok(traceCallsAfter > traceCallsBefore)
 const currentTraceVersion = await page.evaluate(() => window.__traceVersion)
-assert.ok((await page.locator('.trace-page').textContent()).includes(`"version": ${currentTraceVersion}`))
+await page.getByRole('button', { name: /read_business_records/ }).click()
+assert.ok((await page.locator('.trace-detail-panel').textContent()).includes(`"version": ${currentTraceVersion}`))
 
 // 300 trace events in one burst must coalesce to one trace read and one quiet business refresh.
 const burstTraceCallsBefore = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'get_trace' && params.business_id === 'business-b2').length)
@@ -352,12 +426,82 @@ assert.equal(burstBusinessCallsAfter - burstBusinessCallsBefore, 1)
 assert.equal(await page.evaluate(() => window.__traceVersion), burstTraceVersionBefore + 1)
 const traceBurstElapsed = Date.now() - traceBurstStarted
 
+// Production-shaped reconciliation case: inspecting an old run must preserve the
+// current activity, and an uncertain write must remain unknown without a retry.
+await page.getByRole('tab', { name: /Business B3/ }).click()
+await page.getByRole('heading', { name: 'Business B3' }).waitFor()
+const b3Goal = page.getByLabel('业务目标', { exact: true })
+await b3Goal.waitFor()
+const fullB3Goal = '核对中断写入是否已经落库，并保留当前运行与历史单据证据。'
+assert.ok((await b3Goal.textContent()).includes('核对中断写入是否已经落库'))
+await page.getByText('查看原始指令', { exact: true }).click()
+await page.locator('.goal-details').getByText(fullB3Goal, { exact: true }).waitFor()
+const currentActivity = await page.locator('.activity-card').textContent()
+assert.ok(currentActivity?.includes('写入结果待核对'))
+assert.equal(await page.getByRole('button', { name: /开始执行|继续执行|重新执行/ }).count(), 0)
+await page.getByRole('tab', { name: /^运行详情/ }).click()
+await page.locator('.trace-toolbar select').selectOption('business-b3-old-run')
+await page.locator('.trace-page .loading-line').waitFor({ state: 'hidden' })
+assert.equal(await page.locator('.trace-toolbar select').inputValue(), 'business-b3-old-run')
+assert.ok((await page.locator('.trace-page').textContent()).includes('read_business_records'))
+await page.getByRole('tab', { name: /^执行台/ }).click()
+assert.equal(await page.locator('.activity-card').textContent(), currentActivity)
+assert.ok((await page.locator('.business-content').textContent()).includes('系统不会自动重试'))
+await page.getByRole('tab', { name: /^变更与审批/ }).click()
+const reconcileButton = page.getByRole('button', { name: '核对不确定写入' })
+await reconcileButton.waitFor()
+await reconcileButton.click()
+const reconcileCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'reconcile_action'))
+assert.deepEqual(reconcileCalls.map(({ params }) => params), [{ session_id: 'session-b', business_id: 'business-b3', run_id: 'business-b3-run', action_id: 'action-b3' }])
+assert.equal(await page.locator('.outcome-summary').getByText('本轮结束', { exact: true }).count(), 0)
+assert.ok((await page.locator('.approval-row').textContent()).includes('需对账'))
+assert.equal(await page.locator('.business-content button').filter({ hasText: /重试|重新执行/ }).count(), 0)
+await page.getByRole('tab', { name: /^单据/ }).click()
+assert.equal(await page.locator('.document-table a').count(), 0)
+
+// Terminal approval records keep their terminal status after expiry; expiry must
+// not rewrite verified/rejected history into a pending/expired decision.
+await page.getByRole('tab', { name: /Business B4/ }).click()
+await page.getByRole('heading', { name: 'Business B4' }).waitFor()
+await page.getByRole('tab', { name: /^变更与审批/ }).click()
+const terminalApprovals = page.locator('.approval-row')
+await terminalApprovals.nth(1).waitFor()
+assert.equal(await terminalApprovals.nth(0).locator('.state-badge').textContent(), '已核验')
+assert.equal(await terminalApprovals.nth(1).locator('.state-badge').textContent(), '已拒绝')
+assert.equal(await terminalApprovals.locator('.state-expired').count(), 0)
+
+// Evidence navigation carries both identifiers: run selection and tool receipt.
+await page.getByRole('tab', { name: /Business B2/ }).click()
+await page.getByRole('heading', { name: 'Business B2' }).waitFor()
+await page.getByRole('tab', { name: /^执行台/ }).click()
+await page.getByText('当前业务进度').waitFor()
+await page.getByRole('button', { name: /读取订单/ }).click()
+const exactReceipt = page.getByRole('button', { name: /查看订单读取回执/ })
+await exactReceipt.waitFor()
+await exactReceipt.click()
+await page.locator('.trace-page .loading-line').waitFor({ state: 'hidden' })
+assert.equal(await page.locator('.trace-toolbar select').inputValue(), 'business-b2-run')
+await page.locator('.trace-tool-node.active').filter({ hasText: 'read_business_records' }).waitFor()
+
+// A readback link sourced from the historical run resolves to the current
+// independent snapshot and never reports the snapshot as unavailable.
+await page.getByRole('tab', { name: /^执行台/ }).click()
+await page.getByRole('button', { name: /读取订单/ }).click()
+await page.getByRole('button', { name: /查看独立回读快照/ }).click()
+await page.locator('.trace-page .loading-line').waitFor({ state: 'hidden' })
+assert.equal(await page.locator('.trace-toolbar select').inputValue(), 'business-b2-run')
+const readbackDetail = await page.locator('.trace-detail-panel').textContent()
+assert.ok(readbackDetail?.includes('独立 Odoo 回读快照'))
+assert.equal(readbackDetail?.includes('当前运行没有匹配的独立回读快照'), false)
+const readbackTraceCall = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'get_trace' && params.business_id === 'business-b2').at(-1))
+assert.equal(readbackTraceCall?.params.run_id, 'business-b2-run')
+
 // Host lifecycle events are visible and the banner can retry health after a crash/protocol error.
 await page.evaluate(() => window.__emitWorkbench({ event: 'host_status', data: { status: 'crashed', code: 9 } }))
 await page.getByText('主机已崩溃').waitFor()
 await page.evaluate(() => window.__emitWorkbench({ event: 'host_protocol_error', data: { message: 'invalid test frame' } }))
 await page.getByText('主机协议错误').waitFor()
-await page.getByRole('alert').getByRole('button', { name: '重试连接' }).click()
+await page.getByRole('alert').getByRole('button', { name: '重试连接' }).click({ force: true })
 await page.getByText('主机已连接').waitFor()
 const checksBeforeConnectionChanged = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'check_connection').length)
 await page.evaluate(() => window.__emitWorkbench({ event: 'changed', data: { type: 'connection_changed', odoo: { status: 'connected', checked_at: '2026-09-08T09:01:00Z' } } }))
@@ -387,19 +531,34 @@ await page.getByRole('dialog', { name: '连接设置' }).waitFor({ state: 'hidde
 await page.waitForFunction(() => document.activeElement === document.querySelector('.settings-button'))
 
 // The splitter is keyboard-operable and the four-column layout remains inside the viewport.
-const divider = page.getByRole('separator', { name: '调整业务工作区宽度' })
+const divider = page.getByRole('separator', { name: '调整会话辅助面板宽度' })
 await divider.focus()
 for (let index = 0; index < 30; index += 1) await page.keyboard.press('ArrowLeft')
 const overflow = await page.evaluate(() => ({ document: document.documentElement.scrollWidth, viewport: window.innerWidth, grid: document.querySelector('.workspace-grid')?.scrollWidth ?? 0, gridClient: document.querySelector('.workspace-grid')?.clientWidth ?? 0 }))
 assert.ok(overflow.document <= overflow.viewport + 1, JSON.stringify(overflow))
 assert.ok(overflow.grid <= overflow.gridClient + 1, JSON.stringify(overflow))
-await page.setViewportSize({ width: 1280, height: 900 })
+await page.setViewportSize({ width: 1280, height: 800 })
 await divider.focus()
 for (let index = 0; index < 30; index += 1) await page.keyboard.press('ArrowLeft')
 const narrowOverflow = await page.evaluate(() => ({ document: document.documentElement.scrollWidth, viewport: window.innerWidth, grid: document.querySelector('.workspace-grid')?.scrollWidth ?? 0, gridClient: document.querySelector('.workspace-grid')?.clientWidth ?? 0 }))
 assert.ok(narrowOverflow.document <= narrowOverflow.viewport + 1, JSON.stringify(narrowOverflow))
 assert.ok(narrowOverflow.grid <= narrowOverflow.gridClient + 1, JSON.stringify(narrowOverflow))
-await page.setViewportSize({ width: 1440, height: 900 })
+// At the compact viewport, the resource list scrolls independently so the
+// selected document preview heading remains visible in the active tab.
+await page.getByRole('tab', { name: /Business B2/ }).click()
+await page.getByRole('tab', { name: /^单据/ }).click()
+await page.locator('.resource-list .resource-row').last().click()
+const previewHeading = page.locator('.resource-preview h3')
+await previewHeading.waitFor()
+assert.equal(await previewHeading.textContent(), 'INV-B2')
+const previewVisibility = await page.evaluate(() => {
+  const heading = document.querySelector('.resource-preview h3')?.getBoundingClientRect()
+  const activeTab = document.querySelector('.business-content > [data-state="active"]')?.getBoundingClientRect()
+  if (!heading || !activeTab) return { visible: false }
+  return { visible: heading.top >= activeTab.top && heading.bottom <= Math.min(activeTab.bottom, window.innerHeight) }
+})
+assert.equal(previewVisibility.visible, true, JSON.stringify(previewVisibility))
+await page.setViewportSize({ width: 1600, height: 1000 })
 await page.getByLabel('业务目标', {exact: true}).evaluate(e => { e.textContent = '完整业务目标 '.repeat(1000) })
 assert.ok(await page.getByLabel('业务目标', {exact: true}).evaluate(e => e.clientHeight < 100 && e.scrollHeight > e.clientHeight))
 await page.getByLabel('业务目标', {exact: true}).evaluate(e => { e.textContent = '处理订单与发票' })
@@ -410,13 +569,16 @@ assert.ok(calls.includes('get_session') && calls.includes('get_business') && cal
 if (process.env.RENDERER_CHECK_SCREENSHOTS) {
   const screenshotDir = fileURLToPath(new URL('../../.runtime/desktop-refinement/', import.meta.url))
   mkdirSync(screenshotDir, { recursive: true })
-  for (const [name, label] of [['overview', /^概览/], ['documents', /^单据/], ['approvals', /^审批/], ['trace', /^Trace/]]) {
-    await page.getByRole('tab', { name: label }).click()
-    await page.screenshot({ path: resolve(screenshotDir, `${name}.png`), fullPage: false })
+  for (const [width, height] of [[1280, 800], [1600, 1000]]) {
+    await page.setViewportSize({ width, height })
+    for (const [name, label] of [['execution', /^执行台/], ['documents', /^单据/], ['approvals', /^变更与审批/], ['trace', /^运行详情/]]) {
+      await page.getByRole('tab', { name: label }).click()
+      await page.screenshot({ path: resolve(screenshotDir, `${name}-${width}x${height}.png`), fullPage: false })
+    }
   }
 }
 console.log('renderer-check: PASS')
-console.log('checked: session/business/trace stale guards, same-run trace refresh, changed routing, host crash/retry, message scope, session search, approval scope+preflight labels, CONFIG_BUSY mapping, settings save+Escape, splitter overflow')
+console.log('checked: session/business/trace stale guards, same-run trace refresh, changed routing, host crash/retry, message scope, session search, approval scope+preflight labels, CONFIG_BUSY mapping, settings save+Escape, splitter overflow, evidence navigation, unknown-write no-retry, historical activity preservation')
 console.log(`pressure: session50=${sessionPressureElapsed}ms business50=${businessPressureElapsed}ms business20sequential=${sequentialBusinessElapsed}ms trace300=${traceBurstElapsed}ms trace_rpc_delta=${burstTraceCallsAfter - burstTraceCallsBefore} business_rpc_delta=${burstBusinessCallsAfter - burstBusinessCallsBefore} repeated={proposal:${proposalCalls.length},send:${dedupeSendCalls.length},start:${startCalls.length},approve:${repeatedApproveCalls.length},cancel:${cancelCalls.length}}`)
 await browser.close()
 server.close()

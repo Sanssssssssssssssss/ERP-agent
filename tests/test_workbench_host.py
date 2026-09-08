@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 import threading
 import time
@@ -123,6 +124,130 @@ class WorkbenchHostTests(unittest.TestCase):
         self.assertEqual(captured["HOME"], captured["USERPROFILE"])
         self.assertFalse(any(m.get("submitted_run_id") for m in self.host.store.data["messages"][self.sid]))
         self.assertIsNone(self.host.health()["active_run_id"])
+
+    def test_native_read_documents_keep_run_and_tool_provenance(self):
+        business, run = self._run("read a sale")
+        self.host._tool_start(run, {
+            "tool_call_id": "tool-read-1",
+            "tool_name": "read_record",
+            "args": {"model": "sale.order", "record_id": 7},
+        })
+        self.host._tool_end(run, {
+            "tool_call_id": "tool-read-1",
+            "tool_name": "read_record",
+            "result": {"success": True, "result": {"id": 7, "name": "SO001", "state": "sale", "amount_total": 10}},
+        })
+        document = run["documents"][0]
+        self.assertEqual(document["source_run_id"], run["id"])
+        self.assertEqual(document["source_tool_id"], "tool-read-1")
+        self.assertEqual(document["source_observed_at"], document["observed_at"])
+        detail = self.host.get_business(self.sid, business["id"])
+        evidence = detail["execution"]["stages"][0]["evidence"]
+        self.assertEqual(evidence[0]["run_id"], run["id"])
+
+    def test_unknown_write_result_does_not_create_business_evidence(self):
+        business, run = self._run("post an invoice")
+        self.host._tool_start(run, {
+            "tool_call_id": "tool-write-1",
+            "tool_name": "account.move.action_post",
+            "args": {"model": "account.move", "method": "action_post"},
+        })
+        self.host._tool_end(run, {
+            "tool_call_id": "tool-write-1",
+            "tool_name": "account.move.action_post",
+            "result": {"success": False, "error": "outcome unknown"},
+        })
+        detail = self.host.get_business(self.sid, business["id"])
+        self.assertEqual(detail["outcome"]["status"], "unknown")
+        self.assertTrue(all(not stage["evidence"] for stage in detail["execution"]["stages"]))
+
+    def test_reconcile_action_is_read_only_and_clears_run_to_interrupted(self):
+        business, run = self._run("recover an uncertain write")
+        row = self._action(run, key="uncertain")
+        ledger = ActionStore(Path(self.tmp.name) / "runs" / run["id"] / "odoo-actions.sqlite3")
+        ledger.finish(row["action_id"], "needs_reconciliation", error="response lost")
+        ledger.close()
+        run["status"] = "needs_reconciliation"
+        self.host.store.data["approvals"][row["action_id"]] = {
+            "action_id": row["action_id"], "run_id": run["id"], "business_id": business["id"],
+            "session_id": self.sid, "status": "needs_reconciliation", "source": "host",
+        }
+
+        def reconcile(_actions, action):
+            ledger = ActionStore(Path(self.tmp.name) / "runs" / run["id"] / "odoo-actions.sqlite3")
+            try:
+                ledger.finish(action, "verified", result={"readback": True}, verification={"status": "satisfied"})
+            finally:
+                ledger.close()
+            return {"success": True, "action_id": action, "action_status": "verified", "verification": {"status": "satisfied"}}
+
+        fake_actions = SimpleNamespace(NativeActions=type("FakeNativeActions", (), {"__init__": lambda self, _reads, store: setattr(self, "store", store), "reconcile": reconcile}))
+        with patch.dict(sys.modules, {"odoo_runtime.actions": fake_actions}), \
+                patch.object(self.host, "_native_reads", return_value=SimpleNamespace()):
+            result = self.host.reconcile_action(self.sid, business["id"], run["id"], row["action_id"])
+        self.assertEqual(result["business"]["id"], business["id"])
+        self.assertEqual(run["status"], "interrupted")
+        self.assertEqual(self.host.store.data["approvals"][row["action_id"]]["status"], "verified")
+        self.assertTrue(any(event["type"] == "reconciliation" for event in run["events"]))
+
+    def test_reconcile_refuses_pending_approval(self):
+        business, run = self._run("do not replay pending")
+        row = self._action(run, key="pending")
+        run["status"] = "needs_reconciliation"
+        self.host.store.data["approvals"][row["action_id"]] = {
+            "action_id": row["action_id"], "run_id": run["id"], "business_id": business["id"],
+            "session_id": self.sid, "status": "pending_approval", "source": "host",
+        }
+        with self.assertRaises(ValueError):
+            self.host.reconcile_action(self.sid, business["id"], run["id"], row["action_id"])
+
+    def test_reconcile_refuses_when_another_run_is_active(self):
+        business, run = self._run("recover only after the host is idle")
+        row = self._action(run, key="busy-reconcile")
+        ledger = ActionStore(Path(self.tmp.name) / "runs" / run["id"] / "odoo-actions.sqlite3")
+        ledger.finish(row["action_id"], "needs_reconciliation", error="response lost")
+        ledger.close()
+        run["status"] = "needs_reconciliation"
+        self.host.store.data["businesses"][business["id"]]["active_run_id"] = None
+        self.host.store.data["sessions"][self.sid]["active_run_id"] = None
+        self.host.store.data["approvals"][row["action_id"]] = {
+            "action_id": row["action_id"], "run_id": run["id"], "business_id": business["id"],
+            "session_id": self.sid, "status": "needs_reconciliation", "source": "host",
+        }
+        _other_business, other_run = self._run("another run remains active")
+        self.assertEqual(other_run["status"], "running")
+        with self.assertRaisesRegex(RuntimeError, "another run is active"):
+            self.host.reconcile_action(self.sid, business["id"], run["id"], row["action_id"])
+
+    def test_cached_verified_reconcile_does_not_interrupt_completed_run_or_erase_receipt(self):
+        business, run = self._run("keep completed history while checking a cached write")
+        row = self._action(run, key="cached-verified", status_pending=False)
+        ledger = ActionStore(Path(self.tmp.name) / "runs" / run["id"] / "odoo-actions.sqlite3")
+        ledger.finish(row["action_id"], "verified", result={"cached": True}, verification={"status": "satisfied"})
+        ledger.close()
+        run["status"] = "completed"
+        self.host.store.data["businesses"][business["id"]]["active_run_id"] = None
+        self.host.store.data["approvals"][row["action_id"]] = {
+            "action_id": row["action_id"], "run_id": run["id"], "business_id": business["id"],
+            "session_id": self.sid, "status": "verified", "source": "host",
+            "result": {"cached": True}, "verification": {"status": "satisfied"},
+        }
+
+        def cached_reconcile(_actions, _action):
+            return {"success": True, "action_status": "verified"}
+
+        fake_actions = SimpleNamespace(NativeActions=type("FakeNativeActions", (), {
+            "__init__": lambda self, _reads, store: setattr(self, "store", store),
+            "reconcile": cached_reconcile,
+        }))
+        with patch.dict(sys.modules, {"odoo_runtime.actions": fake_actions}), \
+                patch.object(self.host, "_native_reads", return_value=SimpleNamespace()):
+            result = self.host.reconcile_action(self.sid, business["id"], run["id"], row["action_id"])
+        self.assertEqual(result["business"]["id"], business["id"])
+        self.assertEqual(run["status"], "completed")
+        approval = self.host.store.data["approvals"][row["action_id"]]
+        self.assertEqual(approval["result"], {"cached": True})
+        self.assertEqual(approval["verification"], {"status": "satisfied"})
 
     def test_post_popen_worker_init_failure_releases_retryable_instruction(self):
         business, run = self._run("retry after worker initialization")
