@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 import uuid
+import urllib.parse
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -87,6 +88,21 @@ def public_message(row: dict[str, Any]) -> dict[str, Any]:
     return {key: row[key] for key in ("id", "role", "text", "created_at", "business_id", "proposal") if key in row}
 
 
+def _public_endpoint(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        parsed = urllib.parse.urlsplit(value if "://" in value else f"http://{value}")
+        host = parsed.hostname
+        if not host:
+            return None
+        host = f"[{host}]" if ":" in host and not host.startswith("[") else host
+        port = f":{parsed.port}" if parsed.port else ""
+        return f"{parsed.scheme}://{host}{port}"
+    except (TypeError, ValueError):
+        return None
+
+
 class Workbench:
     def __init__(self, data_dir: str | Path, repo: str | Path | None = None,
                  event_sink: Callable[[dict[str, Any]], None] | None = None):
@@ -97,7 +113,65 @@ class Workbench:
         self._threads: dict[str, threading.Thread] = {}
         self._closing = False
         self._event_sink = event_sink
+        self._odoo_health = self._initial_odoo_health()
         self._recover_on_start()
+
+    def _initial_odoo_health(self) -> dict[str, Any]:
+        endpoint = _public_endpoint(os.environ.get("ODOO_URL"))
+        database = os.environ.get("ODOO_DB") or None
+        account = os.environ.get("ODOO_USERNAME") or None
+        configured = all(os.environ.get(key) for key in ("ODOO_URL", "ODOO_DB", "ODOO_USERNAME", "ODOO_API_KEY"))
+        return {
+            "status": "unchecked" if configured else "unconfigured",
+            **({"endpoint": endpoint} if endpoint else {}),
+            **({"database": database} if database else {}),
+            **({"account": account} if account else {}),
+            "detail": "尚未进行连接检查。" if configured else "未配置完整的 Odoo 连接信息。",
+        }
+
+    @staticmethod
+    def _connection_failure(exc: Exception) -> tuple[str, str]:
+        if isinstance(exc, PermissionError):
+            return "permission_denied", "Odoo 认证失败或当前账号没有所需的只读权限。"
+        if isinstance(exc, (TimeoutError, ConnectionError, OSError)):
+            return "unavailable", "Odoo 暂时不可达或连接超时。"
+        text = f"{type(exc).__name__} {exc}".lower()
+        if any(token in text for token in ("auth", "credential", "password", "api key", "permission", "access denied", "forbidden")):
+            return "permission_denied", "Odoo 认证失败或当前账号没有所需的只读权限。"
+        return "error", "Odoo 连接检查发生错误。"
+
+    def check_connection(self) -> dict[str, Any]:
+        if self._processes or any(
+            run.get("status") in {"running", "awaiting_approval", "cancel_requested"}
+            for run in self.store.data["runs"].values()
+        ):
+            raise RuntimeError("CONNECTION_CHECK_BUSY")
+        started = time.perf_counter()
+        endpoint = _public_endpoint(os.environ.get("ODOO_URL"))
+        database = os.environ.get("ODOO_DB") or None
+        account = os.environ.get("ODOO_USERNAME") or None
+        result = {
+            "status": "unconfigured",
+            **({"endpoint": endpoint} if endpoint else {}),
+            **({"database": database} if database else {}),
+            **({"account": account} if account else {}),
+        }
+        required = ("ODOO_URL", "ODOO_DB", "ODOO_USERNAME", "ODOO_API_KEY")
+        if any(not os.environ.get(key) for key in required):
+            result["detail"] = "未配置完整的 Odoo 连接信息。"
+        else:
+            try:
+                # Json2ReadClient construction performs the native res.users.context_get authentication call.
+                self._native_reads(timeout=3)
+                result["status"] = "connected"
+                result["detail"] = "只读认证和当前用户上下文读取成功；这不代表全部模型 ACL 均可用。"
+            except Exception as exc:  # classify without exposing provider/credential text
+                result["status"], result["detail"] = self._connection_failure(exc)
+        result["checked_at"] = now()
+        result["latency_ms"] = round((time.perf_counter() - started) * 1000, 1)
+        self._odoo_health = result
+        self._event("connection_changed", {"odoo": dict(result)})
+        return self.health()
 
     def _ledger_statuses(self, run: dict[str, Any]) -> dict[str, str]:
         from odoo_runtime.store import ActionStore
@@ -192,7 +266,7 @@ class Workbench:
         if data.get("run_id") in self.store.data["runs"]:
             run = self.store.data["runs"][data["run_id"]]
             data = {"session_id": run["session_id"], "business_id": run["business_id"], **data}
-        state_event = name in {"session_changed", "business_changed", "business_proposal_decided", "message_added", "run_changed", "approval_changed", "business_refreshed"}
+        state_event = name in {"session_changed", "business_changed", "business_proposal_decided", "message_added", "run_changed", "approval_changed", "business_refreshed", "connection_changed"}
         wire_name = "changed" if state_event else name
         wire_data = {"type": name, **_safe(data)} if state_event else _safe(data)
         row = self.store.event(wire_name, wire_data)
@@ -359,7 +433,7 @@ class Workbench:
         thread.start()
 
     def _trace(self, run: dict[str, Any], kind: str, data: dict[str, Any]) -> None:
-        row = {"type": kind, **_safe(data)}
+        row = {"type": kind, "at": now(), **_safe(data)}
         run["events"].append(row)
         self._event("run_trace", {"session_id": run["session_id"], "business_id": run["business_id"], "run_id": run["id"], **row})
 
@@ -561,7 +635,7 @@ class Workbench:
                     approval["result"], approval["verification"] = _safe(row.get("result")), _safe(row.get("verification"))
         return business_detail(self.store.data, business_id)
 
-    def _native_reads(self):
+    def _native_reads(self, *, timeout: int = 10):
         from odoo_runtime.gateway import Json2ReadClient
         from odoo_runtime.reads import NativeReads
         required = ("ODOO_URL", "ODOO_DB", "ODOO_USERNAME", "ODOO_API_KEY")
@@ -570,7 +644,7 @@ class Workbench:
         # Explicit construction prevents any legacy config-file or home fallback.
         client = Json2ReadClient(url=os.environ["ODOO_URL"], db=os.environ["ODOO_DB"],
             username=os.environ["ODOO_USERNAME"], password=os.environ["ODOO_API_KEY"],
-            api_key=os.environ["ODOO_API_KEY"], transport="json2", timeout=10)
+            api_key=os.environ["ODOO_API_KEY"], transport="json2", timeout=timeout)
         return NativeReads(client)
 
     def refresh_business(self, session_id: str, business_id: str) -> dict[str, Any]:
@@ -712,10 +786,10 @@ class Workbench:
 
     def health(self) -> dict[str, Any]:
         active = next((r["id"] for r in self.store.data["runs"].values() if r.get("status") in {"running", "awaiting_approval", "cancel_requested"}), None)
-        return {"host_ready": True, "odoo_status": "configured" if os.environ.get("ODOO_URL") and os.environ.get("ODOO_DB") else "unknown", "model_configured": bool(os.environ.get("LLM_API_KEY") and os.environ.get("LLM_BASE_URL") and os.environ.get("LLM_MODEL")), "environment": "configured" if os.environ.get("LLM_API_KEY") else "demo", "active_run_id": active}
+        return {"host_ready": True, "odoo_status": "configured" if os.environ.get("ODOO_URL") and os.environ.get("ODOO_DB") else "unknown", "model_configured": bool(os.environ.get("LLM_API_KEY") and os.environ.get("LLM_BASE_URL") and os.environ.get("LLM_MODEL")), "environment": "configured" if os.environ.get("LLM_API_KEY") else "demo", "active_run_id": active, "odoo": dict(self._odoo_health)}
 
     def _dispatch(self, method: str, params: dict[str, Any]) -> Any:
-        methods = {"list_sessions": lambda: self.list_sessions(), "create_session": lambda: self.create_session(params.get("title")), "rename_session": lambda: self.rename_session(params["session_id"], params["title"]), "archive_session": lambda: self.archive_session(params["session_id"]), "get_session": lambda: self.get_session(params["session_id"]), "send_message": lambda: self.send_message(params["session_id"], params["text"], params.get("business_id")), "confirm_business": lambda: self.confirm_business(params["session_id"], params["proposal_id"], _must_bool(params["confirmed"], "confirmed")), "start_run": lambda: self.start_run(params["session_id"], params["business_id"]), "decide_approval": lambda: self.decide_approval(params["session_id"], params["business_id"], params["run_id"], params["action_id"], params["decision"]), "cancel_run": lambda: self.cancel_run(params["session_id"], params["business_id"], params["run_id"]), "get_business": lambda: self.get_business(params["session_id"], params["business_id"]), "refresh_business": lambda: self.refresh_business(params["session_id"], params["business_id"]), "get_trace": lambda: self.get_trace(params["session_id"], params["business_id"], params.get("run_id")), "health": self.health}
+        methods = {"list_sessions": lambda: self.list_sessions(), "create_session": lambda: self.create_session(params.get("title")), "rename_session": lambda: self.rename_session(params["session_id"], params["title"]), "archive_session": lambda: self.archive_session(params["session_id"]), "get_session": lambda: self.get_session(params["session_id"]), "send_message": lambda: self.send_message(params["session_id"], params["text"], params.get("business_id")), "confirm_business": lambda: self.confirm_business(params["session_id"], params["proposal_id"], _must_bool(params["confirmed"], "confirmed")), "start_run": lambda: self.start_run(params["session_id"], params["business_id"]), "decide_approval": lambda: self.decide_approval(params["session_id"], params["business_id"], params["run_id"], params["action_id"], params["decision"]), "cancel_run": lambda: self.cancel_run(params["session_id"], params["business_id"], params["run_id"]), "get_business": lambda: self.get_business(params["session_id"], params["business_id"]), "refresh_business": lambda: self.refresh_business(params["session_id"], params["business_id"]), "get_trace": lambda: self.get_trace(params["session_id"], params["business_id"], params.get("run_id")), "health": self.health, "check_connection": self.check_connection}
         if method not in methods: raise KeyError("unknown method")
         return methods[method]()
 

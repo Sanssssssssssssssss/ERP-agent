@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { AlertDialog as RadixAlertDialog, Badge as RadixBadge, Button as RadixButton, Dialog as RadixDialog, IconButton as RadixIconButton, Tooltip as RadixTooltip } from '@radix-ui/themes'
+import { Activity, Archive, ArrowUpRight, Check as CheckIcon, CircleAlert, CircleCheck, CircleDashed, Clock3, FileText, FolderPlus, LoaderCircle, Minus, Play, RefreshCw, Search, Send, Settings2, Square, X } from 'lucide-react'
 import type { WorkbenchMethod } from '../shared/protocol'
 import {
   Approval,
@@ -56,13 +58,15 @@ export default function App() {
   const [liveText, setLiveText] = useState('')
   const [settings, setSettings] = useState<Settings | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [connectionDetailsOpen, setConnectionDetailsOpen] = useState(false)
+  const [archiveTarget, setArchiveTarget] = useState('')
   const [settingsDraft, setSettingsDraft] = useState<Record<string, string>>({})
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [notice, setNotice] = useState('')
   const [renamingId, setRenamingId] = useState('')
   const [messageBusinessId, setMessageBusinessId] = useState('')
   const [sessionQuery, setSessionQuery] = useState('')
-  const [businessWidth, setBusinessWidth] = useState(500)
+  const [businessWidth, setBusinessWidth] = useState(560)
   const [traceRefreshToken, setTraceRefreshToken] = useState(0)
   const settingsButtonRef = useRef<HTMLButtonElement>(null)
   const sessionIdRef = useRef('')
@@ -71,6 +75,8 @@ export default function App() {
   const businessRequestRef = useRef(0)
   const traceRequestRef = useRef(0)
   const traceRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const businessRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const quietBusinessRequestRef = useRef(0)
 
   const call = useCallback(async <T,>(method: string, params?: Record<string, unknown>) => {
     if (!window.workbench) throw new Error('桌面主机桥未连接')
@@ -81,9 +87,43 @@ export default function App() {
     const result = await call<SessionSummary[]>('list_sessions')
     const active = result.filter((item) => !item.archived)
     setSessions(active)
-    if (selectFirst && !selectedSessionId && active[0]) setSelectedSessionId(active[0].id)
+    if (selectFirst && !sessionIdRef.current && active[0]) {
+      sessionIdRef.current = active[0].id
+      setSelectedSessionId(active[0].id)
+    }
     return active
-  }, [call, selectedSessionId])
+  }, [call])
+
+  const checkConnection = useCallback(async (showError = true) => {
+    setConnection('checking')
+    try {
+      const result = await call<Health>('check_connection')
+      setHealth(result)
+      setConnection(result.host_ready ? 'connected' : 'disconnected')
+      if (showError) setError(result.host_ready ? '' : '本地 host 尚未就绪')
+      return result
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : String(reason)
+      if (message.includes('CONNECTION_CHECK_BUSY')) {
+        try {
+          const cached = await call<Health>('health')
+          setHealth((current) => cached.odoo ? cached : { ...cached, odoo: current?.odoo })
+          setConnection(cached.host_ready ? 'connected' : 'disconnected')
+          if (showError) setError('执行期间显示最近检查结果，结束后可重新检查。')
+          return cached
+        } catch {
+          setConnection('disconnected')
+        }
+        if (showError) setError('执行期间显示最近检查结果，结束后可重新检查。')
+        return null
+      }
+      setConnection('disconnected')
+      if (showError) {
+        setError(messageForError(reason))
+      }
+      return null
+    }
+  }, [call])
 
   const loadSession = useCallback(async (sessionId: string) => {
     if (!sessionId) return
@@ -125,6 +165,18 @@ export default function App() {
     }
   }, [call])
 
+  const refreshBusinessQuiet = useCallback(async (sessionId: string, businessId: string) => {
+    const requestId = ++quietBusinessRequestRef.current
+    try {
+      const result = await call<BusinessDetail>('get_business', { session_id: sessionId, business_id: businessId })
+      if (requestId !== quietBusinessRequestRef.current || sessionIdRef.current !== sessionId || businessIdRef.current !== businessId) return
+      setBusinessDetail(result)
+      setSelectedRunId((current) => result.runs.some((run) => run.id === current) ? current : result.runs[0]?.id || '')
+    } catch (reason) {
+      if (requestId === quietBusinessRequestRef.current && sessionIdRef.current === sessionId && businessIdRef.current === businessId) setError(messageForError(reason))
+    }
+  }, [call])
+
   useEffect(() => {
     let mounted = true
     void (async () => {
@@ -136,6 +188,7 @@ export default function App() {
           if (!result.host_ready) setError('本地 host 尚未就绪')
         }
         await loadSessions()
+        await checkConnection(false)
       } catch (reason) {
         if (mounted) {
           setConnection('disconnected')
@@ -144,7 +197,7 @@ export default function App() {
       }
     })()
     return () => { mounted = false }
-  }, [call, loadSessions])
+  }, [call, loadSessions, checkConnection])
 
   useEffect(() => {
     if (!selectedSessionId) return
@@ -218,12 +271,20 @@ export default function App() {
         setError(String(data.message || '本地 host 协议错误'))
         return
       }
+      if (event.event === 'changed' && String(data.type || '') === 'connection_changed') {
+        setHealth((current) => current ? { ...current, odoo: data.odoo && typeof data.odoo === 'object' ? data.odoo as Health['odoo'] : current.odoo } : current)
+        return
+      }
       if (event.event === 'message_delta') {
         setLiveText((current) => `${current}${String(data.text || '')}`)
         return
       }
       if (event.event === 'run_trace' || event.event === 'trace') {
         const eventRun = String(data.run_id || '')
+        if (eventBusiness === businessIdRef.current && eventSession === sessionIdRef.current) {
+          if (businessRefreshTimerRef.current) clearTimeout(businessRefreshTimerRef.current)
+          businessRefreshTimerRef.current = setTimeout(() => { void refreshBusinessQuiet(eventSession, eventBusiness) }, 120)
+        }
         if (tab === 'trace' && eventBusiness === selectedBusinessId && (!eventRun || eventRun === selectedRunId)) {
           if (traceRefreshTimerRef.current) clearTimeout(traceRefreshTimerRef.current)
           traceRefreshTimerRef.current = setTimeout(() => setTraceRefreshToken((value) => value + 1), 40)
@@ -250,11 +311,16 @@ export default function App() {
       }
     }
     return window.workbench.subscribe(handleEvent)
-  }, [loadSessions, reloadCurrent, selectedBusinessId, selectedRunId, selectedSessionId, tab])
+  }, [checkConnection, loadSessions, refreshBusinessQuiet, reloadCurrent, selectedBusinessId, selectedRunId, selectedSessionId, tab])
 
   const activeBusiness = useMemo(
     () => session?.businesses.find((item) => item.id === selectedBusinessId) ?? businessDetail?.business ?? null,
     [businessDetail?.business, selectedBusinessId, session?.businesses]
+  )
+  const hasActiveExecution = Boolean(
+    businessDetail?.runs.some((run) => ['running', 'awaiting_approval', 'cancel_requested'].includes(run.status))
+      || session?.businesses.some((business) => ['running', 'awaiting_approval', 'cancel_requested'].includes(business.status))
+      || sessions.some((item) => ['running', 'awaiting_approval', 'cancel_requested'].includes(item.status))
   )
 
   const chooseSession = (id: string) => {
@@ -263,6 +329,7 @@ export default function App() {
     businessIdRef.current = ''
     sessionRequestRef.current += 1
     businessRequestRef.current += 1
+    quietBusinessRequestRef.current += 1
     traceRequestRef.current += 1
     setSelectedSessionId(id)
     setSelectedBusinessId('')
@@ -280,6 +347,7 @@ export default function App() {
     if (businessIdRef.current === id && selectedBusinessId === id) return
     businessIdRef.current = id
     businessRequestRef.current += 1
+    quietBusinessRequestRef.current += 1
     traceRequestRef.current += 1
     setSelectedBusinessId(id)
     setMessageBusinessId(id)
@@ -305,7 +373,6 @@ export default function App() {
   }
 
   const archiveSession = async (id: string) => {
-    if (!window.confirm('归档这个会话？归档不会删除业务记录。')) return
     const requestSessionId = selectedSessionId
     try {
       await call('archive_session', { session_id: id })
@@ -470,9 +537,8 @@ export default function App() {
       const updated = await call<Settings>('save_settings', settingsDraft)
       setSettings(updated)
       setSettingsDraft((current) => ({ ...current, model_key: '', odoo_key: '' }))
-      const currentHealth = await call<Health>('health')
-      setHealth(currentHealth)
-      setConnection(currentHealth.host_ready ? 'connected' : 'disconnected')
+      const currentHealth = await checkConnection(true)
+      if (!currentHealth) throw new Error('连接检查失败')
       setNotice('设置已保存，连接状态已刷新。')
       closeSettings()
     } catch (reason) {
@@ -482,24 +548,13 @@ export default function App() {
     }
   }
 
-  const retryHealth = async () => {
-    setConnection('checking')
-    try {
-      const currentHealth = await call<Health>('health')
-      setHealth(currentHealth)
-      setConnection(currentHealth.host_ready ? 'connected' : 'disconnected')
-      if (currentHealth.host_ready) setError('')
-      else setError('本地 host 尚未就绪')
-    } catch (reason) {
-      setConnection('disconnected')
-      setError(messageForError(reason))
-    }
-  }
+  const retryHealth = async () => { await checkConnection(true) }
 
   const resizeBusiness = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId)
     const move = (moveEvent: PointerEvent) => {
-      const width = Math.max(360, Math.min(700, window.innerWidth - moveEvent.clientX))
+      const maxWidth = Math.max(360, window.innerWidth - 240 - 420 - 5)
+      const width = Math.max(360, Math.min(700, maxWidth, window.innerWidth - moveEvent.clientX))
       setBusinessWidth(width)
     }
     const stop = () => {
@@ -516,17 +571,19 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="window-bar">
-        <div className="brand-lockup"><span className="brand-mark">O</span><span>业务工作台</span><small>Odoo native harness</small></div>
-        <div className="window-bar-state"><span className={`connection-dot ${connection}`} />{connectionLabel(connection)}<span className="health-separator">·</span><span className={`odoo-health odoo-${health?.odoo_status || 'unknown'}`}>Odoo {healthLabel(health?.odoo_status)}</span></div>
-        <button ref={settingsButtonRef} className="settings-button" onClick={() => void openSettings()}>连接设置</button>
+        <div className="brand-lockup"><span className="brand-mark"><Activity size={16} strokeWidth={2.5} /></span><span>业务工作台</span><small>Odoo 业务执行</small></div>
+        <button className="window-bar-state" onClick={() => setConnectionDetailsOpen(true)} aria-label="查看连接状态"><span className={`connection-dot ${connection}`} />{connectionLabel(connection)}<span className="health-separator">·</span><span className={`odoo-health odoo-${odooHealthStatus(health)}`}>Odoo {healthLabel(odooHealthStatus(health))}</span><ArrowUpRight size={13} /></button>
+        <RadixTooltip content="配置模型与 Odoo 连接"><RadixButton ref={settingsButtonRef} className="settings-button" variant="soft" onClick={() => void openSettings()}><Settings2 size={15} />连接设置</RadixButton></RadixTooltip>
         <div className="window-actions">
-          <button aria-label="最小化" onClick={() => void window.workbench?.windowControl('minimize')}>−</button>
-          <button aria-label="最大化" onClick={() => void window.workbench?.windowControl('maximize')}>□</button>
-          <button aria-label="关闭" className="close" onClick={() => void window.workbench?.windowControl('close')}>×</button>
+          <RadixTooltip content="最小化"><RadixIconButton variant="ghost" aria-label="最小化" onClick={() => void window.workbench?.windowControl('minimize')}><Minus size={16} /></RadixIconButton></RadixTooltip>
+          <RadixTooltip content="最大化"><RadixIconButton variant="ghost" aria-label="最大化" onClick={() => void window.workbench?.windowControl('maximize')}><span className="window-maximize-glyph" /></RadixIconButton></RadixTooltip>
+          <RadixTooltip content="关闭"><RadixIconButton variant="ghost" className="close" aria-label="关闭" onClick={() => void window.workbench?.windowControl('close')}><X size={16} /></RadixIconButton></RadixTooltip>
         </div>
       </header>
 
       {settingsOpen && <SettingsDialog settings={settings} draft={settingsDraft} saving={settingsSaving} onChange={(key, value) => setSettingsDraft((current) => ({ ...current, [key]: value }))} onClose={closeSettings} onSave={() => void saveSettings()} />}
+      <ConnectionDetailsDialog health={health} connection={connection} busy={hasActiveExecution} open={connectionDetailsOpen} onOpenChange={setConnectionDetailsOpen} onRetry={() => void checkConnection(true)} />
+      <ArchiveDialog open={Boolean(archiveTarget)} onOpenChange={(open) => { if (!open) setArchiveTarget('') }} onConfirm={() => { const id = archiveTarget; setArchiveTarget(''); void archiveSession(id) }} />
 
       {error && <div className="global-alert" role="alert"><span>{error}</span>{connection !== 'connected' && <button onClick={() => void retryHealth()}>重试连接</button>}<button onClick={() => setError('')}>关闭</button></div>}
       {notice && <div className="global-notice" role="status"><span>{notice}</span><button onClick={() => setNotice('')}>关闭</button></div>}
@@ -539,7 +596,7 @@ export default function App() {
           renamingId={renamingId}
           onSelect={chooseSession}
           onCreate={() => void createSession()}
-          onArchive={(id) => void archiveSession(id)}
+          onArchive={setArchiveTarget}
           onRenameStart={setRenamingId}
           onRename={renameSession}
           query={sessionQuery}
@@ -558,7 +615,7 @@ export default function App() {
           onSubmit={sendMessage}
           onProposal={(proposal, confirmed) => void confirmProposal(proposal, confirmed)}
         />
-        <div className="workspace-divider" role="separator" tabIndex={0} aria-label="调整业务工作区宽度" onPointerDown={resizeBusiness} onKeyDown={(event) => { if (event.key === 'ArrowLeft') setBusinessWidth((width) => Math.min(700, width + 24)); if (event.key === 'ArrowRight') setBusinessWidth((width) => Math.max(360, width - 24)) }} />
+        <div className="workspace-divider" role="separator" tabIndex={0} aria-label="调整业务工作区宽度" onPointerDown={resizeBusiness} onKeyDown={(event) => { const maxWidth = Math.max(360, window.innerWidth - 240 - 420 - 5); if (event.key === 'ArrowLeft') setBusinessWidth((width) => Math.min(maxWidth, 700, width + 24)); if (event.key === 'ArrowRight') setBusinessWidth((width) => Math.max(360, width - 24)) }} />
         <BusinessWorkspace
           session={session}
           activeBusiness={activeBusiness}
@@ -612,8 +669,8 @@ function SessionRail({
   const visibleSessions = sessions.filter((item) => `${item.title} ${item.id}`.toLowerCase().includes(query.trim().toLowerCase()))
   return (
     <aside className="session-rail">
-      <div className="rail-heading"><div><span className="eyebrow">Workspace</span><h1>会话</h1></div><button className="new-button" onClick={onCreate} disabled={loading}>新建</button></div>
-      <label className="session-search"><span className="sr-only">搜索会话</span><input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索会话" aria-label="搜索会话" /></label>
+      <div className="rail-heading"><div><span className="eyebrow">工作区</span><h1>会话</h1></div><RadixTooltip content="新建会话"><RadixButton className="new-button" onClick={onCreate} disabled={loading}><FolderPlus size={15} />新建</RadixButton></RadixTooltip></div>
+      <label className="session-search"><Search size={15} aria-hidden="true" /><span className="sr-only">搜索会话</span><input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索会话" aria-label="搜索会话" /></label>
       <div className="rail-summary"><span>{query ? `${visibleSessions.length} / ${sessions.length} 个会话` : `${sessions.length} 个活跃会话`}</span><span className="quiet-rule" /></div>
       <div className="session-list">
         {sessions.length === 0 && <EmptyState title="还没有会话" detail="创建会话后，从一句业务意图开始。" />}
@@ -628,8 +685,8 @@ function SessionRail({
               <div className="session-row-actions">
                 {renamingId === item.id ? (
                   <input autoFocus defaultValue={item.title} aria-label="会话名称" onKeyDown={(event) => { if (event.key === 'Enter') onRename(item.id, event.currentTarget.value); if (event.key === 'Escape') onRenameStart('') }} />
-                ) : <button title="重命名" onClick={() => onRenameStart(item.id)}>改名</button>}
-                <button title="归档" onClick={() => onArchive(item.id)}>归档</button>
+                ) : <RadixTooltip content="重命名"><RadixIconButton variant="ghost" size="1" aria-label="重命名" onClick={() => onRenameStart(item.id)}><Settings2 size={14} /></RadixIconButton></RadixTooltip>}
+                <RadixTooltip content="归档"><RadixIconButton variant="ghost" size="1" aria-label="归档" onClick={() => onArchive(item.id)}><Archive size={14} /></RadixIconButton></RadixTooltip>
               </div>
             )}
           </div>
@@ -657,8 +714,8 @@ function ConversationPane({ session, draft, liveText, loading, pendingProposal, 
   return (
     <section className="conversation-pane">
       <header className="conversation-header">
-        <div><span className="eyebrow">Session</span><h2>{session?.session.title || '选择一个会话'}</h2><p>和 Agent 讨论业务目标，确认后再进入对应工作区。</p></div>
-        <span className="session-id">{session?.session.id || '—'}</span>
+        <div><span className="eyebrow">会话</span><h2>{session?.session.title || '选择一个会话'}</h2><p>和 Agent 讨论业务目标，确认后再进入对应工作区。</p></div>
+        <span className="session-id" title={session?.session.id || undefined}>会话详情</span>
       </header>
       <div className="conversation-scroll">
         {!session && <EmptyState title="选择一个会话" detail="左侧会话列表会显示已持久化的工作。" />}
@@ -671,7 +728,7 @@ function ConversationPane({ session, draft, liveText, loading, pendingProposal, 
         <textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={!session || loading} placeholder={session ? '告诉 Agent 你要处理的业务…' : '先选择或创建一个会话'} aria-label="会话消息" />
         <div className="composer-footer">
           <div className="composer-context"><label htmlFor="message-business-target">发送到</label><select id="message-business-target" value={messageBusinessId} onChange={(event) => onMessageBusinessChange(event.target.value)} disabled={!session || loading}><option value="__new__">新业务意图（创建工作区）</option>{businesses.map((business) => <option key={business.id} value={business.id}>{business.title || '未命名业务'} · {labelFor(businessStatusLabel, business.status)}</option>)}</select><span>发送后需在右侧明确开始或继续执行。</span></div>
-          <button type="submit" disabled={!session || loading || !draft.trim()}>{loading ? '处理中…' : '发送'}</button>
+          <RadixButton type="submit" disabled={!session || loading || !draft.trim()}>{loading ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}{loading ? '处理中…' : '发送'}</RadixButton>
         </div>
       </form>
     </section>
@@ -684,7 +741,7 @@ function MessageRow({ message }: { message: Message }) {
 }
 
 function ProposalCard({ proposal, disabled, onDecision }: { proposal: ProposalLike; disabled: boolean; onDecision: (proposal: ProposalLike, confirmed: boolean) => void }) {
-  return <section className="proposal-card"><div className="proposal-kicker">发现新的业务意图</div><h3>{proposal.title}</h3><p>{proposal.goal}</p><div className="proposal-actions"><button className="secondary-button" disabled={disabled} onClick={() => onDecision(proposal, false)}>暂不创建</button><button className="primary-button" disabled={disabled} onClick={() => onDecision(proposal, true)}>创建业务工作区</button></div></section>
+  return <section className="proposal-card"><div className="proposal-icon"><FolderPlus size={18} /></div><div className="proposal-kicker">发现新的业务意图</div><h3>{proposal.title}</h3><p>{proposal.goal}</p><div className="proposal-actions"><RadixButton className="secondary-button" variant="soft" disabled={disabled} onClick={() => onDecision(proposal, false)}>暂不创建</RadixButton><RadixButton className="primary-button" disabled={disabled} onClick={() => onDecision(proposal, true)}><FolderPlus size={15} />创建业务工作区</RadixButton></div></section>
 }
 
 function BusinessWorkspace({ session, activeBusiness, detail, tab, trace, traceLoading, businessLoading, loading, selectedRunId, onBusinessSelect, onTabChange, onRunSelect, onRefresh, onStart, onCancel, onApproval }: {
@@ -706,23 +763,25 @@ function BusinessWorkspace({ session, activeBusiness, detail, tab, trace, traceL
   onApproval: (approval: Approval, decision: 'approve' | 'reject') => void
 }) {
   const businessList = session?.businesses ?? []
-  const activeRun = detail?.runs.find((run) => run.id === selectedRunId) ?? detail?.runs.find((run) => ['running', 'awaiting_approval', 'cancel_requested'].includes(run.status))
+  const activeRun = detail?.runs.find((run) => run.id === detail.business.active_run_id)
+    ?? detail?.runs.find((run) => ['running', 'awaiting_approval', 'cancel_requested'].includes(run.status))
+    ?? detail?.runs[0]
   return (
     <aside className="business-workspace">
       <div className="business-tabs-bar">
-        <div className="business-tabs-heading"><span className="eyebrow">Business workspace</span><strong>{businessList.length ? `${businessList.length} 个业务` : '业务页'}</strong></div>
+        <div className="business-tabs-heading"><span className="eyebrow">业务工作区</span><strong>{businessList.length ? `${businessList.length} 个业务` : '业务页'}</strong></div>
         <div className="business-tabs" role="tablist" aria-label="业务工作区">
           {businessList.map((business) => <button role="tab" aria-selected={business.id === activeBusiness?.id} key={business.id} className={business.id === activeBusiness?.id ? 'active' : ''} onClick={() => onBusinessSelect(business.id)}>{business.title || '销售发票'}<span>{labelFor(businessStatusLabel, business.status)}</span></button>)}
         </div>
       </div>
       {!activeBusiness && <EmptyState title="等待业务工作区" detail="在会话中确认一个业务意图后，这里会打开对应工作区。" />}
       {activeBusiness && <>
-        <header className="business-header"><div><span className="eyebrow">{activeBusiness.type}</span><h2>{activeBusiness.title}</h2><p tabIndex={0} aria-label="业务目标">{activeBusiness.goal || '暂无业务目标描述'}</p></div><span className={`state-badge state-${activeBusiness.status}`}>{labelFor(businessStatusLabel, activeBusiness.status)}</span></header>
+        <header className="business-header"><div><span className="eyebrow">业务目标</span><h2>{activeBusiness.title}</h2><p tabIndex={0} aria-label="业务目标">{activeBusiness.goal || '暂无业务目标描述'}</p></div><StatusBadge status={activeBusiness.status} label={labelFor(businessStatusLabel, activeBusiness.status)} /></header>
         <nav className="business-page-tabs" role="tablist" aria-label="业务页面">
           {tabs.map((item) => <button key={item.id} role="tab" aria-selected={tab === item.id} className={tab === item.id ? 'active' : ''} onClick={() => onTabChange(item.id)}>{item.label}{item.id === 'approvals' && detail?.approvals.filter(isPendingApproval).length ? <b>{detail.approvals.filter(isPendingApproval).length}</b> : null}</button>)}
         </nav>
         <div className="business-content">
-          {businessLoading && <div className="loading-line">正在读取业务状态…</div>}
+          {businessLoading && <div className="loading-line"><LoaderCircle className="spin" size={16} />正在读取业务状态…</div>}
           {!businessLoading && tab === 'overview' && <OverviewPage detail={detail} activeRun={activeRun} onRefresh={onRefresh} onStart={onStart} onCancel={onCancel} />}
           {!businessLoading && tab === 'documents' && <DocumentsPage documents={detail?.documents ?? []} stale={detail?.stale ?? false} />}
           {!businessLoading && tab === 'approvals' && <ApprovalsPage approvals={detail?.approvals ?? []} disabled={loading || businessLoading} onDecision={onApproval} />}
@@ -740,27 +799,28 @@ function OverviewPage({ detail, activeRun, onRefresh, onStart, onCancel }: { det
   return (
     <div className="page-stack">
       <div className="action-row">
-        <button className="secondary-button" onClick={onRefresh}>读取最新状态</button>
+        <RadixButton className="secondary-button" variant="soft" disabled={!canStart} title={canStart ? '读取 Odoo 最新状态' : '执行期间会自动更新工具回执，本轮结束后再读取'} onClick={onRefresh}><RefreshCw size={15} />读取最新状态</RadixButton>
         {activeRun && ['running', 'awaiting_approval'].includes(activeRun.status)
-          ? <button className="danger-button" onClick={() => onCancel(activeRun)}>取消运行</button>
-          : <button className="primary-button" disabled={!canStart} onClick={onStart}>{runActionLabel}</button>}
+          ? <RadixButton className="danger-button" variant="soft" onClick={() => onCancel(activeRun)}><Square size={14} />取消运行</RadixButton>
+          : <RadixButton className="primary-button" disabled={!canStart} onClick={onStart}><Play size={15} />{runActionLabel}</RadixButton>}
       </div>
+      {detail?.activity && <ActivityCard activity={detail.activity} />}
       <BusinessFacts documents={detail?.documents ?? []} />
       <section className="status-table-section">
         <div className="section-heading">
-          <div><span className="eyebrow">Current state</span><h3>业务状态</h3></div>
+          <div><span className="eyebrow">状态与回执</span><h3>业务状态</h3></div>
           <span>{detail?.stale ? '数据可能已过期' : `观测于 ${formatInstant(detail?.observed_at)}`}</span>
         </div>
         <div className="fact-table">
           <div><span>工作区状态</span><strong>{labelFor(businessStatusLabel, detail?.business.status)}</strong></div>
-          <div><span>当前运行</span><strong>{activeRun ? labelFor(runStatusLabel, activeRun.status) : '没有运行'}</strong></div>
+          <div><span>当前运行</span><strong>{activeRun ? runDisplayLabel(activeRun.status) : '没有运行'}</strong></div>
           <div><span>回读核验</span><strong>{labelFor({passed: '通过', failed: '未通过', unknown: '未知'}, activeRun?.verification_status)}</strong></div>
           <div><span>最近摘要</span><strong>{detail?.summary || '暂无主机摘要'}</strong></div>
         </div>
       </section>
       <section className="run-summary">
         <div className="section-heading">
-          <div><span className="eyebrow">Run ledger</span><h3>最近运行</h3></div>
+          <div><span className="eyebrow">执行记录</span><h3>最近运行</h3></div>
           <span>{detail?.runs.length ?? 0} 次</span>
         </div>
         {detail?.runs.length
@@ -772,51 +832,59 @@ function OverviewPage({ detail, activeRun, onRefresh, onStart, onCancel }: { det
 }
 
 function BusinessFacts({ documents }: { documents: Document[] }) {
-  const order = documents.find((document) => document.model === 'sale.order')
-  const invoice = documents.find((document) => document.model === 'account.move')
-  if (!order && !invoice) return null
+  const orders = documents.filter((document) => document.model === 'sale.order')
+  const invoices = documents.filter((document) => document.model === 'account.move')
+  const pickings = documents.filter((document) => document.model === 'stock.picking')
   const fact = (document: Document | undefined, keys: string[]) => {
     if (!document) return '未观测'
-    const value = keys.map((key) => document.fields[key]).find((candidate) => candidate !== undefined && candidate !== null && candidate !== '')
+    const value = keys.map((key) => key === 'state' ? document.state : document.fields[key]).find((candidate) => candidate !== undefined && candidate !== null && candidate !== '')
     return readableValue(value)
   }
   return (
     <section className="business-facts">
-      <div className="section-heading"><div><span className="eyebrow">Business records</span><h3>业务关键事实</h3></div><span>来自已观测单据</span></div>
-      <div className="business-facts-grid">
-        {order && <>
-          <div><span>销售订单</span><strong>{order.name || order.id}</strong></div>
-          <div><span>客户</span><strong>{fact(order, ['partner_name', 'customer', 'partner_id'])}</strong></div>
-          <div><span>订单金额</span><strong>{fact(order, ['amount_total', 'total'])} {fact(order, ['currency', 'currency_name', 'currency_id'])}</strong></div>
-          <div><span>订单状态</span><strong>{fact(order, ['state'])} · 开票 {fact(order, ['invoice_status'])}</strong></div>
-          <div><span>交付状态</span><strong>{fact(order, ['delivery_status', 'delivery_state'])}</strong></div>
-        </>}
-        {invoice && <>
-          <div><span>客户发票</span><strong>{invoice.name || invoice.id}</strong></div>
-          <div><span>发票状态</span><strong>{fact(invoice, ['state'])}</strong></div>
-          <div><span>发票金额</span><strong>{fact(invoice, ['amount_total', 'total'])} {fact(invoice, ['currency', 'currency_name', 'currency_id'])}</strong></div>
-          <div><span>已付/未付余额</span><strong>{fact(invoice, ['amount_residual', 'residual'])}</strong></div>
-          <div><span>发票日期</span><strong>{fact(invoice, ['invoice_date', 'date'])}</strong></div>
-        </>}
-      </div>
+      <div className="section-heading"><div><span className="eyebrow">业务记录</span><h3>业务关键事实</h3></div><span>来自已观测单据</span></div>
+      {orders.length === 0 && invoices.length === 0 && <div className="facts-empty"><FileText size={16} /><span>尚未观察到订单或发票</span></div>}
+      {orders.length > 0 && <div className="record-fact-block"><div className="record-fact-heading"><strong>销售订单</strong><span>{orders.length} 张</span></div>{orders.map((order) => <div className="business-facts-grid" key={`order:${order.id}`}><div><span>订单</span><strong>{order.name || order.id}</strong></div><div><span>客户</span><strong>{fact(order, ['partner_name', 'customer', 'partner_id'])}</strong></div><div><span>金额</span><strong>{amountWithCurrency(fact(order, ['amount_total', 'total']), fact(order, ['currency', 'currency_name', 'currency_id']))}</strong></div><div><span>状态</span><strong>{documentStateLabel(order.model, order.state)} · 开票 {invoiceStatusLabel(fact(order, ['invoice_status']))}</strong></div></div>)}</div>}
+      {invoices.length > 0 && <div className="record-fact-block"><div className="record-fact-heading"><strong>客户发票</strong><span>{invoices.length} 张</span></div>{invoices.map((invoice) => <div className="business-facts-grid" key={`invoice:${invoice.id}`}><div><span>发票</span><strong>{invoice.name || invoice.id}</strong></div><div><span>状态</span><strong>{documentStateLabel(invoice.model, invoice.state)}</strong></div><div><span>金额</span><strong>{amountWithCurrency(fact(invoice, ['amount_total', 'total']), fact(invoice, ['currency', 'currency_name', 'currency_id']))}</strong></div><div><span>未付余额</span><strong>{fact(invoice, ['amount_residual', 'residual'])}</strong></div><div><span>付款状态</span><strong>{paymentStatusLabel(fact(invoice, ['payment_state']))}</strong></div></div>)}</div>}
+      {pickings.length > 0 && <div className="record-fact-block"><div className="record-fact-heading"><strong>出库状态</strong><span>{pickings.length} 张</span></div>{pickings.map((picking) => <div className="business-facts-grid" key={`picking:${picking.id}`}><div><span>出库单</span><strong>{picking.name || picking.id}</strong></div><div><span>状态</span><strong>{documentStateLabel(picking.model, picking.state)}</strong></div></div>)}</div>}
     </section>
   )
 }
 
-function RunRow({ run }: { run: Run }) { return <div className="run-row"><div><strong>{run.id}</strong><span>{formatInstant(run.started_at)} · {formatDuration(run.elapsed_seconds)}</span></div><div className="run-row-meta"><span className={`state-badge state-${run.status}`}>{labelFor(runStatusLabel, run.status)}</span><span>{formatCount(run.tool_count)} 工具</span></div></div> }
+function ActivityCard({ activity }: { activity: NonNullable<BusinessDetail['activity']> }) {
+  const phase = activity.phase || 'unknown'
+  const moving = ['model', 'tool', 'cancelling'].includes(phase)
+  return <section key={phase} className={`activity-card activity-phase-${phase}`} aria-label="当前动作">
+    <div className="activity-icon">{moving ? <LoaderCircle className="spin" size={17} /> : phase === 'approval' ? <Clock3 size={17} /> : <Activity size={17} />}</div>
+    <div className="activity-copy"><span className="eyebrow">当前动作</span><strong>{activity.label || '读取状态中'}</strong><p>{activity.detail || '暂无动作详情'}</p><div className="activity-meta"><span>{activityPhaseLabel(activity.phase)}</span>{activity.tool_name && <span title={activity.tool_name}>{toolLabel(activity.tool_name)}</span>}{activity.round != null && <span>第 {activity.round} 轮</span>}{activity.tool_count != null && <span>{activity.tool_count} 个工具</span>}{activity.model_rounds != null && <span>{activity.model_rounds} 轮模型</span>}{activity.at && <span>{formatInstant(activity.at)}</span>}</div></div>
+  </section>
+}
+
+function StatusBadge({ status, label }: { status?: string; label: string }) {
+  const icon = status === 'running' || status === 'awaiting_approval' || status === 'pending' || status === 'pending_approval'
+    ? <Clock3 size={13} />
+    : status === 'failed' || status === 'rejected' || status === 'expired' || status === 'known_failed'
+      ? <CircleAlert size={13} />
+    : status === 'passed' || status === 'verified' || status === 'approved'
+        ? <CircleCheck size={13} />
+        : <CircleDashed size={13} />
+  return <RadixBadge className={`state-badge state-${status || 'unknown'}`} variant="soft">{icon}{label}</RadixBadge>
+}
+
+function RunRow({ run }: { run: Run }) { return <div className="run-row"><div><strong>{run.id}</strong><span>{formatInstant(run.started_at)} · {formatDuration(run.elapsed_seconds)}</span></div><div className="run-row-meta"><StatusBadge status={run.status} label={runDisplayLabel(run.status)} /><span>{formatCount(run.tool_count)} 工具</span></div></div> }
 
 function DocumentsPage({ documents, stale }: { documents: Document[]; stale: boolean }) {
   return (
     <div className="page-stack">
-      <div className="page-intro"><div><span className="eyebrow">Observed records</span><h3>业务单据</h3></div>{stale && <span className="warning-text">数据可能已过期</span>}</div>
+      <div className="page-intro"><div><span className="eyebrow">已观测记录</span><h3>业务单据</h3></div>{stale && <span className="warning-text">数据可能已过期</span>}</div>
       {documents.length === 0 ? <EmptyState title="还没有单据回执" detail="单据将在主机完成只读读取后出现在这里。" /> : (
         <div className="document-table-wrap">
           <table className="document-table">
             <thead><tr><th>类型</th><th>业务对象</th><th>状态</th><th>关键事实</th><th>观测时间</th></tr></thead>
             <tbody>{documents.map((document) => <tr key={`${document.model}:${document.id}`}>
-              <td>{document.model}</td>
+              <td>{documentModelLabel(document.model)}</td>
               <td><strong>{document.name || document.id}</strong><details><summary>字段</summary><pre>{jsonText(document.fields)}</pre></details></td>
-              <td><span className={`state-badge state-${document.state}`}>{document.state || '未知'}</span></td>
+              <td title={document.state || 'unknown'}><StatusBadge status={document.state} label={documentStateLabel(document.model, document.state)} /></td>
               <td>{documentFact(document)}</td>
               <td>{formatInstant(document.observed_at)}</td>
             </tr>)}</tbody>
@@ -830,15 +898,28 @@ function DocumentsPage({ documents, stale }: { documents: Document[]; stale: boo
 function documentFact(document: Document) {
   const fields = document.fields
   const entries = document.model === 'sale.order'
-    ? [['客户', fields.partner_name ?? fields.customer ?? fields.partner_id], ['金额', fields.amount_total ?? fields.total], ['开票', fields.invoice_status], ['交付', fields.delivery_status ?? fields.delivery_state]]
+    ? [['客户', fields.partner_name ?? fields.customer ?? fields.partner_id], ['金额', fields.amount_total ?? fields.total], ['开票', invoiceStatusLabel(String(fields.invoice_status ?? '未知'))]]
     : document.model === 'account.move'
-      ? [['客户', fields.partner_name ?? fields.customer ?? fields.partner_id], ['金额', fields.amount_total ?? fields.total], ['付款', fields.payment_state], ['余额', fields.amount_residual ?? fields.residual]]
+      ? [['客户', fields.partner_name ?? fields.customer ?? fields.partner_id], ['金额', fields.amount_total ?? fields.total], ['付款', paymentStatusLabel(String(fields.payment_state ?? '未知'))], ['余额', fields.amount_residual ?? fields.residual]]
       : Object.entries(fields).slice(0, 3).map(([key, value]) => [key, value])
-  return entries.filter(([, value]) => value !== undefined && value !== null && value !== '').map(([key, value]) => `${key}: ${readableValue(value)}`).join(' · ') || '没有可显示的关键字段'
+  return entries.filter(([, value]) => value !== undefined && value !== null && value !== '').map(([key, value]) => `${key}:${readableValue(value)}`).join(' · ') || '没有可显示的关键字段'
 }
 
+function documentModelLabel(model: string) { return model === 'sale.order' ? '销售订单' : model === 'account.move' ? '客户发票' : model === 'stock.picking' ? '出库单' : model === 'res.partner' ? '客户' : model }
+function documentStateLabel(model: string, state?: string) {
+  const labels: Record<string, Record<string, string>> = {
+    'sale.order': { draft: '草稿', sent: '已发送', sale: '已确认', cancel: '已取消' },
+    'account.move': { draft: '草稿', posted: '已过账', cancel: '已取消' },
+    'stock.picking': { draft: '草稿', waiting: '等待', confirmed: '待处理', assigned: '已分配', done: '已完成', cancel: '已取消' }
+  }
+  return (state && labels[model]?.[state]) || state || (model === 'res.partner' ? '—（不适用）' : '未知')
+}
+function invoiceStatusLabel(value: string) { return ({ invoiced: '已开票', 'to invoice': '待开票', to_invoice: '待开票', no: '无需开票' } as Record<string, string>)[value] || value }
+function paymentStatusLabel(value: string) { return ({ paid: '已付款', not_paid: '未付款', partial: '部分付款', in_payment: '付款处理中', reversed: '已冲销' } as Record<string, string>)[value] || value }
+function amountWithCurrency(amount: string, currency: string) { return currency === '未知' || currency === '未观测' || currency === '—（不适用）' ? amount : `${amount} ${currency}` }
+
 function ApprovalsPage({ approvals, disabled, onDecision }: { approvals: Approval[]; disabled: boolean; onDecision: (approval: Approval, decision: 'approve' | 'reject') => void }) {
-  return <div className="page-stack"><div className="page-intro"><div><span className="eyebrow">Controlled writes</span><h3>业务审批</h3></div><span>{approvals.filter(isPendingApproval).length} 项待处理</span></div>{approvals.length === 0 ? <EmptyState title="没有审批记录" detail="主机产生需要人工确认的业务动作后，审批卡会保留在这里。" /> : <div className="approval-list">{approvals.map((approval) => <ApprovalRow key={approval.action_id} approval={approval} disabled={disabled} onDecision={onDecision} />)}</div>}</div>
+  return <div className="page-stack"><div className="page-intro"><div><span className="eyebrow">需要确认</span><h3>业务审批</h3></div><span>{approvals.filter(isPendingApproval).length} 项待处理</span></div>{approvals.length === 0 ? <EmptyState title="没有审批记录" detail="主机产生需要人工确认的业务动作后，审批卡会保留在这里。" /> : <div className="approval-list">{approvals.map((approval) => <ApprovalRow key={approval.action_id} approval={approval} disabled={disabled} onDecision={onDecision} />)}</div>}</div>
 }
 
 function ApprovalRow({ approval, disabled, onDecision }: { approval: Approval; disabled: boolean; onDecision: (approval: Approval, decision: 'approve' | 'reject') => void }) {
@@ -849,20 +930,20 @@ function ApprovalRow({ approval, disabled, onDecision }: { approval: Approval; d
     <article className={`approval-row ${pending ? 'pending' : ''}`}>
       <div className="approval-row-head">
         <div><strong>{title}</strong><span>{modelLabel(approval.model)} · {operationLabel(approval.operation)} · {approval.model} · {approval.action_id}</span></div>
-        <span className={`state-badge state-${expired ? 'expired' : approval.status}`}>{expired ? '已过期' : approvalStatusLabel(approval.status)}</span>
+        <StatusBadge status={expired ? 'expired' : approval.status} label={expired ? '已过期' : approvalStatusLabel(approval.status)} />
       </div>
       <div className="approval-facts"><span>记录 ID {approval.record_ids.length ? approval.record_ids.join(', ') : '未知'}</span><span>{formatExpiry(approval.expires_at)}</span></div>
       <details>
         <summary>查看拟提交值与执行前状态</summary>
         <div className="json-columns"><div><small>拟提交值</small><pre>{jsonText(approval.values)}</pre></div><div><small>执行前状态</small><pre>{jsonText(approval.prestate)}</pre></div></div>
       </details>
-      {pending && !expired && <div className="approval-actions"><button className="danger-button" disabled={disabled} onClick={() => onDecision(approval, 'reject')}>拒绝</button><button className="primary-button" disabled={disabled} onClick={() => onDecision(approval, 'approve')}>批准这项业务动作</button></div>}
+      {pending && !expired && <div className="approval-actions"><RadixButton className="danger-button" variant="soft" disabled={disabled} onClick={() => onDecision(approval, 'reject')}><X size={15} />拒绝</RadixButton><RadixButton className="primary-button" disabled={disabled} onClick={() => onDecision(approval, 'approve')}><CheckIcon size={15} />批准这项业务动作</RadixButton></div>}
       {approval.result != null && <details className={`receipt receipt-details ${pending ? 'receipt-preflight' : ''}`}><summary>{approvalResultLabel(approval.status)}</summary><pre>{jsonText(approval.result)}</pre></details>}
     </article>
   )
 }
 
-function VerificationPage({ checks, observedAt, stale }: { checks: Check[]; observedAt?: string; stale: boolean }) { return <div className="page-stack"><div className="page-intro"><div><span className="eyebrow">Independent readback</span><h3>业务核验</h3></div><span>{stale ? '可能过期' : `读取于 ${formatInstant(observedAt)}`}</span></div>{checks.length === 0 ? <EmptyState title="核验结果未知" detail="主机尚未提供独立业务检查回执。" /> : <div className="check-table">{checks.map((check) => <div className="check-row" key={check.name}><span className={`check-mark check-${check.status}`}>{check.status === 'passed' ? '✓' : check.status === 'failed' ? '!' : '?'}</span><div><strong>{check.label || check.name}</strong><span>{check.detail || '没有详细说明'}</span></div><span className={`state-badge state-${check.status}`}>{check.status === 'passed' ? '通过' : check.status === 'failed' ? '失败' : '未知'}</span></div>)}</div>}</div> }
+function VerificationPage({ checks, observedAt, stale }: { checks: Check[]; observedAt?: string; stale: boolean }) { return <div className="page-stack"><div className="page-intro"><div><span className="eyebrow">独立回读</span><h3>业务核验</h3></div><span>{stale ? '可能过期' : `读取于 ${formatInstant(observedAt)}`}</span></div>{checks.length === 0 ? <EmptyState title="核验结果未知" detail="主机尚未提供独立业务检查回执。" /> : <div className="check-table">{checks.map((check) => <div className="check-row" key={check.name}><span className={`check-mark check-${check.status}`}>{check.status === 'passed' ? '✓' : check.status === 'failed' ? '!' : '?'}</span><div><strong>{check.label || check.name}</strong><span>{check.detail || '没有详细说明'}</span></div><span className={`state-badge state-${check.status}`}>{check.status === 'passed' ? '通过' : check.status === 'failed' ? '失败' : '未知'}</span></div>)}</div>}</div> }
 
 function TracePage({ trace, runs, selectedRunId, loading, onRunSelect }: { trace: TraceBundle | null; runs: Run[]; selectedRunId: string; loading: boolean; onRunSelect: (id: string) => void }) {
   const toolsById = new Map((trace?.tools ?? []).map((tool) => [tool.id, tool]))
@@ -907,10 +988,14 @@ function EmptyState({ title, detail }: { title: string; detail: string }) { retu
 
 function messageForError(reason: unknown) {
   const message = reason instanceof Error ? reason.message : String(reason)
-  return message.includes('CONFIG_BUSY') ? '当前有业务正在执行或等待审批，请结束后再修改连接设置。' : message
+  return message.includes('CONFIG_BUSY') ? '当前有业务正在执行或等待审批，请结束后再修改连接设置。' : message.includes('CONNECTION_CHECK_BUSY') ? '执行期间显示最近检查结果，结束后可重新检查。' : message
 }
 function connectionLabel(state: ConnectionState) { return state === 'connected' ? '主机已连接' : state === 'checking' ? '正在连接主机' : state === 'crashed' ? '主机已崩溃' : state === 'protocol_error' ? '主机协议错误' : '主机断开' }
-function healthLabel(status?: string) { return status === 'connected' || status === 'ready' || status === 'ok' ? '已连接' : status === 'configured' ? '已配置' : status === 'disconnected' ? '断开' : '状态未知' }
+function odooHealthStatus(health: Health | null) { return health?.odoo?.status || health?.odoo_status || 'unchecked' }
+function healthLabel(status?: string) { return status === 'connected' || status === 'ready' || status === 'ok' ? '已连接' : status === 'configured' ? '已配置' : status === 'unconfigured' ? '未配置' : status === 'unavailable' ? '不可用' : status === 'permission_denied' ? '无权限' : status === 'error' ? '检查失败' : status === 'unchecked' ? '未检查' : status === 'disconnected' ? '断开' : '状态未知' }
+function runDisplayLabel(status?: string) { return status === 'completed' ? '本轮结束' : labelFor(runStatusLabel, status) }
+function activityPhaseLabel(phase?: string) { return ({ idle: '待执行', planning: '准备中', model: '分析业务目标', reading: '读取业务数据', tool: '调用业务工具', approval: '等待确认', executing: '执行中', cancelling: '正在取消', verifying: '回读核验', completed: '本轮结束', failed: '执行失败', interrupted: '已中断', cancelled: '已取消', reconciliation: '等待对账', unknown: '状态未知' } as Record<string, string>)[phase || ''] || '状态未知' }
+function toolLabel(tool?: string) { return ({ mcp_odoo_read_record: '读取业务记录', mcp_odoo_read: '读取业务记录', mcp_odoo_validate_write: '预检业务动作', execute_approved_write: '执行已批准动作', refresh_business: '读取最新状态' } as Record<string, string>)[tool || ''] || '业务工具' }
 function isPendingApproval(approval: Approval) { return approval.status === 'pending' || approval.status === 'pending_approval' }
 function approvalStatusLabel(status: string) {
   const labels: Record<string, string> = {
@@ -936,9 +1021,45 @@ function approvalResultLabel(status: string) {
 function environmentLabel(environment?: string) { return environment === 'configured' ? '已配置环境' : environment === 'demo' ? '演示环境' : '未知' }
 function readableValue(value: unknown): string {
   if (value == null || value === '') return '未知'
-  if (Array.isArray(value)) return value.map((item) => readableValue(item)).join(', ')
+  if (Array.isArray(value)) {
+    if (value.length === 2 && typeof value[0] === 'number' && typeof value[1] === 'string') return value[1]
+    return value.map((item) => readableValue(item)).join(', ')
+  }
   if (typeof value === 'object') return jsonText(value).replace(/\s+/g, ' ')
   return String(value)
+}
+
+function ConnectionDetailsDialog({ health, connection, busy, open, onOpenChange, onRetry }: { health: Health | null; connection: ConnectionState; busy: boolean; open: boolean; onOpenChange: (open: boolean) => void; onRetry: () => void }) {
+  const odoo = health?.odoo
+  const checking = connection === 'checking'
+  const odooProblem = ['unavailable', 'permission_denied', 'error'].includes(odooHealthStatus(health))
+  return <RadixDialog.Root open={open} onOpenChange={onOpenChange}>
+    <RadixDialog.Content className="connection-dialog" maxWidth="440px">
+      <RadixDialog.Title>连接状态</RadixDialog.Title>
+      <RadixDialog.Description>查看桌面工作台与 Odoo 的最近一次只读检查。</RadixDialog.Description>
+      <div className="connection-detail-list">
+        <div><span>本地主机</span><strong>{connectionLabel(connection)}</strong></div>
+        <div><span>Odoo 读取</span><strong>{healthLabel(odooHealthStatus(health))}</strong></div>
+        <div><span>地址 / 数据库</span><strong>{odoo?.endpoint || '未配置'}{odoo?.database ? ` · ${odoo.database}` : ''}</strong></div>
+        <div><span>配置账号</span><strong>{odoo?.account || '未检查'}</strong></div>
+        <div><span>模型配置</span><strong>{health?.model_configured ? '已配置' : '未配置'}</strong></div>
+        <div><span>最近检查</span><strong>{formatInstant(odoo?.checked_at)}{odoo?.latency_ms != null ? ` · ${odoo.latency_ms} ms` : ''}</strong></div>
+      </div>
+      {odoo?.detail && <p className={odooProblem ? 'connection-detail-error' : 'connection-detail-note'}>{odoo.detail}</p>}
+      {busy && <p className="connection-busy-note">执行期间显示最近检查结果，结束后可重新检查。</p>}
+      <div className="connection-dialog-footer"><RadixButton variant="soft" onClick={() => onOpenChange(false)}>关闭</RadixButton><RadixButton disabled={busy || checking} onClick={onRetry}>{checking ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}{checking ? '检查中…' : '重新检查'}</RadixButton></div>
+    </RadixDialog.Content>
+  </RadixDialog.Root>
+}
+
+function ArchiveDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: () => void }) {
+  return <RadixAlertDialog.Root open={open} onOpenChange={onOpenChange}>
+    <RadixAlertDialog.Content maxWidth="420px">
+      <RadixAlertDialog.Title>归档会话</RadixAlertDialog.Title>
+      <RadixAlertDialog.Description>归档后会话从活跃列表中隐藏，业务记录仍会保留。</RadixAlertDialog.Description>
+      <div className="connection-dialog-footer"><RadixAlertDialog.Cancel onClick={() => onOpenChange(false)}><RadixButton variant="soft">取消</RadixButton></RadixAlertDialog.Cancel><RadixAlertDialog.Action onClick={onConfirm}><RadixButton color="red"><Archive size={15} />归档会话</RadixButton></RadixAlertDialog.Action></div>
+    </RadixAlertDialog.Content>
+  </RadixAlertDialog.Root>
 }
 
 function SettingsDialog({ settings, draft, saving, onChange, onClose, onSave }: { settings: Settings | null; draft: Record<string, string>; saving: boolean; onChange: (key: string, value: string) => void; onClose: () => void; onSave: () => void }) {

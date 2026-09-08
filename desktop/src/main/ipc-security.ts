@@ -3,7 +3,7 @@ import type { WorkbenchMethod } from "../shared/protocol";
 export const METHODS = new Set<WorkbenchMethod>([
   "list_sessions", "create_session", "rename_session", "archive_session", "get_session",
   "send_message", "confirm_business", "get_business", "start_run", "decide_approval",
-  "cancel_run", "get_trace", "refresh_business", "health",
+  "cancel_run", "get_trace", "refresh_business", "health", "check_connection",
 ]);
 
 export interface ValidIpcRequest {

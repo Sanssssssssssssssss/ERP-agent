@@ -5,6 +5,7 @@ import type {
   BusinessProposal,
   Check,
   Document,
+  Health,
   Message,
   Round,
   Run,
@@ -22,6 +23,7 @@ export type {
   BusinessProposal,
   Check,
   Document,
+  Health,
   Message,
   Round,
   Run,
@@ -49,13 +51,6 @@ export interface TraceBundle {
   events?: Array<Record<string, unknown>>
 }
 
-export interface Health {
-  host_ready: boolean
-  odoo_status?: string
-  model_configured?: boolean
-  environment?: string
-}
-
 export type HostEvent = WorkbenchEvent
 
 export const runStatusLabel: Record<string, string> = {
@@ -67,7 +62,7 @@ export const runStatusLabel: Record<string, string> = {
   cancel_requested: '正在取消',
   cancelled: '已取消',
   interrupted: '已中断',
-  completed: '已完成',
+  completed: '本轮结束',
   failed: '失败',
   needs_reconciliation: '待对账'
 }
@@ -78,7 +73,7 @@ export const businessStatusLabel: Record<string, string> = {
   blocked: '需核对',
   running: '执行中',
   awaiting_approval: '等待审批',
-  completed: '已完成',
+  completed: '本轮结束',
   failed: '执行失败',
   needs_reconciliation: '需要复核',
   cancelled: '已取消',

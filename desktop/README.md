@@ -12,6 +12,8 @@ Node、Python、WSL，也无需启动前端服务器。Odoo 和模型服务由�
 
 1. 打开连接设置，填写模型、模型服务地址、Odoo 地址/数据库/账号及对应密钥。
    网络连接使用 HTTPS；本机调试允许 localhost HTTP。密钥保留空白表示不更换。
+   顶部连接状态可查看 Odoo 只读认证结果、地址、数据库、最近检查时间和耗时。
+   模型“已配置”只表示配置齐全；不会为检查连接而发送模型请求。
 2. 新建会话，描述目标，确认创建业务工作区。这一步只建立本地记录。
 3. 点击开始执行。每项 ERP 写操作单独展示目标、参数和操作前状态，确认后继续。
 4. 在概览点击“读取最新状态”，在单据/核验页查看 Odoo 回读结果，在 Trace 查看每轮调用与回执。
@@ -21,6 +23,8 @@ Node、Python、WSL，也无需启动前端服务器。Odoo 和模型服务由�
 加密。Trace 和 Pi 会话包含业务数据，请按业务数据管理这些本地文件。
 模型停止和业务核验分开显示；未知 token 不计作零，推理 token 是输出的一部分。
 独立回读保存在业务工作区中，不改写历史运行证据。这里的核验检查并非完整 ERP-Bench 评分。
+概览显示当前动作和来自单据的订单、开票、付款及出库状态；未观测到的事实不推测。
+连接检查只在启动、保存设置或手动检查时发起；执行期间保留最近结果，避免干扰运行和取消。
 
 V1 支持同一会话的多个销售业务工作区，主机同时执行一项任务。异常中断不自动
 重放写操作；不确定的写入进入待核对状态。当前版本为未签名的 Windows 试用构建。
@@ -63,6 +67,7 @@ npm run dist:portable
 | 需求 | 入口 |
 | --- | --- |
 | 页面与交互 | `src/renderer/App.tsx`、`styles.css` |
+| 基础组件与视觉变量 | `src/renderer/main.tsx` 的 Radix Theme、`styles.css` 的 `:root` |
 | 桌面权限、进程和密钥 | `src/main/`、`src/preload/` |
 | 会话、运行和审批 | `../workbench/host.py` |
 | 销售事实与回读核验 | `../workbench/sale_view.py` |
@@ -70,4 +75,4 @@ npm run dist:portable
 | 模型循环接入 | `../integration/pi_odoo_runner.py` |
 
 增加业务类型时先新增其事实投影与核验规则，再扩充工作区页面；不复制模型循环。
-验收依据见 `../experiments/desktop_workbench/PLAN.md` 和 `ACCEPTANCE.md`。
+验收依据见 `../experiments/desktop_workbench/PLAN.md`、`ACCEPTANCE.md` 和 `UI_REFINEMENT.md`。

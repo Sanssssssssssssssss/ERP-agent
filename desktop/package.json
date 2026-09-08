@@ -1,6 +1,7 @@
 {
   "name": "odoo-workbench-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "description": "面向真实 Odoo 业务执行与核验的桌面工作台",
   "private": true,
   "type": "module",
   "main": "out/main/index.js",
@@ -14,6 +15,8 @@
     "dist:installer": "npm run build && electron-builder --win nsis"
   },
   "dependencies": {
+    "@radix-ui/themes": "3.3.0",
+    "lucide-react": "1.43.0",
     "react": "19.1.1",
     "react-dom": "19.1.1"
   },
@@ -42,11 +45,21 @@
       {
         "from": "resources/host",
         "to": "host",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "assets/workbench.png",
+        "to": "workbench.png"
       }
     ],
     "win": {
-      "target": ["portable", "nsis"],
+      "icon": "assets/workbench.ico",
+      "target": [
+        "portable",
+        "nsis"
+      ],
       "signAndEditExecutable": false
     },
     "portable": {

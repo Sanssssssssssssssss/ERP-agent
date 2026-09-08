@@ -48,6 +48,7 @@ export async function runSelfCheck(): Promise<void> {
   assert.equal(canChangeSettings(true, false), false);
   assert.equal(canChangeSettings(false, true), false);
   assert.doesNotThrow(() => assertRequest({ method: "health", params: {} }));
+  assert.doesNotThrow(() => assertRequest({ method: "check_connection", params: {} }));
   assert.doesNotThrow(() => assertRequest({ method: "get_settings" }));
   assert.throws(() => assertRequest({ method: "shell_exec" }), /METHOD_NOT_ALLOWED/);
   assert.throws(() => assertRequest({ method: "health", params: [] }), /INVALID_PARAMS/);

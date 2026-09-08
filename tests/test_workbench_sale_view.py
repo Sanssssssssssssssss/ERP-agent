@@ -35,7 +35,7 @@ RECORDS = {
     ("sale.order", 7): {"id": 7, "name": "SO001", "state": "sale", "partner_id": [10, "Acme"], "amount_total": 120, "currency_id": [1, "USD"], "payment_term_id": [5, "30 Days"], "order_line": [[21, "Line"]], "invoice_ids": [[31, "INV001"]], "picking_ids": [[51, "WH/OUT/001"]], "invoice_status": "invoiced", "commitment_date": "2026-01-04", "client_order_ref": "REF-1"},
     ("res.partner", 10): {"id": 10, "name": "Acme", "display_name": "Acme"},
     ("sale.order.line", 21): {"id": 21, "name": "Line", "order_id": [7, "SO001"], "product_id": [99, "Widget"], "product_uom_qty": 3, "product_uom_id": [1, "Units"], "price_unit": 40, "price_subtotal": 120, "price_total": 120},
-    ("account.move", 31): {"id": 31, "name": "INV001", "state": "posted", "move_type": "out_invoice", "partner_id": [10, "Acme"], "amount_total": 120, "currency_id": [1, "USD"], "invoice_payment_term_id": [5, "30 Days"], "invoice_origin": "SO001", "invoice_line_ids": [[41, "Invoice line"]]},
+    ("account.move", 31): {"id": 31, "name": "INV001", "state": "posted", "move_type": "out_invoice", "partner_id": [10, "Acme"], "amount_total": 120, "currency_id": [1, "USD"], "invoice_payment_term_id": [5, "30 Days"], "invoice_origin": "SO001", "invoice_line_ids": [[41, "Invoice line"]], "payment_state": "not_paid", "amount_residual": 120, "invoice_date": "2026-01-02"},
     ("account.move.line", 41): {"id": 41, "name": "Invoice line", "move_id": [31, "INV001"], "product_id": [99, "Widget"], "quantity": 3, "price_unit": 40, "price_subtotal": 120, "price_total": 120},
     ("stock.picking", 51): {"id": 51, "name": "WH/OUT/001", "state": "done", "sale_id": [7, "SO001"], "origin": "SO001", "partner_id": [10, "Acme"], "scheduled_date": "2026-01-03"},
 }
@@ -68,6 +68,9 @@ class SaleViewReadbackTests(unittest.TestCase):
         self.assertEqual(documents[("sale.order", 7)]["fields"]["amount_total"], 120)
         self.assertEqual(documents[("sale.order.line", 21)]["fields"]["product_uom_qty"], 3)
         self.assertEqual(documents[("account.move.line", 41)]["fields"]["quantity"], 3)
+        self.assertEqual(documents[("account.move", 31)]["fields"]["payment_state"], "not_paid")
+        self.assertEqual(documents[("account.move", 31)]["fields"]["amount_residual"], 120)
+        self.assertEqual(documents[("account.move", 31)]["fields"]["invoice_date"], "2026-01-02")
         self.assertEqual(documents[("stock.picking", 51)]["state"], "done")
         self.assertIn(("stock.move", 80), documents)
         self.assertTrue(all(row["status"] == "passed" for row in detail["checks"]))
@@ -120,6 +123,36 @@ class SaleViewReadbackTests(unittest.TestCase):
         detail = refresh_business(_state(), "b1", NativeReadFixture(records))
         checks = {row["name"]: row for row in detail["checks"]}
         self.assertEqual(checks["invoice_posted"]["status"], "unknown")
+
+    def test_activity_reflects_waiting_tool_approval_and_terminal_states(self):
+        state = _state()
+        run = state["runs"]["r2"]
+        run.update({
+            "status": "running", "tool_count": 1, "model_rounds": 1,
+            "tools": [{"name": "read_record", "status": "running", "round": 2, "started_at": "2026-01-02T00:00:00Z"}],
+            "events": [{"type": "tool_start", "at": "2026-01-02T00:00:00Z"}],
+        })
+        detail = business_detail(state, "b1")
+        self.assertEqual(detail["activity"]["phase"], "tool")
+        self.assertEqual(detail["activity"]["tool_name"], "read_record")
+        self.assertEqual(detail["activity"]["model_rounds"], 1)
+
+        run["status"] = "awaiting_approval"
+        run["pending_approval_action_ids"] = ["a1"]
+        detail = business_detail(state, "b1")
+        self.assertEqual(detail["activity"]["phase"], "approval")
+
+        run["status"] = "needs_reconciliation"
+        detail = business_detail(state, "b1")
+        self.assertEqual(detail["activity"]["phase"], "reconciliation")
+
+        run["status"] = "completed"
+        run["ended_at"] = "2026-01-02T00:05:00Z"
+        run.pop("pending_approval_action_ids", None)
+        detail = business_detail(state, "b1")
+        self.assertEqual(detail["activity"]["phase"], "completed")
+        self.assertEqual(detail["activity"]["at"], run["ended_at"])
+        self.assertNotIn("round", detail["activity"])
 
 
 if __name__ == "__main__":

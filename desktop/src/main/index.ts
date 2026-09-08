@@ -21,11 +21,12 @@ function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1440,
     height: 900,
-    minWidth: 1024,
+    minWidth: 1100,
     minHeight: 640,
     frame: false,
     autoHideMenuBar: true,
     title: "Odoo 业务工作台",
+    icon: app.isPackaged ? join(process.resourcesPath, "workbench.png") : join(app.getAppPath(), "assets/workbench.png"),
     backgroundColor: "#f4f7f8",
     webPreferences: {
       preload: join(__dirname, "../preload/index.cjs"),

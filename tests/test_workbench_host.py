@@ -168,6 +168,61 @@ class WorkbenchHostTests(unittest.TestCase):
             self.host.start_run(self.sid, second["id"])
         self.assertEqual(self.host.health()["active_run_id"], run["id"])
 
+    def test_health_is_cached_and_does_not_probe_odoo(self):
+        calls = []
+        self.host._native_reads = lambda **_kwargs: calls.append(True)
+        with patch.dict(os.environ, {}, clear=True):
+            before = self.host.health()
+            after = self.host.health()
+        self.assertEqual(before["odoo"]["status"], after["odoo"]["status"])
+        self.assertNotEqual(after["odoo"]["status"], "connected")
+        self.assertEqual(calls, [])
+
+    def test_check_connection_rejects_active_run_without_touching_cache(self):
+        business, run = self._run("busy connection probe")
+        self.host._odoo_health.update({"status": "unchecked", "checked_at": "before-run"})
+        calls = []
+        self.host._native_reads = lambda **_kwargs: calls.append(True)
+        with self.assertRaisesRegex(RuntimeError, "^CONNECTION_CHECK_BUSY$"):
+            self.host.check_connection()
+        self.assertEqual(calls, [])
+        self.assertEqual(self.host.health()["odoo"]["checked_at"], "before-run")
+        cancelled = self.host.cancel_run(self.sid, business["id"], run["id"])
+        self.assertEqual(cancelled["status"], "cancelled")
+
+    def test_check_connection_success_is_explicit_and_emits_safe_event(self):
+        client = SimpleNamespace(url="https://user:secret@example.test/json/2?token=secret", db="bench", username="demo")
+        self.host._native_reads = lambda **_kwargs: SimpleNamespace(client=client)
+        env = {"ODOO_URL": client.url, "ODOO_DB": "bench", "ODOO_USERNAME": "demo", "ODOO_API_KEY": "secret"}
+        with patch.dict(os.environ, env, clear=False):
+            result = self.host.call("check_connection", {})
+        odoo = result["odoo"]
+        self.assertEqual(odoo["status"], "connected")
+        self.assertEqual(odoo["endpoint"], "https://example.test")
+        self.assertNotIn("secret", json.dumps(result))
+        event = self.host.store.data["events"][-1]
+        self.assertEqual(event["event"], "changed")
+        self.assertEqual(event["data"]["type"], "connection_changed")
+
+    def test_check_connection_classifies_failures_without_raw_error(self):
+        env = {"ODOO_URL": "http://example.test", "ODOO_DB": "bench", "ODOO_USERNAME": "demo", "ODOO_API_KEY": "secret"}
+        with patch.dict(os.environ, env, clear=False):
+            self.host._native_reads = lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("token=secret"))
+            unavailable = self.host.check_connection()["odoo"]
+            self.assertEqual(unavailable["status"], "unavailable")
+            self.assertNotIn("secret", json.dumps(unavailable))
+
+            self.host._native_reads = lambda **_kwargs: (_ for _ in ()).throw(PermissionError("api_key=secret"))
+            denied = self.host.check_connection()["odoo"]
+            self.assertEqual(denied["status"], "permission_denied")
+            self.assertNotIn("secret", json.dumps(denied))
+
+    def test_check_connection_unconfigured_does_not_construct_client(self):
+        self.host._native_reads = lambda **_kwargs: self.fail("unconfigured check must not construct NativeReads")
+        with patch.dict(os.environ, {}, clear=True):
+            result = self.host.check_connection()["odoo"]
+        self.assertEqual(result["status"], "unconfigured")
+
     def test_native_approval_envelopes_are_pending_approval_and_scoped(self):
         variants = (
             ({"approval": {"action_id": "a1"}, "approval_status": {"status": "pending_approval"}}, "a1"),

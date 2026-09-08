@@ -8,7 +8,7 @@ READBACK_FIELDS: dict[str, tuple[str, ...]] = {
     "res.partner": ("id", "name", "display_name", "email"),
     "sale.order": ("id", "name", "state", "partner_id", "amount_total", "currency_id", "payment_term_id", "order_line", "invoice_ids", "picking_ids", "invoice_status", "commitment_date", "client_order_ref"),
     "sale.order.line": ("id", "name", "order_id", "product_id", "product_uom_qty", "product_uom_id", "price_unit", "price_subtotal", "price_total"),
-    "account.move": ("id", "name", "state", "move_type", "partner_id", "amount_total", "currency_id", "invoice_payment_term_id", "invoice_origin", "invoice_line_ids"),
+    "account.move": ("id", "name", "state", "move_type", "partner_id", "amount_total", "currency_id", "invoice_payment_term_id", "invoice_origin", "invoice_line_ids", "payment_state", "amount_residual", "invoice_date"),
     "account.move.line": ("id", "name", "move_id", "product_id", "quantity", "product_uom_id", "price_unit", "price_subtotal", "price_total"),
     "stock.picking": ("id", "name", "state", "sale_id", "origin", "partner_id", "scheduled_date"),
 }
@@ -121,6 +121,64 @@ def _read_one(reads: Callable[[str, dict[str, Any]], Any] | Any, model: str, rec
 
 def _run_sort_key(run: dict[str, Any]) -> tuple[str, str]:
     return (str(run.get("started_at") or ""), str(run.get("ended_at") or ""))
+
+
+def _activity(runs: list[dict[str, Any]], approvals: list[dict[str, Any]]) -> dict[str, Any]:
+    if not runs:
+        return {"phase": "idle", "label": "等待开始", "detail": "业务已建立，尚未启动执行。"}
+    run = runs[0]
+    status = run.get("status")
+    tools = run.get("tools") if isinstance(run.get("tools"), list) else []
+    latest_tool = next((tool for tool in reversed(tools) if isinstance(tool, dict)), None)
+    pending = any(
+        row.get("run_id") == run.get("id") and row.get("status") == "pending_approval"
+        for row in approvals
+        if isinstance(row, dict)
+    ) or bool(run.get("pending_approval_action_ids"))
+    if status == "needs_reconciliation":
+        phase, label, detail = "reconciliation", "需要核对", "存在不确定写入，禁止自动重试。"
+    elif status == "interrupted":
+        phase, label, detail = "interrupted", "已中断", "运行因主机或进程中断而停止。"
+    elif status == "cancelled":
+        phase, label, detail = "cancelled", "已取消", "运行已取消，未据此判断业务结果。"
+    elif status == "failed":
+        phase, label, detail = "failed", "执行失败", "运行失败；请查看 trace 和独立核验。"
+    elif status == "completed":
+        phase, label, detail = "completed", "已结束", "运行已结束；业务结果请查看独立核验。"
+    elif status == "awaiting_approval" or (status == "running" and pending):
+        phase, label, detail = "approval", "等待审批", "存在待处理的 ERP 写入审批。"
+    elif status == "running" and latest_tool and latest_tool.get("status") == "running":
+        phase, label, detail = "tool", "执行工具", "正在等待工具回执。"
+    elif status == "running":
+        phase, label, detail = "model", "模型处理中", "正在等待下一轮模型结果。"
+    elif status == "cancel_requested":
+        phase, label, detail = "cancelling", "正在取消", "已请求停止当前运行。"
+    else:
+        phase, label, detail = "unknown", "状态未知", "当前运行状态无法安全归类。"
+    activity: dict[str, Any] = {
+        "phase": phase,
+        "label": label,
+        "detail": detail,
+        "tool_count": run.get("tool_count", len(tools)),
+        "model_rounds": run.get("model_rounds", len(run.get("rounds", [])) if isinstance(run.get("rounds"), list) else 0),
+    }
+    if latest_tool:
+        if isinstance(latest_tool.get("name"), str) and latest_tool.get("name"):
+            activity["tool_name"] = latest_tool["name"]
+        if phase == "tool" and isinstance(latest_tool.get("round"), int):
+            activity["round"] = latest_tool["round"]
+        activity["at"] = latest_tool.get("ended_at") or latest_tool.get("started_at")
+    events = run.get("events") if isinstance(run.get("events"), list) else []
+    if events and isinstance(events[-1], dict):
+        last = events[-1]
+        if isinstance(last.get("type"), str):
+            activity["last_event"] = last["type"]
+        activity["at"] = last.get("at") or activity.get("at")
+    if phase in {"completed", "failed"} and run.get("ended_at"):
+        activity["at"] = run["ended_at"]
+    else:
+        activity.setdefault("at", run.get("ended_at") or run.get("started_at"))
+    return activity
 
 
 def _check(name: str, label: str, status: str, detail: str) -> dict[str, Any]:
@@ -306,4 +364,5 @@ def business_detail(state: dict[str, Any], business_id: str) -> dict[str, Any]:
             "documents": list(docs.values()), "checks": list(checks.values()),
             "observed_at": observed_at,
             "stale": detail_stale,
-            "summary": next((run.get("summary") for run in runs if run.get("summary")), None)}
+            "summary": next((run.get("summary") for run in runs if run.get("summary")), None),
+            "activity": _activity(runs, approvals)}

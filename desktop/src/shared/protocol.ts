@@ -128,6 +128,34 @@ export interface BusinessDetail {
   observed_at?: string;
   stale: boolean;
   summary?: string;
+  activity?: {
+    phase: string;
+    label: string;
+    detail: string;
+    at?: string;
+    tool_name?: string;
+    round?: number;
+    tool_count?: number;
+    model_rounds?: number;
+    last_event?: string;
+  };
+}
+
+export interface Health {
+  host_ready: boolean;
+  odoo_status?: string;
+  model_configured?: boolean;
+  environment?: string;
+  active_run_id?: string | null;
+  odoo?: {
+    status: "unconfigured" | "unchecked" | "connected" | "unavailable" | "permission_denied" | "error";
+    checked_at?: string;
+    latency_ms?: number;
+    endpoint?: string;
+    database?: string;
+    account?: string;
+    detail?: string;
+  };
 }
 
 export interface Settings {
@@ -162,6 +190,7 @@ export type WorkbenchMethod =
   | "refresh_business"
   | "get_settings"
   | "save_settings"
+  | "check_connection"
   | "health";
 
 export interface WorkbenchRequest {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { createReadStream, existsSync, statSync } from 'node:fs'
+import { createReadStream, existsSync, mkdirSync, statSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { fileURLToPath } from 'node:url'
 import { extname, resolve } from 'node:path'
@@ -31,6 +31,7 @@ const bridgeScript = String.raw`
     const calls = []
     let traceVersion = 0
     let saveBlocked = true
+    let failInitialConnectionCheck = true
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
     const session = (id, title, businesses) => ({ id, title, created_at: '2026-09-08T08:00:00Z', updated_at: '2026-09-08T09:00:00Z', archived: false, status: 'idle', businesses })
     const business = (id, session_id, title, status = 'idle') => ({ id, session_id, type: 'sale_invoice', title, goal: '处理订单与发票', status, created_at: '2026-09-08T08:00:00Z', updated_at: '2026-09-08T09:00:00Z', active_run_id: id + '-run' })
@@ -39,10 +40,11 @@ const bridgeScript = String.raw`
     const sessions = [session('session-a', 'Session A', [business('business-a1', 'session-a', 'Business A1')]), session('session-b', 'Session B', [b1, b2])]
     const details = (b) => ({
       business: b,
-      runs: [{ id: b.id + '-run', business_id: b.id, session_id: b.session_id, status: b.id === 'business-b2' ? 'awaiting_approval' : 'completed', started_at: '2026-09-08T08:30:00Z', tool_count: 2, model_rounds: 2, elapsed_seconds: 1.2, verification_status: b.id === 'business-b2' ? '未知' : 'passed', usage: { input: null, cache_read: null, output: null, reasoning: null, total: null } }],
-      approvals: b.id === 'business-b2' ? [{ action_id: 'action-b2', run_id: 'business-b2-run', business_id: 'business-b2', status: 'pending_approval', title: 'ERP write approval', model: 'account.move', operation: 'create', record_ids: [42], values: { state: 'posted' }, prestate: { state: 'draft' }, result: { ok: true, preflight: true }, expires_at: Date.now() + 60000 }] : [],
+      runs: [{ id: b.id + '-old-run', business_id: b.id, session_id: b.session_id, status: 'completed', started_at: '2026-09-08T08:00:00Z', tool_count: 1, model_rounds: 1, elapsed_seconds: 0.8, verification_status: 'passed', usage: { input: null, cache_read: null, output: null, reasoning: null, total: null } }, { id: b.id + '-run', business_id: b.id, session_id: b.session_id, status: b.id === 'business-b2' ? 'awaiting_approval' : 'completed', started_at: '2026-09-08T08:30:00Z', tool_count: 2, model_rounds: 2, elapsed_seconds: 1.2, verification_status: b.id === 'business-b2' ? '未知' : 'passed', usage: { input: null, cache_read: null, output: null, reasoning: null, total: null } }],
+      approvals: b.id === 'business-b2' ? [{ action_id: 'action-b2', run_id: 'business-b2-run', business_id: 'business-b2', status: 'pending_approval', title: 'ERP write approval', model: 'account.move', operation: 'create', record_ids: [42], values: { state: 'posted' }, prestate: { state: 'draft' }, result: { ok: true, preflight: true }, expires_at: Math.floor(Date.now() / 1000) + 60 }] : [],
       documents: b.id === 'business-b2' ? [
         { id: '1', model: 'sale.order', name: 'SO-B2', state: 'sale', source: 'odoo', observed_at: '2026-09-08T08:45:00Z', fields: { partner_name: 'Nimbus Bureau', amount_total: 695.22, currency: 'USD', invoice_status: 'invoiced', delivery_status: 'pending' } },
+        { id: '2', model: 'sale.order', name: 'SO-B2-SECOND', state: 'draft', source: 'odoo', observed_at: '2026-09-08T08:45:30Z', fields: { partner_name: 'Nimbus Bureau', amount_total: 10, currency: 'USD', invoice_status: 'to invoice' } },
         { id: '1', model: 'account.move', name: 'INV-B2', state: 'posted', source: 'odoo', observed_at: '2026-09-08T08:46:00Z', fields: { partner_name: 'Nimbus Bureau', amount_total: 695.22, currency: 'USD', payment_state: 'not_paid', amount_residual: 695.22 } }
       ] : [],
       checks: [], stale: false, observed_at: '2026-09-08T08:46:00Z', summary: '主机已返回业务回执'
@@ -59,7 +61,11 @@ const bridgeScript = String.raw`
       windowControl() { return Promise.resolve() },
       async call(method, params = {}) {
         calls.push({ method, params })
-        if (method === 'health') return { host_ready: true, odoo_status: 'connected', model_configured: true, environment: 'demo' }
+        if (method === 'health') return { host_ready: true, odoo_status: 'connected', odoo: { status: 'connected', endpoint: 'http://odoo.invalid', database: 'demo', account: 'admin', checked_at: '2026-09-08T09:00:00Z', latency_ms: 12 }, model_configured: true, environment: 'demo' }
+        if (method === 'check_connection') {
+          if (failInitialConnectionCheck) { failInitialConnectionCheck = false; throw new Error('CHECK_CONNECTION_OFFLINE') }
+          return { host_ready: true, odoo_status: 'connected', odoo: { status: 'connected', endpoint: 'http://odoo.invalid', database: 'demo', account: 'admin', checked_at: '2026-09-08T09:00:00Z', latency_ms: 12 }, model_configured: true, environment: 'demo' }
+        }
         if (method === 'list_sessions') return sessions
         if (method === 'get_session') {
           await wait(params.session_id === 'session-a' ? 220 : 12)
@@ -98,10 +104,12 @@ const browser = await chromium.launch({ headless: true })
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
 await context.addInitScript({ content: bridgeScript })
 const page = await context.newPage()
-page.on('pageerror', (error) => console.error(`renderer page error: ${error.message}`))
+const pageErrors = []
+page.on('pageerror', (error) => { pageErrors.push(error.message); console.error(`renderer page error: ${error.message}`) })
 page.on('console', (message) => { if (message.type() === 'error') console.error(`renderer console error: ${message.text()}`) })
 await page.goto(`http://127.0.0.1:${serverAddress.port}/`)
 await page.getByRole('button', { name: /Session A/ }).waitFor()
+await page.getByText('主机断开').waitFor()
 
 // A is deliberately slow. Switching to B while A is in flight must leave B visible.
 await page.getByRole('button', { name: /Session B/ }).click()
@@ -144,8 +152,13 @@ const sessionSearch = page.getByRole('textbox', { name: '搜索会话' })
 await sessionSearch.fill('Session A')
 assert.equal(await page.getByRole('button', { name: /Session B/ }).isVisible(), false)
 await sessionSearch.fill('')
+await page.getByRole('button', { name: '归档' }).click()
+await page.getByRole('alertdialog', { name: '归档会话' }).waitFor()
+await page.getByRole('alertdialog', { name: '归档会话' }).getByRole('button', { name: '取消' }).click()
+await page.getByRole('alertdialog', { name: '归档会话' }).waitFor({ state: 'hidden' })
 
 // B1 is deliberately slow. B2 must win the business detail race.
+await page.getByRole('tab', { name: /Business B2/ }).click()
 await page.getByRole('tab', { name: /Business B1/ }).click()
 await page.getByText('正在读取业务状态…').waitFor()
 assert.equal(await page.getByRole('button', { name: '取消运行' }).count(), 0)
@@ -153,10 +166,25 @@ assert.equal(await page.locator('.tool-row').count(), 0)
 await page.getByRole('tab', { name: /Business B2/ }).click()
 await page.getByRole('heading', { name: 'Business B2' }).waitFor()
 assert.equal(await page.locator('.business-header h2').textContent(), 'Business B2')
+assert.ok((await page.locator('.business-facts').textContent()).includes('已确认'))
+assert.ok((await page.locator('.business-facts').textContent()).includes('已过账'))
+assert.ok((await page.locator('.business-facts').textContent()).includes('2 张'))
+assert.ok((await page.locator('.business-facts').textContent()).includes('SO-B2-SECOND'))
+await page.getByRole('tab', { name: /^单据/ }).click()
+const documentRows = page.locator('.document-table tbody tr')
+const secondOrderText = await documentRows.nth(1).textContent()
+const invoiceText = await documentRows.nth(2).textContent()
+assert.ok(secondOrderText?.includes('开票:待开票'))
+assert.ok(!secondOrderText?.includes('付款'))
+assert.ok(invoiceText?.includes('付款:未付款'))
 await page.getByRole('tab', { name: /Business B2/ }).click()
 await page.waitForTimeout(30)
 assert.equal(await page.locator('.business-header h2').textContent(), 'Business B2')
 assert.equal(await page.getByText('正在读取业务状态…').count(), 0)
+await page.getByRole('tab', { name: /^Trace/ }).click()
+await page.locator('.trace-toolbar select').selectOption('business-b2-old-run')
+await page.getByRole('tab', { name: /^概览/ }).click()
+await page.getByRole('button', { name: '取消运行' }).waitFor()
 
 // An unrelated changed event refreshes the session list, but does not steal the active business.
 await page.evaluate(() => window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-a', business_id: 'business-a1', status: 'completed' } }))
@@ -228,6 +256,11 @@ await page.evaluate(() => window.__emitWorkbench({ event: 'host_protocol_error',
 await page.getByText('主机协议错误').waitFor()
 await page.getByRole('alert').getByRole('button', { name: '重试连接' }).click()
 await page.getByText('主机已连接').waitFor()
+const checksBeforeConnectionChanged = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'check_connection').length)
+await page.evaluate(() => window.__emitWorkbench({ event: 'changed', data: { type: 'connection_changed', odoo: { status: 'connected', checked_at: '2026-09-08T09:01:00Z' } } }))
+await page.waitForTimeout(30)
+const checksAfterConnectionChanged = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'check_connection').length)
+assert.equal(checksAfterConnectionChanged, checksBeforeConnectionChanged)
 
 // Settings opens with focus on close and Escape closes it.
 await page.getByRole('button', { name: '连接设置' }).click()
@@ -253,15 +286,32 @@ await page.waitForFunction(() => document.activeElement === document.querySelect
 // The splitter is keyboard-operable and the four-column layout remains inside the viewport.
 const divider = page.getByRole('separator', { name: '调整业务工作区宽度' })
 await divider.focus()
-await page.keyboard.press('ArrowLeft')
+for (let index = 0; index < 30; index += 1) await page.keyboard.press('ArrowLeft')
 const overflow = await page.evaluate(() => ({ document: document.documentElement.scrollWidth, viewport: window.innerWidth, grid: document.querySelector('.workspace-grid')?.scrollWidth ?? 0, gridClient: document.querySelector('.workspace-grid')?.clientWidth ?? 0 }))
 assert.ok(overflow.document <= overflow.viewport + 1, JSON.stringify(overflow))
 assert.ok(overflow.grid <= overflow.gridClient + 1, JSON.stringify(overflow))
+await page.setViewportSize({ width: 1280, height: 900 })
+await divider.focus()
+for (let index = 0; index < 30; index += 1) await page.keyboard.press('ArrowLeft')
+const narrowOverflow = await page.evaluate(() => ({ document: document.documentElement.scrollWidth, viewport: window.innerWidth, grid: document.querySelector('.workspace-grid')?.scrollWidth ?? 0, gridClient: document.querySelector('.workspace-grid')?.clientWidth ?? 0 }))
+assert.ok(narrowOverflow.document <= narrowOverflow.viewport + 1, JSON.stringify(narrowOverflow))
+assert.ok(narrowOverflow.grid <= narrowOverflow.gridClient + 1, JSON.stringify(narrowOverflow))
+await page.setViewportSize({ width: 1440, height: 900 })
 await page.getByLabel('业务目标', {exact: true}).evaluate(e => { e.textContent = '完整业务目标 '.repeat(1000) })
 assert.ok(await page.getByLabel('业务目标', {exact: true}).evaluate(e => e.clientHeight < 100 && e.scrollHeight > e.clientHeight))
+await page.getByLabel('业务目标', {exact: true}).evaluate(e => { e.textContent = '处理订单与发票' })
+assert.equal(pageErrors.length, 0, pageErrors.join('\n'))
 
 const calls = await page.evaluate(() => window.__bridgeCalls.map(({ method }) => method))
 assert.ok(calls.includes('get_session') && calls.includes('get_business') && calls.includes('get_trace'))
+if (process.env.RENDERER_CHECK_SCREENSHOTS) {
+  const screenshotDir = fileURLToPath(new URL('../../.runtime/desktop-refinement/', import.meta.url))
+  mkdirSync(screenshotDir, { recursive: true })
+  for (const [name, label] of [['overview', /^概览/], ['documents', /^单据/], ['approvals', /^审批/], ['trace', /^Trace/]]) {
+    await page.getByRole('tab', { name: label }).click()
+    await page.screenshot({ path: resolve(screenshotDir, `${name}.png`), fullPage: false })
+  }
+}
 console.log('renderer-check: PASS')
 console.log('checked: session/business/trace stale guards, same-run trace refresh, changed routing, host crash/retry, message scope, session search, approval scope+preflight labels, CONFIG_BUSY mapping, settings save+Escape, splitter overflow')
 await browser.close()
