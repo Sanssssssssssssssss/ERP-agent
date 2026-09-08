@@ -51,7 +51,7 @@ const bridgeScript = String.raw`
     })
     const sessionDetails = {
       'session-a': { session: sessions[0], messages: [], businesses: sessions[0].businesses },
-      'session-b': { session: sessions[1], messages: [{ id: 'm1', role: 'assistant', text: '已识别两个业务工作区。', created_at: '2026-09-08T08:01:00Z' }], businesses: sessions[1].businesses }
+      'session-b': { session: sessions[1], messages: [{ id: 'm1', role: 'assistant', text: '已识别两个业务工作区。', created_at: '2026-09-08T08:01:00Z' }, { id: 'proposal-1', role: 'assistant', text: '发现一个新的业务意图。', created_at: '2026-09-08T08:02:00Z', proposal: { id: 'proposal-1', title: '新业务意图', goal: '处理一笔新的销售业务', type: 'sale_invoice', status: 'pending' } }], businesses: sessions[1].businesses }
     }
     window.__bridgeCalls = calls
     window.__traceVersion = 0
@@ -81,7 +81,7 @@ const bridgeScript = String.raw`
           if (params.business_id === 'business-b1') return { run: details(b1).runs[0], rounds: [], tools: [] }
           traceVersion += 1
           window.__traceVersion = traceVersion
-          return { run: details(b2).runs[0], rounds: [{ index: 1, status: 'completed', elapsed_seconds: null, usage: { input: null, cache_read: null, output: null, reasoning: null, total: null }, tool_ids: ['tool-b2'] }], tools: [{ id: 'tool-b2', name: 'read_business_records', status: 'completed', arguments: { model: 'sale.order' }, result: { count: 2, version: traceVersion }, elapsed_seconds: null }] }
+          return { run: details(b2).runs[0], rounds: [{ index: 1, status: 'completed', text: '公开业务摘要 '.repeat(500), elapsed_seconds: null, usage: { input: null, cache_read: null, output: null, reasoning: null, total: null }, tool_ids: ['tool-b2'] }], tools: [{ id: 'tool-b2', name: 'read_business_records', status: 'completed', arguments: { model: 'sale.order' }, result: { count: 2, version: traceVersion }, elapsed_seconds: null }] }
         }
         if (method === 'decide_approval') return { ok: true }
         if (method === 'get_settings') return { model: 'deepseek/deepseek-v4-flash/high', base_url: 'http://model.invalid', odoo_url: 'http://odoo.invalid', odoo_db: 'demo', odoo_username: 'admin', has_model_key: false, has_odoo_key: false, environment: 'demo' }
@@ -93,7 +93,8 @@ const bridgeScript = String.raw`
           if (params.text === 'delayed mutation') await wait(180)
           return null
         }
-        if (method === 'start_run' || method === 'cancel_run' || method === 'confirm_business' || method === 'rename_session' || method === 'archive_session') return null
+        if (method === 'start_run') return { id: params.business_id + '-started-run', business_id: params.business_id, session_id: params.session_id, status: 'running', tool_count: 0, model_rounds: 0, elapsed_seconds: 0 }
+        if (method === 'cancel_run' || method === 'confirm_business' || method === 'rename_session' || method === 'archive_session') return null
         throw new Error('unexpected bridge method: ' + method)
       }
     }
@@ -114,10 +115,58 @@ await page.getByText('主机断开').waitFor()
 // A is deliberately slow. Switching to B while A is in flight must leave B visible.
 await page.getByRole('button', { name: /Session B/ }).click()
 await page.getByRole('heading', { name: 'Session B' }).waitFor()
+const proposalButton = page.getByRole('button', { name: '创建业务工作区' })
+await proposalButton.waitFor()
+await page.evaluate(() => {
+  const create = [...document.querySelectorAll('button')].find((item) => item.textContent?.includes('创建业务工作区'))
+  const cancel = [...document.querySelectorAll('button')].find((item) => item.textContent?.includes('暂不创建'))
+  for (let index = 0; index < 5; index += 1) (index % 2 === 0 ? create : cancel)?.click()
+})
+await page.waitForTimeout(25)
+const proposalCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'confirm_business'))
+assert.equal(proposalCalls.length, 1)
 await page.getByRole('button', { name: /Session B/ }).click()
 await page.waitForTimeout(30)
 assert.equal(await page.locator('.conversation-header h2').textContent(), 'Session B')
 assert.equal(await page.locator('.conversation-header h2').textContent(), 'Session B')
+
+// Pressure: 50 rapid session switches plus an explicit A -> B -> A must settle on the last scope.
+const sessionPressureStarted = Date.now()
+const sessionBurstDispatches = await page.evaluate(() => {
+  const find = (title) => [...document.querySelectorAll('.session-select')].find((button) => button.textContent?.includes(title))
+  let dispatched = 0
+  for (let index = 0; index < 50; index += 1) { const button = find(index % 2 === 0 ? 'Session A' : 'Session B'); if (!button) throw new Error('missing session switch button'); button.click(); dispatched += 1 }
+  return dispatched
+})
+assert.equal(sessionBurstDispatches, 50)
+await page.getByRole('heading', { name: 'Session B' }).waitFor()
+await page.getByRole('button', { name: /Session A/ }).click()
+await page.getByRole('button', { name: /Session B/ }).click()
+await page.getByRole('button', { name: /Session A/ }).click()
+await page.getByRole('heading', { name: 'Session A' }).waitFor()
+await page.getByRole('button', { name: /Session B/ }).click()
+await page.getByRole('heading', { name: 'Session B' }).waitFor()
+const sessionPressureElapsed = Date.now() - sessionPressureStarted
+
+// Pressure: 50 business tab switches must leave the last selected business visible.
+const businessPressureStarted = Date.now()
+const businessBurstDispatches = await page.evaluate(() => {
+  const find = (title) => [...document.querySelectorAll('[role="tab"]')].find((button) => button.textContent?.includes(title))
+  let dispatched = 0
+  for (let index = 0; index < 50; index += 1) { const button = find(index % 2 === 0 ? 'Business B1' : 'Business B2'); if (!button) throw new Error('missing business switch button'); button.click(); dispatched += 1 }
+  return dispatched
+})
+assert.equal(businessBurstDispatches, 50)
+await page.getByRole('heading', { name: 'Business B2' }).waitFor()
+const businessPressureElapsed = Date.now() - businessPressureStarted
+const sequentialBusinessStarted = Date.now()
+for (let index = 0; index < 20; index += 1) {
+  const title = index % 2 === 0 ? 'Business B1' : 'Business B2'
+  await page.getByRole('tab', { name: new RegExp(title) }).click()
+  await page.getByRole('heading', { name: title }).waitFor()
+}
+await page.getByRole('heading', { name: 'Business B2' }).waitFor()
+const sequentialBusinessElapsed = Date.now() - sequentialBusinessStarted
 
 // Composer target is explicit: current-business followups carry a business_id; a new intent omits it.
 const messageTarget = page.getByLabel('发送到')
@@ -135,6 +184,15 @@ assert.deepEqual(sentMessages.map(({ params }) => params), [
   { session_id: 'session-b', text: '继续处理当前业务', business_id: 'business-b2' },
   { session_id: 'session-b', text: '开始一个新的业务意图' }
 ])
+await messageTarget.selectOption('business-b2')
+await composer.fill('dedupe send')
+await page.evaluate(() => {
+  const button = [...document.querySelectorAll('button')].find((item) => item.textContent?.includes('发送'))
+  for (let index = 0; index < 5; index += 1) button?.click()
+})
+await page.waitForTimeout(25)
+const dedupeSendCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'send_message' && params.text === 'dedupe send'))
+assert.equal(dedupeSendCalls.length, 1)
 
 // A delayed send response from the old session must not reload that session over a newer selection.
 await messageTarget.selectOption('business-b2')
@@ -161,6 +219,16 @@ await page.getByRole('alertdialog', { name: '归档会话' }).waitFor({ state: '
 await page.getByRole('tab', { name: /Business B2/ }).click()
 await page.getByRole('tab', { name: /Business B1/ }).click()
 await page.getByText('正在读取业务状态…').waitFor()
+await page.getByRole('heading', { name: 'Business B1' }).waitFor()
+const startButton = page.getByRole('button', { name: /继续执行|开始执行/ })
+await startButton.waitFor()
+await page.evaluate(() => {
+  const button = [...document.querySelectorAll('button')].find((item) => /继续执行|开始执行/.test(item.textContent || ''))
+  for (let index = 0; index < 5; index += 1) button?.click()
+})
+await page.waitForTimeout(30)
+const startCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'start_run'))
+assert.equal(startCalls.length, 1)
 assert.equal(await page.getByRole('button', { name: '取消运行' }).count(), 0)
 assert.equal(await page.locator('.tool-row').count(), 0)
 await page.getByRole('tab', { name: /Business B2/ }).click()
@@ -170,6 +238,16 @@ assert.ok((await page.locator('.business-facts').textContent()).includes('已确
 assert.ok((await page.locator('.business-facts').textContent()).includes('已过账'))
 assert.ok((await page.locator('.business-facts').textContent()).includes('2 张'))
 assert.ok((await page.locator('.business-facts').textContent()).includes('SO-B2-SECOND'))
+await page.getByRole('tab', { name: /^概览/ }).click()
+const cancelButton = page.getByRole('button', { name: '取消运行' })
+await cancelButton.waitFor()
+await page.evaluate(() => {
+  const button = [...document.querySelectorAll('button')].find((item) => item.textContent?.includes('取消运行'))
+  for (let index = 0; index < 5; index += 1) button?.click()
+})
+await page.waitForTimeout(30)
+const cancelCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'cancel_run'))
+assert.equal(cancelCalls.length, 1)
 await page.getByRole('tab', { name: /^单据/ }).click()
 const documentRows = page.locator('.document-table tbody tr')
 const secondOrderText = await documentRows.nth(1).textContent()
@@ -207,8 +285,16 @@ await page.waitForFunction(() => {
   const button = [...document.querySelectorAll('button')].find((item) => item.textContent?.includes('批准这项业务动作'))
   return Boolean(button && !button.disabled)
 })
-await approvalButton.click()
+await page.evaluate(() => {
+  const approve = [...document.querySelectorAll('button')].find((item) => item.textContent?.includes('批准这项业务动作'))
+  const reject = [...document.querySelectorAll('button')].find((item) => item.textContent?.includes('拒绝'))
+  for (let index = 0; index < 5; index += 1) (index % 2 === 0 ? approve : reject)?.click()
+})
 await page.waitForTimeout(30)
+const repeatedApproveCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'decide_approval' && params.decision === 'approve'))
+const repeatedRejectCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'decide_approval' && params.decision === 'reject'))
+assert.equal(repeatedApproveCalls.length, 1)
+assert.equal(repeatedRejectCalls.length, 0)
 await page.getByRole('button', { name: '拒绝' }).click()
 await page.waitForTimeout(30)
 const approvalCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'decide_approval'))
@@ -234,6 +320,7 @@ await page.locator('.trace-toolbar select').selectOption('business-b2-run')
 await page.getByText('未知 tokens').first().waitFor()
 const traceText = await page.locator('.trace-page').textContent()
 assert.ok(traceText.includes('未知 tokens'))
+assert.ok((await page.locator('.round-card').first().textContent()).length > 1500)
 for (const label of ['未缓存输入 未知', '缓存命中 未知', '输出（含推理） 未知', '推理 未知', '总计 未知']) assert.ok(traceText.includes(label), `missing usage label: ${label}`)
 
 // A trace event for the same run refreshes the visible trace without changing tabs or run scope.
@@ -248,6 +335,22 @@ const traceCallsAfter = await page.evaluate(() => window.__bridgeCalls.filter(({
 assert.ok(traceCallsAfter > traceCallsBefore)
 const currentTraceVersion = await page.evaluate(() => window.__traceVersion)
 assert.ok((await page.locator('.trace-page').textContent()).includes(`"version": ${currentTraceVersion}`))
+
+// 300 trace events in one burst must coalesce to one trace read and one quiet business refresh.
+const burstTraceCallsBefore = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'get_trace' && params.business_id === 'business-b2').length)
+const burstBusinessCallsBefore = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'get_business' && params.business_id === 'business-b2').length)
+const burstTraceVersionBefore = await page.evaluate(() => window.__traceVersion)
+const traceBurstStarted = Date.now()
+await page.evaluate(() => {
+  for (let index = 0; index < 300; index += 1) window.__emitWorkbench({ event: 'run_trace', data: { session_id: 'session-b', business_id: 'business-b2', run_id: 'business-b2-run' } })
+})
+await page.waitForTimeout(300)
+const burstTraceCallsAfter = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'get_trace' && params.business_id === 'business-b2').length)
+const burstBusinessCallsAfter = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'get_business' && params.business_id === 'business-b2').length)
+assert.equal(burstTraceCallsAfter - burstTraceCallsBefore, 1)
+assert.equal(burstBusinessCallsAfter - burstBusinessCallsBefore, 1)
+assert.equal(await page.evaluate(() => window.__traceVersion), burstTraceVersionBefore + 1)
+const traceBurstElapsed = Date.now() - traceBurstStarted
 
 // Host lifecycle events are visible and the banner can retry health after a crash/protocol error.
 await page.evaluate(() => window.__emitWorkbench({ event: 'host_status', data: { status: 'crashed', code: 9 } }))
@@ -314,5 +417,6 @@ if (process.env.RENDERER_CHECK_SCREENSHOTS) {
 }
 console.log('renderer-check: PASS')
 console.log('checked: session/business/trace stale guards, same-run trace refresh, changed routing, host crash/retry, message scope, session search, approval scope+preflight labels, CONFIG_BUSY mapping, settings save+Escape, splitter overflow')
+console.log(`pressure: session50=${sessionPressureElapsed}ms business50=${businessPressureElapsed}ms business20sequential=${sequentialBusinessElapsed}ms trace300=${traceBurstElapsed}ms trace_rpc_delta=${burstTraceCallsAfter - burstTraceCallsBefore} business_rpc_delta=${burstBusinessCallsAfter - burstBusinessCallsBefore} repeated={proposal:${proposalCalls.length},send:${dedupeSendCalls.length},start:${startCalls.length},approve:${repeatedApproveCalls.length},cancel:${cancelCalls.length}}`)
 await browser.close()
 server.close()

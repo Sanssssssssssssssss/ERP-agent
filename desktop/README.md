@@ -75,4 +75,6 @@ npm run dist:portable
 | 模型循环接入 | `../integration/pi_odoo_runner.py` |
 
 增加业务类型时先新增其事实投影与核验规则，再扩充工作区页面；不复制模型循环。
-验收依据见 `../experiments/desktop_workbench/PLAN.md`、`ACCEPTANCE.md` 和 `UI_REFINEMENT.md`。
+验收依据见 `../experiments/desktop_workbench/PLAN.md`、`ACCEPTANCE.md`、`UI_REFINEMENT.md`
+和 `PRESSURE_AND_LIVE.md`。0.2.1 补充重复操作去重及有界压力回归；真实模型销售开票
+仍需按最新验收记录完成授权与独立业务验证。

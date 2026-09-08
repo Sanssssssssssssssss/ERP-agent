@@ -6,6 +6,7 @@ import tempfile
 import threading
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from unittest.mock import patch
 from pathlib import Path
@@ -167,6 +168,111 @@ class WorkbenchHostTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.host.start_run(self.sid, second["id"])
         self.assertEqual(self.host.health()["active_run_id"], run["id"])
+
+    def test_bounded_public_call_pressure_preserves_scope_trace_and_recovery(self):
+        """Exercise public calls concurrently without starting a worker or network client."""
+        started = time.perf_counter()
+        business = self._business("pressure start")
+
+        def start_once(_):
+            try:
+                return ("ok", self.host.call("start_run", {"session_id": self.sid, "business_id": business["id"]}))
+            except Exception as exc:
+                return ("error", type(exc).__name__)
+
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            starts = list(pool.map(start_once, range(100)))
+        self.assertEqual(sum(kind == "ok" for kind, _ in starts), 1)
+        run = self.host.store.data["runs"][self.host.health()["active_run_id"]]
+        self.assertEqual(sum(row.get("status") == "running" for row in self.host.store.data["runs"].values()), 1)
+        self.host.call("cancel_run", {"session_id": self.sid, "business_id": business["id"], "run_id": run["id"]})
+
+        business2, run2 = self._run("pressure approval")
+        row = self._action(run2, key="pressure")
+        self._approval_state(run2, row)
+        other = self._business("cross business")
+
+        def decide_once(index):
+            target = other["id"] if index % 2 else business2["id"]
+            try:
+                return self.host.call("decide_approval", {"session_id": self.sid, "business_id": target, "run_id": run2["id"], "action_id": row["action_id"], "decision": "approve"})
+            except Exception as exc:
+                return type(exc).__name__
+
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            decisions = list(pool.map(decide_once, range(100)))
+        self.assertEqual(sum(isinstance(result, dict) and result.get("status") == "approved" for result in decisions), 1)
+        self.assertEqual(self.launches[-1], (run2["id"], True))
+        self.assertEqual(self.host._action_row(run2, row["action_id"])["status"], "approved")
+        self.host._finalize_run(run2, "failed", "pressure cleanup")
+
+        business3, run3 = self._run("pressure trace")
+        run3["model_rounds"] = 2
+        trace_errors = []
+
+        def write_trace():
+            for index in range(160):
+                with self.host._lock:
+                    self.host._trace(run3, "pressure", {"index": index})
+
+        def read_trace(_):
+            try:
+                return self.host.call("get_trace", {"session_id": self.sid, "business_id": business3["id"]})
+            except Exception as exc:
+                trace_errors.append(exc)
+                return None
+
+        writer = threading.Thread(target=write_trace)
+        writer.start()
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            traces = list(pool.map(read_trace, range(100)))
+        writer.join(timeout=2)
+        self.assertFalse(writer.is_alive())
+        self.assertFalse(trace_errors)
+        self.assertTrue(all(isinstance(trace, dict) for trace in traces))
+        self.assertEqual(len(run3["events"]), 160)
+        self.host._finalize_run(run3, "failed", "pressure cleanup")
+
+        isolated = tempfile.TemporaryDirectory()
+        try:
+            durable = Workbench(isolated.name, repo=Path.cwd())
+            durable._launch = lambda *_args, **_kwargs: None
+            session = durable.create_session("durable")
+            durable.send_message(session["id"], "durable business")
+            proposal = durable.store.data["messages"][session["id"]][-1]["proposal"]
+            durable_business = durable.confirm_business(session["id"], proposal["id"], True)
+            durable_run = durable.start_run(session["id"], durable_business["id"])
+            durable._finalize_run(durable_run, "completed", None)
+            durable.store.save()
+            durable.close()
+            reopened = Workbench(isolated.name, repo=Path.cwd())
+            self.assertEqual(reopened.store.data["runs"][durable_run["id"]]["status"], "completed")
+            self.assertIsNone(reopened.health()["active_run_id"])
+            reopened.close()
+        finally:
+            isolated.cleanup()
+
+        business4, run4 = self._run("busy probe")
+        process = _LiveProcess()
+        self.host._processes[run4["id"]] = process
+        self.host._native_reads = lambda **_kwargs: self.fail("busy connection checks must not construct NativeReads")
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            checks = list(pool.map(lambda _: self._busy_connection_check(), range(100)))
+        cancel_started = time.perf_counter()
+        cancelled = self.host.call("cancel_run", {"session_id": self.sid, "business_id": business4["id"], "run_id": run4["id"]})
+        self.assertEqual(cancelled["status"], "cancel_requested")
+        self.assertLess(time.perf_counter() - cancel_started, 1.0)
+        self.assertTrue(all(check == "CONNECTION_CHECK_BUSY" for check in checks))
+        self.host._processes.pop(run4["id"], None)
+        self.host._finalize_run(run4, "cancelled", "pressure cleanup")
+        self.assertLess(time.perf_counter() - started, 10.0)
+
+    def _busy_connection_check(self):
+        try:
+            self.host.call("check_connection", {})
+        except RuntimeError as exc:
+            return str(exc)
+        return "unexpected_success"
 
     def test_health_is_cached_and_does_not_probe_odoo(self):
         calls = []

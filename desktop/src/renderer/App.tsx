@@ -77,6 +77,11 @@ export default function App() {
   const traceRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const businessRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const quietBusinessRequestRef = useRef(0)
+  const messageInFlightRef = useRef(new Set<string>())
+  const proposalInFlightRef = useRef(new Set<string>())
+  const runStartInFlightRef = useRef(new Set<string>())
+  const approvalInFlightRef = useRef(new Set<string>())
+  const cancelInFlightRef = useRef(new Set<string>())
 
   const call = useCallback(async <T,>(method: string, params?: Record<string, unknown>) => {
     if (!window.workbench) throw new Error('桌面主机桥未连接')
@@ -399,10 +404,13 @@ export default function App() {
     event.preventDefault()
     const text = draft.trim()
     if (!text || !selectedSessionId || loading) return
+    const requestSessionId = selectedSessionId
+    const messageKey = `${requestSessionId}:${text}`
+    if (messageInFlightRef.current.has(messageKey)) return
+    messageInFlightRef.current.add(messageKey)
     setLoading(true)
     setDraft('')
     setLiveText('')
-    const requestSessionId = selectedSessionId
     const targetBusinessId = messageBusinessId === '__new__' ? '' : messageBusinessId || selectedBusinessId
     try {
       await call('send_message', {
@@ -412,9 +420,12 @@ export default function App() {
       })
       if (sessionIdRef.current === requestSessionId) await loadSession(requestSessionId)
     } catch (reason) {
-      setDraft(text)
-      if (sessionIdRef.current === requestSessionId) setError(messageForError(reason))
+      if (sessionIdRef.current === requestSessionId) {
+        setDraft(text)
+        setError(messageForError(reason))
+      }
     } finally {
+      messageInFlightRef.current.delete(messageKey)
       if (sessionIdRef.current === requestSessionId) setLoading(false)
     }
   }
@@ -422,6 +433,9 @@ export default function App() {
   const confirmProposal = async (proposal: ProposalLike, confirmed: boolean) => {
     if (!selectedSessionId) return
     const requestSessionId = selectedSessionId
+    const proposalKey = `${requestSessionId}:${proposal.id}`
+    if (proposalInFlightRef.current.has(proposalKey)) return
+    proposalInFlightRef.current.add(proposalKey)
     setLoading(true)
     try {
       const business = await call<Business | null>('confirm_business', {
@@ -437,6 +451,7 @@ export default function App() {
     } catch (reason) {
       if (sessionIdRef.current === requestSessionId) setError(messageForError(reason))
     } finally {
+      proposalInFlightRef.current.delete(proposalKey)
       if (sessionIdRef.current === requestSessionId) setLoading(false)
     }
   }
@@ -445,6 +460,9 @@ export default function App() {
     if (!selectedSessionId || !selectedBusinessId) return
     const requestSessionId = selectedSessionId
     const requestBusinessId = selectedBusinessId
+    const runKey = `${requestSessionId}:${requestBusinessId}`
+    if (runStartInFlightRef.current.has(runKey)) return
+    runStartInFlightRef.current.add(runKey)
     setLoading(true)
     try {
       const run = await call<Run>('start_run', { session_id: requestSessionId, business_id: requestBusinessId })
@@ -454,6 +472,7 @@ export default function App() {
     } catch (reason) {
       if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) setError(messageForError(reason))
     } finally {
+      runStartInFlightRef.current.delete(runKey)
       if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) setLoading(false)
     }
   }
@@ -461,17 +480,25 @@ export default function App() {
   const cancelRun = async (run: Run) => {
     const requestSessionId = selectedSessionId
     const requestBusinessId = selectedBusinessId
+    const cancelKey = `${requestSessionId}:${requestBusinessId}:${run.id}`
+    if (cancelInFlightRef.current.has(cancelKey)) return
+    cancelInFlightRef.current.add(cancelKey)
     try {
       await call('cancel_run', { session_id: requestSessionId, business_id: requestBusinessId, run_id: run.id })
       if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) await reloadCurrent()
     } catch (reason) {
       if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) setError(messageForError(reason))
+    } finally {
+      cancelInFlightRef.current.delete(cancelKey)
     }
   }
 
   const decideApproval = async (approval: Approval, decision: 'approve' | 'reject') => {
     const requestSessionId = selectedSessionId
     const requestBusinessId = approval.business_id
+    const approvalKey = `${requestSessionId}:${requestBusinessId}:${approval.run_id}:${approval.action_id}`
+    if (approvalInFlightRef.current.has(approvalKey)) return
+    approvalInFlightRef.current.add(approvalKey)
     setLoading(true)
     try {
       await call('decide_approval', {
@@ -485,6 +512,7 @@ export default function App() {
     } catch (reason) {
       if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) setError(messageForError(reason))
     } finally {
+      approvalInFlightRef.current.delete(approvalKey)
       if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) setLoading(false)
     }
   }
