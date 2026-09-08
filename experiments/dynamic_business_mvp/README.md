@@ -17,7 +17,14 @@ Run `bash experiments/dynamic_business_mvp/run.sh` in the existing WSL
 environment from a clean commit. The wrapper verifies the frozen manifest hash
 and source case, then reuses `integration/run_baseline.sh` with the dedicated
 snapshot compose overlay. Credentials remain in ignored `.runtime/control.env`.
-The run is limited to 24 model requests, 4096 output tokens per request, and
-900 seconds, with automatic retries and compaction disabled. Static tools remain
-the default outside this experiment. No claim of equal-quality token savings is
-made without a matching static business run.
+The current acceptance run has no configured model-turn, request-count, or
+per-response output limit. It restores the normal session defaults and the Stage
+7 infrastructure timeout (3570 seconds inside the agent, 3600 seconds outside).
+Acceptance requires natural agent completion plus an independent business pass.
+The previous 24-turn run is retained in RESULTS.md and its frozen source commit.
+
+Work proceeds in this order: functional correctness, deployment readiness, then
+engineering and token-efficiency tradeoffs. Reports include an experiment summary
+and every model round, including tool results, usage, timing and final completion.
+Static tools remain the default outside this experiment. Equal-quality token
+savings require a separate matching static business run.
