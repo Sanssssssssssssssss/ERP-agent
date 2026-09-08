@@ -13,6 +13,12 @@ state, 30 Days terms, one posted linked invoice with a unique sale-line link,
 amount, and zero new purchase/manufacturing orders. This is not the original
 ERP-Bench task score and does not claim full 2262 coverage.
 
+Latest complete run: [r2 results and round table](RESULTS_R2.md),
+[full tool details](ROUND_DETAILS_R2.md), [CSV](ROUND_DETAILS_R2.csv).
+It naturally finished in 29 model rounds and passed 7/7 business checks.
+The report also retains the datetime prevalidation defect and verifier coverage
+limits; this does not promote dynamic tools to the default configuration.
+
 Run `bash experiments/dynamic_business_mvp/run.sh` in the existing WSL
 environment from a clean commit. The wrapper verifies the frozen manifest hash
 and source case, then reuses `integration/run_baseline.sh` with the dedicated
