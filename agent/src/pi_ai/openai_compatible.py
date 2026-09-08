@@ -389,8 +389,8 @@ class OpenAICompatibleProvider:
                             return
                         continue
                     yield ProviderErrorEvent(
-                        message=str(exc),
-                        data={"attempts": attempt + 1},
+                        message=f"{type(exc).__name__}: {exc}",
+                        data={"attempts": attempt + 1, "error_type": type(exc).__name__},
                     )
                     return
 

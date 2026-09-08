@@ -441,6 +441,13 @@ async def run(args: argparse.Namespace) -> None:
                     "maxOutputTokens": max_output_tokens,
                     "maxModelRequests": max_model_requests,
                     "assistantEntries": len(assistant),
+                    "lastStopReason": assistant[-1].stop_reason if assistant else None,
+                    "errorMessage": assistant[-1].error_message if assistant else None,
+                    "unreportedUsageRequests": max(0, receipts.number - sum(
+                        bool(message.usage.input + message.usage.output
+                             + message.usage.cache_read + message.usage.cache_write)
+                        for message in assistant
+                    )),
                     "worldMode": world_mode,
                     "actionBackend": getattr(args, "action_backend", "mcp"),
                     "capabilityBackend": getattr(args, "capability_backend", "mcp"),
@@ -450,6 +457,11 @@ async def run(args: argparse.Namespace) -> None:
                     "commitSha": os.environ.get("PI_ODOO_SOURCE_COMMIT"),
                 }
                 args.usage_file.write_text(json.dumps(usage), encoding="utf-8")
+                if assistant and assistant[-1].stop_reason == "error":
+                    raise RuntimeError(
+                        "Provider run did not complete: "
+                        + (assistant[-1].error_message or "unspecified provider error")
+                    )
             finally:
                 await session.aclose()
     finally:
