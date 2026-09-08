@@ -15,7 +15,7 @@ from itertools import count
 from pathlib import Path
 
 from pi_agent.messages import AssistantMessage
-from pi_agent.session import JsonlSessionStorage
+from pi_agent.session import BranchSummaryEntry, CompactionEntry, JsonlSessionStorage, MessageEntry
 from pi_agent.tools import AgentTool, AgentToolResult
 from pi_ai.env import OpenAICompatibleConfig
 from pi_ai.openai_compatible import OpenAICompatibleProvider
@@ -422,21 +422,22 @@ async def run(args: argparse.Namespace) -> None:
                     if event.type != "message_update":
                         print(event.model_dump_json(by_alias=True), flush=True)
 
-                assistant = [
-                    message
-                    for message in session.messages
-                    if isinstance(message, AssistantMessage)
+                # Compaction prunes the live context, but never the billed history.
+                entries = await JsonlSessionStorage(args.session_file).read_all()
+                assistant = [entry.message for entry in entries
+                             if isinstance(entry, MessageEntry)
+                             and isinstance(entry.message, AssistantMessage)]
+                usages = [message.usage for message in assistant] + [
+                    entry.usage for entry in entries
+                    if isinstance(entry, (CompactionEntry, BranchSummaryEntry))
+                    and entry.usage is not None
                 ]
                 usage = {
-                    "input": sum(message.usage.input for message in assistant),
-                    "output": sum(message.usage.output for message in assistant),
-                    "cacheRead": sum(message.usage.cache_read for message in assistant),
-                    "cacheWrite": sum(
-                        message.usage.cache_write for message in assistant
-                    ),
-                    "reasoning": sum(
-                        message.usage.reasoning or 0 for message in assistant
-                    ),
+                    "input": sum(item.input for item in usages),
+                    "output": sum(item.output for item in usages),
+                    "cacheRead": sum(item.cache_read for item in usages),
+                    "cacheWrite": sum(item.cache_write for item in usages),
+                    "reasoning": sum(item.reasoning or 0 for item in usages),
                     "modelCalls": receipts.number,
                     "maxOutputTokens": max_output_tokens,
                     "maxModelRequests": max_model_requests,
@@ -444,9 +445,8 @@ async def run(args: argparse.Namespace) -> None:
                     "lastStopReason": assistant[-1].stop_reason if assistant else None,
                     "errorMessage": assistant[-1].error_message if assistant else None,
                     "unreportedUsageRequests": max(0, receipts.number - sum(
-                        bool(message.usage.input + message.usage.output
-                             + message.usage.cache_read + message.usage.cache_write)
-                        for message in assistant
+                        bool(item.input + item.output + item.cache_read + item.cache_write)
+                        for item in usages
                     )),
                     "worldMode": world_mode,
                     "actionBackend": getattr(args, "action_backend", "mcp"),

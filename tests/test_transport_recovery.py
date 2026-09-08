@@ -17,18 +17,26 @@ from pi_coding import CodingSessionConfig
 
 
 @pytest.mark.parametrize("recover", [True, False])
-def test_partial_stream_timeout_recovery(tmp_path: Path, recover: bool):
+@pytest.mark.parametrize("error_type", [httpx.ReadTimeout, httpx.RemoteProtocolError])
+def test_partial_stream_timeout_recovery(tmp_path: Path, recover: bool, error_type):
     async def check():
         calls = []
 
         class BrokenStream(httpx.AsyncByteStream):
             async def __aiter__(self):
                 yield b'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'
-                raise httpx.ReadTimeout("")
+                raise error_type("")
 
         def handler(request):
             calls.append(json.loads(request.content))
-            if len(calls) == 1 or not recover:
+            if len(calls) == 1:
+                return httpx.Response(200, text=(
+                    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"clock1",'
+                    '"type":"function","function":{"name":"get_current_time","arguments":"{}"}}]},'
+                    '"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}\n\n'
+                    'data: [DONE]\n\n'
+                ))
+            if len(calls) == 2 or not recover:
                 return httpx.Response(200, stream=BrokenStream())
             return httpx.Response(200, text=(
                 'data: {"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}],'
@@ -40,6 +48,22 @@ def test_partial_stream_timeout_recovery(tmp_path: Path, recover: bool):
         async def no_odoo(_args):
             yield []
 
+        original_load = runner.CodingSession.load
+
+        async def load_with_pruned_view(config):
+            session = await original_load(config)
+
+            class PrunedView:
+                # Reproduce the accounting boundary after context compaction.
+                @property
+                def messages(self):
+                    return session.messages[-1:]
+
+                def __getattr__(self, name):
+                    return getattr(session, name)
+
+            return PrunedView()
+
         instruction = tmp_path / "instruction.txt"
         instruction.write_text("Reply done.", encoding="utf-8")
         args = SimpleNamespace(instruction_file=instruction,
@@ -48,6 +72,7 @@ def test_partial_stream_timeout_recovery(tmp_path: Path, recover: bool):
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             with (
                 patch.object(runner, "_source_tools", no_odoo),
+                patch.object(runner.CodingSession, "load", side_effect=load_with_pruned_view),
                 patch.object(runner, "OpenAICompatibleProvider", side_effect=lambda config:
                              OpenAICompatibleProvider(config, client=client)),
                 patch.object(runner, "CodingSessionConfig", side_effect=lambda **kwargs:
@@ -59,14 +84,16 @@ def test_partial_stream_timeout_recovery(tmp_path: Path, recover: bool):
                 if recover:
                     await runner.run(args)
                 else:
-                    with pytest.raises(RuntimeError, match="Provider run did not complete: ReadTimeout"):
+                    with pytest.raises(RuntimeError, match="Provider run did not complete: Network error"):
                         await runner.run(args)
-        assert len(calls) == 2
+        assert len(calls) == 3
         rows = [json.loads(line) for line in args.session_file.read_text().splitlines()]
         errors = [row["message"] for row in rows if row.get("message", {}).get("stopReason") == "error"]
-        assert errors and all("ReadTimeout" in row["errorMessage"] for row in errors)
+        assert errors and all(error_type.__name__ in row["errorMessage"] for row in errors)
         usage = json.loads(args.usage_file.read_text())
-        assert usage["modelCalls"] == 2
+        assert usage["modelCalls"] == 3
+        assert usage["input"] == (20 if recover else 10)
+        assert usage["output"] == (3 if recover else 2)
         assert usage["unreportedUsageRequests"] == (1 if recover else 2)
         assert usage["lastStopReason"] == ("stop" if recover else "error")
 

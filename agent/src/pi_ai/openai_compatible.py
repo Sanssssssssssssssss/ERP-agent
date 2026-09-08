@@ -389,7 +389,7 @@ class OpenAICompatibleProvider:
                             return
                         continue
                     yield ProviderErrorEvent(
-                        message=f"{type(exc).__name__}: {exc}",
+                        message=f"Network error ({type(exc).__name__}): {exc}",
                         data={"attempts": attempt + 1, "error_type": type(exc).__name__},
                     )
                     return
