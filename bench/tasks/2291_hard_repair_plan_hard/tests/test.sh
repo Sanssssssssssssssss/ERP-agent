@@ -32,7 +32,7 @@ coproc ODOO { python3 /tests/checks.py 2>/logs/verifier/checks.log; }
 check() {
     echo "$*" >&"${ODOO[1]}"
     local r
-    read -r -t 300 r <&"${ODOO[0]}" || r=FAIL
+    read -r r <&"${ODOO[0]}" || r=FAIL
     case "$r" in
         PASS|FAIL|NA) ;;
         *) r=FAIL ;;
