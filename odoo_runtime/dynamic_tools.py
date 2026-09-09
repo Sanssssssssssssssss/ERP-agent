@@ -32,6 +32,7 @@ BASE_TOOLS = frozenset(
 # Published with the compact base when the native catalog supplies it.  Keeping
 # this optional preserves MCP-only inventories that predate the native helper.
 OPTIONAL_NATIVE_BASE_TOOLS = frozenset({"read_supply_context"})
+_FIND_BASE_TOOLS = frozenset((BASE_TOOLS - {"search_records"}) | {"find_records"})
 
 CAPABILITY_GROUPS = {
     "actions": {
@@ -140,7 +141,8 @@ class DynamicToolController:
         self._all = tuple(tools)
         names = [_base_name(tool.name) for tool in self._all]
         available = set(names)
-        required = BASE_TOOLS | {
+        self._base_tools = _FIND_BASE_TOOLS if "find_records" in available else BASE_TOOLS
+        required = self._base_tools | {
             name for group in CAPABILITY_GROUPS.values() for name in group["tools"]
         }
         missing = sorted(required - available)
@@ -160,7 +162,7 @@ class DynamicToolController:
 
     @property
     def tools(self) -> tuple[AgentTool, ...]:
-        selected = (BASE_TOOLS | (OPTIONAL_NATIVE_BASE_TOOLS & {_base_name(tool.name) for tool in self._all})) | {
+        selected = (self._base_tools | (OPTIONAL_NATIVE_BASE_TOOLS & {_base_name(tool.name) for tool in self._all})) | {
             name
             for group_id in self._active
             for name in CAPABILITY_GROUPS[group_id]["tools"]
@@ -186,17 +188,17 @@ class DynamicToolController:
                 for model in group["required_models"]
             }
         )
-        search = next(
-            tool for tool in self._all if _base_name(tool.name) == "search_records"
-        )
-        result = await search.execute(
-            f"{call_id}:model-probe",
-            {
-                "model": "ir.model",
-                "domain": [["model", "in", required]],
-                "fields": ["model"],
-                "limit": len(required),
-            },
+        finder_name = "find_records" if "find_records" in {_base_name(tool.name) for tool in self._all} else "search_records"
+        finder = next(tool for tool in self._all if _base_name(tool.name) == finder_name)
+        arguments = {
+            "model": "ir.model",
+            "domain": [["model", "in", required]],
+            "limit": min(20, len(required)),
+        }
+        if finder_name == "search_records":
+            arguments["fields"] = ["model"]
+        result = await finder.execute(
+            f"{call_id}:model-probe", arguments,
         )
         details = result.details if isinstance(result.details, dict) else {}
         payload = details.get("structuredContent", details)

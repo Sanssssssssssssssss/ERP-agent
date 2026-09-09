@@ -286,6 +286,7 @@ async def run(args: argparse.Namespace) -> None:
                     build_sop_tools(
                         args.session_file.parent / "sop-events.jsonl",
                         next_tool_sequence,
+                        read_locator="find_records" if runtime_mode == "native" else "search_records",
                     )
                     if sop_mode == "controlled"
                     else ()

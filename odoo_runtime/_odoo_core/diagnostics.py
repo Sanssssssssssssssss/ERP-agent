@@ -250,7 +250,7 @@ _ACCESS_ERROR_MATCHERS: tuple[
         "missing_or_filtered",
         (re.compile(r"does not exist or has been deleted"),),
         "The record is deleted, or a record rule hides it so Odoo reports it as missing.",
-        "Search the model by ID with search_records, then call diagnose_access for the same IDs.",
+        "Find the record by ID, then call diagnose_access for the same IDs.",
     ),
 )
 

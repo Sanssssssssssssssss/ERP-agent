@@ -40,6 +40,7 @@ from odoo_runtime.reads import (
     Json2ReadClient,
     NativeReads,
 )
+from odoo_runtime.world import WorldStore
 
 
 class FakeOdoo:
@@ -112,6 +113,78 @@ class FakeOdoo:
 
 
 class NativeReadsTest(unittest.TestCase):
+    def test_find_records_returns_only_bounded_identities_and_pages(self):
+        class FinderClient(FakeOdoo):
+            def __init__(self):
+                super().__init__()
+                self.metadata.update({
+                    "display_name": {"type": "char"},
+                    "default_code": {"type": "char"},
+                    "ref": {"type": "char"},
+                })
+
+            def _records(self, fields):
+                rows = [
+                    {"id": index, "display_name": f"Record {index}",
+                     "default_code": f"SKU-{index}", "ref": f"REF-{index}",
+                     "comment": "must not leak"}
+                    for index in range(1, 22)
+                ]
+                return [{key: value for key, value in row.items()
+                         if key == "id" or fields is None or key in fields}
+                        for row in rows]
+
+            def search_read(self, **kwargs):
+                self.requests.append(("search_read", kwargs))
+                return self._records(kwargs["fields"])[
+                    kwargs["offset"]:kwargs["offset"] + kwargs["limit"]
+                ]
+
+        reads = NativeReads(FinderClient())
+        first = reads.call("find_records", {
+            "model": "res.partner", "domain": [["name", "ilike", "Record"]], "limit": 20,
+        })
+        self.assertTrue(first["success"])
+        self.assertEqual(first["count"], 20)
+        self.assertTrue(first["has_more"])
+        self.assertEqual(first["next_offset"], 20)
+        self.assertEqual(set(first["result"][0]), {"id", "display_name", "default_code", "ref"})
+        self.assertNotIn("comment", json.dumps(first))
+        second = reads.call("find_records", {
+            "model": "res.partner", "domain": [["name", "ilike", "Record"]], "offset": 20,
+        })
+        self.assertEqual([row["id"] for row in second["result"]], [21])
+        self.assertFalse(second["has_more"])
+        invalid = reads.call("find_records", {"model": "res.partner", "domain": []})
+        self.assertFalse(invalid["success"])
+        self.assertIn("non-empty domain", invalid["error"])
+
+    def test_find_records_native_route_records_an_identity_receipt(self):
+        async def run(root: Path):
+            client = FakeOdoo()
+            client.lang, client.context = "en_US", {}
+            client.scope_fingerprint = lambda: "fixture-scope"
+            native = NativeReads(client)
+            world = WorldStore(root / "world.jsonl")
+            routed = next(tool for tool in route_tools(
+                native_tool_catalog(), root / "routes.jsonl", native, world, native_health=True,
+            ) if tool.name == "mcp_odoo_find_records")
+            result = await routed.execute("find-1", {
+                "model": "res.partner", "domain": [["name", "=", "Test 中文"]],
+            })
+            return result, world.receipt_for_call("find-1")
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "ODOO_URL": "http://fixture", "ODOO_DB": "bench", "ODOO_USERNAME": "admin",
+            "ODOO_PASSWORD": "test-only", "ODOO_TRANSPORT": "json2",
+        }, clear=True):
+            result, receipt = asyncio.run(run(Path(directory)))
+        payload = json.loads(result.text)
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["fields_used"], ["id"])
+        self.assertEqual(receipt["tool"], "find_records")
+        self.assertEqual(receipt["targets"][0]["records"][0]["id"], 1)
+
     def test_count_measure_preserves_native_and_legacy_counts_and_field_policy(self):
         from odoo_runtime.capabilities import NativeCapabilities
 

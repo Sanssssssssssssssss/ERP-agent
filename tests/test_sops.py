@@ -59,6 +59,15 @@ class ControlledSopTest(unittest.TestCase):
         self.assertTrue(events[-1]["success"])
         self.assertNotIn("private business request", json.dumps(events))
 
+    def test_native_sop_replaces_only_the_model_visible_locator(self) -> None:
+        tool = build_sop_tools(read_locator="find_records")[1]
+        payload = json.loads(asyncio.run(tool.execute("sop", {
+            "sop_id": "po_to_receipt", "inputs": {"purchase_order": "PO001"},
+        })).text)
+        self.assertIn("find_records", payload["sop"]["required_tools"])
+        self.assertNotIn("search_records", payload["sop"]["required_tools"])
+        self.assertIn("search_records", get_sop("po_to_receipt", {"purchase_order": "PO001"})["sop"]["required_tools"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -19,7 +19,7 @@ from odoo_runtime._odoo_core.odoo_client import (
 )
 
 READ_TOOLS = frozenset({
-    "get_odoo_profile", "get_model_fields", "search_records", "read_record",
+    "get_odoo_profile", "get_model_fields", "search_records", "find_records", "read_record",
     "list_instances", "list_models", "schema_catalog", "read_attachment",
     "aggregate_records", "search_employee", "search_holidays", "read_supply_context",
 })
@@ -390,7 +390,7 @@ class WorldStore:
         records: list[dict[str, Any]] = []
         if tool == "read_record":
             records = [payload.get("result")] if isinstance(payload, dict) and isinstance(payload.get("result"), dict) else []
-        elif tool in {"search_records", "search_employee", "search_holidays"}:
+        elif tool in {"search_records", "find_records", "search_employee", "search_holidays"}:
             model = {"search_employee": "hr.employee", "search_holidays": "hr.leave.report.calendar"}.get(tool, model)
             rows = payload.get("result") if isinstance(payload, dict) else None
             records = [row for row in (rows or []) if isinstance(row, dict)]

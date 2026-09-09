@@ -48,6 +48,7 @@ from odoo_runtime._odoo_core.rate_limit import (
 from odoo_runtime._odoo_core.schema_cache import _build_schema_cache
 from odoo_runtime._odoo_core.schemas import (
     AggregateRecordsResponse,
+    FindRecordsResponse,
     GetModelFieldsResponse,
     GetOdooProfileResponse,
     HealthCheckResponse,
@@ -94,8 +95,9 @@ READ_RESPONSES = {
     "search_holidays": SearchHolidaysResponse,
 }
 NATIVE_READ_RESPONSES = {
-    **READ_RESPONSES,
+    **{name: response for name, response in READ_RESPONSES.items() if name != "search_records"},
     "health_check": HealthCheckResponse,
+    "find_records": FindRecordsResponse,
     "read_supply_context": ReadSupplyContextResponse,
 }
 
@@ -226,7 +228,7 @@ class NativeReads:
         return root
 
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        if name not in NATIVE_READ_RESPONSES:
+        if name not in (set(READ_RESPONSES) | set(NATIVE_READ_RESPONSES)):
             raise ValueError(f"Not a native read tool: {name}")
         try:
             args = dict(arguments)
@@ -241,7 +243,7 @@ class NativeReads:
                 if name == "health_check":
                     return runtime.health_check()
                 runtime._refresh_scope()
-                if name in {"search_records", "read_record", "aggregate_records"}:
+                if name in {"search_records", "find_records", "read_record", "aggregate_records"}:
                     refusal = check_rate(runtime.instance, name)
                     if refusal is not None:
                         return refusal
@@ -753,6 +755,43 @@ class NativeReads:
                 "candidate_window_full": len(records) == limit,
             }
         return result
+
+    def find_records(
+        self, model: str, domain: Any, limit: int = 10, offset: int = 0,
+    ) -> dict[str, Any]:
+        """Locate a small, stable page of record identities from a precise domain."""
+        normalized_domain = normalize_domain_input(domain)
+        if not normalized_domain:
+            raise ValueError("find_records requires a non-empty domain")
+        limit = clamp_limit(limit, maximum=20)
+        if offset < 0:
+            raise ValueError("offset must be greater than or equal to 0")
+        validate_model_name(model)
+        metadata = self._metadata(model)
+        allowed, _ = self.policy.filter_fields(self.instance, model, metadata)
+        wanted = ["id", "display_name"]
+        if model == "ir.model":
+            wanted.append("model")
+        wanted.extend(field for field in ("default_code", "ref") if field in metadata)
+        fields = [field for field in wanted if field in allowed]
+        if "id" not in fields:
+            raise ValueError(f"Field policy denies identity reads on {model}")
+        page = self.search_records(
+            model, domain=normalized_domain, fields=fields, limit=limit + 1,
+            offset=offset, order="id",
+        )
+        if not page.get("success"):
+            return {"success": False, "tool": "find_records", "error": page.get("error", "record lookup failed")}
+        records = list(page.get("result") or [])
+        has_more = len(records) > limit
+        records = records[:limit]
+        return {
+            "success": True, "tool": "find_records", "count": len(records),
+            "result": records, "fields_used": fields,
+            "unavailable_fields": [field for field in wanted if field not in fields],
+            "has_more": has_more,
+            "next_offset": offset + len(records) if has_more else None,
+        }
 
     def read_supply_context(
         self, product_ids: list[int], include_manufacturing: bool = False,

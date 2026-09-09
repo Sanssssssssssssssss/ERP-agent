@@ -261,7 +261,10 @@ def get_sop(sop_id: str, inputs: dict[str, Any] | None = None) -> dict[str, Any]
 def build_sop_tools(
     log_path: Path | None = None,
     next_sequence: Callable[[], int] | None = None,
+    read_locator: str = "search_records",
 ) -> tuple[AgentTool, AgentTool]:
+    if read_locator not in {"search_records", "find_records"}:
+        raise ValueError("read_locator must be search_records or find_records")
     def log(event: dict[str, Any]) -> None:
         if log_path is None:
             return
@@ -289,13 +292,22 @@ def build_sop_tools(
         return await execute("list_odoo_sops", call_id, arguments, list_sops)
 
     async def get_tool(call_id, arguments, _signal=None, _on_update=None):
+        def build() -> dict[str, Any]:
+            payload = get_sop(str(arguments.get("sop_id", "")), arguments.get("inputs"))
+            if payload.get("success") and read_locator != "search_records":
+                payload = dict(payload)
+                sop = dict(payload["sop"])
+                sop["required_tools"] = [
+                    read_locator if tool == "search_records" else tool
+                    for tool in sop["required_tools"]
+                ]
+                payload["sop"] = sop
+            return payload
         return await execute(
             "get_odoo_sop",
             call_id,
             arguments,
-            lambda: get_sop(
-                str(arguments.get("sop_id", "")), arguments.get("inputs")
-            ),
+            build,
         )
 
     return (

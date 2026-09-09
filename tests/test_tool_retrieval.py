@@ -1,17 +1,11 @@
 from __future__ import annotations
 
 import copy
-import asyncio
-import os
-import tempfile
 import unittest
-from pathlib import Path
-from unittest.mock import patch
 
 from odoo_runtime._odoo_core.field_policy import FieldPolicy, ModelFieldRule
-from integration.odoo_tools import native_tool_catalog, route_tools
+from integration.odoo_tools import native_tool_catalog
 from odoo_runtime.reads import NativeReads, _summarize_field_metadata
-from odoo_runtime.world import WorldStore
 
 
 class MetadataClient:
@@ -66,21 +60,10 @@ class ToolRetrievalTest(unittest.TestCase):
         )
         self.assertEqual(result["count"], 0)
 
-    def test_search_records_rerank_native_route_schema(self):
-        async def run():
-            with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
-                "ODOO_URL": "http://fixture", "ODOO_DB": "bench", "ODOO_USERNAME": "admin", "ODOO_PASSWORD": "fixture",
-            }):
-                root = Path(directory)
-                world = WorldStore(root / "world.jsonl", projection_path=root / "projection.jsonl")
-                routed = next(item for item in route_tools(
-                    native_tool_catalog(), root / "routes.jsonl", NativeReads(RerankClient()), world, native_health=True
-                ) if item.name == "mcp_odoo_search_records")
-                result = await routed.execute("rerank-1", {"model": "res.partner", "limit": 3, "rerank_query": "needle", "top_k": 2})
-                structured = result.model_dump()["details"]["structuredContent"]
-                self.assertEqual(structured["rerank"]["top_k"], 2)
-                self.assertEqual(structured["count"], 1)
-        asyncio.run(run())
+    def test_search_records_rerank_is_retained_but_not_native_model_visible(self):
+        names = {tool.name for tool in native_tool_catalog()}
+        self.assertNotIn("mcp_odoo_search_records", names)
+        self.assertIn("mcp_odoo_find_records", names)
 
     def test_schema_query_is_advertised_in_native_catalog(self):
         tool = next(tool for tool in native_tool_catalog() if tool.name == "mcp_odoo_get_model_fields")

@@ -121,6 +121,19 @@ class SearchRecordsResponse(ToolResponse):
     rerank: Optional[Dict[str, Any]] = Field(default=None, exclude_if=lambda value: value is None)
 
 
+class FindRecordsResponse(ToolResponse):
+    """Bounded record identities returned from a required Odoo domain."""
+
+    count: Optional[int] = None
+    result: Optional[List[Dict[str, Any]]] = Field(
+        default=None, description="Identity fields for the current result page."
+    )
+    fields_used: Optional[List[str]] = None
+    unavailable_fields: Optional[List[str]] = None
+    has_more: Optional[bool] = None
+    next_offset: Optional[int] = None
+
+
 class ReadSupplyContextResponse(ToolResponse):
     """Identity-scoped product, supply, stock, and optional manufacturing facts."""
 
