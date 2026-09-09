@@ -350,6 +350,10 @@ async def run(args: argparse.Namespace) -> None:
                         + (DYNAMIC_TOOL_POLICY if tool_mode == "dynamic" else "")
                     ),
                     auto_compact_enabled=not budget_enabled,
+                    # Bench turns end at the final agent stop; avoid paying a
+                    # post-stop summarizer call while retaining pre-prompt and
+                    # provider-overflow compaction paths.
+                    auto_compact_after_prompt_enabled=False,
                     retry_enabled=not budget_enabled,
                     thinking_level=thinking,
                 )

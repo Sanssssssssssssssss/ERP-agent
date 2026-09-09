@@ -419,6 +419,7 @@ class CodingSessionConfig:
     owns_initial_provider: bool = False
     auto_compact_token_threshold: int | None = None
     auto_compact_enabled: bool = True
+    auto_compact_after_prompt_enabled: bool = True
     retry_enabled: bool = True
     retry_max_retries: int = 3
     retry_base_delay_ms: int = 2000
@@ -518,6 +519,7 @@ class CodingSession:
         self._resource_paths = resource_paths_with_cwd(config.resource_paths, config.cwd)
         self._auto_compact_token_threshold = config.auto_compact_token_threshold
         self._auto_compact_enabled = config.auto_compact_enabled
+        self._auto_compact_after_prompt_enabled = config.auto_compact_after_prompt_enabled
         self._thinking_level = _state_thinking_level(
             state,
             default=_default_thinking_level_for_active_model(self),
@@ -2823,6 +2825,7 @@ class CodingSession:
                 runtime_provider_config=runtime_provider_config,
                 auto_compact_token_threshold=self._auto_compact_token_threshold,
                 auto_compact_enabled=self._auto_compact_enabled,
+                auto_compact_after_prompt_enabled=self._auto_compact_after_prompt_enabled,
                 thinking_level=self._thinking_level,
                 shell_command_prefix=self._config.shell_command_prefix,
                 skills_enabled=self._config.skills_enabled,
@@ -3064,6 +3067,7 @@ class CodingSession:
         self._resource_paths = replacement._resource_paths
         self._auto_compact_token_threshold = replacement._auto_compact_token_threshold
         self._auto_compact_enabled = replacement._auto_compact_enabled
+        self._auto_compact_after_prompt_enabled = replacement._auto_compact_after_prompt_enabled
         self._thinking_level = replacement._thinking_level
         self._pending_initial_entries = replacement._pending_initial_entries
         self._pending_message_writes = replacement._pending_message_writes
@@ -3912,6 +3916,11 @@ class CodingSession:
         context: AgentCallDiagnosticContext,
         phase: str,
     ) -> bool:
+        if (
+            phase in {"auto_compact_after_prompt", "auto_compact_after_continue"}
+            and not self._auto_compact_after_prompt_enabled
+        ):
+            return False
         try:
             return await self._maybe_auto_compact()
         except Exception as exc:  # noqa: BLE001 - automatic compaction must not lose a turn
