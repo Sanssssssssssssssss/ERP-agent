@@ -4,6 +4,8 @@ Windows 桌面工作台：会话、业务意图确认、销售与开票工作区
 Odoo 状态回读、运行 Trace。模型循环复用 Python Pi `CodingSession`，
 实际工具使用 `odoo_runtime`；不启动或导入 MCP。
 
+当前为业务执行原型，尚未达到客户 Demo 标准：普通会话仍被固定为销售开票提案，公开文本流尚未端到端接通。已知问题、修复顺序和验收用例见 [Demo 复盘清单](../experiments/desktop_workbench/DEMO_READINESS_REVIEW.md)。下述操作描述已实现的业务执行路径。
+
 ## 使用
 
 解压 `dist/win-unpacked` 后运行 `Odoo Workbench.exe`；必须保留同目录资源。

@@ -1,5 +1,7 @@
 # Odoo desktop workbench V1
 
+> Historical plan, superseded where noted by [DEMO_READINESS_REVIEW.md](DEMO_READINESS_REVIEW.md) (2026-09-09). In particular, treating every message without business_id as a sale_invoice proposal was an incorrect product contract. Ordinary conversation and explicit business proposals must be distinct; the current desktop is not Demo-ready.
+
 Baseline: `b4e6461`, tag `desktop-workbench-baseline-b4e6461`.
 Implementation branch: `feature/odoo-desktop-workbench`.
 
