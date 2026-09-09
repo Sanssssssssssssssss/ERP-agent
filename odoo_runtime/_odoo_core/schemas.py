@@ -90,6 +90,18 @@ class GetModelFieldsResponse(ToolResponse):
     ranking: Optional[List[Dict[str, Any]]] = Field(
         default=None, description='Relevance scores when relevance="top".'
     )
+    query: Optional[str] = Field(
+        default=None, description="Optional schema intent used for BM25 field ranking."
+    )
+    query_matched: Optional[bool] = Field(
+        default=None, description="Whether the schema query matched any fields."
+    )
+    supplemental_fields: Optional[List[str]] = Field(
+        default=None, description="Business note fields retained alongside BM25 matches."
+    )
+    summary: Optional[bool] = Field(
+        default=None, description="Whether default exploration metadata was summarized."
+    )
     restricted_fields: Optional[List[str]] = Field(
         default=None, description="Fields marked restricted by the field ACL."
     )

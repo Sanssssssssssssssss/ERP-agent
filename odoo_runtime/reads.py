@@ -94,6 +94,64 @@ READ_RESPONSES = {
 }
 NATIVE_READ_RESPONSES = {**READ_RESPONSES, "health_check": HealthCheckResponse}
 
+_FIELD_SUMMARY_KEYS = (
+    "type", "string", "help", "required", "readonly", "store", "searchable",
+    "relation", "relation_field", "ondelete", "index",
+)
+
+
+def _implicit_always_include(model: str, metadata: dict[str, Any]) -> list[str]:
+    """Keep small, model-specific business groups in implicit reads."""
+    groups: tuple[str, ...] = ()
+    if model == "mail.message":
+        groups = ("body", "model", "res_id")
+    elif model == "product.supplierinfo":
+        groups = ("product_id", "product_tmpl_id", "partner_id", "price", "min_qty", "delay")
+    elif model.startswith("stock."):
+        groups = ("product_id", "quantity", "qty_available", "reserved_quantity", "product_uom_qty")
+    return [name for name in groups if name in metadata]
+
+
+def _summarize_field_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Keep default schema exploration useful without returning enum payloads."""
+    summary = {key: metadata[key] for key in _FIELD_SUMMARY_KEYS if key in metadata}
+    if "access" in metadata:
+        summary["access"] = metadata["access"]
+    selection = metadata.get("selection")
+    if isinstance(selection, (list, tuple)):
+        if len(selection) <= 20:
+            summary["selection"] = selection
+        else:
+            summary["selection_count"] = len(selection)
+    return summary
+
+
+def _field_candidates(
+    query: str, metadata: dict[str, Any], allowed: list[str], limit: int = 3
+) -> list[str]:
+    """Suggest live, readable field names for an invalid explicit request."""
+    from .knowledge import bm25_rank_texts
+
+    names = list(allowed)
+    texts = [
+        " ".join(
+            str(value)
+            for value in (
+                name, name.replace("_", " "), metadata[name].get("string", ""),
+                metadata[name].get("help", ""), metadata[name].get("type", ""),
+            )
+            if value
+        )
+        for name in names
+    ]
+    hits = bm25_rank_texts(f"{query} {query.replace('_', ' ')}", texts, limit)
+    suggestions = [names[hit["record_id"]] for hit in hits]
+    if not suggestions:
+        suggestions = [entry["field"] for entry in rank_relevant_fields(
+            {name: metadata[name] for name in names}, max_fields=limit
+        )]
+    return suggestions
+
 
 @cache
 def _read_arguments_model(name: str):
@@ -382,8 +440,30 @@ class NativeReads:
             metadata = self._metadata(model)
             if not metadata:
                 raise ValueError("No readable field metadata; refusing implicit full-field read")
-            return select_smart_fields(metadata, max_fields=max_smart_fields())
-        return None if fields == ["*"] else fields
+            return select_smart_fields(
+                metadata,
+                max_fields=max_smart_fields(),
+                always_include=_implicit_always_include(model, metadata),
+            )
+        if fields == ["*"]:
+            return None
+        try:
+            metadata = self._metadata(model)
+        except Exception:
+            # Explicit reads retain their existing client-side validation when
+            # fields_get is unavailable or denied.
+            return fields
+        if not metadata:
+            return fields
+        unknown = [name for name in fields if name not in metadata]
+        if unknown:
+            allowed, _ = self.policy.filter_fields(self.instance, model, metadata)
+            candidates = _field_candidates(unknown[0], metadata, allowed)
+            hint = f" Valid candidates: {', '.join(candidates)}." if candidates else ""
+            raise ValueError(
+                f"Unknown field(s) {unknown} on {model}; use live get_model_fields.{hint}"
+            )
+        return fields
 
     def _require_fields(self, model: str, fields: list[str]) -> None:
         denied = self.policy.restricted_fields(self.instance, model, fields)
@@ -521,6 +601,7 @@ class NativeReads:
     def get_model_fields(
         self, model: str, field_names: list[str] | None = None,
         relevance: str | None = "top", max_fields: int = DEFAULT_MAX_RELEVANT_FIELDS,
+        query: str | None = None,
     ) -> dict[str, Any]:
         if not 1 <= max_fields <= DEFAULT_MAX_RELEVANT_FIELDS:
             raise ValueError(
@@ -538,15 +619,65 @@ class NativeReads:
                 name: {**meta, "access": "restricted"} if name in restricted else meta
                 for name, meta in fields.items()
             }
+        query_text = str(query).strip() if query is not None else ""
+        supplemental_fields: list[str] = []
         if relevance == "top" and not field_names:
             ranking = rank_relevant_fields(fields, max_fields=max_fields)
-            fields = {entry["field"]: fields[entry["field"]] for entry in ranking}
+            if query_text:
+                from .knowledge import bm25_rank_texts
+
+                names = list(fields)
+                texts = [
+                    " ".join(
+                        str(value)
+                        for value in (
+                            name,
+                            name.replace("_", " "),
+                            metadata.get("string", ""),
+                            metadata.get("help", ""),
+                            metadata.get("type", ""),
+                            metadata.get("relation", ""),
+                        )
+                        if value
+                    )
+                    for name, metadata in fields.items()
+                ]
+                hits = bm25_rank_texts(query_text, texts, max_fields)
+                ranking = [
+                    {"field": names[hit["record_id"]], "score": hit["score"]}
+                    for hit in hits
+                ]
+                if ranking and max_fields > 1:
+                    ranked_names = {entry["field"] for entry in ranking}
+                    supplemental_candidates = [
+                        name for name in ("note", "comment")
+                        if name in fields and name not in restricted and name not in ranked_names
+                    ]
+                    reserve = min(len(supplemental_candidates), 2, max_fields - 1)
+                    if reserve:
+                        ranking = ranking[: max_fields - reserve]
+                        supplemental_fields = supplemental_candidates[:reserve]
+            all_fields = fields
+            fields = {entry["field"]: all_fields[entry["field"]] for entry in ranking}
+            fields.update({name: all_fields[name] for name in supplemental_fields})
             result = {
                 "success": True, "count": len(fields), "result": fields,
                 "relevance_applied": True, "ranking": ranking,
             }
         else:
             result = {"success": True, "count": len(fields), "result": fields}
+        if query_text:
+            result["query"] = query_text
+            if relevance == "top" and not field_names:
+                result["query_matched"] = bool(result.get("ranking"))
+        if supplemental_fields:
+            result["supplemental_fields"] = supplemental_fields
+        if not field_names and relevance is not None:
+            result["summary"] = True
+            result["result"] = {
+                name: _summarize_field_metadata(metadata)
+                for name, metadata in result["result"].items()
+            }
         if restricted:
             result["restricted_fields"] = restricted
         return result

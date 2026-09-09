@@ -184,6 +184,18 @@ class BM25Index:
         ]
 
 
+def bm25_rank_texts(query: str, texts: list[str], limit: int) -> list[dict[str, Any]]:
+    """Rank transient text documents with the same BM25 implementation as knowledge search.
+
+    Schema exploration has no durable knowledge index, so these documents are
+    deliberately ephemeral and contain field names plus safe metadata labels.
+    """
+    index = BM25Index()
+    for record_id, text in enumerate(texts):
+        index.add({"id": record_id, "text": text}, None)
+    return index.search(query, limit)
+
+
 class KnowledgeStore:
     def __init__(self, max_docs: int | None = None) -> None:
         self.max_docs = max_docs or knowledge_max_docs()

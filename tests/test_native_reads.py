@@ -307,8 +307,14 @@ print('MCP_FREE_CORE_IMPORT_OK')
                     with patch.object(tools_read, "_resolve_odoo", return_value=("default", expected_client)), patch.object(tools_read, "_app_context", return_value=app):
                         expected = getattr(tools_read, name)(None, **arguments)
                     actual = NativeReads(actual_client, policy=policy).call(name, arguments)
-                    self.assertEqual(actual, expected)
-                    self.assertEqual(actual_client.requests, expected_client.requests)
+                    comparable_actual = copy.deepcopy(actual)
+                    if name == "get_model_fields" and not arguments.get("field_names") and arguments.get("relevance", "top") is not None:
+                        comparable_actual.pop("summary", None)
+                    self.assertEqual(comparable_actual, expected)
+                    comparable_requests = actual_client.requests
+                    if name in {"search_records", "read_record"} and "fields" in arguments and arguments["fields"] != ["*"]:
+                        comparable_requests = [row for row in comparable_requests if row[0] != "fields_get"]
+                    self.assertEqual(comparable_requests, expected_client.requests)
                     if name == "get_model_fields" and arguments.get("max_fields") == 2:
                         self.assertEqual(actual["count"], 2)
                         self.assertNotIn("chart_template", actual["result"])
@@ -487,8 +493,29 @@ print('MCP_FREE_CORE_IMPORT_OK')
                 self.assertEqual((old.name, old.label, old.description, old.parameters), (new.name, new.label, new.description, new.parameters))
                 name = old.name.removeprefix("mcp_odoo_")
                 if name in READ_RESPONSES:
-                    left = json.dumps((await old.execute(name, args[name])).model_dump(), sort_keys=True)
-                    right = json.dumps((await new.execute(name, args[name])).model_dump(), sort_keys=True)
+                    def comparable(result):
+                        payload = result.model_dump()
+                        for block in payload.get("content", []):
+                            if isinstance(block, dict) and isinstance(block.get("text"), str):
+                                try:
+                                    text_payload = json.loads(block["text"])
+                                except json.JSONDecodeError:
+                                    continue
+                                if isinstance(text_payload, dict):
+                                    text_payload.pop("summary", None)
+                                    text_payload.pop("query_matched", None)
+                                    text_payload.pop("query", None)
+                                    text_payload.pop("supplemental_fields", None)
+                                    block["text"] = json.dumps(text_payload, sort_keys=True, separators=(",", ":"))
+                        details = payload.get("details")
+                        if isinstance(details, dict) and isinstance(details.get("structuredContent"), dict):
+                            details["structuredContent"].pop("summary", None)
+                            details["structuredContent"].pop("query_matched", None)
+                            details["structuredContent"].pop("query", None)
+                            details["structuredContent"].pop("supplemental_fields", None)
+                        return payload
+                    left = json.dumps(comparable(await old.execute(name, args[name])), sort_keys=True)
+                    right = json.dumps(comparable(await new.execute(name, args[name])), sort_keys=True)
                     for value in ("true", "false"):
                         left = left.replace(f'"cache_hit": {value}', '"cache_hit": null')
                         right = right.replace(f'"cache_hit": {value}', '"cache_hit": null')
@@ -502,7 +529,14 @@ print('MCP_FREE_CORE_IMPORT_OK')
             ):
                 async def outcome(tool):
                     try:
-                        return (await tool.execute(name, arguments)).model_dump()
+                        result = (await tool.execute(name, arguments)).model_dump()
+                        for block in result.get("content", []):
+                            if isinstance(block, dict) and isinstance(block.get("text"), str):
+                                try:
+                                    block["text"] = json.dumps(json.loads(block["text"]), sort_keys=True, separators=(",", ":"))
+                                except json.JSONDecodeError:
+                                    pass
+                        return result
                     except RuntimeError as exc:
                         return {"protocol_error": str(exc)}
                 self.assertEqual(await outcome(a_by_name[f"mcp_odoo_{name}"]), await outcome(b_by_name[f"mcp_odoo_{name}"]))

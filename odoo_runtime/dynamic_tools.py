@@ -347,7 +347,7 @@ class DynamicToolController:
                 "tool_contract_sha256": payload.get("tool_contract_sha256"),
             }
         )
-        return AgentToolResult(content=json.dumps(payload, indent=2), details=payload)
+        return AgentToolResult(content=json.dumps(payload, separators=(",", ":")), details=payload)
 
     def _build_controls(self) -> tuple[AgentTool, AgentTool]:
         async def list_tool(call_id, _arguments, _signal=None, _on_update=None):

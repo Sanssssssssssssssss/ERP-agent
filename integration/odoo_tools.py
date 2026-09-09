@@ -121,7 +121,7 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                         mode="json", by_alias=True
                     )
                     result = AgentToolResult(
-                        content=to_json(raw, fallback=str, indent=2).decode(),
+                        content=to_json(raw, fallback=str).decode(),
                         details={"structuredContent": structured, "meta": None},
                     )
                 elif direct_action:
@@ -134,7 +134,7 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                             report = await asyncio.to_thread(business_facts.inspect, payload)
                             raw = attach_business_facts(raw, report)
                     result = AgentToolResult(
-                        content=to_json(raw, fallback=str, indent=2).decode(),
+                        content=to_json(raw, fallback=str).decode(),
                         details={"structuredContent": raw, "meta": None},
                     )
                 elif direct_capability:
@@ -142,7 +142,7 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                         capabilities.call, name, dict(arguments)
                     )
                     result = AgentToolResult(
-                        content=to_json(raw, fallback=str, indent=2).decode(),
+                        content=to_json(raw, fallback=str).decode(),
                         details={"structuredContent": raw, "meta": None},
                     )
                 else:
@@ -168,7 +168,7 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                                     rates.pop(key, None)
                     result.content = [
                         TextContent(
-                            text=to_json(payload, fallback=str, indent=2).decode()
+                            text=to_json(payload, fallback=str).decode()
                         )
                     ]
                 event["result_sha256"] = hashlib.sha256(result.text.encode()).hexdigest()

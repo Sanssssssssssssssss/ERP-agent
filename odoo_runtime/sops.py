@@ -283,7 +283,7 @@ def build_sop_tools(
             "end_sequence": next_sequence() if next_sequence else None,
             "success": payload.get("success") is True,
         })
-        return AgentToolResult(content=json.dumps(payload, indent=2), details=payload)
+        return AgentToolResult(content=json.dumps(payload, separators=(",", ":")), details=payload)
 
     async def list_tool(call_id, arguments, _signal=None, _on_update=None):
         return await execute("list_odoo_sops", call_id, arguments, list_sops)
