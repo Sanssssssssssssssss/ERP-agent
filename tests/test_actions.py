@@ -302,6 +302,66 @@ class NativeActionCheckpointTests(unittest.TestCase):
             [("res.partner", "create", ([{"name": "Ada"}, {"name": "Grace"}],), {})],
         )
 
+    def test_compact_action_reference_uses_ledger_payload_and_replays_once(self):
+        actions, writer, _ = _actions()
+        validation = actions.validate_write(
+            "res.partner", "write", record_ids=[7], values={"name": "Ada"}
+        )
+        approval = validation["approval"]
+        self.assertEqual(
+            validation["execution_request"],
+            {
+                "approval": {
+                    "action_id": approval["action_id"],
+                    "token": approval["token"],
+                },
+                "confirm": True,
+            },
+        )
+        compact = {"action_id": approval["action_id"], "token": approval["token"]}
+        with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1"}):
+            first = actions.execute_approved_write(compact, confirm=True)
+            replay = actions.execute_approved_write(compact, confirm=True)
+        self.assertTrue(first["success"], first)
+        self.assertTrue(replay["success"], replay)
+        self.assertTrue(replay["replayed"])
+        self.assertEqual(len(writer.calls), 1)
+
+    def test_compact_action_reference_rejects_conflicts_bad_token_and_unknown_id(self):
+        actions, writer, _ = _actions()
+        approval = actions.validate_write(
+            "res.partner", "write", record_ids=[7], values={"name": "Ada"}
+        )["approval"]
+        base = {"action_id": approval["action_id"], "token": approval["token"]}
+        for candidate in (
+            {**base, "values": {"name": "Mallory"}},
+            {**base, "token": "odoo-write:bad"},
+            {**base, "action_id": "missing"},
+            {"token": approval["token"]},
+        ):
+            result = actions.execute_approved_write(candidate, confirm=True)
+            self.assertFalse(result["success"], result)
+        self.assertEqual(writer.calls, [])
+
+    def test_compact_action_reference_keeps_host_and_identity_guards(self):
+        actions, writer, runtime = _actions(approval_mode="host")
+        approval = actions.validate_write(
+            "res.partner", "write", record_ids=[7], values={"name": "Ada"}
+        )["approval"]
+        compact = {"action_id": approval["action_id"], "token": approval["token"]}
+        with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1"}):
+            denied = actions.execute_approved_write(compact, confirm=True)
+        self.assertFalse(denied["success"])
+        self.assertEqual(writer.calls, [])
+
+        self.assertTrue(actions.store.approve(approval["action_id"], "desktop-user"))
+        runtime.client.db = "other-scope"
+        with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1"}):
+            changed = actions.execute_approved_write(compact, confirm=True)
+        self.assertFalse(changed["success"])
+        self.assertIn("identity changed", changed["error"])
+        self.assertEqual(writer.calls, [])
+
     def test_single_write_unlink_tamper_expiry_and_write_off(self):
         actions, writer, _ = _actions()
         with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1"}):
@@ -319,9 +379,13 @@ class NativeActionCheckpointTests(unittest.TestCase):
         blocked = actions.validate_write(
             "res.partner", "write", record_ids=[8], values={"name": "Grace"}
         )
+        compact = {
+            "action_id": blocked["approval"]["action_id"],
+            "token": blocked["approval"]["token"],
+        }
         with patch.dict(os.environ, {}, clear=True):
             self.assertFalse(
-                actions.execute_approved_write(blocked["approval"], confirm=True)[
+                actions.execute_approved_write(compact, confirm=True)[
                     "success"
                 ]
             )
@@ -333,7 +397,7 @@ class NativeActionCheckpointTests(unittest.TestCase):
             patch("odoo_runtime.store.time.time", return_value=time.time() + 3600),
         ):
             self.assertFalse(
-                actions.execute_approved_write(blocked["approval"], confirm=True)[
+                actions.execute_approved_write(compact, confirm=True)[
                     "success"
                 ]
             )
@@ -911,12 +975,17 @@ class NativeActionCheckpointTests(unittest.TestCase):
 
     def test_external_change_file_replacement_and_unknown_method_fail_closed(self):
         actions, writer, runtime = _actions()
-        approval = actions.validate_write(
+        validation = actions.validate_write(
             "res.partner", "write", record_ids=[8], values={"name": "Grace"}
-        )["approval"]
+        )
+        approval = validation["approval"]
+        compact = {
+            "action_id": approval["action_id"],
+            "token": approval["token"],
+        }
         runtime.client.records["res.partner"][8]["name"] = "Externally changed"
         with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1"}):
-            changed = actions.execute_approved_write(approval, confirm=True)
+            changed = actions.execute_approved_write(compact, confirm=True)
         self.assertFalse(changed["success"])
         self.assertIn("state changed", changed["error"])
         self.assertEqual(writer.calls, [])
@@ -1032,7 +1101,7 @@ class NativeActionCheckpointTests(unittest.TestCase):
             runtime._policy_version = f"policy-v{len(refreshes)}"
 
         runtime._refresh_scope = refresh_scope
-        actions, _, _ = _actions(runtime=runtime)
+        actions, writer, _ = _actions(runtime=runtime)
         first = actions.validate_write(
             "res.partner", "write", record_ids=[7], values={"name": "Ada"}
         )
@@ -1043,6 +1112,15 @@ class NativeActionCheckpointTests(unittest.TestCase):
         self.assertNotEqual(
             first["approval"]["action_id"], second["approval"]["action_id"]
         )
+        compact = {
+            "action_id": first["approval"]["action_id"],
+            "token": first["approval"]["token"],
+        }
+        with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1"}):
+            changed = actions.execute_approved_write(compact, confirm=True)
+        self.assertFalse(changed["success"])
+        self.assertIn("policy changed", changed["error"])
+        self.assertEqual(writer.calls, [])
 
     def test_route_keeps_contract_uses_no_mcp_fallback_and_serializes_actions(self):
         async def check(directory: Path) -> None:

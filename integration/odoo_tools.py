@@ -17,6 +17,7 @@ from pydantic_core import to_json
 
 from odoo_runtime._odoo_core.odoo_client import READ_CALL_ID
 from odoo_runtime.actions import ACTION_TOOLS, NativeActions
+from odoo_runtime.business_facts import BusinessFacts, attach_business_facts
 from odoo_runtime.capabilities import CAPABILITY_TOOLS, NativeCapabilities
 from odoo_runtime.reads import (
     NATIVE_READ_RESPONSES,
@@ -72,6 +73,7 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                 native_health: bool = False):
     """No MCP fallback on a native failure; business errors retain their envelope."""
     routed = []
+    business_facts = BusinessFacts(actions) if actions is not None else None
     native_reads = NATIVE_READ_RESPONSES if native_health else READ_RESPONSES
     for tool in tools:
         name = tool.name.removeprefix("mcp_odoo_")
@@ -124,6 +126,13 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                     )
                 elif direct_action:
                     raw = await asyncio.to_thread(actions.call, name, dict(arguments))
+                    if business_facts is not None and name in {
+                        "preview_write", "validate_write"
+                    } and raw.get("success"):
+                        payload = raw.get("approval")
+                        if isinstance(payload, dict):
+                            report = await asyncio.to_thread(business_facts.inspect, payload)
+                            raw = attach_business_facts(raw, report)
                     result = AgentToolResult(
                         content=to_json(raw, fallback=str, indent=2).decode(),
                         details={"structuredContent": raw, "meta": None},

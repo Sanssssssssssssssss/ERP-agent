@@ -18,8 +18,8 @@ from urllib.parse import urlparse
 from odoo_runtime._odoo_core.agent_tools import (
     build_approval_token,
     build_write_preview_report,
+    canonical_json,
     validate_write_report,
-    verify_write_approval,
 )
 from odoo_runtime._odoo_core.audit import record_write_event
 from odoo_runtime._odoo_core.diagnostics import (
@@ -1067,6 +1067,14 @@ class NativeActions:
                     ),
                 }
             )
+            if action is not None and report.get("success"):
+                report["execution_request"] = {
+                    "approval": {
+                        "action_id": action["action_id"],
+                        "token": approval["token"],
+                    },
+                    "confirm": True,
+                }
             record_write_event(
                 "validate",
                 outcome=(action["status"] if action else "rejected"),
@@ -1085,17 +1093,27 @@ class NativeActions:
         self, approval: dict[str, Any], confirm: bool = False
     ) -> dict[str, Any]:
         report = self._execute_approved_write_gated(approval, confirm)
+        audit_payload = approval
+        action_id = str(approval.get("action_id") or "").strip()
+        record = None
+        if report.get("success") and action_id:
+            try:
+                record = self.store.get(action_id)
+            except Exception:  # noqa: BLE001 - audit enrichment must not alter the result
+                record = None
+        if isinstance(record, dict) and record.get("kind") == "write":
+            audit_payload = record.get("payload") or approval
         record_write_event(
             "execute",
             outcome="success" if report.get("success") else "denied",
-            model=str(approval.get("model") or "") or None,
-            operation=str(approval.get("operation") or "") or None,
+            model=str(audit_payload.get("model") or "") or None,
+            operation=str(audit_payload.get("operation") or "") or None,
             record_ids=[
                 int(value)
-                for value in approval.get("record_ids") or []
+                for value in audit_payload.get("record_ids") or []
                 if isinstance(value, (int, str)) and str(value).isdigit()
             ],
-            instance=str(approval.get("instance") or "") or None,
+            instance=str(audit_payload.get("instance") or "") or None,
             token=str(approval.get("token") or "") or None,
             detail=report.get("error"),
         )
@@ -1105,8 +1123,48 @@ class NativeActions:
         self, approval: dict[str, Any], confirm: bool
     ) -> dict[str, Any]:
         try:
-            valid, _ = verify_write_approval(approval)
-            if not valid:
+            action_id = str(approval.get("action_id") or "").strip()
+            if not action_id:
+                return {
+                    "success": False,
+                    "tool": "execute_approved_write",
+                    "error": "durable action_id is missing or unknown; call validate_write first",
+                }
+            record = self.store.get(action_id) if action_id else None
+            if record is None or record["kind"] != "write":
+                return {
+                    "success": False,
+                    "tool": "execute_approved_write",
+                    "error": "durable action_id is missing or unknown; call validate_write first",
+                }
+
+            payload_fields = {
+                "model",
+                "operation",
+                "record_ids",
+                "values",
+                "values_list",
+                "context",
+                "instance",
+            }
+            supplied = {
+                field: approval[field]
+                for field in payload_fields
+                if field in approval
+            }
+            expected = record["payload"]
+            if any(
+                canonical_json(supplied[field])
+                != canonical_json(expected.get(field))
+                for field in supplied
+            ):
+                return {
+                    "success": False,
+                    "tool": "execute_approved_write",
+                    "error": "approval payload does not match the durable validation record",
+                }
+            token = str(approval.get("token") or "")
+            if not token or token != build_approval_token(expected):
                 return {
                     "success": False,
                     "tool": "execute_approved_write",
@@ -1115,20 +1173,11 @@ class NativeActions:
                         "re-run preview_write and validate_write"
                     ),
                 }
-            action_id = str(approval.get("action_id") or "")
-            record = self.store.get(action_id) if action_id else None
-            if record is None or record["kind"] != "write":
-                return {
-                    "success": False,
-                    "tool": "execute_approved_write",
-                    "error": "durable action_id is missing or unknown; call validate_write first",
-                }
-            if _approval_payload(approval) != record["payload"]:
-                return {
-                    "success": False,
-                    "tool": "execute_approved_write",
-                    "error": "approval payload does not match the durable validation record",
-                }
+            approval = {
+                **expected,
+                "action_id": action_id,
+                "token": token,
+            }
             if not confirm:
                 return {
                     "success": False,
