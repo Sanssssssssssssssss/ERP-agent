@@ -105,7 +105,7 @@ for (const packageName of ["pi_ai", "pi_agent", "pi_coding"]) {
   await cp(join(repoRoot, "agent", "src", packageName), join(destination, "app", packageName), { recursive: true, filter: rejectSourceJunk });
 }
 await cp(join(repoRoot, "odoo_runtime"), join(destination, "app", "odoo_runtime"), { recursive: true, filter: rejectSourceJunk });
-const integrationFiles = ["__init__.py", "pi_odoo_runner.py", "odoo_tools.py", "world_context.py", "native_tool_catalog.json"];
+const integrationFiles = ["__init__.py", "pi_odoo_runner.py", "stream_events.py", "odoo_tools.py", "world_context.py", "native_tool_catalog.json"];
 await mkdir(join(destination, "app", "integration"), { recursive: true });
 for (const file of integrationFiles) {
   const source = join(repoRoot, "integration", file);

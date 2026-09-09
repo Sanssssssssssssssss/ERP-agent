@@ -65,7 +65,7 @@ class StateStore:
             raise RuntimeError("workbench state is unreadable; refusing to start") from exc
         if not isinstance(value, dict) or value.get("version") != 1:
             raise RuntimeError("unsupported workbench state version")
-        for key, default in (("sessions", {}), ("businesses", {}), ("runs", {}), ("messages", {}), ("approvals", {}), ("events", [])):
+        for key, default in (("sessions", {}), ("businesses", {}), ("runs", {}), ("conversation_runs", {}), ("messages", {}), ("approvals", {}), ("events", [])):
             if not isinstance(value.get(key, default), type(default)):
                 raise RuntimeError(f"invalid workbench state field: {key}")
             value.setdefault(key, default)

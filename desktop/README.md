@@ -4,7 +4,7 @@ Windows 桌面工作台：会话、业务意图确认、销售与开票工作区
 Odoo 状态回读、运行 Trace。模型循环复用 Python Pi `CodingSession`，
 实际工具使用 `odoo_runtime`；不启动或导入 MCP。
 
-当前为业务执行原型，尚未达到客户 Demo 标准：普通会话仍被固定为销售开票提案，公开文本流尚未端到端接通。已知问题、修复顺序和验收用例见 [Demo 复盘清单](../experiments/desktop_workbench/DEMO_READINESS_REVIEW.md)。下述操作描述已实现的业务执行路径。
+0.4.0 已接通普通 Pi 会话与公开文本流，补齐消息归并、取消反馈和业务文件索引。真实能力问答、提案及 Odoo 只读旅程通过；完整客户写入 Demo 仍待复跑。结果和每轮用量见 [修复验收](../experiments/desktop_workbench/REPAIR_ACCEPTANCE.md)，问题定义见 [Demo 复盘清单](../experiments/desktop_workbench/DEMO_READINESS_REVIEW.md)。
 
 ## 使用
 
@@ -16,18 +16,19 @@ Node、Python、WSL，也无需启动前端服务器。Odoo 和模型服务由�
    网络连接使用 HTTPS；本机调试允许 localhost HTTP。密钥保留空白表示不更换。
    顶部连接状态可查看 Odoo 只读认证结果、地址、数据库、最近检查时间和耗时。
    模型“已配置”只表示配置齐全；不会为检查连接而发送模型请求。
-2. 新建会话，描述目标，确认创建业务工作区。这一步只建立本地记录。
+2. 新建会话，可以先问能力或讨论范围。明确业务目标后，审阅提案并点击“创建业务工作区”。这一步只建立本地记录。
 3. 点击开始执行。每项 ERP 写操作单独展示目标、参数和操作前状态，确认后继续。
 4. 在执行台查看当前动作、业务阶段与基础核验；运行结束后点击“读取最新状态”。
-   在单据与文件查看真实记录、来源回执、Odoo 入口并导出业务报告；在运行详情查看每轮调用与用量。
-5. 后续消息选择当前业务或新业务。当前业务消息提交后，点击继续执行。
+   在单据与文件查看真实记录、来源回执、Odoo 入口并导出业务报告；已导出文件在重启后仍可定位和打开。在运行详情查看每轮调用与用量。
+5. 后续消息可以讨论整个会话或选定业务的上下文。普通发送进入会话模型；需要执行时先审阅相应提案，再通过业务工作区明确启动。
 
 同一业务的新运行会从真实历史配置回执恢复已启用的工具组；当前运行回执优先。
 新业务或没有可验证配置的历史使用基础工具组，写操作仍逐项审批。续跑机制及成本检查见
 `../experiments/desktop_workbench/TOKEN_COST_REVIEW.md`。
 
-会话与回执保存在当前 Windows 用户的应用数据目录；密钥通过 Windows DPAPI
+连接详情显示当前数据目录。会话与回执保存在当前 Windows 用户的应用数据目录；密钥通过 Windows DPAPI
 加密。Trace 和 Pi 会话包含业务数据，请按业务数据管理这些本地文件。
+升级与备份请保留完整 profile，包括 `data`、`settings.json` 与 `Local State`；仅复制加密设置文件不能保证解密。使用相同 `--user-data-dir` 才能继续原有会话。
 模型停止和业务核验分开显示；未知 token 不计作零，推理 token 是输出的一部分。
 独立回读保存在业务工作区中，不改写历史运行证据。这里的核验检查并非完整 ERP-Bench 评分。
 执行台显示来自单据的订单、开票、付款及出库状态；未观测到的事实不推测。
@@ -79,6 +80,8 @@ npm run dist:portable
 | 基础组件与视觉变量 | `src/renderer/main.tsx` 的 Radix Theme、`styles.css` 的 `:root` |
 | 桌面权限、进程和密钥 | `src/main/`、`src/preload/` |
 | 会话、运行和审批 | `../workbench/host.py` |
+| 普通会话与提案 | `../workbench/conversation.py` |
+| 公开文本事件 | `../integration/stream_events.py` |
 | 销售事实与回读核验 | `../workbench/sale_view.py` |
 | UI/host 数据契约 | `src/shared/protocol.ts` |
 | 模型循环接入 | `../integration/pi_odoo_runner.py` |

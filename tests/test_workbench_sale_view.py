@@ -334,6 +334,18 @@ class SaleViewReadbackTests(unittest.TestCase):
         detail = business_detail(state, "b1")
         self.assertNotIn("intent", detail["activity"])
 
+    def test_activity_prefers_live_message_over_completed_round(self):
+        state = _state()
+        state["runs"]["r2"].update({
+            "status": "running",
+            "rounds": [{"text": "stale completed round"}],
+            "live_messages": [{"id": "m1", "role": "assistant", "text": "current streamed plan"}],
+            "last_event_at": "2026-01-01T00:00:02Z",
+        })
+        detail = business_detail(state, "b1")
+        self.assertEqual(detail["activity"]["intent"], "current streamed plan")
+        self.assertEqual(detail["activity"]["at"], "2026-01-01T00:00:02Z")
+
 
 if __name__ == "__main__":
     unittest.main()

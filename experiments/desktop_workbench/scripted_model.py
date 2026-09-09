@@ -1,6 +1,6 @@
 """Local, explicitly scripted chat-completions fixture. No paid API or ERP writes.
 
-Run with --mode read or --mode approval; reset by restarting this process.
+Run with --mode read, approval, or conversation; reset by restarting this process.
 The approval plan validates a proposed write but never calls an execution tool.
 """
 
@@ -28,7 +28,43 @@ def plan(mode: str) -> list[tuple[str, dict]]:
     return reads
 
 
-def serve(port: int, mode: str, delay: float = 0) -> None:
+def _latest_user_turn(messages: list[object]) -> tuple[str, list[object]]:
+    user_index = next(
+        (index for index in range(len(messages) - 1, -1, -1)
+         if isinstance(messages[index], dict) and messages[index].get("role") == "user"),
+        None,
+    )
+    if user_index is None:
+        return "", []
+    return str(messages[user_index].get("content", "")), messages[user_index + 1:]
+
+
+def _conversation_response(request: dict) -> tuple[dict, str]:
+    messages = request.get("messages", [])
+    current_user, turn_messages = _latest_user_turn(messages)
+    if "FIXTURE_PROPOSE" in current_user and not any(
+        isinstance(message, dict) and message.get("role") == "tool" for message in turn_messages
+    ):
+        return ({"role": "assistant", "tool_calls": [{
+            "index": 0, "id": "offline-propose-1", "type": "function",
+            "function": {"name": "propose_business", "arguments": json.dumps({
+                "type": "sale_invoice", "title": "Nimbus demo", "goal": "只读核对 Nimbus 销售与客户发票",
+            }, ensure_ascii=False)},
+        }]}, "tool_calls")
+    if "FIXTURE_SLOW" in current_user:
+        text = "\n".join(f"第 {index} 段：离线流式会话压力测试内容。" for index in range(1, 101))
+    else:
+        text = (
+            "离线会话脚本已收到你的业务目标。\n\n"
+            "1. 我会先确认客户、订单与发票的上下文。\n"
+            "2. 只读核对会保留当前记录，不会直接执行 ERP 写入。\n"
+            "3. 需要变更时，我会先展示可审阅的业务提案。\n\n"
+            "当前结果：这是本地 scripted fixture，便于验证分段输出、取消和滚动行为。"
+        )
+    return {"role": "assistant", "content": text}, "stop"
+
+
+def serve(port: int, mode: str, delay: float = 0, chunk_delay: float = 0) -> None:
     steps = plan(mode)
     lock = threading.Lock()
     request_count = 0
@@ -51,7 +87,20 @@ def serve(port: int, mode: str, delay: float = 0) -> None:
             with lock:
                 index = request_count
                 request_count += 1
-            if index < len(steps):
+            if mode == "conversation":
+                current_user, turn_messages = _latest_user_turn(request.get("messages", []))
+                if "FIXTURE_PROPOSE" in current_user and not any(
+                    isinstance(message, dict) and message.get("role") == "tool"
+                    for message in turn_messages
+                ) and "propose_business" not in {
+                    item.get("function", {}).get("name")
+                    for item in request.get("tools", [])
+                    if isinstance(item, dict)
+                }:
+                    self.send_error(422, "Scripted proposal tool was not advertised")
+                    return
+                delta, finish = _conversation_response(request)
+            elif index < len(steps):
                 name, arguments = steps[index]
                 advertised = {item["function"]["name"] for item in request.get("tools", [])}
                 if name not in advertised:
@@ -72,21 +121,30 @@ def serve(port: int, mode: str, delay: float = 0) -> None:
                 finish = "stop"
             envelope = {"id": f"offline-response-{index + 1}", "object": "chat.completion.chunk",
                         "created": int(time.time()), "model": "local-scripted-acceptance"}
+            text = delta.get("content") if isinstance(delta, dict) else None
+            if isinstance(text, str):
+                deltas = [dict(delta, content=text[index:index + 24]) for index in range(0, len(text), 24)] or [delta]
+            else:
+                deltas = [delta]
             chunks = [
-                {**envelope, "choices": [{"index": 0, "delta": delta, "finish_reason": None}]},
-                {**envelope, "choices": [{"index": 0, "delta": {}, "finish_reason": finish}],
-                 "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
-                           "prompt_tokens_details": {"cached_tokens": 40},
-                           "completion_tokens_details": {"reasoning_tokens": 5}}},
+                {**envelope, "choices": [{"index": 0, "delta": item, "finish_reason": None}]}
+                for item in deltas
             ]
-            body = "".join("data: " + json.dumps(chunk, ensure_ascii=False) + "\n\n" for chunk in chunks)
-            body = (body + "data: [DONE]\n\n").encode("utf-8")
+            chunks.append({**envelope, "choices": [{"index": 0, "delta": {}, "finish_reason": finish}],
+                           "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
+                                     "prompt_tokens_details": {"cached_tokens": 40},
+                                     "completion_tokens_details": {"reasoning_tokens": 5}}})
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
-            print(json.dumps({"fixture_request": index + 1, "mode": mode, "finish": finish}), flush=True)
+            for chunk in chunks:
+                self.wfile.write(("data: " + json.dumps(chunk, ensure_ascii=False) + "\n\n").encode("utf-8"))
+                self.wfile.flush()
+                if chunk_delay:
+                    time.sleep(chunk_delay)
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+            print(json.dumps({"fixture_request": index + 1, "mode": mode, "finish": finish, "chunks": len(chunks)}), flush=True)
 
     print(f"SCRIPTED FIXTURE ONLY: http://127.0.0.1:{port}/v1 ({mode})", flush=True)
     ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
@@ -95,9 +153,12 @@ def serve(port: int, mode: str, delay: float = 0) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=18081)
-    parser.add_argument("--mode", choices=("read", "approval"), default="read")
+    parser.add_argument("--mode", choices=("read", "approval", "conversation"), default="read")
     parser.add_argument("--delay", type=float, default=0, help="Response delay for cancellation acceptance, in seconds")
+    parser.add_argument("--chunk-delay", type=float, default=0, help="Delay between flushed SSE chunks, 0 to 5 seconds")
     args = parser.parse_args()
     if not 0 <= args.delay <= 60:
         parser.error("delay must be between 0 and 60 seconds")
-    serve(args.port, args.mode, args.delay)
+    if not 0 <= args.chunk_delay <= 5:
+        parser.error("chunk-delay must be between 0 and 5 seconds")
+    serve(args.port, args.mode, args.delay, args.chunk_delay)

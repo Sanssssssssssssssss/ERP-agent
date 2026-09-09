@@ -1,19 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { AlertDialog as RadixAlertDialog, Badge as RadixBadge, Button as RadixButton, Dialog as RadixDialog, IconButton as RadixIconButton, Tabs as RadixTabs, Tooltip as RadixTooltip } from '@radix-ui/themes'
 import { Activity, Archive, ArrowUpRight, Check as CheckIcon, CircleAlert, CircleCheck, CircleDashed, Clock3, FileText, FolderPlus, LoaderCircle, MessageSquare, Minus, PanelLeftClose, PanelLeftOpen, Play, RefreshCw, Search, Send, Settings2, Square, X } from 'lucide-react'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { WorkbenchMethod } from '../shared/protocol'
 import {
   Approval,
+  BusinessArtifact,
   Business,
   BusinessDetail,
   BusinessDetailProjection,
   BusinessEvidence,
   BusinessTab,
   Check,
+  ConversationRun,
   Document,
   HostEvent,
   Health,
   Message,
+  LiveMessage,
   Round,
   Run,
   SessionDetail,
@@ -33,6 +38,8 @@ import {
 } from './protocol'
 
 type ConnectionState = 'checking' | 'connected' | 'disconnected' | 'crashed' | 'protocol_error'
+
+const liveMessageKey = (message: Pick<LiveMessage, 'session_id' | 'business_id' | 'run_id' | 'id'>) => `${message.session_id}:${message.business_id ?? '__conversation__'}:${message.run_id}:${message.id}`
 
 const tabs: Array<{ id: BusinessTab; label: string }> = [
   { id: 'execution', label: '执行台' },
@@ -58,7 +65,7 @@ export default function App() {
   const [connection, setConnection] = useState<ConnectionState>('checking')
   const [health, setHealth] = useState<Health | null>(null)
   const [error, setError] = useState('')
-  const [liveText, setLiveText] = useState('')
+  const [liveMessages, setLiveMessages] = useState<LiveMessage[]>([])
   const [settings, setSettings] = useState<Settings | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [connectionDetailsOpen, setConnectionDetailsOpen] = useState(false)
@@ -70,7 +77,14 @@ export default function App() {
   const [messageBusinessId, setMessageBusinessId] = useState('')
   const [sessionQuery, setSessionQuery] = useState('')
   const [businessWidth, setBusinessWidth] = useState(560)
-  const [conversationOpen, setConversationOpen] = useState(() => window.innerWidth > 1440)
+  const [conversationOpen, setConversationOpen] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem('odoo-workbench.conversation-open')
+      return saved == null ? true : saved === 'true'
+    } catch {
+      return true
+    }
+  })
   const [railCollapsed, setRailCollapsed] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [exportPath, setExportPath] = useState('')
@@ -89,6 +103,71 @@ export default function App() {
   const runStartInFlightRef = useRef(new Set<string>())
   const approvalInFlightRef = useRef(new Set<string>())
   const cancelInFlightRef = useRef(new Set<string>())
+  const conversationCancelInFlightRef = useRef(new Set<string>())
+  const conversationRunsRef = useRef<ConversationRun[]>([])
+  const businessRunsRef = useRef<Run[]>([])
+  const conversationStreamsRef = useRef(new Map<string, LiveMessage>())
+  const pendingStreamEventsRef = useRef<Array<{ event: 'message_delta' | 'message_end'; sessionId: string; businessId: string | null; runId: string; messageId: string; sequence: number; text: string }>>([])
+  const finalizedStreamKeysRef = useRef(new Set<string>())
+  const streamRenderFrameRef = useRef<number | null>(null)
+
+  const publishLiveMessages = () => {
+    if (streamRenderFrameRef.current !== null) return
+    streamRenderFrameRef.current = window.requestAnimationFrame(() => {
+      streamRenderFrameRef.current = null
+      setLiveMessages([...conversationStreamsRef.current.values()])
+    })
+  }
+
+  const applyStreamEvent = (event: { event: 'message_delta' | 'message_end'; sessionId: string; businessId: string | null; runId: string; messageId: string; sequence: number; text: string }) => {
+    if (event.sessionId !== sessionIdRef.current) return true
+    const conversationRun = conversationRunsRef.current.find((run) => run.id === event.runId && run.session_id === event.sessionId)
+    const businessRun = businessRunsRef.current.find((run) => run.id === event.runId && run.session_id === event.sessionId && run.business_id === event.businessId)
+    if (!conversationRun && !businessRun) return false
+    const expectedBusinessId = conversationRun ? (conversationRun.business_id ?? null) : event.businessId
+    if (expectedBusinessId !== event.businessId) return true
+    const runStatus = conversationRun?.status ?? businessRun?.status
+    if (event.event === 'message_delta' && ['completed', 'failed', 'cancelled', 'interrupted'].includes(runStatus || '')) return true
+    const key = liveMessageKey({ session_id: event.sessionId, business_id: event.businessId, run_id: event.runId, id: event.messageId })
+    if (finalizedStreamKeysRef.current.has(key)) return true
+    const current = conversationStreamsRef.current.get(key)
+    if (event.event === 'message_delta') {
+      if (!current || event.sequence > current.sequence) {
+        conversationStreamsRef.current.set(key, {
+          id: event.messageId,
+          session_id: event.sessionId,
+          business_id: event.businessId,
+          run_id: event.runId,
+          sequence: event.sequence,
+          text: `${current?.text || ''}${event.text}`,
+          role: 'assistant',
+          status: 'streaming',
+          created_at: current?.created_at || new Date().toISOString()
+        })
+        publishLiveMessages()
+      }
+    } else if (!current || current.status !== 'ended') {
+      conversationStreamsRef.current.set(key, {
+        id: event.messageId,
+        session_id: event.sessionId,
+        business_id: event.businessId,
+        run_id: event.runId,
+        sequence: Math.max(event.sequence, current?.sequence ?? 0),
+        text: event.text || current?.text || '',
+        role: 'assistant',
+        status: 'ended',
+        created_at: current?.created_at || new Date().toISOString()
+      })
+      finalizedStreamKeysRef.current.add(key)
+      publishLiveMessages()
+    }
+    return true
+  }
+
+  const drainPendingStreamEvents = () => {
+    const pending = pendingStreamEventsRef.current
+    pendingStreamEventsRef.current = pending.filter((event) => !applyStreamEvent(event))
+  }
 
   const call = useCallback(async <T,>(method: string, params?: Record<string, unknown>) => {
     if (!window.workbench) throw new Error('桌面主机桥未连接')
@@ -143,14 +222,33 @@ export default function App() {
     const result = await call<SessionDetail>('get_session', { session_id: sessionId })
     if (requestId !== sessionRequestRef.current || sessionIdRef.current !== sessionId) return
     setSession(result)
+    conversationRunsRef.current = result.conversation_runs ?? []
+    const persistedMessageIds = new Set(result.messages.map((message) => message.id))
+    for (const message of result.messages) {
+      if (message.run_id) finalizedStreamKeysRef.current.add(liveMessageKey({ session_id: sessionId, business_id: message.business_id ?? null, run_id: message.run_id, id: message.id }))
+    }
+    for (const message of result.live_messages ?? []) {
+      if (!persistedMessageIds.has(message.id) && message.session_id === sessionId && Number.isInteger(message.sequence)) {
+        const key = liveMessageKey(message)
+        const current = conversationStreamsRef.current.get(key)
+        if (!current || message.sequence >= current.sequence) conversationStreamsRef.current.set(key, message)
+        if (message.status === 'ended') finalizedStreamKeysRef.current.add(key)
+      }
+    }
+    for (const [key, message] of conversationStreamsRef.current) {
+      if (message.session_id !== sessionId || persistedMessageIds.has(message.id)) conversationStreamsRef.current.delete(key)
+    }
+    setLiveMessages([...conversationStreamsRef.current.values()])
+    drainPendingStreamEvents()
+    publishLiveMessages()
     sessionIdRef.current = sessionId
     setSelectedBusinessId((current) => {
       if (current && result.businesses.some((item) => item.id === current)) return current
       return result.businesses[0]?.id ?? ''
     })
     setMessageBusinessId((current) => {
-      if (current === '__new__' || (current && result.businesses.some((item) => item.id === current))) return current
-      return result.businesses[0]?.id ?? '__new__'
+      if (current === '__conversation__' || (current && result.businesses.some((item) => item.id === current))) return current
+      return '__conversation__'
     })
     setError('')
   }, [call])
@@ -166,6 +264,17 @@ export default function App() {
       const result = await call<BusinessDetailProjection>('get_business', { session_id: sessionId, business_id: businessId })
       if (requestId !== businessRequestRef.current || sessionIdRef.current !== sessionId || businessIdRef.current !== businessId) return
       setBusinessDetail(result)
+      businessRunsRef.current = result.runs
+      for (const message of result.live_messages ?? []) {
+        if (message.session_id === sessionId && Number.isInteger(message.sequence)) {
+          const key = liveMessageKey(message)
+          const current = conversationStreamsRef.current.get(key)
+          if (!current || message.sequence >= current.sequence) conversationStreamsRef.current.set(key, message)
+          if (message.status === 'ended') finalizedStreamKeysRef.current.add(key)
+        }
+      }
+      drainPendingStreamEvents()
+      publishLiveMessages()
       businessIdRef.current = businessId
       const currentRun = result.runs.find((run) => run.id === result.business.active_run_id) ?? result.runs[0]
       setSelectedRunId((current) => result.runs.some((run) => run.id === current) ? current : currentRun?.id || '')
@@ -183,6 +292,9 @@ export default function App() {
       const result = await call<BusinessDetailProjection>('get_business', { session_id: sessionId, business_id: businessId })
       if (requestId !== quietBusinessRequestRef.current || sessionIdRef.current !== sessionId || businessIdRef.current !== businessId) return
       setBusinessDetail(result)
+      businessRunsRef.current = result.runs
+      drainPendingStreamEvents()
+      publishLiveMessages()
       setSelectedRunId((current) => result.runs.some((run) => run.id === current) ? current : result.runs[0]?.id || '')
     } catch (reason) {
       if (requestId === quietBusinessRequestRef.current && sessionIdRef.current === sessionId && businessIdRef.current === businessId) setError(messageForError(reason))
@@ -272,6 +384,8 @@ export default function App() {
         if (status === 'ready') {
           setConnection('connected')
           setError('')
+          void loadSessions(false).catch(() => undefined)
+          void reloadCurrent().catch((reason) => setError(messageForError(reason)))
         } else if (status === 'crashed') {
           setConnection('crashed')
           setError(`本地 host 已崩溃${data.code ? `（${String(data.code)}）` : ''}`)
@@ -287,8 +401,19 @@ export default function App() {
         setHealth((current) => current ? { ...current, odoo: data.odoo && typeof data.odoo === 'object' ? data.odoo as Health['odoo'] : current.odoo } : current)
         return
       }
-      if (event.event === 'message_delta') {
-        setLiveText((current) => `${current}${String(data.text || '')}`)
+      if (event.event === 'message_delta' || event.event === 'message_end') {
+        const runId = typeof data.run_id === 'string' ? data.run_id : ''
+        const messageId = typeof data.message_id === 'string' ? data.message_id : ''
+        const sequence = Number(data.sequence)
+        const eventText = typeof data.text === 'string' ? data.text : ''
+        const eventBusiness = data.business_id == null ? null : String(data.business_id)
+        if (!eventSession || eventSession !== sessionIdRef.current || !runId || !messageId || !Number.isInteger(sequence) || sequence < 0) return
+        if (eventBusiness && eventBusiness !== businessIdRef.current) return
+        const normalized = { event: event.event as 'message_delta' | 'message_end', sessionId: eventSession, businessId: eventBusiness, runId, messageId, sequence, text: eventText }
+        if (!applyStreamEvent(normalized)) {
+          pendingStreamEventsRef.current.push(normalized)
+          if (pendingStreamEventsRef.current.length > 100) pendingStreamEventsRef.current.shift()
+        }
         return
       }
       if (event.event === 'run_trace' || event.event === 'trace') {
@@ -318,7 +443,7 @@ export default function App() {
           traceRefreshTimerRef.current = setTimeout(() => setTraceRefreshToken((value) => value + 1), 40)
         }
         void reloadCurrent().then(() => {
-          if (['completed', 'failed', 'cancelled', 'interrupted'].includes(changeStatus)) setLiveText('')
+          if (['completed', 'failed', 'cancelled', 'interrupted'].includes(changeStatus)) setLiveMessages([...conversationStreamsRef.current.values()])
         }).catch((reason) => setError(messageForError(reason)))
       }
     }
@@ -352,9 +477,14 @@ export default function App() {
     setTraceTarget(null)
     setExportPath('')
     setSelectedRunId('')
-    setMessageBusinessId('')
+    setMessageBusinessId('__conversation__')
     setTab('execution')
-    setLiveText('')
+    conversationStreamsRef.current.clear()
+    conversationRunsRef.current = []
+    businessRunsRef.current = []
+    pendingStreamEventsRef.current = []
+    finalizedStreamKeysRef.current.clear()
+    setLiveMessages([])
   }
 
   const chooseBusiness = (id: string) => {
@@ -375,11 +505,21 @@ export default function App() {
     setSelectedRunId('')
   }
 
+  const toggleConversation = () => {
+    setConversationOpen((value) => {
+      const next = !value
+      try { window.localStorage.setItem('odoo-workbench.conversation-open', String(next)) } catch { /* storage is optional */ }
+      return next
+    })
+  }
+
   const createSession = async () => {
     setLoading(true)
     try {
       const created = await call<SessionSummary>('create_session')
       await loadSessions(false)
+      setConversationOpen(true)
+      try { window.localStorage.setItem('odoo-workbench.conversation-open', 'true') } catch { /* storage is optional */ }
       chooseSession(created.id)
     } catch (reason) {
       setError(messageForError(reason))
@@ -421,13 +561,12 @@ export default function App() {
     messageInFlightRef.current.add(messageKey)
     setLoading(true)
     setDraft('')
-    setLiveText('')
-    const targetBusinessId = messageBusinessId === '__new__' ? '' : messageBusinessId || selectedBusinessId
+    const contextBusinessId = messageBusinessId === '__conversation__' ? '' : messageBusinessId || selectedBusinessId
     try {
       await call('send_message', {
         session_id: requestSessionId,
         text,
-        ...(targetBusinessId ? { business_id: targetBusinessId } : {})
+        ...(contextBusinessId ? { context_business_id: contextBusinessId } : {})
       })
       if (sessionIdRef.current === requestSessionId) await loadSession(requestSessionId)
     } catch (reason) {
@@ -501,6 +640,23 @@ export default function App() {
       if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) setError(messageForError(reason))
     } finally {
       cancelInFlightRef.current.delete(cancelKey)
+    }
+  }
+
+  const cancelConversation = async (run: ConversationRun) => {
+    const requestSessionId = selectedSessionId
+    const key = `${requestSessionId}:${run.id}`
+    if (conversationCancelInFlightRef.current.has(key)) return
+    conversationCancelInFlightRef.current.add(key)
+    setLoading(true)
+    try {
+      await call('cancel_conversation', { session_id: requestSessionId, run_id: run.id })
+      if (sessionIdRef.current === requestSessionId) await loadSession(requestSessionId)
+    } catch (reason) {
+      if (sessionIdRef.current === requestSessionId) setError(messageForError(reason))
+    } finally {
+      conversationCancelInFlightRef.current.delete(key)
+      if (sessionIdRef.current === requestSessionId) setLoading(false)
     }
   }
 
@@ -627,6 +783,7 @@ export default function App() {
       if (sessionIdRef.current !== requestSessionId || businessIdRef.current !== requestBusinessId) return
       setExportPath(result.path || '导出已完成，但主机没有返回文件路径。')
       setNotice(result.path ? '业务回执已导出。' : '业务回执已导出。')
+      await loadBusiness(requestSessionId, requestBusinessId).catch(() => undefined)
       window.setTimeout(() => setNotice(''), 2600)
     } catch (reason) {
       setError(messageForError(reason))
@@ -650,6 +807,24 @@ export default function App() {
       window.setTimeout(() => setNotice(''), 2600)
     } catch (reason) {
       setError(messageForError(reason))
+    }
+  }
+
+  const openArtifact = async (artifact: BusinessArtifact, reveal = false) => {
+    if (!selectedSessionId || !selectedBusinessId) return
+    const requestSessionId = selectedSessionId
+    const requestBusinessId = selectedBusinessId
+    try {
+      await call(reveal ? 'reveal_business_artifact' : 'open_business_artifact', {
+        session_id: requestSessionId,
+        business_id: requestBusinessId,
+        artifact_id: artifact.id
+      })
+      if (sessionIdRef.current !== requestSessionId || businessIdRef.current !== requestBusinessId) return
+      setNotice(reveal ? `已打开文件所在位置：${artifact.name}` : `已请求打开文件：${artifact.name}`)
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (reason) {
+      if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) setError(messageForError(reason))
     }
   }
 
@@ -698,7 +873,7 @@ export default function App() {
       {error && <div className="global-alert" role="alert"><span>{error}</span>{connection !== 'connected' && <button onClick={() => void retryHealth()}>重试连接</button>}<button onClick={() => setError('')}>关闭</button></div>}
       {notice && <div className="global-notice" role="status"><span>{notice}</span><button onClick={() => setNotice('')}>关闭</button></div>}
 
-      <main className={`workspace-grid ${conversationOpen ? '' : 'conversation-hidden'} ${railCollapsed ? 'rail-collapsed' : ''}`} style={{ '--business-width': `${businessWidth}px` } as CSSProperties}>
+      <main className={`workspace-grid ${conversationOpen ? '' : 'conversation-hidden'} ${conversationOpen && !activeBusiness ? 'conversation-focus' : ''} ${railCollapsed ? 'rail-collapsed' : ''}`} style={{ '--business-width': `${businessWidth}px` } as CSSProperties}>
         <SessionRail
           sessions={sessions}
           selectedId={selectedSessionId}
@@ -734,26 +909,31 @@ export default function App() {
           onApproval={(approval, decision) => void decideApproval(approval, decision)}
           onReconcile={(approval) => void reconcileApproval(approval)}
           onTraceTarget={openTraceTarget}
-          onToggleConversation={() => setConversationOpen((value) => !value)}
+          onToggleConversation={toggleConversation}
           conversationOpen={conversationOpen}
           onExport={() => void exportBusiness()}
           exporting={exporting}
           exportPath={exportPath}
           onOpenDocument={(document) => void openOdooRecord(document)}
+          onOpenArtifact={(artifact) => void openArtifact(artifact)}
+          onRevealArtifact={(artifact) => void openArtifact(artifact, true)}
         />
         {conversationOpen && <div className="workspace-divider" role="separator" tabIndex={0} aria-label="调整会话辅助面板宽度" onPointerDown={resizeBusiness} onKeyDown={(event) => { const maxWidth = Math.max(320, window.innerWidth - 240 - 520 - 5); if (event.key === 'ArrowLeft') setBusinessWidth((width) => Math.min(maxWidth, 640, width + 24)); if (event.key === 'ArrowRight') setBusinessWidth((width) => Math.max(320, width - 24)) }} />}
         {conversationOpen && <ConversationPane
           session={session}
           draft={draft}
-          liveText={liveText}
+          liveMessages={liveMessages}
+          conversationRuns={conversationRunsRef.current}
+          selectedBusinessId={selectedBusinessId}
           loading={loading}
           pendingProposal={pendingProposal}
           businesses={session?.businesses ?? []}
-          messageBusinessId={messageBusinessId || selectedBusinessId || '__new__'}
+          messageBusinessId={messageBusinessId || '__conversation__'}
           onMessageBusinessChange={setMessageBusinessId}
           onDraftChange={setDraft}
           onSubmit={sendMessage}
           onProposal={(proposal, confirmed) => void confirmProposal(proposal, confirmed)}
+          onCancelConversation={(run) => void cancelConversation(run)}
         />}
       </main>
     </div>
@@ -822,10 +1002,12 @@ function SessionRail({
   )
 }
 
-function ConversationPane({ session, draft, liveText, loading, pendingProposal, businesses, messageBusinessId, onMessageBusinessChange, onDraftChange, onSubmit, onProposal }: {
+function ConversationPane({ session, draft, liveMessages, conversationRuns, selectedBusinessId, loading, pendingProposal, businesses, messageBusinessId, onMessageBusinessChange, onDraftChange, onSubmit, onProposal, onCancelConversation }: {
   session: SessionDetail | null
   draft: string
-  liveText: string
+  liveMessages: LiveMessage[]
+  conversationRuns: ConversationRun[]
+  selectedBusinessId: string
   loading: boolean
   pendingProposal?: ProposalLike
   businesses: Business[]
@@ -834,42 +1016,78 @@ function ConversationPane({ session, draft, liveText, loading, pendingProposal, 
   onDraftChange: (value: string) => void
   onSubmit: (event: FormEvent) => void
   onProposal: (proposal: ProposalLike, confirmed: boolean) => void
+  onCancelConversation: (run: ConversationRun) => void
 }) {
   const messages = session?.messages ?? []
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [atLatest, setAtLatest] = useState(true)
+  const [hasNew, setHasNew] = useState(false)
+  const latestConversation = [...conversationRuns].filter((run) => run.business_id == null).sort((left, right) => String(right.started_at || '').localeCompare(String(left.started_at || '')))[0]
+  const activeConversation = latestConversation && ['running', 'cancel_requested'].includes(latestConversation.status) ? latestConversation : undefined
+  const terminalConversation = latestConversation && ['failed', 'cancelled', 'interrupted'].includes(latestConversation.status) ? latestConversation : undefined
+  const visibleLiveMessages = liveMessages.filter((message) => message.session_id === session?.session.id && (message.business_id == null || message.business_id === selectedBusinessId))
+  const persistedMessageKeys = new Set(messages.map((message) => `${message.business_id ?? '__conversation__'}:${message.id}`))
+  const orderedMessages = [
+    ...messages.map((message) => ({ kind: 'message' as const, message, created_at: message.created_at })),
+    ...visibleLiveMessages.filter((message) => !persistedMessageKeys.has(`${message.business_id ?? '__conversation__'}:${message.id}`)).map((message) => ({ kind: 'live' as const, message, created_at: message.created_at || '' }))
+  ].sort((left, right) => left.created_at.localeCompare(right.created_at))
+  const scrollToLatest = () => {
+    const element = scrollRef.current
+    if (!element) return
+    element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' })
+    setAtLatest(true)
+    setHasNew(false)
+  }
+  useEffect(() => {
+    const element = scrollRef.current
+    if (!element || atLatest) {
+      if (element) element.scrollTop = element.scrollHeight
+      return
+    }
+    setHasNew(true)
+  }, [atLatest, liveMessages, messages])
   return (
-    <section className="conversation-pane">
+    <section className={`conversation-pane ${terminalConversation ? 'has-run-status' : ''}`}>
       <header className="conversation-header">
-        <div><span className="eyebrow">会话</span><h2>{session?.session.title || '选择一个会话'}</h2><p>和 Agent 讨论业务目标，确认后再进入对应工作区。</p></div>
-        <span className="session-id" title={session?.session.id || undefined}>会话详情</span>
+        <div><span className="eyebrow">会话</span><h2>{session?.session.title || '选择一个会话'}</h2><p>先和 Agent 讨论目标、能力和范围；确认业务后才会进入执行台。</p></div>
+        <div className="conversation-header-meta"><span className="session-id" title={session?.session.id || undefined}>会话详情</span>{activeConversation && <RadixButton className="conversation-cancel" variant="soft" disabled={loading || activeConversation.status === 'cancel_requested'} onClick={() => onCancelConversation(activeConversation)}><Square size={13} />{activeConversation.status === 'cancel_requested' ? '正在停止…' : '停止对话'}</RadixButton>}</div>
       </header>
-      <div className="conversation-scroll">
+      {terminalConversation && <div className={`conversation-run-status status-${terminalConversation.status}`} role="status"><strong>{terminalConversation.status === 'failed' ? '对话失败，可继续输入' : terminalConversation.status === 'cancelled' ? '对话已停止，可继续输入' : '对话已中断，可继续输入'}</strong>{(terminalConversation.error || terminalConversation.error_detail) && <details><summary>查看错误详情</summary><code>{terminalConversation.error || terminalConversation.error_detail}</code>{terminalConversation.error_detail && terminalConversation.error_detail !== terminalConversation.error && <p>{terminalConversation.error_detail}</p>}</details>}</div>}
+      <div ref={scrollRef} className="conversation-scroll" onScroll={(event) => { const element = event.currentTarget; const latest = element.scrollHeight - element.scrollTop - element.clientHeight < 24; setAtLatest(latest); if (latest) setHasNew(false) }}>
         {!session && <EmptyState title="选择一个会话" detail="左侧会话列表会显示已持久化的工作。" />}
-        {session && messages.length === 0 && <EmptyState title="从业务意图开始" detail="例如：帮我处理一张销售发票。" />}
-        {messages.map((message) => <MessageRow key={message.id} message={message} />)}
-        {liveText && <article className="message assistant live-message"><span className="avatar agent-avatar">A</span><div><div className="message-meta"><strong>Agent</strong><span>实时回复</span></div><p>{liveText}</p></div></article>}
+        {session && messages.length === 0 && visibleLiveMessages.length === 0 && <EmptyState title="从会话开始" detail="先问我能做什么，或描述想解决的业务问题。" />}
+        {orderedMessages.map((item) => item.kind === 'message' ? <MessageRow key={`message:${item.message.id}`} message={item.message} /> : <article className="message assistant live-message" key={`live:${item.message.run_id}:${item.message.id}`}><span className="avatar agent-avatar">A</span><div><div className="message-meta"><strong>Agent</strong><span>{item.message.status === 'ended' ? '回复完成' : item.message.status === 'interrupted' || item.message.status === 'failed' ? '已停止 · 回复未完成' : '实时回复'}</span></div><MessageText text={item.message.text} collapsible={false} /></div></article>)}
         {pendingProposal && <ProposalCard proposal={pendingProposal} disabled={loading} onDecision={onProposal} />}
+        {hasNew && <button className="new-message-indicator" type="button" onClick={scrollToLatest}>有新消息 · 回到最新</button>}
       </div>
       <form className="composer" onSubmit={onSubmit}>
-        <textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={!session || loading} placeholder={session ? '告诉 Agent 你要处理的业务…' : '先选择或创建一个会话'} aria-label="会话消息" />
+        <textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={!session || loading} placeholder={session ? '和 Agent 讨论目标、能力或业务范围…' : '先选择或创建一个会话'} aria-label="会话消息" />
         <div className="composer-footer">
-          <div className="composer-context"><label htmlFor="message-business-target">发送到</label><select id="message-business-target" value={messageBusinessId} onChange={(event) => onMessageBusinessChange(event.target.value)} disabled={!session || loading}><option value="__new__">新业务意图（创建工作区）</option>{businesses.map((business) => <option key={business.id} value={business.id}>{business.title || '未命名业务'} · {labelFor(businessStatusLabel, business.status)}</option>)}</select><span>发送后需在右侧明确开始或继续执行。</span></div>
-          <RadixButton type="submit" disabled={!session || loading || !draft.trim()}>{loading ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}{loading ? '处理中…' : '发送'}</RadixButton>
+          <div className="composer-context"><label htmlFor="message-business-target">讨论范围</label><select id="message-business-target" value={messageBusinessId} onChange={(event) => onMessageBusinessChange(event.target.value)} disabled={!session || loading}><option value="__conversation__">整个会话（普通讨论）</option>{businesses.map((business) => <option key={business.id} value={business.id}>{business.title || '未命名业务'} · {labelFor(businessStatusLabel, business.status)}</option>)}</select><span>普通发送只会话，不会自动开始业务执行。</span></div>
+        <RadixButton type="submit" disabled={!session || loading || !draft.trim()}>{loading ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}{loading ? '处理中…' : '发送'}</RadixButton>
         </div>
       </form>
     </section>
   )
 }
 
+function MessageText({ text, collapsible = true }: { text: string; collapsible?: boolean }) {
+  const value = text || '（空消息）'
+  const content = <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{ img: ({ alt }) => <span>{alt || '图片'}</span>, a: ({ children }) => <span>{children}</span>, table: ({ children }) => <div className="message-table-wrap"><table>{children}</table></div> }}>{value}</Markdown>
+  if (value.length <= 900 || !collapsible) return <div className="message-text message-markdown">{content}</div>
+  return <div><p className="message-text">{value.slice(0, 360)}…</p><details className="message-full"><summary>查看完整消息（{value.length.toLocaleString('zh-CN')} 字）</summary><div className="message-text message-markdown">{content}</div></details></div>
+}
+
 function MessageRow({ message }: { message: Message }) {
   const role = message.role === 'user' ? 'user' : message.role === 'system' ? 'system' : 'assistant'
-  return <article className={`message ${role}`}><span className={`avatar ${role === 'user' ? 'user-avatar' : role === 'system' ? 'system-avatar' : 'agent-avatar'}`}>{role === 'user' ? '你' : role === 'system' ? '·' : 'A'}</span><div><div className="message-meta"><strong>{role === 'user' ? '你' : role === 'system' ? '系统' : 'Agent'}</strong><span>{formatInstant(message.created_at)}</span></div><p>{message.text}</p></div></article>
+  return <article className={`message ${role}`}><span className={`avatar ${role === 'user' ? 'user-avatar' : role === 'system' ? 'system-avatar' : 'agent-avatar'}`}>{role === 'user' ? '你' : role === 'system' ? '·' : 'A'}</span><div><div className="message-meta"><strong>{role === 'user' ? '你' : role === 'system' ? '系统' : 'Agent'}</strong><span>{formatInstant(message.created_at)}</span></div><MessageText text={message.text} /></div></article>
 }
 
 function ProposalCard({ proposal, disabled, onDecision }: { proposal: ProposalLike; disabled: boolean; onDecision: (proposal: ProposalLike, confirmed: boolean) => void }) {
   return <section className="proposal-card"><div className="proposal-icon"><FolderPlus size={18} /></div><div className="proposal-kicker">发现新的业务意图</div><h3>{proposal.title}</h3><p>{proposal.goal}</p><div className="proposal-actions"><RadixButton className="secondary-button" variant="soft" disabled={disabled} onClick={() => onDecision(proposal, false)}>暂不创建</RadixButton><RadixButton className="primary-button" disabled={disabled} onClick={() => onDecision(proposal, true)}><FolderPlus size={15} />创建业务工作区</RadixButton></div></section>
 }
 
-function BusinessWorkspace({ session, activeBusiness, detail, tab, trace, traceTarget, traceLoading, businessLoading, loading, selectedRunId, onBusinessSelect, onTabChange, onRunSelect, onRefresh, onStart, onCancel, onApproval, onReconcile, onTraceTarget, onToggleConversation, conversationOpen, onExport, exporting, exportPath, onOpenDocument }: {
+function BusinessWorkspace({ session, activeBusiness, detail, tab, trace, traceTarget, traceLoading, businessLoading, loading, selectedRunId, onBusinessSelect, onTabChange, onRunSelect, onRefresh, onStart, onCancel, onApproval, onReconcile, onTraceTarget, onToggleConversation, conversationOpen, onExport, exporting, exportPath, onOpenDocument, onOpenArtifact, onRevealArtifact }: {
   session: SessionDetail | null
   activeBusiness: Business | null
   detail: BusinessDetailProjection | null
@@ -895,6 +1113,8 @@ function BusinessWorkspace({ session, activeBusiness, detail, tab, trace, traceT
   exporting: boolean
   exportPath: string
   onOpenDocument: (document: Document) => void
+  onOpenArtifact: (artifact: BusinessArtifact) => void
+  onRevealArtifact: (artifact: BusinessArtifact) => void
 }) {
   const businessList = session?.businesses ?? []
   const activeRun = detail?.runs?.find((run) => run.id === detail.business.active_run_id)
@@ -903,7 +1123,7 @@ function BusinessWorkspace({ session, activeBusiness, detail, tab, trace, traceT
   return (
     <main className="business-workspace">
       <div className="business-tabs-bar">
-        <div className="business-tabs-heading"><div><span className="eyebrow">业务工作区</span><strong>{businessList.length ? `${businessList.length} 个业务` : '业务页'}</strong></div><RadixTooltip content={conversationOpen ? '收起会话辅助' : '展开会话辅助'}><RadixIconButton variant="ghost" aria-label={conversationOpen ? '收起会话辅助' : '展开会话辅助'} onClick={onToggleConversation}>{conversationOpen ? <MessageSquare size={16} /> : <MessageSquare size={16} />}</RadixIconButton></RadixTooltip></div>
+        <div className="business-tabs-heading"><div><span className="eyebrow">业务工作区</span><strong>{businessList.length ? `${businessList.length} 个业务` : '业务页'}</strong></div><RadixButton className="conversation-toggle" variant="soft" aria-label={conversationOpen ? '收起会话' : '打开会话'} onClick={onToggleConversation}><MessageSquare size={15} />{conversationOpen ? '收起会话' : '打开会话'}</RadixButton></div>
         <div className="business-tabs" role="tablist" aria-label="业务工作区">
           {businessList.map((business) => <button role="tab" aria-selected={business.id === activeBusiness?.id} key={business.id} className={business.id === activeBusiness?.id ? 'active' : ''} onClick={() => onBusinessSelect(business.id)}>{business.title || '销售发票'}<span>{labelFor(businessStatusLabel, business.status)}</span></button>)}
         </div>
@@ -918,7 +1138,7 @@ function BusinessWorkspace({ session, activeBusiness, detail, tab, trace, traceT
           <div className="business-content">
           {businessLoading && <div className="loading-line"><LoaderCircle className="spin" size={16} />正在读取业务状态…</div>}
           <RadixTabs.Content value="execution">{!businessLoading && <ExecutionPage detail={detail} activeRun={activeRun} onRefresh={onRefresh} onStart={onStart} onCancel={onCancel} onEvidence={onTraceTarget} />}</RadixTabs.Content>
-          <RadixTabs.Content value="documents">{!businessLoading && <DocumentsPage documents={detail?.documents ?? []} goal={activeBusiness.goal} stale={detail?.stale ?? false} onExport={onExport} exporting={exporting} exportPath={exportPath} onOpenDocument={onOpenDocument} onTraceTarget={onTraceTarget} />}</RadixTabs.Content>
+           <RadixTabs.Content value="documents">{!businessLoading && <DocumentsPage documents={detail?.documents ?? []} artifacts={detail?.artifacts ?? []} goal={activeBusiness.goal} stale={detail?.stale ?? false} onExport={onExport} exporting={exporting} exportPath={exportPath} onOpenDocument={onOpenDocument} onOpenArtifact={onOpenArtifact} onRevealArtifact={onRevealArtifact} onTraceTarget={onTraceTarget} />}</RadixTabs.Content>
           <RadixTabs.Content value="approvals">{!businessLoading && <ApprovalsPage approvals={detail?.approvals ?? []} disabled={loading || businessLoading} onDecision={onApproval} onReconcile={onReconcile} onTraceTarget={onTraceTarget} />}</RadixTabs.Content>
           <RadixTabs.Content value="trace">{!businessLoading && <TracePage trace={trace} runs={detail?.runs ?? []} readback={detail?.business.readback} selectedRunId={selectedRunId} loading={traceLoading} target={traceTarget} onRunSelect={onRunSelect} />}</RadixTabs.Content>
           </div>
@@ -1015,27 +1235,34 @@ function ActivityCard({ activity }: { activity: NonNullable<BusinessDetail['acti
 }
 
 function StatusBadge({ status, label }: { status?: string; label: string }) {
-  const icon = status === 'running' || status === 'awaiting_approval' || status === 'pending' || status === 'pending_approval'
+  const neutral = label === '—（不适用）'
+  const icon = neutral ? <Minus size={13} /> : status === 'running' || status === 'awaiting_approval' || status === 'pending' || status === 'pending_approval'
     ? <Clock3 size={13} />
     : status === 'failed' || status === 'rejected' || status === 'expired' || status === 'known_failed'
       ? <CircleAlert size={13} />
     : status === 'passed' || status === 'verified' || status === 'approved'
         ? <CircleCheck size={13} />
         : <CircleDashed size={13} />
-  return <RadixBadge className={`state-badge state-${status || 'unknown'}`} variant="soft">{icon}{label}</RadixBadge>
+  return <RadixBadge className={`state-badge ${neutral ? 'state-neutral' : `state-${status || 'unknown'}`}`} variant="soft">{icon}{label}</RadixBadge>
 }
 
 function RunRow({ run }: { run: Run }) { return <div className="run-row"><div><strong>{run.id}</strong><span>{formatInstant(run.started_at)} · {formatDuration(run.elapsed_seconds)}</span></div><div className="run-row-meta"><StatusBadge status={run.status} label={runDisplayLabel(run.status)} /><span>{formatCount(run.tool_count)} 工具</span></div></div> }
 
-function DocumentsPage({ documents, goal, stale, onExport, exporting, exportPath, onOpenDocument, onTraceTarget }: { documents: Document[]; goal?: string; stale: boolean; onExport: () => void; exporting: boolean; exportPath: string; onOpenDocument: (document: Document) => void; onTraceTarget: (target: { run_id?: string; tool_id?: string; action_id?: string; kind?: string }) => void }) {
+function DocumentsPage({ documents, artifacts, goal, stale, onExport, exporting, exportPath, onOpenDocument, onOpenArtifact, onRevealArtifact, onTraceTarget }: { documents: Document[]; artifacts: BusinessArtifact[]; goal?: string; stale: boolean; onExport: () => void; exporting: boolean; exportPath: string; onOpenDocument: (document: Document) => void; onOpenArtifact: (artifact: BusinessArtifact) => void; onRevealArtifact: (artifact: BusinessArtifact) => void; onTraceTarget: (target: { run_id?: string; tool_id?: string; action_id?: string; kind?: string }) => void }) {
   const [selectedKey, setSelectedKey] = useState('')
   useEffect(() => { if (!documents.some((document) => documentKey(document) === selectedKey)) setSelectedKey(documents[0] ? documentKey(documents[0]) : '') }, [documents, selectedKey])
   const selected = documents.find((document) => documentKey(document) === selectedKey)
+  const resourceGroups = [
+    { label: '业务单据', items: documents.filter((document) => ['sale.order', 'account.move', 'stock.picking'].includes(document.model)) },
+    { label: '客户与明细', items: documents.filter((document) => document.model === 'res.partner' || document.model.endsWith('.line')) },
+    { label: '参考记录', items: documents.filter((document) => !['sale.order', 'account.move', 'stock.picking', 'res.partner'].includes(document.model) && !document.model.endsWith('.line')) }
+  ].filter((group) => group.items.length > 0)
   return (
     <div className="page-stack">
       <div className="page-intro"><div><span className="eyebrow">已观测记录</span><h3>单据与文件</h3></div><div className="page-actions"><RadixButton className="secondary-button" variant="soft" disabled={exporting} onClick={onExport}>{exporting ? <LoaderCircle className="spin" size={15} /> : <FileText size={15} />}{exporting ? '导出中…' : '导出业务回执'}</RadixButton>{stale && <span className="warning-text">数据可能已过期</span>}</div></div>
       {exportPath && <div className="export-receipt" role="status"><strong>导出路径</strong><span>{exportPath}</span></div>}
-      {documents.length === 0 ? <><details className="goal-details resource-goal"><summary>查看原始目标输入</summary><p>{goal || '未知'}</p></details><EmptyState title="还没有单据回执" detail="单据将在主机完成只读读取后出现在这里。" /></> : <div className="resource-layout"><nav className="resource-list" aria-label="已观测单据">{documents.map((document) => <button className={`resource-row ${documentKey(document) === selectedKey ? 'active' : ''}`} type="button" key={documentKey(document)} onClick={() => setSelectedKey(documentKey(document))}><span className="resource-icon"><FileText size={14} /></span><span><strong>{document.name || String(document.id)}</strong><small>{documentModelLabel(document.model)} · {documentStateLabel(document.model, document.state)}</small></span><span className="resource-type">{document.source || '来源未知'}</span></button>)}</nav><section className="resource-preview">{selected ? <><div className="preview-head"><div><h3>{selected.name || String(selected.id)}</h3><p>{documentModelLabel(selected.model)} · 记录 {selected.id}</p></div><RadixButton className="secondary-button" variant="soft" onClick={() => onOpenDocument(selected)}>在 Odoo 打开</RadixButton></div><dl className="preview-meta"><dt>状态</dt><dd><StatusBadge status={selected.state} label={documentStateLabel(selected.model, selected.state)} /></dd><dt>关键事实</dt><dd>{documentFact(selected)}</dd><dt>来源</dt><dd>{documentSource(selected)}</dd><dt>刷新观测时间</dt><dd>{formatInstant(selected.observed_at)}</dd></dl><details className="goal-details resource-goal"><summary>查看原始目标输入</summary><p>{goal || '未知'}</p></details><div className="resource-receipt-actions"><RadixButton className="inline-action" variant="ghost" disabled={!documentSourceRun(selected) || !documentSourceTool(selected)} onClick={() => onTraceTarget({ run_id: documentSourceRun(selected), tool_id: documentSourceTool(selected) })}>查看原始读取回执</RadixButton><span>{documentSourceRun(selected) && documentSourceTool(selected) ? `原始读取时间：${formatInstant(documentSourceObservedAt(selected))}` : '原始读取回执不可用'}</span></div>{resourceText(selected.fields, 'goal') && <div className="resource-note"><strong>单据返回的目标上下文</strong><p>{resourceText(selected.fields, 'goal')}</p></div>}<details className="resource-fields"><summary>查看原始字段</summary><pre>{jsonText(selected.fields)}</pre></details>{resourceText(selected.fields, 'sop') && <div className="resource-note"><strong>已返回 SOP / 知识</strong><p>{resourceText(selected.fields, 'sop')}</p></div>}{exportPath && <div className="export-receipt"><strong>生成的业务回执</strong><span>{exportPath}</span></div>}</> : <EmptyState title="选择一项单据" detail="从左侧选择已观测的 Odoo 记录。" />}</section></div>}
+      <section className="artifact-section" aria-label="业务文件"><div className="section-heading"><div><span className="eyebrow">持久化产物</span><h3>文件与回执</h3></div><span>{artifacts.length} 项</span></div>{artifacts.length === 0 ? <p className="muted">当前业务没有已保存的文件产物。</p> : <div className="artifact-list">{artifacts.map((artifact) => <article className={`artifact-row ${artifact.available === false ? 'artifact-missing' : ''}`} key={artifact.id}><div><strong>{artifact.name}</strong><span>{artifact.kind === 'business_receipt' ? '业务回执' : artifact.kind} · {formatInstant(artifact.created_at)}{artifact.run_id ? ` · 运行 ${artifact.run_id}` : ''}</span>{artifact.available === false && <small>{artifact.error || '文件不可用'}</small>}</div><div className="artifact-actions"><RadixButton className="inline-action" variant="ghost" disabled={artifact.available === false} onClick={() => onOpenArtifact(artifact)}>打开文件</RadixButton><RadixButton className="inline-action" variant="ghost" disabled={artifact.available === false} onClick={() => onRevealArtifact(artifact)}>显示位置</RadixButton></div></article>)}</div>}</section>
+      {documents.length === 0 ? <><details className="goal-details resource-goal"><summary>查看原始目标输入</summary><p>{goal || '未知'}</p></details><EmptyState title="还没有单据回执" detail="单据将在主机完成只读读取后出现在这里。" /></> : <div className="resource-layout"><nav className="resource-list" aria-label="已观测单据">{resourceGroups.map((group) => <section className="resource-group" key={group.label}><h4>{group.label}</h4>{group.items.map((document) => <button className={`resource-row ${documentKey(document) === selectedKey ? 'active' : ''}`} type="button" key={documentKey(document)} onClick={() => setSelectedKey(documentKey(document))}><span className="resource-icon"><FileText size={14} /></span><span><strong>{document.name || String(document.id)}</strong><small>{documentModelLabel(document.model)} · {documentStateLabel(document.model, document.state)}</small></span><span className="resource-type">{documentSourceLabel(document.source)}</span></button>)}</section>)}</nav><section className="resource-preview">{selected ? <><div className="preview-head"><div><h3>{selected.name || String(selected.id)}</h3><p>{documentModelLabel(selected.model)} · 记录 {selected.id}</p></div><RadixButton className="secondary-button" variant="soft" onClick={() => onOpenDocument(selected)}>在 Odoo 打开</RadixButton></div><dl className="preview-meta"><dt>状态</dt><dd><StatusBadge status={selected.state} label={documentStateLabel(selected.model, selected.state)} /></dd><dt>关键事实</dt><dd>{documentFact(selected)}</dd><dt>来源</dt><dd>{documentSource(selected)}</dd><dt>刷新观测时间</dt><dd>{formatInstant(selected.observed_at)}</dd></dl><details className="goal-details resource-goal"><summary>查看原始目标输入</summary><p>{goal || '未知'}</p></details><div className="resource-receipt-actions"><RadixButton className="inline-action" variant="ghost" disabled={!documentSourceRun(selected) || !documentSourceTool(selected)} onClick={() => onTraceTarget({ run_id: documentSourceRun(selected), tool_id: documentSourceTool(selected) })}>查看原始读取回执</RadixButton><span>{documentSourceRun(selected) && documentSourceTool(selected) ? `原始读取时间：${formatInstant(documentSourceObservedAt(selected))}` : '原始读取回执不可用'}</span></div>{resourceText(selected.fields, 'goal') && <div className="resource-note"><strong>单据返回的目标上下文</strong><p>{resourceText(selected.fields, 'goal')}</p></div>}<details className="resource-fields"><summary>查看原始字段</summary><pre>{jsonText(selected.fields)}</pre></details>{resourceText(selected.fields, 'sop') && <div className="resource-note"><strong>已返回 SOP / 知识</strong><p>{resourceText(selected.fields, 'sop')}</p></div>}{exportPath && <div className="export-receipt"><strong>生成的业务回执</strong><span>{exportPath}</span></div>}</> : <EmptyState title="选择一项单据" detail="从左侧选择已观测的 Odoo 记录。" />}</section></div>}
     </div>
   )
 }
@@ -1046,6 +1273,14 @@ function documentFact(document: Document) {
     ? [['客户', fields.partner_name ?? fields.customer ?? fields.partner_id], ['金额', fields.amount_total ?? fields.total], ['开票', invoiceStatusLabel(String(fields.invoice_status ?? '未知'))]]
     : document.model === 'account.move'
       ? [['客户', fields.partner_name ?? fields.customer ?? fields.partner_id], ['金额', fields.amount_total ?? fields.total], ['付款', paymentStatusLabel(String(fields.payment_state ?? '未知'))], ['余额', fields.amount_residual ?? fields.residual]]
+      : document.model === 'mail.message'
+        ? [['主题', fields.subject], ['作者', fields.author_name ?? fields.author_id], ['留言', fields.body ?? fields.message]]
+        : document.model === 'sale.order.line'
+          ? [['产品', fields.product_name ?? fields.product_id], ['数量', fields.product_uom_qty ?? fields.quantity], ['单价', fields.price_unit]]
+          : document.model === 'account.move.line'
+            ? [['科目', fields.account_name ?? fields.account_id], ['借方', fields.debit], ['贷方', fields.credit]]
+            : document.model === 'account.payment.term'
+              ? [['付款条件', fields.name ?? fields.note], ['说明', fields.description]]
       : Object.entries(fields).slice(0, 3).map(([key, value]) => [key, value])
   return entries.filter(([, value]) => value !== undefined && value !== null && value !== '').map(([key, value]) => `${key}:${readableValue(value)}`).join(' · ') || '没有可显示的关键字段'
 }
@@ -1070,7 +1305,8 @@ function resourceText(fields: Record<string, unknown>, key: string) {
   return value == null || value === '' ? '' : readableValue(value)
 }
 
-function documentModelLabel(model: string) { return model === 'sale.order' ? '销售订单' : model === 'account.move' ? '客户发票' : model === 'stock.picking' ? '出库单' : model === 'res.partner' ? '客户' : model }
+function documentModelLabel(model: string) { return ({ 'sale.order': '销售订单', 'account.move': '客户发票', 'stock.picking': '出库单', 'res.partner': '客户', 'mail.message': '业务留言', 'sale.order.line': '销售明细', 'account.move.line': '会计分录', 'account.payment.term': '付款条件', 'product.template': '产品', 'account.journal': '会计日记账', 'sale.advance.payment.inv': '开票向导' } as Record<string, string>)[model] || model }
+function documentSourceLabel(source?: string) { return ({ odoo: 'Odoo 观测', odoo_rpc: 'Odoo 观测', refresh_native_read: '独立回读', native_read_receipt: '原始读取回执', agent: 'Agent', host: '本地 host' } as Record<string, string>)[source || ''] || '其他来源' }
 function documentKey(document: Document) { return `${document.model}:${String(document.id)}` }
 function documentStateLabel(model: string, state?: string) {
   const labels: Record<string, Record<string, string>> = {
@@ -1078,7 +1314,8 @@ function documentStateLabel(model: string, state?: string) {
     'account.move': { draft: '草稿', posted: '已过账', cancel: '已取消' },
     'stock.picking': { draft: '草稿', waiting: '等待', confirmed: '待处理', assigned: '已分配', done: '已完成', cancel: '已取消' }
   }
-  return (state && labels[model]?.[state]) || state || (model === 'res.partner' ? '—（不适用）' : '未知')
+  const noIndependentState = ['res.partner', 'mail.message', 'sale.order.line', 'account.move.line', 'account.payment.term', 'product.template', 'account.journal', 'sale.advance.payment.inv'].includes(model)
+  return (state && labels[model]?.[state]) || (state ? '状态未知' : noIndependentState ? '—（不适用）' : '未知')
 }
 function invoiceStatusLabel(value: string) { return ({ invoiced: '已开票', 'to invoice': '待开票', to_invoice: '待开票', no: '无需开票' } as Record<string, string>)[value] || value }
 function paymentStatusLabel(value: string) { return ({ paid: '已付款', not_paid: '未付款', partial: '部分付款', in_payment: '付款处理中', reversed: '已冲销' } as Record<string, string>)[value] || value }
@@ -1113,7 +1350,7 @@ function ApprovalRow({ approval, disabled, onDecision, onReconcile, onTraceTarge
         <div><strong>{title}</strong><span>{modelLabel(approval.model)} · {operationLabel(approval.operation)} · {approval.model} · {approval.action_id}</span></div>
         <StatusBadge status={expired ? 'expired' : approval.status} label={expired ? '已过期' : approvalStatusLabel(approval.status)} />
       </div>
-      <div className="approval-facts"><span>记录 ID {approval.record_ids.length ? approval.record_ids.join(', ') : '未知'}</span><span>{formatExpiry(approval.expires_at)}</span></div>
+      <div className="approval-facts"><span>记录 ID {approval.record_ids.length ? approval.record_ids.join(', ') : '未知'}</span><span>{pending ? formatExpiry(approval.expires_at) : '审批已结束'}</span></div>
       <ApprovalFieldDiff approval={approval} />
       <details>
         <summary>查看拟提交值与执行前状态</summary>
@@ -1131,10 +1368,13 @@ function ApprovalFieldDiff({ approval }: { approval: Approval }) {
   const values = approval.values || {}
   const prestate = approvalPrestateView(approval)
   const before = prestate.fields
-  const keys = Array.from(new Set([...Object.keys(before), ...Object.keys(values)])).slice(0, 8)
+  const keys = Array.from(new Set([...Object.keys(before), ...Object.keys(values)]))
   if (!keys.length) return prestate.kind === 'multiple' ? <div className="field-diff"><p className="field-diff-note">执行前状态包含多条记录，无法压缩为单条字段对比；原始结构保留在下方。</p></div> : <p className="muted">没有可展示的字段前后值。</p>
   const beforeText = (key: string) => prestate.kind === 'new' ? '新建 / 无前态' : prestate.kind === 'multiple' ? '多条记录（见下方原始状态）' : prestate.kind === 'unknown' ? '未知' : readableValue(before[key])
-  return <div className="field-diff"><div className="field-diff-row field-diff-head"><span>字段</span><span>执行前</span><span>拟提交</span></div>{keys.map((key) => <div className="field-diff-row" key={key}><span>{approvalFieldLabel(key)}</span><span className="diff-value">{beforeText(key)}</span><span className="diff-value after">{readableValue(values[key])}</span></div>)}</div>
+  const row = (key: string) => <div className="field-diff-row" key={key}><span>{approvalFieldLabel(key)}</span><span className="diff-value">{beforeText(key)}</span><span className="diff-value after">{readableValue(values[key])}</span></div>
+  const visible = keys.slice(0, 8)
+  const remaining = keys.slice(8)
+  return <div className="field-diff"><div className="field-diff-row field-diff-head"><span>字段</span><span>执行前</span><span>拟提交</span></div>{visible.map(row)}{remaining.length > 0 && <details className="field-diff-more"><summary>查看其余字段（共 {keys.length} 项）</summary>{remaining.map(row)}</details>}</div>
 }
 
 function approvalPrestateView(approval: Approval): { kind: 'new' | 'unknown' | 'fields' | 'multiple'; fields: Record<string, unknown> } {
@@ -1190,16 +1430,16 @@ function TracePage({ trace, runs, readback, selectedRunId, loading, target, onRu
       {loading && <div className="loading-line">正在读取运行详情…</div>}
       {!loading && !trace && <EmptyState title="选择一次运行" detail="运行详情只读取已持久化的回执，不会重新执行模型。" />}
       {trace && <div className="trace-split">
-        <nav className="trace-tree" aria-label="运行、轮次与工具"><button className={`trace-node ${selectedNode === 'run' ? 'active' : ''}`} type="button" onClick={() => setSelectedNode('run')}><strong>运行</strong><span>{trace.run?.id || '运行未知'}</span></button>{target?.kind === 'readback' && <button className={`trace-node ${selectedNode.startsWith('readback:') ? 'active' : ''}`} type="button" onClick={() => setSelectedNode(`readback:${target.runId || 'unknown'}`)}><strong>独立回读快照</strong><span>{readbackMatches ? '已返回' : '当前运行无此快照'}</span></button>}{trace.rounds.map((round) => <div key={round.index} className="trace-tree-round"><button className={`trace-node ${selectedNode === `round:${round.index}` ? 'active' : ''}`} type="button" onClick={() => setSelectedNode(`round:${round.index}`)}><strong>第 {round.index} 轮</strong><span>{runStatusLabel[round.status] || round.status || '状态未知'}</span></button>{round.tool_ids.map((id) => { const tool = toolsById.get(id); return <button className={`trace-node trace-tool-node ${selectedNode === `tool:${id}` ? 'active' : ''}`} type="button" key={id} onClick={() => setSelectedNode(`tool:${id}`)}><strong>{tool?.name || id}</strong><span>{tool?.status || '回执未知'}</span></button> })}</div>)}{activeTools.map((tool) => <button className={`trace-node trace-tool-node ${selectedNode === `tool:${tool.id}` ? 'active' : ''}`} type="button" key={`active:${tool.id}`} onClick={() => setSelectedNode(`tool:${tool.id}`)}><strong>{tool.name}</strong><span>活动中 · 回执尚未到达</span></button>)}{missingTargetTool && <button className={`trace-node trace-tool-node unavailable ${selectedNode === `tool:${target?.toolId}` ? 'active' : ''}`} type="button" onClick={() => setSelectedNode(`tool:${target?.toolId}`)}><strong>{target?.toolId}</strong><span>不可用 · 尚未返回回执</span></button>}{missingTargetAction && <button className={`trace-node trace-tool-node unavailable ${selectedNode === `action:${target?.actionId}` ? 'active' : ''}`} type="button" onClick={() => setSelectedNode(`action:${target?.actionId}`)}><strong>{target?.actionId}</strong><span>回执不可用 · 尚未返回</span></button>}</nav>
-        <section className="trace-detail-panel" aria-live="polite"><div className="section-heading"><div><span className="eyebrow">运行详情</span><h3>{selectedTool ? selectedTool.name : selectedAction ? selectedAction.name : selectedRound ? `第 ${selectedRound.index} 轮` : selectedNode.startsWith('readback:') ? '独立回读快照' : missingTargetTool ? '工具回执不可用' : missingTargetAction ? '动作回执不可用' : '运行总览'}</h3></div><span>{trace.run?.id || '运行未知'}</span></div>{selectedTool ? <ToolDetail tool={selectedTool} /> : selectedAction ? <ToolDetail tool={selectedAction} /> : selectedRound ? <RoundDetail round={selectedRound} /> : selectedNode.startsWith('readback:') ? <ReadbackDetail readback={readbackMatches ? readback : undefined} /> : missingTargetTool ? <div className="empty-state"><strong>工具回执不可用</strong><p>工具 {target?.toolId} 尚未出现在当前运行的持久化回执中。</p></div> : missingTargetAction ? <div className="empty-state"><strong>动作回执不可用</strong><p>动作 {target?.actionId} 尚未出现在当前运行的持久化工具回执中。</p></div> : <RunDetail trace={trace} />}</section>
+        <nav className="trace-tree" aria-label="运行、轮次与工具"><button className={`trace-node ${selectedNode === 'run' ? 'active' : ''}`} type="button" onClick={() => setSelectedNode('run')}><strong>运行</strong><span>{trace.run?.id || '运行未知'}</span></button>{target?.kind === 'readback' && <button className={`trace-node ${selectedNode.startsWith('readback:') ? 'active' : ''}`} type="button" onClick={() => setSelectedNode(`readback:${target.runId || 'unknown'}`)}><strong>独立回读快照</strong><span>{readbackMatches ? '已返回' : '当前运行无此快照'}</span></button>}{trace.rounds.map((round) => <div key={round.index} className="trace-tree-round"><button className={`trace-node ${selectedNode === `round:${round.index}` ? 'active' : ''}`} type="button" onClick={() => setSelectedNode(`round:${round.index}`)}><strong>第 {round.index} 轮</strong><span>{roundStatusLabel(round.status)}</span></button>{round.tool_ids.map((id) => { const tool = toolsById.get(id); return <button className={`trace-node trace-tool-node ${selectedNode === `tool:${id}` ? 'active' : ''}`} type="button" key={id} onClick={() => setSelectedNode(`tool:${id}`)}><strong>{tool?.name || id}</strong><span>{tool ? toolStatusLabel(tool.status) : '回执未知'}</span></button> })}</div>)}{activeTools.map((tool) => <button className={`trace-node trace-tool-node ${selectedNode === `tool:${tool.id}` ? 'active' : ''}`} type="button" key={`active:${tool.id}`} onClick={() => setSelectedNode(`tool:${tool.id}`)}><strong>{tool.name}</strong><span>活动中 · 回执尚未到达</span></button>)}{missingTargetTool && <button className={`trace-node trace-tool-node unavailable ${selectedNode === `tool:${target?.toolId}` ? 'active' : ''}`} type="button" onClick={() => setSelectedNode(`tool:${target?.toolId}`)}><strong>{target?.toolId}</strong><span>不可用 · 尚未返回回执</span></button>}{missingTargetAction && <button className={`trace-node trace-tool-node unavailable ${selectedNode === `action:${target?.actionId}` ? 'active' : ''}`} type="button" onClick={() => setSelectedNode(`action:${target?.actionId}`)}><strong>{target?.actionId}</strong><span>回执不可用 · 尚未返回</span></button>}</nav>
+       <section className="trace-detail-panel" aria-live="polite"><div className="section-heading"><div><span className="eyebrow">运行详情</span><h3>{selectedTool ? selectedTool.name : selectedAction ? selectedAction.name : selectedRound ? `第 ${selectedRound.index} 轮` : selectedNode.startsWith('readback:') ? '独立回读快照' : missingTargetTool ? '工具回执不可用' : missingTargetAction ? '动作回执不可用' : '运行总览'}</h3></div><span>{trace.run?.id || '运行未知'}</span></div>{selectedTool ? <ToolDetail tool={selectedTool} /> : selectedAction ? <ToolDetail tool={selectedAction} /> : selectedRound ? <RoundDetail round={selectedRound} /> : selectedNode.startsWith('readback:') ? <ReadbackDetail readback={readbackMatches ? readback : undefined} /> : missingTargetTool ? <div className="empty-state"><strong>工具回执不可用</strong><p>工具 {target?.toolId} 尚未出现在当前运行的持久化回执中。</p></div> : missingTargetAction ? <div className="empty-state"><strong>动作回执不可用</strong><p>动作 {target?.actionId} 尚未出现在当前运行的持久化工具回执中。</p></div> : <RunDetail trace={trace} />}</section>
       </div>}
     </div>
   )
 }
 
 function RunDetail({ trace }: { trace: TraceBundle }) { if (!trace.run) return <EmptyState title="运行状态未知" detail="主机尚未返回运行摘要。" />; return <div className="trace-detail-content"><div className="fact-table"><div><span>状态</span><strong>{runDisplayLabel(trace.run.status)}</strong></div><div><span>轮次</span><strong>{formatCount(trace.run.model_rounds)}</strong></div><div><span>工具</span><strong>{formatCount(trace.run.tool_count)}</strong></div><div><span>耗时</span><strong>{formatDuration(trace.run.elapsed_seconds)}</strong></div></div><UsageBreakdown usage={trace.run.usage} />{trace.run.error && <div className="notice red"><CircleAlert size={15} /><span>{trace.run.error_detail || trace.run.error}</span></div>}</div> }
-function RoundDetail({ round }: { round: Round }) { return <div className="trace-detail-content"><p>{round.text || '没有公开摘要；隐藏思维不会在工作台展示。'}</p><UsageBreakdown usage={round.usage} /><div className="trace-label">状态</div><p>{round.status} · {formatDuration(round.elapsed_seconds)}</p></div> }
-function ToolDetail({ tool }: { tool: ToolReceipt }) { return <div className="trace-detail-content"><div className="fact-table"><div><span>状态</span><strong>{tool.status}</strong></div><div><span>轮次</span><strong>{tool.round == null ? '未知' : `第 ${tool.round} 轮`}</strong></div><div><span>耗时</span><strong>{formatDuration(tool.elapsed_seconds)}</strong></div><div><span>审批</span><strong>{tool.action_id || '未知'}</strong></div></div><div className="json-columns"><div><small>请求参数</small><pre>{jsonText(tool.arguments)}</pre></div><div><small>结果回执</small><pre>{tool.result == null ? '未知' : jsonText(tool.result)}</pre></div></div></div> }
+function RoundDetail({ round }: { round: Round }) { return <div className="trace-detail-content"><MessageText text={round.text || '没有公开摘要；隐藏思维不会在工作台展示。'} /><UsageBreakdown usage={round.usage} /><div className="trace-label">状态</div><p>{roundStatusLabel(round.status)} · {formatDuration(round.elapsed_seconds)}</p></div> }
+function ToolDetail({ tool }: { tool: ToolReceipt }) { return <div className="trace-detail-content"><div className="fact-table"><div><span>状态</span><strong>{toolStatusLabel(tool.status)}</strong></div><div><span>轮次</span><strong>{tool.round == null ? '未知' : `第 ${tool.round} 轮`}</strong></div><div><span>耗时</span><strong>{formatDuration(tool.elapsed_seconds)}</strong></div><div><span>审批</span><strong>{tool.action_id || '未知'}</strong></div></div><div className="json-columns"><div><small>请求参数</small><pre>{jsonText(tool.arguments)}</pre></div><div><small>结果回执</small><pre>{tool.result == null ? '未知' : jsonText(tool.result)}</pre></div></div></div> }
 function ReadbackDetail({ readback }: { readback?: BusinessDetailProjection['business']['readback'] }) { return <div className="trace-detail-content"><div className="notice blue"><CircleCheck size={15} /><span>这是独立 Odoo 回读快照，时间与原始工具调用分开记录。</span></div>{readback ? <><div className="fact-table"><div><span>快照时间</span><strong>{formatInstant(readback.observed_at)}</strong></div><div><span>来源</span><strong>独立 Odoo 回读</strong></div><div><span>核验项</span><strong>{readback.checks?.length ?? 0}</strong></div><div><span>状态</span><strong>{readback.stale ? '可能已过期' : '已返回'}</strong></div></div><details className="resource-fields"><summary>查看回读核验</summary><pre>{jsonText(readback.checks ?? [])}</pre></details></> : <div className="empty-state"><strong>快照详情不可用</strong><p>当前运行没有匹配的独立回读快照。</p></div>}</div> }
 
 function UsageBreakdown({ usage }: { usage?: Run['usage'] }) {
@@ -1207,23 +1447,25 @@ function UsageBreakdown({ usage }: { usage?: Run['usage'] }) {
   return <div className="usage-breakdown" aria-label="Token 用量"><span>未缓存输入 {formatCount(usage.input)}</span><span>缓存命中 {formatCount(usage.cache_read)}</span><span>输出（含推理） {formatCount(usage.output)}</span><span>推理 {formatCount(usage.reasoning)}</span><span>总计 {formatCount(usage.total)}</span></div>
 }
 
-function ToolReceiptRow({ tool }: { tool: ToolReceipt }) { return <details className="tool-row"><summary><span className={`tool-status tool-${tool.status}`}>{tool.status}</span><strong>{tool.name}</strong><small>{tool.round ? `第 ${tool.round} 轮 · ` : ''}{formatDuration(tool.elapsed_seconds)}</small></summary><div className="json-columns"><div><small>请求参数</small><pre>{jsonText(tool.arguments)}</pre></div><div><small>结果回执</small><pre>{tool.result == null ? '未知' : jsonText(tool.result)}</pre></div></div>{tool.action_id && <span className="receipt-link">关联审批：{tool.action_id}</span>}</details> }
+function ToolReceiptRow({ tool }: { tool: ToolReceipt }) { return <details className="tool-row"><summary><span className={`tool-status tool-${tool.status}`}>{toolStatusLabel(tool.status)}</span><strong>{tool.name}</strong><small>{tool.round ? `第 ${tool.round} 轮 · ` : ''}{formatDuration(tool.elapsed_seconds)}</small></summary><div className="json-columns"><div><small>请求参数</small><pre>{jsonText(tool.arguments)}</pre></div><div><small>结果回执</small><pre>{tool.result == null ? '未知' : jsonText(tool.result)}</pre></div></div>{tool.action_id && <span className="receipt-link">关联审批：{tool.action_id}</span>}</details> }
 
 function EmptyState({ title, detail }: { title: string; detail: string }) { return <div className="empty-state"><span className="empty-glyph">○</span><strong>{title}</strong><p>{detail}</p></div> }
 
 function messageForError(reason: unknown) {
   const message = reason instanceof Error ? reason.message : String(reason)
-  return message.includes('CONFIG_BUSY') ? '当前有业务正在执行或等待审批，请结束后再修改连接设置。' : message.includes('CONNECTION_CHECK_BUSY') ? '执行期间显示最近检查结果，结束后可重新检查。' : message.includes('EXPORT_CANCELLED') ? '已取消导出业务回执。' : message.includes('ODOO_RECORD_NOT_FOUND') ? '该 Odoo 记录已不存在或不属于当前业务。' : message.includes('ODOO_OPEN_UNAVAILABLE') ? '当前无法打开 Odoo 记录，请检查 Odoo 连接。' : message.includes('ODOO_ORIGIN_MISMATCH') ? '该记录不属于当前配置的 Odoo 地址。' : message
+  return message.includes('CONFIG_BUSY') ? '当前有业务正在执行或等待审批，请结束后再修改连接设置。' : message.includes('CONNECTION_CHECK_BUSY') ? '执行期间显示最近检查结果，结束后可重新检查。' : message.includes('EXPORT_CANCELLED') ? '已取消导出业务回执。' : message.includes('ARTIFACT_FILE_MISSING') ? '文件已移动或删除，请重新导出。' : message.includes('ARTIFACT_NOT_FOUND') ? '当前业务没有此文件。' : message.includes('ARTIFACT_FORMAT_INVALID') ? '仅支持本业务已登记的 JSON 回执。' : message.includes('ARTIFACT_OPEN_FAILED') ? '系统无法打开文件，可尝试显示位置。' : message.includes('ARTIFACT_INDEX_FAILED') ? message : message.includes('ODOO_RECORD_NOT_FOUND') ? '该 Odoo 记录已不存在或不属于当前业务。' : message.includes('ODOO_OPEN_UNAVAILABLE') ? '当前无法打开 Odoo 记录，请检查 Odoo 连接。' : message.includes('ODOO_ORIGIN_MISMATCH') ? '该记录不属于当前配置的 Odoo 地址。' : message
 }
 function connectionLabel(state: ConnectionState) { return state === 'connected' ? '主机已连接' : state === 'checking' ? '正在连接主机' : state === 'crashed' ? '主机已崩溃' : state === 'protocol_error' ? '主机协议错误' : '主机断开' }
 function odooHealthStatus(health: Health | null) { return health?.odoo?.status || health?.odoo_status || 'unchecked' }
 function healthLabel(status?: string) { return status === 'connected' || status === 'ready' || status === 'ok' ? '已连接' : status === 'configured' ? '已配置' : status === 'unconfigured' ? '未配置' : status === 'unavailable' ? '不可用' : status === 'permission_denied' ? '无权限' : status === 'error' ? '检查失败' : status === 'unchecked' ? '未检查' : status === 'disconnected' ? '断开' : '状态未知' }
 function runDisplayLabel(status?: string) { return status === 'completed' ? '本轮结束' : labelFor(runStatusLabel, status) }
+function roundStatusLabel(status?: string) { return labelFor({ completed: '已完成', running: '进行中', pending: '待处理', failed: '失败', interrupted: '已中断', cancelled: '已取消', awaiting_approval: '等待审批' }, status) }
+function toolStatusLabel(status?: string) { return labelFor({ completed: '已完成', running: '进行中', error: '错误', failed: '失败', executed: '已执行', awaiting_approval: '等待审批', pending: '待处理', interrupted: '已中断', cancelled: '已取消', unknown: '未知' }, status) }
 function activityPhaseLabel(phase?: string) { return ({ idle: '待执行', planning: '准备中', model: '分析业务目标', reading: '读取业务数据', tool: '调用业务工具', approval: '等待确认', executing: '执行中', cancelling: '正在取消', verifying: '回读核验', completed: '本轮结束', failed: '执行失败', interrupted: '已中断', cancelled: '已取消', reconciliation: '等待对账', unknown: '状态未知' } as Record<string, string>)[phase || ''] || '状态未知' }
-function stageLabel(stage?: string) { return ({ read: '读取', quote: '报价', confirm: '确认', invoice: '开票', verify: '核验' } as Record<string, string>)[stage || ''] || stage || '未知阶段' }
-function stageStatusLabel(status?: string) { return ({ pending: '待处理', active: '进行中', awaiting_approval: '等待审批', observed: '已观测', verified: '已核验', failed: '失败', unknown: '未知' } as Record<string, string>)[status || ''] || status || '未知' }
-function outcomeScopeLabel(scope?: string) { return ({ sale_invoice_basic_checks: '销售订单与客户发票基础核验' } as Record<string, string>)[scope || ''] || scope || '未知' }
-function outcomeStatusLabel(status?: string) { return ({ unknown: '未知', passed: '通过', failed: '失败' } as Record<string, string>)[status || ''] || status || '未知' }
+function stageLabel(stage?: string) { return ({ read: '读取', quote: '报价', confirm: '确认', invoice: '开票', verify: '核验' } as Record<string, string>)[stage || ''] || '未知阶段' }
+function stageStatusLabel(status?: string) { return ({ pending: '待处理', active: '进行中', awaiting_approval: '等待审批', observed: '已观测', verified: '已核验', failed: '失败', unknown: '未知' } as Record<string, string>)[status || ''] || '未知' }
+function outcomeScopeLabel(scope?: string) { return ({ sale_invoice_basic_checks: '销售订单与客户发票基础核验' } as Record<string, string>)[scope || ''] || '业务范围未知' }
+function outcomeStatusLabel(status?: string) { return ({ unknown: '未知', passed: '通过', failed: '失败' } as Record<string, string>)[status || ''] || '状态未知' }
 function toolLabel(tool?: string) { return ({ mcp_odoo_read_record: '读取业务记录', mcp_odoo_read: '读取业务记录', mcp_odoo_validate_write: '预检业务动作', execute_approved_write: '执行已批准动作', refresh_business: '读取最新状态' } as Record<string, string>)[tool || ''] || '业务工具' }
 function isPendingApproval(approval: Approval) { return approval.status === 'pending' || approval.status === 'pending_approval' }
 function approvalStatusLabel(status: string) {
@@ -1232,7 +1474,7 @@ function approvalStatusLabel(status: string) {
     verified: '已核验', known_failed: '已知失败', not_executed: '未执行', interrupted: '已中断',
     stale: '已失效', expired: '已过期', needs_reconciliation: '需对账', executing: '执行中', executed: '已执行', failed: '执行失败'
   }
-  return labels[status] || status
+  return labels[status] || '状态未知'
 }
 function operationLabel(operation: string) {
   const labels: Record<string, string> = { create: '创建', write: '修改', unlink: '删除', action_confirm: '确认', create_invoices: '创建发票', action_post: '过账' }
@@ -1281,6 +1523,7 @@ function ConnectionDetailsDialog({ health, connection, busy, open, onOpenChange,
         <div><span>Odoo 读取</span><strong>{healthLabel(odooHealthStatus(health))}</strong></div>
         <div><span>地址 / 数据库</span><strong>{odoo?.endpoint || '未配置'}{odoo?.database ? ` · ${odoo.database}` : ''}</strong></div>
         <div><span>配置账号</span><strong>{odoo?.account || '未检查'}</strong></div>
+        <div><span>本地数据目录</span><strong>{health?.data_dir || '未提供'}</strong></div>
         <div><span>模型配置</span><strong>{health?.model_configured ? '已配置' : '未配置'}</strong></div>
         <div><span>最近检查</span><strong>{formatInstant(odoo?.checked_at)}{odoo?.latency_ms != null ? ` · ${odoo.latency_ms} ms` : ''}</strong></div>
       </div>

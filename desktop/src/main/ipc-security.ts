@@ -1,12 +1,13 @@
+import { extname, isAbsolute } from "node:path";
 import type { Document, WorkbenchMethod } from "../shared/protocol";
 import { validateEndpoint } from "./settings";
 
-const LOCAL_METHODS = new Set(["get_settings", "save_settings", "export_business_report", "open_odoo_record"]);
+const LOCAL_METHODS = new Set(["get_settings", "save_settings", "export_business_report", "open_odoo_record", "open_business_artifact", "reveal_business_artifact"]);
 
 export const METHODS = new Set<WorkbenchMethod>([
   "list_sessions", "create_session", "rename_session", "archive_session", "get_session",
   "send_message", "confirm_business", "get_business", "start_run", "decide_approval",
-  "cancel_run", "get_trace", "refresh_business", "reconcile_action", "health", "check_connection",
+  "cancel_run", "cancel_conversation", "get_trace", "refresh_business", "reconcile_action", "health", "check_connection",
 ]);
 
 export interface ValidIpcRequest {
@@ -52,4 +53,13 @@ export function observedRecordUrl(endpoint: string, documents: Document[], model
   url.pathname = `${url.pathname.replace(/\/$/, "")}/web`;
   url.hash = new URLSearchParams({ id: String(recordId), model, view_type: "form" }).toString();
   return url.href;
+}
+
+export function recordedArtifactPath(artifacts: ReadonlyArray<{ id: string; path: string }>, artifactId: unknown): string {
+  if (typeof artifactId !== "string") throw new Error("ARTIFACT_NOT_FOUND");
+  const artifact = artifacts.find(item => item.id === artifactId);
+  if (!artifact) throw new Error("ARTIFACT_NOT_FOUND");
+  // Only files registered after the native receipt save dialog can be opened.
+  if (!isAbsolute(artifact.path) || extname(artifact.path).toLowerCase() !== ".json") throw new Error("ARTIFACT_FORMAT_INVALID");
+  return artifact.path;
 }

@@ -1,5 +1,6 @@
 import type {
   Approval,
+  BusinessArtifact,
   Business,
   BusinessDetail,
   BusinessEvidence,
@@ -9,6 +10,8 @@ import type {
   Check,
   Document,
   Health,
+  ConversationRun,
+  LiveMessage,
   Message,
   Round,
   Run,
@@ -21,6 +24,7 @@ import type {
 
 export type {
   Approval,
+  BusinessArtifact,
   Business,
   BusinessDetail,
   BusinessEvidence,
@@ -30,6 +34,8 @@ export type {
   Check,
   Document,
   Health,
+  ConversationRun,
+  LiveMessage,
   Message,
   Round,
   Run,
@@ -58,6 +64,8 @@ export interface SessionDetail {
   session: SessionSummary
   messages: Message[]
   businesses: Business[]
+  conversation_runs?: ConversationRun[]
+  live_messages?: LiveMessage[]
 }
 
 export type ToolReceipt = Tool
@@ -99,7 +107,7 @@ export const businessStatusLabel: Record<string, string> = {
 }
 
 export function labelFor(map: Record<string, string>, value: string | undefined, fallback = '未知') {
-  return value ? map[value] ?? value : fallback
+  return value ? map[value] ?? fallback : fallback
 }
 
 export function formatInstant(value?: string) {

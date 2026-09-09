@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import io
 import os
 import sys
 import tempfile
@@ -55,6 +56,22 @@ class _WorkerInitFailureProcess:
         return self.returncode
 
 
+class _EventProcess:
+    def __init__(self, events):
+        self.stdout = io.StringIO("".join(json.dumps(event) + "\n" for event in events))
+        self.stderr = io.StringIO()
+        self.returncode = 0
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+    def kill(self):
+        self.returncode = -9
+
+
 class WorkbenchHostTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -70,8 +87,8 @@ class WorkbenchHostTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def _business(self, goal: str = "create a sale"):
-        self.host.send_message(self.sid, goal)
-        proposal = self.host.store.data["messages"][self.sid][-1]["proposal"]
+        proposal = {"id": f"p_{goal.replace(' ', '_')}", "type": "sale_invoice", "title": "销售订单与发票", "goal": goal, "status": "pending"}
+        self.host.store.data["messages"][self.sid].append({"id": f"m_{proposal['id']}", "role": "user", "text": goal, "created_at": "2026-01-01T00:00:00Z", "business_id": None, "proposal": proposal})
         return self.host.confirm_business(self.sid, proposal["id"], True)
 
     def _run(self, goal: str = "create a sale"):
@@ -275,8 +292,8 @@ class WorkbenchHostTests(unittest.TestCase):
         first = self._business("first order")
         second = self._business("second order")
         self.assertNotEqual(first["id"], second["id"])
-        self.assertIn("1", first["title"])
-        self.assertIn("2", second["title"])
+        self.assertEqual(first["title"], "销售订单与发票")
+        self.assertEqual(second["title"], "销售订单与发票")
         self.host.store.data["messages"][self.sid].append({
             "id": "assistant", "role": "assistant", "text": "secret internal reasoning", "business_id": first["id"]
         })
@@ -363,8 +380,8 @@ class WorkbenchHostTests(unittest.TestCase):
             durable = Workbench(isolated.name, repo=Path.cwd())
             durable._launch = lambda *_args, **_kwargs: None
             session = durable.create_session("durable")
-            durable.send_message(session["id"], "durable business")
-            proposal = durable.store.data["messages"][session["id"]][-1]["proposal"]
+            proposal = {"id": "p_durable", "type": "sale_invoice", "title": "销售订单与发票", "goal": "durable business", "status": "pending"}
+            durable.store.data["messages"][session["id"]].append({"id": "m_durable", "role": "user", "text": "durable business", "created_at": "2026-01-01T00:00:00Z", "business_id": None, "proposal": proposal})
             durable_business = durable.confirm_business(session["id"], proposal["id"], True)
             durable_run = durable.start_run(session["id"], durable_business["id"])
             durable._finalize_run(durable_run, "completed", None)
@@ -559,8 +576,9 @@ class WorkbenchHostTests(unittest.TestCase):
         tmp2 = tempfile.TemporaryDirectory()
         try:
             h = Workbench(tmp2.name, repo=Path.cwd()); h._launch = lambda *_args, **_kw: None
-            s = h.create_session(); sid = s["id"]; h.send_message(sid, "uncertain")
-            proposal = h.store.data["messages"][sid][-1]["proposal"]; b = h.confirm_business(sid, proposal["id"], True); r = h.start_run(sid, b["id"])
+            s = h.create_session(); sid = s["id"]; proposal = {"id": "p_uncertain", "type": "sale_invoice", "title": "销售订单与发票", "goal": "uncertain", "status": "pending"}
+            h.store.data["messages"][sid].append({"id": "m_uncertain", "role": "user", "text": "uncertain", "created_at": "2026-01-01T00:00:00Z", "business_id": None, "proposal": proposal})
+            b = h.confirm_business(sid, proposal["id"], True); r = h.start_run(sid, b["id"])
             path = Path(tmp2.name) / "runs" / r["id"] / "odoo-actions.sqlite3"
             ActionStore(path).close()
             h.store.save(); h.store.close(); path.write_bytes(b"not sqlite")
@@ -579,8 +597,8 @@ class WorkbenchHostTests(unittest.TestCase):
                 host._launch = lambda *_args, **_kw: None
                 session = host.create_session("recovery")
                 sid = session["id"]
-                host.send_message(sid, ledger_status)
-                proposal = host.store.data["messages"][sid][-1]["proposal"]
+                proposal = {"id": f"p_{ledger_status}", "type": "sale_invoice", "title": "销售订单与发票", "goal": ledger_status, "status": "pending"}
+                host.store.data["messages"][sid].append({"id": f"m_{ledger_status}", "role": "user", "text": ledger_status, "created_at": "2026-01-01T00:00:00Z", "business_id": None, "proposal": proposal})
                 business = host.confirm_business(sid, proposal["id"], True)
                 run = host.start_run(sid, business["id"])
                 path = Path(isolated.name) / "runs" / run["id"] / "odoo-actions.sqlite3"
@@ -658,6 +676,166 @@ class WorkbenchHostTests(unittest.TestCase):
     def test_state_store_is_single_host_locked(self):
         with self.assertRaises(RuntimeError):
             Workbench(self.tmp.name, repo=Path.cwd())
+
+    def test_plain_message_starts_scoped_conversation_without_odoo_or_proposal(self):
+        captured = []
+        self.host._launch_conversation = lambda run: captured.append(run)
+        context_business = self._business("context only")
+        with patch.object(self.host, "_native_reads", side_effect=AssertionError("conversation must not initialize Odoo")):
+            result = self.host.send_message(self.sid, "你好，你能做什么？", context_business_id=context_business["id"])
+        self.assertTrue(result["run_id"].startswith("c_"))
+        run = captured[0]
+        self.assertEqual(run["kind"], "conversation")
+        self.assertIsNone(run["business_id"])
+        self.assertEqual(run["context_business_id"], context_business["id"])
+        self.assertNotIn("proposal", self.host.store.data["messages"][self.sid][-1])
+        self.assertEqual(self.host.store.data["sessions"][self.sid]["active_run_id"], run["id"])
+
+    def test_send_message_worker_events_complete_proposal_from_real_run_shape(self):
+        events = [
+            {"type": "tool_execution_start", "tool_call_id": "call-1", "tool_name": "propose_business",
+             "args": {"type": "sale_invoice", "title": "客户开票提案", "goal": "建立订单并开票"}},
+            {"type": "tool_execution_end", "tool_call_id": "call-1", "tool_name": "propose_business",
+             "result": {"success": True, "proposal": {"type": "sale_invoice", "title": "客户开票提案", "goal": "建立订单并开票"}}},
+            {"type": "turn_end", "message": {"role": "assistant", "content": [{"type": "text", "text": "请确认这份提案。"}],
+             "stop_reason": "stop", "usage": {"input": 1, "output": 2, "total": 3}}},
+            {"type": "message_end", "message_id": "assistant-1", "text": "请确认这份提案。", "sequence": 1},
+        ]
+        launched = {}
+
+        def launch(run):
+            process = _EventProcess(events)
+            self.host._processes[run["id"]] = process
+            thread = threading.Thread(target=self.host._consume_worker,
+                                      args=(run["id"], process, Path(self.tmp.name) / "usage.json"), daemon=True)
+            self.host._threads[run["id"]] = thread
+            launched["thread"] = thread
+            thread.start()
+
+        self.host._launch_conversation = launch
+        result = self.host.send_message(self.sid, "请准备客户订单和开票提案。")
+        launched["thread"].join(2)
+        run = self.host.store.data["conversation_runs"][result["run_id"]]
+        self.assertEqual(run["status"], "completed")
+        self.assertEqual(run["tool_count"], 1)
+        proposals = [row.get("proposal") for row in self.host.store.data["messages"][self.sid] if row.get("proposal")]
+        self.assertEqual(len(proposals), 1)
+        self.assertEqual(proposals[0]["title"], "客户开票提案")
+        self.assertEqual(run["assistant_text"], "请确认这份提案。")
+
+    def test_conversation_stop_without_visible_text_is_failed(self):
+        events = [{"type": "turn_end", "message": {"role": "assistant", "content": [],
+                  "stop_reason": "stop", "usage": {"input": 1, "output": 0, "total": 1}}}]
+        launched = {}
+
+        def launch(run):
+            process = _EventProcess(events)
+            self.host._processes[run["id"]] = process
+            thread = threading.Thread(target=self.host._consume_worker,
+                                      args=(run["id"], process, Path(self.tmp.name) / "usage.json"), daemon=True)
+            self.host._threads[run["id"]] = thread
+            launched["thread"] = thread
+            thread.start()
+
+        self.host._launch_conversation = launch
+        result = self.host.send_message(self.sid, "只返回空内容。")
+        launched["thread"].join(2)
+        run = self.host.store.data["conversation_runs"][result["run_id"]]
+        self.assertEqual(run["status"], "failed")
+        self.assertEqual(run["error"], "model_did_not_finish")
+
+    def test_legacy_preflight_failure_keeps_goal_for_first_retry(self):
+        business = {"id": "b_legacy", "session_id": self.sid, "type": "sale_invoice",
+                    "title": "Legacy", "goal": "retry the original goal", "status": "failed",
+                    "active_run_id": None}
+        self.host.store.data["businesses"][business["id"]] = business
+        self.host.store.data["runs"]["r_legacy_failed"] = {
+            "id": "r_legacy_failed", "session_id": self.sid, "business_id": business["id"],
+            "status": "failed", "model_rounds": 0, "tool_count": 0,
+        }
+        self.host._migrate_business_goal_flags()
+        self.assertFalse(business["goal_submitted"])
+        instruction = self.host._instruction(business, "r_legacy_retry")
+        self.assertIn(business["goal"], instruction.read_text(encoding="utf-8"))
+
+    def test_stream_deltas_are_scoped_deduped_and_do_not_fsync_each_fragment(self):
+        events = []
+        self.host._event_sink = events.append
+        run = {"id": "c_stream", "kind": "conversation", "session_id": self.sid, "business_id": None,
+               "status": "running", "started_at": "2026-01-01T00:00:00Z", "live_messages": [],
+               "events": [], "tools": [], "model_rounds": 0, "rounds": [], "ttft_ms": None}
+        self.host.store.data["conversation_runs"][run["id"]] = run
+        with patch.object(self.host.store, "event", wraps=self.host.store.event) as persisted:
+            for index in range(1, 101):
+                self.host._message_delta(run, {"type": "message_delta", "message_id": "m1", "text": "x", "sequence": index})
+            self.host._message_delta(run, {"type": "message_delta", "message_id": "m1", "text": "duplicate", "sequence": 100})
+        self.assertEqual(persisted.call_count, 0)
+        self.assertEqual(run["live_messages"][0]["text"], "x" * 100)
+        self.assertEqual(run["live_messages"][0]["sequence"], 100)
+        self.assertEqual(len(events), 100)
+        self.assertTrue(all(event["data"]["session_id"] == self.sid and event["data"]["run_id"] == "c_stream" for event in events))
+
+    def test_existing_business_proposal_cannot_mutate_active_target(self):
+        business = self._business("original active goal")
+        original_title = business["title"]
+        business["status"] = "awaiting_approval"
+        business["active_run_id"] = "r_active"
+        proposal = {"id": "p_existing_active", "type": "sale_invoice", "title": "替换标题",
+                    "goal": "替换目标", "status": "pending", "existing_business_id": business["id"]}
+        self.host.store.data["messages"][self.sid].append({
+            "id": "m_existing_active", "role": "assistant", "text": "proposal",
+            "created_at": "2026-01-01T00:00:00Z", "business_id": None, "proposal": proposal,
+        })
+        with self.assertRaises(RuntimeError):
+            self.host.confirm_business(self.sid, proposal["id"], True)
+        self.assertEqual(proposal["status"], "pending")
+        self.assertEqual(business["title"], original_title)
+        self.assertEqual(business["goal"], "original active goal")
+
+    def test_message_end_is_scoped_final_and_late_events_are_ignored(self):
+        events = []
+        self.host._event_sink = events.append
+        run = {"id": "c_final", "kind": "conversation", "session_id": self.sid, "business_id": None,
+               "status": "running", "started_at": "2026-01-01T00:00:00Z", "live_messages": [],
+               "events": [], "tools": [], "model_rounds": 0, "rounds": [], "ttft_ms": None}
+        self.host.store.data["conversation_runs"][run["id"]] = run
+        self.host._message_delta(run, {"message_id": "m_final", "text": "draft", "sequence": 1})
+        self.host._message_end(run, {"message_id": "m_final", "text": "final", "sequence": 2})
+        self.host._message_delta(run, {"message_id": "m_final", "text": "late", "sequence": 3})
+        self.host._message_end(run, {"message_id": "m_final", "text": "duplicate", "sequence": 4})
+        saved = [row for row in self.host.store.data["messages"][self.sid] if row.get("id") == "m_final"]
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0]["text"], "final")
+        self.assertEqual(saved[0]["session_id"], self.sid)
+        self.assertEqual(saved[0]["run_id"], run["id"])
+        self.assertEqual(saved[0]["status"], "ended")
+        self.assertEqual(run["assistant_text"], "final")
+        self.assertEqual(run["live_messages"], [])
+        ends = [event for event in events if event.get("event") == "message_end"]
+        self.assertEqual(len(ends), 1)
+        self.assertEqual(ends[0]["data"]["message_id"], "m_final")
+        self.assertEqual(ends[0]["data"]["sequence"], 2)
+
+    def test_cancelled_conversation_keeps_partial_text_as_interrupted_snapshot(self):
+        run = {"id": "c_cancel", "kind": "conversation", "session_id": self.sid, "business_id": None,
+               "status": "running", "started_at": "2026-01-01T00:00:00Z", "live_messages": [], "events": [], "tools": []}
+        self.host.store.data["conversation_runs"][run["id"]] = run
+        self.host.store.data["sessions"][self.sid]["active_run_id"] = run["id"]
+        self.host._message_delta(run, {"message_id": "m1", "text": "半句", "sequence": 1})
+        proc = _LiveProcess(); self.host._processes[run["id"]] = proc
+        self.assertEqual(self.host.cancel_conversation(self.sid, run["id"])["status"], "cancel_requested")
+        self.host._finalize_conversation(run, "interrupted", "host_restarted")
+        self.assertEqual(run["live_messages"][0]["text"], "半句")
+        self.assertEqual(run["live_messages"][0]["status"], "interrupted")
+
+    def test_record_artifact_is_scoped_and_exposed(self):
+        business = self._business("artifact")
+        artifact = self.host._record_artifact(self.sid, business["id"], "/tmp/receipt.json", "receipt.json")
+        self.assertTrue(artifact["id"].startswith("a_"))
+        detail = self.host.get_business(self.sid, business["id"])
+        self.assertEqual(detail["artifacts"][0]["path"], "/tmp/receipt.json")
+        with self.assertRaises(KeyError):
+            self.host._record_artifact("other", business["id"], "/tmp/x.json", "x.json")
 
 
 if __name__ == "__main__":

@@ -1,11 +1,11 @@
 import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
 import { randomUUID } from "node:crypto";
-import { rename, unlink, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { rename, stat, unlink, writeFile } from "node:fs/promises";
+import { basename, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { HostClient } from "./host";
 import { publicSettings, saveSettings } from "./settings";
-import { assertRequest, businessScope, canChangeSettings, METHODS, observedRecordUrl } from "./ipc-security";
+import { assertRequest, businessScope, canChangeSettings, METHODS, observedRecordUrl, recordedArtifactPath } from "./ipc-security";
 import { runSelfCheck } from "./self-check";
 import type { BusinessDetail, SettingsInput, WorkbenchMethod } from "../shared/protocol";
 
@@ -83,7 +83,7 @@ function registerIpc(): void {
       }
     }
     if (settingsChanging) throw new Error("CONFIG_BUSY");
-    if (request.method === "export_business_report" || request.method === "open_odoo_record") {
+    if (["export_business_report", "open_odoo_record", "open_business_artifact", "reveal_business_artifact"].includes(request.method)) {
       const params = request.params ?? {};
       const scope = businessScope(params);
       const detail = await host.call("get_business", scope) as BusinessDetail;
@@ -91,6 +91,14 @@ function registerIpc(): void {
       if (request.method === "open_odoo_record") {
         const settings = await publicSettings();
         await shell.openExternal(observedRecordUrl(settings.odoo_url, detail.documents, params.model, params.record_id));
+        return { opened: true };
+      }
+      if (request.method === "open_business_artifact" || request.method === "reveal_business_artifact") {
+        const path = recordedArtifactPath(detail.artifacts ?? [], params.artifact_id);
+        const file = await stat(path).catch(() => undefined);
+        if (!file?.isFile()) throw new Error("ARTIFACT_FILE_MISSING");
+        if (request.method === "reveal_business_artifact") shell.showItemInFolder(path);
+        else if (await shell.openPath(path)) throw new Error("ARTIFACT_OPEN_FAILED");
         return { opened: true };
       }
       if (exportInProgress) throw new Error("EXPORT_BUSY");
@@ -105,12 +113,16 @@ function registerIpc(): void {
         const result = await dialog.showSaveDialog(window, { title: "导出业务回执", defaultPath: `odoo-business-${scope.business_id}.json`,
           filters: [{ name: "业务回执 JSON", extensions: ["json"] }] });
         if (result.canceled || !result.filePath) return { cancelled: true };
+        if (extname(result.filePath).toLowerCase() !== ".json") throw new Error("ARTIFACT_FORMAT_INVALID");
         temporary = `${result.filePath}.${randomUUID()}.tmp`;
         await writeFile(temporary, JSON.stringify({ schema_version: 1, exported_at: new Date().toISOString(),
           scope: { ...scope, run_id: run?.id ?? null }, business: detail, trace }, null, 2), { encoding: "utf8", flag: "wx", mode: 0o600 });
         await rename(temporary, result.filePath);
         temporary = undefined;
-        return { cancelled: false, path: result.filePath };
+        const artifact = await host.call("_record_artifact" as WorkbenchMethod, {
+          ...scope, ...(run ? { run_id: run.id } : {}), path: result.filePath, name: basename(result.filePath),
+        }).catch(() => { throw new Error(`ARTIFACT_INDEX_FAILED: 回执已保存至 ${result.filePath}，但文件索引保存失败，请保留此路径。`); });
+        return { cancelled: false, path: result.filePath, artifact };
       } finally {
         exportInProgress = false;
         if (temporary) await unlink(temporary).catch(() => undefined);

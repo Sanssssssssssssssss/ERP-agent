@@ -17,6 +17,23 @@ def worker_command(repo: Path, instruction: Path, usage: Path, session: Path, *,
     return command
 
 
+def conversation_command(repo: Path, instruction: Path, usage: Path, session: Path) -> list[str]:
+    """Launch the isolated, proposal-only Pi conversation worker."""
+    return [
+        sys.executable,
+        "-m",
+        "workbench.conversation",
+        "--instruction-file",
+        str(instruction),
+        "--usage-file",
+        str(usage),
+        "--session-file",
+        str(session),
+        "--receipt-dir",
+        str(usage.parent),
+    ]
+
+
 def child_environment(session_id: str, run_id: str) -> dict[str, str]:
     allowed = ("PATH", "SystemRoot", "TEMP", "TMP", "PYTHONUTF8", "PYTHONDONTWRITEBYTECODE",
                "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "LLM_THINKING_TYPE",
@@ -38,4 +55,17 @@ def child_environment(session_id: str, run_id: str) -> dict[str, str]:
     root = str(Path(__file__).resolve().parents[1])
     # Do not inherit another checkout's agent/runtime modules into the worker.
     env["PYTHONPATH"] = os.pathsep.join((str(Path(root) / "agent" / "src"), root))
+    return env
+
+
+def conversation_environment(session_id: str, run_id: str) -> dict[str, str]:
+    """Environment for ordinary conversation; deliberately excludes Odoo access."""
+    allowed = (
+        "PATH", "SystemRoot", "TEMP", "TMP", "PYTHONUTF8", "PYTHONDONTWRITEBYTECODE",
+        "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "LLM_THINKING_TYPE", "LLM_PROVIDER",
+    )
+    env = {key: os.environ[key] for key in allowed if key in os.environ}
+    env["PI_AGENT_SESSION_ID"] = session_id
+    env["HARBOR_TRIAL_ID"] = run_id
+    env["PYTHONPATH"] = os.pathsep.join((str(Path(__file__).resolve().parents[1] / "agent" / "src"), str(Path(__file__).resolve().parents[1])))
     return env

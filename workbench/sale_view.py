@@ -171,13 +171,23 @@ def _activity(runs: list[dict[str, Any]], approvals: list[dict[str, Any]]) -> di
         "model_rounds": run.get("model_rounds", len(run.get("rounds", [])) if isinstance(run.get("rounds"), list) else 0),
     }
     rounds = run.get("rounds") if isinstance(run.get("rounds"), list) else []
-    latest_public_text = next(
-        (row.get("text", "").strip()[:1200] for row in reversed(rounds)
+    live_messages = run.get("live_messages") if isinstance(run.get("live_messages"), list) else []
+    latest_live = next(
+        (row for row in reversed(live_messages)
          if isinstance(row, dict) and isinstance(row.get("text"), str) and row.get("text", "").strip()),
         None,
     )
+    latest_public_text = (latest_live.get("text", "").strip()[:1200] if latest_live else None)
+    if latest_public_text is None:
+        latest_public_text = next(
+            (row.get("text", "").strip()[:1200] for row in reversed(rounds)
+             if isinstance(row, dict) and isinstance(row.get("text"), str) and row.get("text", "").strip()),
+            None,
+        )
     if latest_public_text:
         activity["intent"] = latest_public_text
+    if latest_live and run.get("last_event_at"):
+        activity["at"] = run["last_event_at"]
     if latest_tool:
         if isinstance(latest_tool.get("name"), str) and latest_tool.get("name"):
             activity["tool_name"] = latest_tool["name"]
@@ -190,6 +200,8 @@ def _activity(runs: list[dict[str, Any]], approvals: list[dict[str, Any]]) -> di
         if isinstance(last.get("type"), str):
             activity["last_event"] = last["type"]
         activity["at"] = last.get("at") or activity.get("at")
+    if latest_live and run.get("last_event_at"):
+        activity["at"] = run["last_event_at"]
     if phase in {"completed", "failed"} and run.get("ended_at"):
         activity["at"] = run["ended_at"]
     else:
@@ -641,7 +653,7 @@ def business_detail(state: dict[str, Any], business_id: str) -> dict[str, Any]:
     matching_readback_documents = readback_documents if readback_fresh else None
     public_runs = []
     for run in runs:
-        public = {key: value for key, value in run.items() if key not in {"_round_tool_start", "assistant_text", "rounds", "tools", "events"}}
+        public = {key: value for key, value in run.items() if key not in {"_round_tool_start", "assistant_text", "rounds", "tools", "events", "live_messages", "_message_sequences", "finalized_message_ids", "instruction"}}
         usage = public.get("usage")
         if isinstance(usage, dict):
             public["usage"] = {"input": usage.get("input"), "cache_read": usage.get("cache_read", usage.get("cacheRead")),
@@ -680,8 +692,14 @@ def business_detail(state: dict[str, Any], business_id: str) -> dict[str, Any]:
         approvals,
         matching_readback_documents,
     )
+    live_messages = []
+    for run in runs:
+        for message in run.get("live_messages", []) if isinstance(run.get("live_messages"), list) else []:
+            if isinstance(message, dict):
+                live_messages.append(dict(message))
+    artifacts = [dict(item) for item in business.get("artifacts", []) if isinstance(item, dict)]
     return {"business": business, "runs": public_runs, "approvals": approvals,
-            "documents": list(docs.values()), "checks": factual_checks,
+            "artifacts": artifacts, "live_messages": live_messages, "documents": list(docs.values()), "checks": factual_checks,
             "observed_at": observed_at,
             "stale": detail_stale,
             "summary": next((run.get("summary") for run in runs if run.get("summary")), None),

@@ -17,7 +17,35 @@ export interface Message {
   text: string;
   created_at: string;
   business_id?: string;
+  context_business_id?: string | null;
+  run_id?: string;
+  sequence?: number;
   proposal?: BusinessProposal;
+}
+
+export interface ConversationRun {
+  id: string;
+  session_id: string;
+  business_id?: string | null;
+  context_business_id?: string | null;
+  kind: "conversation";
+  status: string;
+  started_at?: string;
+  ended_at?: string;
+  error?: string;
+  error_detail?: string;
+}
+
+export interface LiveMessage {
+  id: string;
+  session_id: string;
+  business_id?: string | null;
+  run_id: string;
+  sequence: number;
+  text: string;
+  role?: Role;
+  status?: "streaming" | "ended" | "interrupted" | "failed";
+  created_at?: string;
 }
 
 export interface BusinessProposal {
@@ -84,6 +112,17 @@ export interface Document {
   source: string;
   source_run_id?: string;
   source_tool_id?: string;
+}
+
+export interface BusinessArtifact {
+  id: string;
+  name: string;
+  path: string;
+  created_at?: string;
+  kind: "business_receipt" | string;
+  run_id?: string;
+  available?: boolean;
+  error?: string;
 }
 
 export interface Check {
@@ -158,8 +197,10 @@ export interface Tool {
 export interface BusinessDetail {
   business: Business;
   runs: Run[];
+  live_messages?: LiveMessage[];
   approvals: Approval[];
   documents: Document[];
+  artifacts?: BusinessArtifact[];
   checks: Check[];
   observed_at?: string;
   stale: boolean;
@@ -185,6 +226,7 @@ export interface Health {
   odoo_status?: string;
   model_configured?: boolean;
   environment?: string;
+  data_dir?: string;
   active_run_id?: string | null;
   odoo?: {
     status: "unconfigured" | "unchecked" | "connected" | "unavailable" | "permission_denied" | "error";
@@ -220,6 +262,7 @@ export type WorkbenchMethod =
   | "archive_session"
   | "get_session"
   | "send_message"
+  | "cancel_conversation"
   | "confirm_business"
   | "get_business"
   | "start_run"
@@ -230,6 +273,8 @@ export type WorkbenchMethod =
   | "refresh_business"
   | "export_business_report"
   | "open_odoo_record"
+  | "open_business_artifact"
+  | "reveal_business_artifact"
   | "get_settings"
   | "save_settings"
   | "check_connection"

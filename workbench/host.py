@@ -18,7 +18,7 @@ from typing import Any, Callable
 
 from .sale_view import business_detail, collect_documents, refresh_business as readback_business
 from .storage import StateStore
-from .worker import child_environment, worker_command
+from .worker import conversation_command, conversation_environment, child_environment, worker_command
 
 _SECRET = re.compile(r"(?i)(token|secret|password|api[_-]?key|authorization|cookie)")
 _HIDDEN = {"reasoning_content", "reasoningContent", "thinking", "thought_signature", "thoughtSignature"}
@@ -85,7 +85,8 @@ def _must_bool(value: Any, name: str) -> bool:
 
 
 def public_message(row: dict[str, Any]) -> dict[str, Any]:
-    return {key: row[key] for key in ("id", "role", "text", "created_at", "business_id", "proposal") if key in row}
+    return {key: row[key] for key in ("id", "role", "text", "created_at", "session_id", "business_id",
+                                      "context_business_id", "run_id", "status", "proposal") if key in row}
 
 
 def _public_endpoint(value: str | None) -> str | None:
@@ -113,8 +114,11 @@ class Workbench:
         self._threads: dict[str, threading.Thread] = {}
         self._closing = False
         self._event_sink = event_sink
+        self.store.data.setdefault("conversation_runs", {})
         self._odoo_health = self._initial_odoo_health()
         self._recover_on_start()
+        self._migrate_business_goal_flags()
+        self.store.save()
 
     def _initial_odoo_health(self) -> dict[str, Any]:
         endpoint = _public_endpoint(os.environ.get("ODOO_URL"))
@@ -207,6 +211,10 @@ class Workbench:
         for tool in run.get("tools", []):
             if tool.get("status") == "running":
                 tool["status"] = "interrupted"
+        if status in {"failed", "cancelled", "interrupted"}:
+            partial_status = "failed" if status == "failed" else "interrupted"
+            for message in run.get("live_messages", []):
+                message["status"] = partial_status
         pending_ids = list(run.get("pending_approval_action_ids", []))
         if pending_ids and status in {"completed", "failed", "cancelled", "interrupted"}:
             # Only hide the pending list after every corresponding ledger row
@@ -223,6 +231,9 @@ class Workbench:
         # submit on a retry.  Keep markers for any run with model/tool activity
         # or a non-retryable terminal state.
         if status == "failed" and run.get("model_rounds", 0) == 0 and not run.get("tools"):
+            business = self.store.data["businesses"].get(run.get("business_id"))
+            if business is not None:
+                business["goal_submitted"] = False
             for message in self.store.data["messages"].get(run["session_id"], []):
                 if (message.get("role") == "user" and
                         message.get("business_id") == run["business_id"] and
@@ -235,7 +246,22 @@ class Workbench:
         for run in self.store.data["runs"].values():
             if run.get("status") in {"running", "awaiting_approval", "cancel_requested"}:
                 self._finalize_run(run, "interrupted", "host_restarted")
+        for run in self.store.data.get("conversation_runs", {}).values():
+            if run.get("status") in {"running", "cancel_requested"}:
+                self._finalize_conversation(run, "interrupted", "host_restarted")
         self.store.save()
+
+    def _migrate_business_goal_flags(self) -> None:
+        """Avoid replaying a legacy business goal on every later run."""
+        for business in self.store.data["businesses"].values():
+            if "goal_submitted" in business:
+                continue
+            business["goal_submitted"] = any(
+                row.get("business_id") == business.get("id") and
+                ((isinstance(row.get("model_rounds"), (int, float)) and row.get("model_rounds", 0) > 0) or
+                 (isinstance(row.get("tool_count"), (int, float)) and row.get("tool_count", 0) > 0))
+                for row in self.store.data["runs"].values()
+            )
 
     def close(self) -> None:
         with self._lock:
@@ -245,6 +271,9 @@ class Workbench:
             threads = list(self._threads.values())
             for run in self.store.data["runs"].values():
                 if run.get("status") in {"running", "awaiting_approval", "cancel_requested"}:
+                    run["_stop_status"] = "interrupted"
+            for run in self.store.data.get("conversation_runs", {}).values():
+                if run.get("status") in {"running", "cancel_requested"}:
                     run["_stop_status"] = "interrupted"
             self.store.save()
         for proc in processes:
@@ -263,9 +292,12 @@ class Workbench:
             self.store.close()
 
     def _event(self, name: str, data: dict[str, Any]) -> dict[str, Any]:
-        if data.get("run_id") in self.store.data["runs"]:
-            run = self.store.data["runs"][data["run_id"]]
-            data = {"session_id": run["session_id"], "business_id": run["business_id"], **data}
+        run_id = data.get("run_id")
+        run = self.store.data["runs"].get(run_id) if isinstance(run_id, str) else None
+        if run is None and isinstance(run_id, str):
+            run = self.store.data.get("conversation_runs", {}).get(run_id)
+        if run is not None:
+            data = {"session_id": run["session_id"], "business_id": run.get("business_id"), "kind": run.get("kind", "business"), **data}
         state_event = name in {"session_changed", "business_changed", "business_proposal_decided", "message_added", "run_changed", "approval_changed", "business_refreshed", "connection_changed"}
         wire_name = "changed" if state_event else name
         wire_data = {"type": name, **_safe(data)} if state_event else _safe(data)
@@ -273,6 +305,17 @@ class Workbench:
         if self._event_sink:
             self._event_sink({"event": wire_name, "data": {**row["data"], "sequence": row["sequence"]}})
         return row
+
+    def _transient_event(self, name: str, data: dict[str, Any]) -> None:
+        """Send live-only data without appending/fsyncing the whole state file."""
+        run_id = data.get("run_id")
+        run = self.store.data["runs"].get(run_id) if isinstance(run_id, str) else None
+        if run is None and isinstance(run_id, str):
+            run = self.store.data.get("conversation_runs", {}).get(run_id)
+        if run is not None:
+            data = {"session_id": run["session_id"], "business_id": run.get("business_id"), "kind": run.get("kind", "business"), **data}
+        if self._event_sink:
+            self._event_sink({"event": name, "data": _safe(data)})
 
     def _session(self, session_id: str) -> dict[str, Any]:
         row = self.store.data["sessions"].get(session_id)
@@ -325,24 +368,104 @@ class Workbench:
         session = self._session(session_id)
         businesses = [row for row in self.store.data["businesses"].values() if row["session_id"] == session_id]
         businesses.sort(key=lambda row: (row["created_at"], row["id"]))
-        return {"session": session, "messages": [public_message(row) for row in self.store.data["messages"].get(session_id, [])], "businesses": businesses}
+        conversation_runs = []
+        for row in self.store.data.get("conversation_runs", {}).values():
+            if row.get("session_id") != session_id:
+                continue
+            public = {key: value for key, value in row.items() if key not in {"instruction", "events", "rounds", "tools", "_message_sequences", "finalized_message_ids"}}
+            public["live_messages"] = _safe(row.get("live_messages", []))
+            conversation_runs.append(_safe(public))
+        conversation_runs.sort(key=lambda row: (str(row.get("started_at") or ""), str(row.get("id") or "")), reverse=True)
+        live_messages = []
+        for row in conversation_runs:
+            live_messages.extend(_safe(row.get("live_messages", [])))
+        return {"session": session, "messages": [public_message(row) for row in self.store.data["messages"].get(session_id, [])],
+                "businesses": businesses, "conversation_runs": conversation_runs, "live_messages": live_messages}
 
-    def send_message(self, session_id: str, text: str, business_id: str | None = None) -> dict[str, bool]:
-        self._session(session_id)
+    def _conversation_prompt(self, session_id: str, text: str, context_business_id: str | None) -> str:
+        context = "No business is selected. Answer from the conversation only."
+        if context_business_id:
+            business = self._business(session_id, context_business_id)
+            documents = []
+            for run in self.store.data["runs"].values():
+                if run.get("business_id") != context_business_id:
+                    continue
+                for doc in run.get("documents", []):
+                    documents.append({"model": doc.get("model"), "id": doc.get("id"), "name": doc.get("name"), "state": doc.get("state")})
+            context = json.dumps({
+                "business": {key: business.get(key) for key in ("id", "type", "title", "goal", "status")},
+                "observed_documents": documents[-20:],
+                "notice": "These are local workbench facts and may be stale; do not describe them as a live Odoo read.",
+            }, ensure_ascii=False)
+        feedback = [row.get("text") for row in self.store.data["messages"].get(session_id, [])
+                    if row.get("role") == "system" and isinstance(row.get("text"), str)][-5:]
+        if feedback:
+            context += "\nPrevious host feedback:\n" + "\n".join(feedback)
+        return ("User message:\n" + text + "\n\nSelected business context:\n" + context +
+                "\n\nAnswer the user directly. If the goal is clearly a sales/invoice task, use propose_business for a reviewable proposal.")
+
+    def _launch_conversation(self, run: dict[str, Any]) -> None:
+        try:
+            if self._closing or self._processes:
+                raise RuntimeError("host is busy or stopping")
+            if any(not os.environ.get(key) for key in ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL")):
+                raise RuntimeError("explicit model settings are required")
+            instruction = self.store.root / "conversation-runs" / run["id"] / "instruction.txt"
+            instruction.parent.mkdir(parents=True, exist_ok=True)
+            instruction.write_text(run["instruction"], encoding="utf-8")
+            usage = self.store.root / "conversation-runs" / run["id"] / "usage.json"
+            session_file = self.store.root / "sessions" / run["session_id"] / "conversation.jsonl"
+            session_file.parent.mkdir(parents=True, exist_ok=True)
+            runtime_home = self.store.root / "runtime-home"
+            runtime_home.mkdir(exist_ok=True)
+            proc = subprocess.Popen(
+                conversation_command(self.root, instruction, usage, session_file),
+                cwd=self.root,
+                env={**conversation_environment(run["session_id"], run["id"]), "USERPROFILE": str(runtime_home), "HOME": str(runtime_home)},
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding="utf-8", errors="replace", bufsize=1,
+            )
+        except Exception as exc:
+            self._finalize_conversation(run, "failed", f"worker_launch_{type(exc).__name__}")
+            self._event("run_changed", {"run_id": run["id"], "status": run["status"]})
+            return
+        self._processes[run["id"]] = proc
+        thread = threading.Thread(target=self._consume_worker, args=(run["id"], proc, usage), daemon=True)
+        self._threads[run["id"]] = thread
+        thread.start()
+
+    def send_message(self, session_id: str, text: str, business_id: str | None = None,
+                     context_business_id: str | None = None) -> dict[str, Any]:
+        session = self._session(session_id)
         text = str(text).strip()
         if not text or len(text) > 20_000:
             raise ValueError("text must be 1..20000 characters")
-        proposal = None
-        if business_id is None:
-            proposal = {"id": uid("p"), "type": "sale_invoice", "title": "销售订单与发票", "goal": text, "status": "pending"}
-        else:
+        if business_id is not None:
             self._business(session_id, business_id)
-            if self.store.data["sessions"][session_id].get("active_run_id"):
-                raise RuntimeError("host already has an active run")
-        self.store.data["messages"].setdefault(session_id, []).append({"id": uid("m"), "role": "user", "text": text,
-            "created_at": now(), "business_id": business_id, **({"proposal": proposal} if proposal else {})})
+        if context_business_id is not None:
+            self._business(session_id, context_business_id)
+        if session.get("active_run_id"):
+            raise RuntimeError("host already has an active run")
+        message = {"id": uid("m"), "role": "user", "text": text, "created_at": now(),
+                   "business_id": business_id,
+                   **({"context_business_id": context_business_id} if context_business_id else {})}
+        self.store.data["messages"].setdefault(session_id, []).append(message)
         self._event("message_added", {"session_id": session_id, "business_id": business_id})
-        return {"ok": True}
+        if business_id is not None:
+            return {"ok": True}
+        run_id, stamp = uid("c"), now()
+        run = {"id": run_id, "kind": "conversation", "session_id": session_id, "business_id": None,
+               "context_business_id": context_business_id,
+               "status": "running", "started_at": stamp, "ended_at": None, "error": None,
+               "usage": None, "tool_count": 0, "model_rounds": 0, "elapsed_seconds": None,
+               "rounds": [], "tools": [], "documents": [],
+               "events": [], "live_messages": [], "instruction": self._conversation_prompt(session_id, text, context_business_id),
+               "ttft_ms": None, "last_event_at": None}
+        self.store.data.setdefault("conversation_runs", {})[run_id] = run
+        session["active_run_id"], session["status"], session["updated_at"] = run_id, "running", stamp
+        self._event("run_changed", {"run_id": run_id, "status": "running"})
+        self._launch_conversation(run)
+        return {"ok": True, "run_id": run_id}
 
     def confirm_business(self, session_id: str, proposal_id: str, confirmed: bool) -> dict[str, Any] | None:
         self._session(session_id)
@@ -351,14 +474,28 @@ class Workbench:
             if proposal and proposal.get("id") == proposal_id:
                 if proposal["status"] != "pending":
                     raise ValueError("proposal already decided")
+                existing_id = proposal.get("existing_business_id")
+                if confirmed and existing_id is not None:
+                    target = self._business(session_id, existing_id)
+                    if target.get("active_run_id") or target.get("status") in {"running", "awaiting_approval", "cancel_requested", "needs_reconciliation", "blocked"}:
+                        raise RuntimeError("existing business is active or requires reconciliation")
                 proposal["status"] = "confirmed" if confirmed else "rejected"
                 if not confirmed:
+                    self.store.data["messages"].setdefault(session_id, []).append({
+                        "id": uid("m"), "role": "system", "text": "业务提案已拒绝，尚未创建或修改业务。",
+                        "created_at": now(), "business_id": None,
+                    })
                     self._event("business_proposal_decided", {"session_id": session_id, "proposal_id": proposal_id, "confirmed": False})
                     return None
+                if existing_id is not None:
+                    business = self._business(session_id, existing_id)
+                    business.update({"title": proposal["title"], "goal": proposal["goal"], "goal_submitted": False, "updated_at": now(), "status": "ready"})
+                    message["business_id"] = existing_id
+                    self._event("business_changed", {"session_id": session_id, "business_id": existing_id})
+                    return business
                 business_id, stamp = uid("b"), now()
-                ordinal = 1 + sum(1 for row in self.store.data["businesses"].values() if row.get("session_id") == session_id)
-                business = {"id": business_id, "session_id": session_id, "type": "sale_invoice", "title": f"销售与开票 · {ordinal}",
-                            "goal": proposal["goal"], "status": "ready", "created_at": stamp, "updated_at": stamp, "active_run_id": None}
+                business = {"id": business_id, "session_id": session_id, "type": "sale_invoice", "title": proposal["title"].strip(),
+                            "goal": proposal["goal"], "goal_submitted": False, "status": "ready", "created_at": stamp, "updated_at": stamp, "active_run_id": None}
                 self.store.data["businesses"][business_id] = business
                 message["business_id"] = business_id
                 self._event("business_changed", {"session_id": session_id, "business_id": business_id})
@@ -371,12 +508,18 @@ class Workbench:
         if path.exists():
             return path
         messages = [m for m in self.store.data["messages"].get(business["session_id"], []) if m.get("business_id") == business["id"] and m.get("role") == "user" and not m.get("submitted_run_id")]
-        text = "\n".join(m["text"] for m in messages) or "Continue the existing business goal. Re-read current state; do not repeat completed writes."
+        queued = []
+        if not business.get("goal_submitted") and isinstance(business.get("goal"), str) and business.get("goal", "").strip():
+            queued.append(business["goal"].strip())
+        queued.extend(m["text"] for m in messages if m.get("text") not in queued)
+        text = "\n".join(queued) or "Continue the existing business goal. Re-read current state; do not repeat completed writes."
         path.write_text("Complete the confirmed sale_invoice business task for this workspace.\n" +
                         "New user instructions:\n" + text +
-                        "\nUse native Odoo tools only. Before any ERP write, wait for trusted host approval. After writes, read resulting documents and report facts briefly.\n", encoding="utf-8")
+                        "\nUse native Odoo tools only. Before any ERP write, wait for trusted host approval. After writes, read resulting documents and report facts briefly. Report to the operator in the same language as the confirmed business goal.\n", encoding="utf-8")
         for message in messages:
             message["submitted_run_id"] = run_id
+        if queued and business.get("goal") in queued:
+            business["goal_submitted"] = True
         return path
 
     def start_run(self, session_id: str, business_id: str) -> dict[str, Any]:
@@ -511,6 +654,123 @@ class Workbench:
             run["documents"].append(doc)
         self._trace(run, "tool_end", {"tool_call_id": call_id, "tool_name": tool["name"], "is_error": failed and not approval_status, "action_id": action_id})
 
+    def _tool_progress(self, run: dict[str, Any], event: dict[str, Any]) -> None:
+        call_id = str(event.get("tool_call_id", event.get("toolCallId", "")))
+        tool = next((row for row in reversed(run.get("tools", [])) if row.get("tool_call_id") == call_id), None)
+        if tool is None:
+            return
+        partial = _structured(event.get("partial_result", event.get("partialResult")))
+        text = str(partial.get("text") or partial.get("status") or partial.get("message") or "")[:600]
+        row = {"type": "tool_progress", "at": now(), "tool_call_id": call_id, "tool_name": tool.get("name", ""), "detail": text}
+        run.setdefault("events", []).append(row)
+        run["last_event_at"] = row["at"]
+        self._transient_event("run_trace", {"run_id": run["id"], **row})
+
+    @staticmethod
+    def _event_message_text(event: dict[str, Any]) -> str:
+        if isinstance(event.get("text"), str):
+            return event["text"]
+        message = event.get("message")
+        return _visible_content(message) if isinstance(message, dict) else ""
+
+    def _message_delta(self, run: dict[str, Any], event: dict[str, Any]) -> None:
+        message_id = str(event.get("message_id") or event.get("messageId") or "")
+        text = event.get("text", event.get("delta", ""))
+        if not message_id or not isinstance(text, str) or not text:
+            return
+        if message_id in run.get("finalized_message_ids", []):
+            return
+        sequence = event.get("sequence")
+        sequences = run.setdefault("_message_sequences", {})
+        if type(sequence) is int:
+            previous = sequences.get(message_id, 0)
+            if sequence <= previous:
+                return
+            sequences[message_id] = sequence
+        live = next((row for row in run.setdefault("live_messages", []) if row.get("id") == message_id), None)
+        if live is None:
+            live = {"id": message_id, "role": "assistant", "text": "", "created_at": now(),
+                    "business_id": run.get("business_id"), "session_id": run.get("session_id"),
+                    "run_id": run.get("id")}
+            run["live_messages"].append(live)
+        live["text"] += text
+        if type(sequence) is int:
+            live["sequence"] = sequence
+        stamp = now()
+        run["last_event_at"] = stamp
+        if run.get("ttft_ms") is None:
+            try:
+                run["ttft_ms"] = max(0.0, (datetime.fromisoformat(stamp.replace("Z", "+00:00")) - datetime.fromisoformat(run["started_at"].replace("Z", "+00:00"))).total_seconds() * 1000)
+            except (KeyError, ValueError, TypeError):
+                run["ttft_ms"] = None
+        self._transient_event("message_delta", {"run_id": run["id"], "message_id": message_id,
+                                                  "text": text, "sequence": event.get("sequence")})
+
+    def _message_end(self, run: dict[str, Any], event: dict[str, Any]) -> None:
+        message_id = str(event.get("message_id") or event.get("messageId") or "")
+        finalized = run.setdefault("finalized_message_ids", [])
+        if message_id and message_id in finalized:
+            return
+        text = self._event_message_text(event)
+        live = next((row for row in run.setdefault("live_messages", []) if row.get("id") == message_id), None) if message_id else None
+        if live is not None and not text:
+            text = live.get("text", "")
+        if live is not None and text:
+            live["text"] = text
+        if not text:
+            return
+        run["assistant_text"] = text
+        sequence = event.get("sequence")
+        if type(sequence) is not int and message_id:
+            sequence = run.setdefault("_message_sequences", {}).get(message_id)
+        self._transient_event("message_end", {
+            "run_id": run["id"], "message_id": message_id or None,
+            "text": text, "sequence": sequence,
+        })
+        if message_id:
+            finalized.append(message_id)
+        row = {"id": uid("m"), "role": "assistant", "text": text, "created_at": now(),
+               "session_id": run["session_id"], "business_id": run.get("business_id"),
+               "run_id": run["id"], "status": "ended"}
+        if message_id:
+            row["id"] = message_id
+        self.store.data["messages"].setdefault(run["session_id"], []).append(row)
+        if message_id:
+            run["live_messages"] = [item for item in run.get("live_messages", []) if item.get("id") != message_id]
+        self._event("message_added", {"run_id": run["id"], "message_id": message_id or row["id"]})
+
+    def _conversation_tool_end(self, run: dict[str, Any], event: dict[str, Any]) -> None:
+        call_id = str(event.get("tool_call_id", event.get("toolCallId", "")))
+        tool = next((row for row in reversed(run.setdefault("tools", [])) if row.get("tool_call_id") == call_id), None)
+        if tool is None:
+            self._tool_start(run, event)
+            tool = run["tools"][-1]
+        payload = _structured(event.get("result"))
+        failed = bool(event.get("is_error", event.get("isError", False))) or payload.get("success") is False
+        tool.update({"status": "error" if failed else "completed", "ended_at": now(), "result": _safe(payload)})
+        proposal = payload.get("proposal") if isinstance(payload.get("proposal"), dict) else None
+        if not failed and proposal is not None:
+            kind = proposal.get("type")
+            title, goal = proposal.get("title"), proposal.get("goal")
+            existing = proposal.get("existing_business_id")
+            valid = kind == "sale_invoice" and isinstance(title, str) and 1 <= len(title.strip()) <= 200 and isinstance(goal, str) and 1 <= len(goal.strip()) <= 20_000
+            if existing is not None:
+                valid = valid and isinstance(existing, str) and existing in self.store.data["businesses"] and self.store.data["businesses"][existing].get("session_id") == run["session_id"]
+            if valid:
+                proposal_row = {"id": uid("p"), "type": "sale_invoice", "title": title.strip(), "goal": goal.strip(), "status": "pending"}
+                if existing is not None:
+                    proposal_row["existing_business_id"] = existing
+                message = {"id": uid("m"), "role": "assistant", "text": f"业务提案：{proposal_row['title']}\n{proposal_row['goal']}",
+                           "created_at": now(), "business_id": None, "proposal": proposal_row}
+                self.store.data["messages"].setdefault(run["session_id"], []).append(message)
+                run.setdefault("proposal_ids", []).append(proposal_row["id"])
+                tool["proposal_id"] = proposal_row["id"]
+                self._event("message_added", {"run_id": run["id"], "proposal_id": proposal_row["id"]})
+            else:
+                tool["status"] = "error"
+                tool["result"] = {"success": False, "error": "proposal failed server validation"}
+        self._trace(run, "tool_end", {"tool_call_id": call_id, "tool_name": tool.get("name", "propose_business"), "is_error": tool["status"] == "error"})
+
     def _round_end(self, run: dict[str, Any], event: dict[str, Any]) -> None:
         message = event.get("message") if isinstance(event.get("message"), dict) else {}
         usage = message.get("usage") if isinstance(message.get("usage"), dict) else {}
@@ -537,7 +797,10 @@ class Workbench:
         return result
 
     def _consume_worker(self, run_id: str, proc: subprocess.Popen[str], usage_path: Path) -> None:
-        run = self.store.data["runs"][run_id]
+        run = self.store.data["runs"].get(run_id) or self.store.data.get("conversation_runs", {}).get(run_id)
+        if run is None:
+            return
+        conversation = run.get("kind") == "conversation"
         finished, timed_out = threading.Event(), threading.Event()
         diagnostics: deque[str] = deque(maxlen=4)
         def watchdog() -> None:
@@ -559,25 +822,27 @@ class Workbench:
                     if not isinstance(event, dict):
                         raise ValueError("invalid_worker_event")
                     with self._lock:
-                        if run.get("_stop_status"):
-                            continue
                         kind = event.get("type")
+                        if run.get("_stop_status") and kind not in {"tool_execution_end", "turn_end", "message_end"}:
+                            continue
                         if kind == "tool_execution_start":
                             run.setdefault("_round_tool_start", len(run["tools"]))
                             self._tool_start(run, event)
                         elif kind == "tool_execution_end":
-                            self._tool_end(run, event)
+                            self._conversation_tool_end(run, event) if conversation else self._tool_end(run, event)
+                        elif kind == "tool_execution_update":
+                            self._tool_progress(run, event)
+                        elif kind == "message_delta":
+                            self._message_delta(run, event)
                         elif kind == "turn_end":
                             self._round_end(run, event)
                             run["usage"] = self._round_usage(run["rounds"])
                         elif kind == "run_metadata":
                             run["metadata"] = {key: event.get(key) for key in ("model", "runtimeMode", "toolMode", "worldMode", "odooToolCount", "toolNames", "maxOutputTokens", "maxModelRequests")}
-                        elif kind == "message_end" and isinstance(event.get("message"), dict) and event["message"].get("role") == "assistant":
-                            text = _visible_content(event["message"])
-                            run["assistant_text"] = text
-                            if text:
-                                self.store.data["messages"].setdefault(run["session_id"], []).append({"id": uid("m"), "role": "assistant", "text": text, "created_at": now(), "business_id": run["business_id"]})
-                                self._event("message_added", {"session_id": run["session_id"], "business_id": run["business_id"]})
+                        elif kind == "message_end" and (
+                                (isinstance(event.get("message"), dict) and event["message"].get("role") == "assistant")
+                                or (conversation and (isinstance(event.get("text"), str) or event.get("message_id") or event.get("messageId")))):
+                            self._message_end(run, event)
             code = proc.wait()
         except Exception as exc:
             failure = type(exc).__name__
@@ -594,6 +859,26 @@ class Workbench:
             self._threads.pop(run_id, None)
             run["usage"] = self._round_usage(run.get("rounds", []))
             pending_ids = run.get("pending_approval_action_ids", [])
+            if conversation:
+                run["usage"] = self._round_usage(run.get("rounds", []))
+                if run.get("_stop_status"):
+                    status, failure = run.pop("_stop_status"), "execution_stopped"
+                elif failure or code != 0:
+                    status, failure = "failed", failure or f"worker_exit_{code}"
+                elif (run.get("last_stop_reason") == "stop" and run.get("model_rounds", 0) > 0 and
+                      isinstance(run.get("assistant_text"), str) and run.get("assistant_text", "").strip()):
+                    status = "completed"
+                else:
+                    status, failure = "failed", "model_did_not_finish"
+                self._finalize_conversation(run, status, failure)
+                if failure:
+                    detail = "".join(diagnostics)[-4096:]
+                    for key in ("LLM_API_KEY", "ODOO_API_KEY", "ODOO_PASSWORD"):
+                        if os.environ.get(key):
+                            detail = detail.replace(os.environ[key], "<redacted>")
+                    run["error_detail"] = detail
+                self._event("run_changed", {"run_id": run_id, "status": run["status"]})
+                return
             valid_pending = all((self._action_row(run, action_id) or {}).get("status") == "pending_approval" for action_id in pending_ids)
             if run.get("_stop_status"):
                 status, failure = run.pop("_stop_status"), "execution_stopped"
@@ -668,6 +953,27 @@ class Workbench:
         self._event("business_refreshed", {"session_id": session_id, "business_id": business_id})
         return detail
 
+    def _record_artifact(self, session_id: str, business_id: str, path: str, name: str,
+                         run_id: str | None = None) -> dict[str, Any]:
+        """Record a host-created artifact after the owning process saved it."""
+        business = self._business(session_id, business_id)
+        if not isinstance(path, str) or not path.strip() or not isinstance(name, str) or not name.strip():
+            raise ValueError("artifact path and name are required")
+        if run_id is not None:
+            run = self.store.data["runs"].get(run_id)
+            if not run or run.get("session_id") != session_id or run.get("business_id") != business_id:
+                raise ValueError("artifact run scope is invalid")
+        artifacts = business.setdefault("artifacts", [])
+        existing = next((item for item in artifacts if item.get("path") == path), None)
+        if existing is None:
+            existing = {"id": uid("a"), "kind": "business_receipt"}
+            artifacts.append(existing)
+        existing.update({"name": name.strip(), "path": path, "created_at": now(), "business_id": business_id, "session_id": session_id})
+        if run_id is not None:
+            existing["run_id"] = run_id
+        self._event("business_changed", {"session_id": session_id, "business_id": business_id, "artifact_id": existing["id"]})
+        return _safe(existing)
+
     def get_trace(self, session_id: str, business_id: str, run_id: str | None = None) -> dict[str, Any]:
         self._business(session_id, business_id)
         runs = [r for r in self.store.data["runs"].values() if r.get("business_id") == business_id and (run_id is None or r["id"] == run_id)]
@@ -710,6 +1016,30 @@ class Workbench:
         business = self.store.data["businesses"].get(run["business_id"])
         if session: session["active_run_id"], session["status"] = None, status
         if business: business["active_run_id"], business["status"] = None, status
+
+    def _clear_conversation_active(self, run: dict[str, Any], status: str) -> None:
+        run["status"] = status
+        run["ended_at"] = run.get("ended_at") or now()
+        try:
+            run["elapsed_seconds"] = max(0.0, (datetime.fromisoformat(run["ended_at"].replace("Z", "+00:00")) - datetime.fromisoformat(run["started_at"].replace("Z", "+00:00"))).total_seconds())
+        except (KeyError, ValueError, TypeError):
+            run["elapsed_seconds"] = None
+        session = self.store.data["sessions"].get(run["session_id"])
+        if session and session.get("active_run_id") == run["id"]:
+            session["active_run_id"], session["status"], session["updated_at"] = None, status, now()
+
+    def _finalize_conversation(self, run: dict[str, Any], status: str, error: str | None = None) -> None:
+        run["error"] = error
+        run.pop("_stop_status", None)
+        if run.get("assistant_text"):
+            run["summary"] = run["assistant_text"]
+        for tool in run.get("tools", []):
+            if tool.get("status") == "running":
+                tool["status"] = "interrupted"
+        if status in {"failed", "cancelled", "interrupted"}:
+            for message in run.get("live_messages", []):
+                message["status"] = "failed" if status == "failed" else "interrupted"
+        self._clear_conversation_active(run, status)
 
     def _approval_prestate_matches(self, row, store) -> bool:
         from odoo_runtime.actions import NativeActions
@@ -791,6 +1121,22 @@ class Workbench:
         self._event("run_changed", {"run_id": run_id, "status": run["status"]})
         return {"ok": True, "status": run["status"], "run_id": run_id}
 
+    def cancel_conversation(self, session_id: str, run_id: str) -> dict[str, Any]:
+        self._session(session_id)
+        run = self.store.data.get("conversation_runs", {}).get(run_id)
+        if not run or run.get("session_id") != session_id:
+            raise ValueError("conversation scope is invalid")
+        if run.get("status") not in {"running", "cancel_requested"}:
+            raise ValueError("conversation is already terminal or stopping")
+        proc = self._processes.get(run_id)
+        if proc and proc.poll() is None:
+            run["_stop_status"], run["status"] = "cancelled", "cancel_requested"
+            proc.terminate()
+        else:
+            self._finalize_conversation(run, "cancelled", "cancelled_by_user")
+        self._event("run_changed", {"run_id": run_id, "status": run["status"]})
+        return {"ok": True, "status": run["status"], "run_id": run_id}
+
     def reconcile_action(self, session_id: str, business_id: str, run_id: str, action_id: str) -> dict[str, Any]:
         """Read-only reconciliation for one uncertain ledger action."""
         self._business(session_id, business_id)
@@ -842,10 +1188,12 @@ class Workbench:
 
     def health(self) -> dict[str, Any]:
         active = next((r["id"] for r in self.store.data["runs"].values() if r.get("status") in {"running", "awaiting_approval", "cancel_requested"}), None)
-        return {"host_ready": True, "odoo_status": "configured" if os.environ.get("ODOO_URL") and os.environ.get("ODOO_DB") else "unknown", "model_configured": bool(os.environ.get("LLM_API_KEY") and os.environ.get("LLM_BASE_URL") and os.environ.get("LLM_MODEL")), "environment": "configured" if os.environ.get("LLM_API_KEY") else "demo", "active_run_id": active, "odoo": dict(self._odoo_health)}
+        if active is None:
+            active = next((r["id"] for r in self.store.data.get("conversation_runs", {}).values() if r.get("status") in {"running", "cancel_requested"}), None)
+        return {"host_ready": True, "odoo_status": "configured" if os.environ.get("ODOO_URL") and os.environ.get("ODOO_DB") else "unknown", "model_configured": bool(os.environ.get("LLM_API_KEY") and os.environ.get("LLM_BASE_URL") and os.environ.get("LLM_MODEL")), "environment": "configured" if os.environ.get("LLM_API_KEY") else "demo", "active_run_id": active, "data_dir": str(self.store.root), "odoo": dict(self._odoo_health)}
 
     def _dispatch(self, method: str, params: dict[str, Any]) -> Any:
-        methods = {"list_sessions": lambda: self.list_sessions(), "create_session": lambda: self.create_session(params.get("title")), "rename_session": lambda: self.rename_session(params["session_id"], params["title"]), "archive_session": lambda: self.archive_session(params["session_id"]), "get_session": lambda: self.get_session(params["session_id"]), "send_message": lambda: self.send_message(params["session_id"], params["text"], params.get("business_id")), "confirm_business": lambda: self.confirm_business(params["session_id"], params["proposal_id"], _must_bool(params["confirmed"], "confirmed")), "start_run": lambda: self.start_run(params["session_id"], params["business_id"]), "decide_approval": lambda: self.decide_approval(params["session_id"], params["business_id"], params["run_id"], params["action_id"], params["decision"]), "cancel_run": lambda: self.cancel_run(params["session_id"], params["business_id"], params["run_id"]), "reconcile_action": lambda: self.reconcile_action(params["session_id"], params["business_id"], params["run_id"], params["action_id"]), "get_business": lambda: self.get_business(params["session_id"], params["business_id"]), "refresh_business": lambda: self.refresh_business(params["session_id"], params["business_id"]), "get_trace": lambda: self.get_trace(params["session_id"], params["business_id"], params.get("run_id")), "health": self.health, "check_connection": self.check_connection}
+        methods = {"list_sessions": lambda: self.list_sessions(), "create_session": lambda: self.create_session(params.get("title")), "rename_session": lambda: self.rename_session(params["session_id"], params["title"]), "archive_session": lambda: self.archive_session(params["session_id"]), "get_session": lambda: self.get_session(params["session_id"]), "send_message": lambda: self.send_message(params["session_id"], params["text"], params.get("business_id"), params.get("context_business_id")), "confirm_business": lambda: self.confirm_business(params["session_id"], params["proposal_id"], _must_bool(params["confirmed"], "confirmed")), "start_run": lambda: self.start_run(params["session_id"], params["business_id"]), "decide_approval": lambda: self.decide_approval(params["session_id"], params["business_id"], params["run_id"], params["action_id"], params["decision"]), "cancel_run": lambda: self.cancel_run(params["session_id"], params["business_id"], params["run_id"]), "cancel_conversation": lambda: self.cancel_conversation(params["session_id"], params["run_id"]), "reconcile_action": lambda: self.reconcile_action(params["session_id"], params["business_id"], params["run_id"], params["action_id"]), "get_business": lambda: self.get_business(params["session_id"], params["business_id"]), "refresh_business": lambda: self.refresh_business(params["session_id"], params["business_id"]), "get_trace": lambda: self.get_trace(params["session_id"], params["business_id"], params.get("run_id")), "_record_artifact": lambda: self._record_artifact(params["session_id"], params["business_id"], params["path"], params["name"], params.get("run_id")), "health": self.health, "check_connection": self.check_connection}
         if method not in methods: raise KeyError("unknown method")
         return methods[method]()
 

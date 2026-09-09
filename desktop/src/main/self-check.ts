@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { publicSettings, saveSettings } from "./settings";
-import { assertRequest, businessScope, canChangeSettings, observedRecordUrl } from "./ipc-security";
+import { assertRequest, businessScope, canChangeSettings, observedRecordUrl, recordedArtifactPath } from "./ipc-security";
 
 export async function runSelfCheck(): Promise<void> {
   // Even a manually invoked packaged --self-check must not overwrite settings.
@@ -62,6 +62,12 @@ export async function runSelfCheck(): Promise<void> {
   assert.throws(() => observedRecordUrl("https://odoo.example", documents, "sale.order", 43), /RECORD_NOT_OBSERVED/);
   assert.throws(() => observedRecordUrl("file:///C:/Windows", documents, "sale.order", 42), /PROTOCOL_INVALID/);
   assert.throws(() => observedRecordUrl("https://odoo.example/?secret=x", documents, "sale.order", 42), /CREDENTIALS_INVALID/);
+  const artifactPath = join(isolated, "receipt.json");
+  assert.equal(recordedArtifactPath([{ id: "a_receipt", path: artifactPath }], "a_receipt"), artifactPath);
+  assert.throws(() => recordedArtifactPath([{ id: "a_receipt", path: artifactPath }], "a_other_business"), /NOT_FOUND/);
+  assert.throws(() => recordedArtifactPath([{ id: "a_receipt", path: join(isolated, "program.exe") }], "a_receipt"), /FORMAT_INVALID/);
+  assert.throws(() => recordedArtifactPath([{ id: "a_receipt", path: "https://example.com/receipt.json" }], "a_receipt"), /FORMAT_INVALID/);
+  assert.throws(() => assertRequest({ method: "_record_artifact", params: { path: artifactPath } }), /METHOD_NOT_ALLOWED/);
   console.log("desktop self-check: PASS (settings, secrets, busy guard, IPC allowlist)");
   } finally {
     app.setPath("userData", previous);

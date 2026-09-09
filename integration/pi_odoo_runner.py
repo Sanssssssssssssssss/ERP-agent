@@ -28,6 +28,7 @@ from pi_coding.resources import PiResourcePaths
 from pi_coding.session import CodingSession, CodingSessionConfig
 
 from integration.odoo_tools import native_tool_catalog, route_tools
+from integration.stream_events import public_events
 from integration.world_context import project_messages
 from odoo_runtime.actions import NativeActions
 from odoo_runtime.capabilities import NativeCapabilities
@@ -581,9 +582,8 @@ async def run(args: argparse.Namespace) -> None:
                     source = session.continue_()
                 else:
                     source = session.prompt(args.instruction_file.read_text(encoding="utf-8"))
-                async for event in source:
-                    if event.type != "message_update":
-                        print(event.model_dump_json(by_alias=True), flush=True)
+                async for event in public_events(source):
+                    print(json.dumps(event, ensure_ascii=False), flush=True)
 
                 assistant = [
                     message
