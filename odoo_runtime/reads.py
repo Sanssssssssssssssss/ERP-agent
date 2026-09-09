@@ -654,8 +654,11 @@ class NativeReads:
         # No silent truncation when the caller omitted a limit.
         bounded_limit = clamp_limit(limit) if limit is not None else 101
         domain = normalize_domain_input(domain)
-        normalized = [f"{field}:{agg}" for field, agg in map(parse_measure_spec, measures or [])]
-        referenced = [entry.split(":", 1)[0] for entry in [*group_by, *normalized]]
+        normalized = [f"{field}:{agg}" if agg else field
+                      for field, agg in map(parse_measure_spec, measures or [])]
+        referenced = [entry.split(":", 1)[0] for entry in group_by]
+        referenced += ["id" if entry == "__count" else entry.split(":", 1)[0]
+                       for entry in normalized]
         blocked = self.policy.check_aggregate(self.instance, model, referenced)
         if blocked:
             return {"success": False, "error": blocked}
@@ -668,7 +671,9 @@ class NativeReads:
         if offset:
             common["offset"] = offset
         formatted = {**common, "aggregates": normalized, **({"order": order} if order else {})}
-        legacy = {**common, "fields": normalized, "lazy": lazy, **({"orderby": order} if order else {})}
+        # Legacy read_group supplies the group count without a synthetic field.
+        legacy = {**common, "fields": [entry for entry in normalized if entry != "__count"],
+                  "lazy": lazy, **({"orderby": order} if order else {})}
         method, reason = "read_group", None
         if major is not None and major < 19:
             rows = self.client.execute_method(model, method, **legacy)

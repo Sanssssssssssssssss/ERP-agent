@@ -112,6 +112,45 @@ class FakeOdoo:
 
 
 class NativeReadsTest(unittest.TestCase):
+    def test_count_measure_preserves_native_and_legacy_counts_and_field_policy(self):
+        from odoo_runtime.capabilities import NativeCapabilities
+
+        for version, method, key, expected in (
+            ("19", "formatted_read_group", "aggregates", ["__count"]),
+            ("18", "read_group", "fields", []),
+        ):
+            client = FakeOdoo()
+            client.get_server_version = lambda: {"server_version": version}
+            policy = FieldPolicy({"default": {"res.partner": ModelFieldRule("deny", frozenset({"email"}))}})
+            reads = NativeReads(client, policy=policy)
+            result = reads.aggregate_records("res.partner", ["company_id"], [" __count "])
+            self.assertEqual(result["rows"][0]["__count"], 2)
+            self.assertEqual(result["measures"], ["__count"])
+            request = next(row for row in client.requests if len(row) == 4 and row[1] == method)
+            self.assertEqual(request[3][key], expected)
+
+        client = FakeOdoo()
+        denied = FieldPolicy({"default": {"res.partner": ModelFieldRule("deny", frozenset({"company_id"}))}})
+        result = NativeReads(client, policy=denied).call(
+            "aggregate_records", {"model": "res.partner", "group_by": ["company_id"], "measures": ["__count"]})
+        self.assertFalse(result["success"])
+        self.assertFalse(client.requests)
+
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "odoo_runtime.capabilities.list_configured_instances",
+            return_value={"default": {"tags": [], "cross_instance": True}},
+        ):
+            client = FakeOdoo()
+            capabilities = NativeCapabilities(NativeReads(client), task_path=Path(directory) / "tasks.sqlite3")
+            try:
+                result = capabilities.aggregate_across_instances("res.partner", ["company_id"], ["__count"])
+                self.assertEqual(result["combined_count"], 2)
+                self.assertEqual(result["combined_measures"]["__count"], 2)
+                request = next(row for row in client.requests if len(row) == 4 and row[1] == "read_group")
+                self.assertEqual(request[2][1], [])
+            finally:
+                capabilities.close()
+
     def test_native_health_has_no_mcp_fallback(self):
         async def check(directory: Path):
             native = NativeReads(FakeOdoo())

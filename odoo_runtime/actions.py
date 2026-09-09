@@ -1362,19 +1362,22 @@ class NativeActions:
                     "error": "write execution disabled; set ODOO_MCP_ENABLE_WRITES=1 to enable",
                     "classification": safety,
                 }
-            if args:
-                return {
-                    "success": False,
-                    "error": (
-                        "Native side-effect methods require named JSON-2 kwargs; "
-                        "pass kwargs.ids instead of positional args."
-                    ),
-                    "classification": safety,
-                }
             required_ids = (model, method) in _KNOWN_METHOD_STATES or (
                 model,
                 method,
             ) == ("sale.advance.payment.inv", "create_invoices")
+            if args and (not required_ids or len(args) != 1 or "ids" in kwargs):
+                return {
+                    "success": False,
+                    "error": (
+                        "Use named JSON-2 kwargs. Verified native business methods "
+                        "also accept args=[[1,2]], with no extra positional arguments "
+                        "and no duplicate kwargs.ids."
+                    ),
+                    "classification": safety,
+                }
+            if args:
+                kwargs["ids"] = args[0]
             ids = kwargs.get("ids")
             if required_ids and (
                 not isinstance(ids, list)

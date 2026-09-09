@@ -199,6 +199,29 @@ def _actions(
 
 
 class NativeActionCheckpointTests(unittest.TestCase):
+    def test_legacy_business_ids_use_the_same_validated_action(self):
+        actions, writer, _ = _actions()
+        with patch.dict(os.environ, {
+            "ODOO_MCP_ENABLE_WRITES": "1",
+            "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": "sale.order.action_confirm,res.partner.action_custom",
+        }):
+            for args, kwargs in (([[7]], {"ids": [7]}), ([[7], {}], {}), ([7], {}),
+                                 ([[]], {}), ([[True]], {}), ([[-1]], {})):
+                denied = actions.execute_method("sale.order", "action_confirm", args=args, kwargs=kwargs)
+                self.assertFalse(denied["success"])
+            self.assertFalse(actions.execute_method("res.partner", "action_custom", args=[[7]])["success"])
+            self.assertFalse(actions.execute_method("sale.order", "write", args=[[7], {}])["success"])
+            self.assertEqual(writer.calls, [])
+            first = actions.execute_method("sale.order", "action_confirm", args=[[7, 7]])
+            self.assertTrue(first["success"], first)
+            self.assertEqual(writer.calls, [("sale.order", "action_confirm", (), {"ids": [7]})])
+            pending, writer, _ = _actions(approval_mode="host")
+            first = pending.execute_method("sale.order", "action_confirm", args=[[7, 7]])
+            repeated = pending.execute_method("sale.order", "action_confirm", kwargs={"ids": [7]})
+            self.assertTrue(first["approval_required"])
+            self.assertEqual(first["action_id"], repeated["action_id"])
+            self.assertEqual(writer.calls, [])
+
     def test_benchmark_manufacturing_and_cancel_require_verified_state(self):
         cases = [
             ("sale.order", "action_cancel", "sale", "cancel"),
