@@ -685,10 +685,16 @@ class NativeReads:
     def search_records(
         self, model: str, domain: Any = None, fields: list[str] | None = None,
         limit: int = 10, offset: int = 0, order: str | None = None,
-        query: str | None = None,
+        query: str | None = None, rerank_query: str | None = None,
+        top_k: int = 20,
     ) -> dict[str, Any]:
         validate_model_name(model)
         limit = clamp_limit(limit)
+        if rerank_query is not None:
+            rerank_query = str(rerank_query).strip()
+            if not rerank_query:
+                raise ValueError("rerank_query must be null or a non-empty string")
+            top_k = clamp_limit(top_k)
         if offset < 0:
             raise ValueError("offset must be greater than or equal to 0")
         domain = normalize_domain_input(domain)
@@ -713,6 +719,27 @@ class NativeReads:
             result["query_fields_used"] = query_fields
         if redacted:
             result["redacted_fields"] = redacted
+        if rerank_query is not None:
+            from odoo_runtime.knowledge import bm25_rank_texts, flatten_record_text
+
+            texts = [flatten_record_text(record) for record in records]
+            ranking_rows = bm25_rank_texts(rerank_query, texts, len(records))
+            positive = [row for row in ranking_rows if row.get("score", 0) > 0]
+            selected = positive[:top_k]
+            result["result"] = [records[row["record_id"]] for row in selected]
+            result["count"] = len(result["result"])
+            result["rerank"] = {
+                "query": rerank_query,
+                "top_k": top_k,
+                "candidate_count": len(records),
+                "matched_count": len(positive),
+                "omitted_matches": max(0, len(positive) - len(selected)),
+                "candidate_window_full": len(records) == limit,
+                "ranking": [
+                    {"id": records[row["record_id"]].get("id"), "score": row["score"]}
+                    for row in selected
+                ],
+            }
         return result
 
     def read_attachment(self, attachment_id: int, include_data: bool = True) -> dict[str, Any]:

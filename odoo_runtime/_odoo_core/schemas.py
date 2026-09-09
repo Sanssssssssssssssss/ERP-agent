@@ -118,6 +118,7 @@ class SearchRecordsResponse(ToolResponse):
         default=None, description="Fields matched by the free-text query shortcut."
     )
     redacted_fields: Optional[List[str]] = None
+    rerank: Optional[Dict[str, Any]] = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class ReadRecordResponse(ToolResponse):

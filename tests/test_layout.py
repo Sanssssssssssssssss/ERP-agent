@@ -160,7 +160,7 @@ class CleanHarnessTest(unittest.TestCase):
         self.assertEqual(len(tools), 44)
         self.assertEqual(
             hashlib.sha256(json.dumps(contract, sort_keys=True).encode()).hexdigest(),
-            "1e7ce6d50ef76f99952e2cb43a814b71b013af906d7e8545319bb73f0e4c498f",
+            "f70746bdd6afebe10ea018d6ac5521caf1e66fb375480ce4d5d4f72bad732c56",
         )
 
 

@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import copy
+import asyncio
+import os
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from odoo_runtime._odoo_core.field_policy import FieldPolicy, ModelFieldRule
-from integration.odoo_tools import native_tool_catalog
+from integration.odoo_tools import native_tool_catalog, route_tools
 from odoo_runtime.reads import NativeReads, _summarize_field_metadata
+from odoo_runtime.world import WorldStore
 
 
 class MetadataClient:
@@ -22,7 +28,60 @@ class MetadataClient:
         return [{"id": 1, **{name: name for name in kwargs["fields"] or [] if name != "id"}}]
 
 
+class RerankClient:
+    fields = {"res.partner": {name: {"type": "text"} for name in ("id", "name", "comment", "secret_note")}}
+
+    def get_model_fields(self, model: str):
+        return copy.deepcopy(self.fields[model])
+
+    def search_read(self, **kwargs):
+        rows = [
+            {"id": 1, "name": "Alpha vendor", "comment": "fast delivery", "secret_note": "hidden marker"},
+            {"id": 2, "name": "Beta vendor", "comment": "ordinary supply", "secret_note": "hidden marker"},
+            {"id": 3, "name": "Gamma vendor", "comment": "fast delivery and needle", "secret_note": "hidden marker"},
+        ]
+        return [{key: row[key] for key in kwargs["fields"] if key in row} for row in rows]
+
+
 class ToolRetrievalTest(unittest.TestCase):
+    def test_search_records_rerank_window_topk_and_nohit(self):
+        reads = NativeReads(RerankClient())
+        result = reads.call("search_records", {"model": "res.partner", "limit": 3, "rerank_query": "vendor", "top_k": 2})
+        self.assertEqual(result["count"], 2)
+        self.assertEqual(result["rerank"]["candidate_count"], 3)
+        self.assertEqual(result["rerank"]["matched_count"], 3)
+        self.assertEqual(result["rerank"]["omitted_matches"], 1)
+        self.assertTrue(result["rerank"]["candidate_window_full"])
+        needle = reads.call("search_records", {"model": "res.partner", "limit": 3, "rerank_query": "needle", "top_k": 20})
+        self.assertEqual(needle["count"], 1)
+        nohit = reads.call("search_records", {"model": "res.partner", "limit": 3, "rerank_query": "absent", "top_k": 20})
+        self.assertEqual(nohit["count"], 0)
+        invalid = reads.call("search_records", {"model": "res.partner", "rerank_query": ""})
+        self.assertFalse(invalid["success"])
+
+    def test_search_records_rerank_excludes_acl_redacted_keyword(self):
+        policy = FieldPolicy({"default": {"res.partner": ModelFieldRule("deny", frozenset({"secret_note"}))}})
+        result = NativeReads(RerankClient(), policy=policy).call(
+            "search_records", {"model": "res.partner", "limit": 3, "rerank_query": "hidden marker", "top_k": 20}
+        )
+        self.assertEqual(result["count"], 0)
+
+    def test_search_records_rerank_native_route_schema(self):
+        async def run():
+            with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+                "ODOO_URL": "http://fixture", "ODOO_DB": "bench", "ODOO_USERNAME": "admin", "ODOO_PASSWORD": "fixture",
+            }):
+                root = Path(directory)
+                world = WorldStore(root / "world.jsonl", projection_path=root / "projection.jsonl")
+                routed = next(item for item in route_tools(
+                    native_tool_catalog(), root / "routes.jsonl", NativeReads(RerankClient()), world, native_health=True
+                ) if item.name == "mcp_odoo_search_records")
+                result = await routed.execute("rerank-1", {"model": "res.partner", "limit": 3, "rerank_query": "needle", "top_k": 2})
+                structured = result.model_dump()["details"]["structuredContent"]
+                self.assertEqual(structured["rerank"]["top_k"], 2)
+                self.assertEqual(structured["count"], 1)
+        asyncio.run(run())
+
     def test_schema_query_is_advertised_in_native_catalog(self):
         tool = next(tool for tool in native_tool_catalog() if tool.name == "mcp_odoo_get_model_fields")
         self.assertIn("query", tool.parameters["properties"])
