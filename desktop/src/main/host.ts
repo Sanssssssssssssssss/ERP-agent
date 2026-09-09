@@ -211,11 +211,33 @@ export class HostClient {
   }
 }
 
-function safeErrorMessage(code: string, message: string): string {
-  if (/AUTH|TOKEN|KEY|CONFIG|HEALTH|ODOO|MODEL/i.test(code)) {
-    return "Workbench configuration or health check failed.";
-  }
-  return message
-    .replace(/(api[_-]?key|password|token|authorization|secret)([\s:=]+)[^\s,;}]+/gi, "$1$2[redacted]")
-    .replace(/https?:\/\/[^\s/@:]+:[^\s/@]+@/gi, "https://[redacted]@");
+const SAFE_ERROR_MESSAGES: Record<string, string> = {
+  CONFIG_READ_FAILED: "配置文件读取失败，请检查桌面配置文件。",
+  CONFIG_INPUT_INVALID: "配置输入无效，请检查字段。",
+  CONFIG_BUSY: "配置正在使用中，请等待当前操作结束。",
+  SECURE_STORAGE_UNAVAILABLE: "系统安全存储不可用，无法读取密钥。",
+  ODOO_NOT_CONFIGURED: "Odoo 尚未配置，请先填写连接设置。",
+  RECORD_NOT_OBSERVED: "该记录未被当前业务读取，无法打开。",
+};
+
+const SAFE_LOCAL_ERROR_MESSAGES: Record<string, string> = {
+  "KEYERROR\u0000'unknown proposal'": "未找到可处理的业务提案，可能已处理或已过期。",
+  "KEYERROR\u0000'unknown session'": "未找到当前会话，请重新选择会话。",
+  "KEYERROR\u0000'business does not belong to session'": "业务不属于当前会话，请重新选择会话。",
+  "KEYERROR\u0000'unknown run'": "未找到当前运行记录，请刷新业务状态。",
+  "KEYERROR\u0000'unknown method'": "主机不支持当前请求，请刷新桌面应用。",
+  "VALUEERROR\u0000proposal already decided": "该业务提案已经处理，请刷新会话状态。",
+  "RUNTIMEERROR\u0000only one active run is allowed on this host": "主机已有运行中的业务，请等待当前运行结束。",
+};
+
+function safeErrorCode(code: string): string {
+  const normalized = String(code || "").toUpperCase();
+  return /^[A-Z][A-Z0-9_-]{0,63}$/.test(normalized) ? normalized : "HOST_ERROR";
+}
+
+export function safeErrorMessage(code: string, message: string): string {
+  const safeCode = safeErrorCode(code);
+  const mapped = SAFE_ERROR_MESSAGES[safeCode] || SAFE_LOCAL_ERROR_MESSAGES[`${safeCode}\u0000${message}`];
+  const text = mapped || "请求失败，请检查当前操作状态后重试。";
+  return `[${safeCode}] ${text}`;
 }

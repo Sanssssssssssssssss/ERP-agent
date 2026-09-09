@@ -6,6 +6,8 @@ Odoo 状态回读、运行 Trace。模型循环复用 Python Pi `CodingSession`�
 
 0.4.0 已接通普通 Pi 会话与公开文本流，补齐消息归并、取消反馈和业务文件索引。真实能力问答、提案及 Odoo 只读旅程通过；完整客户写入 Demo 仍待复跑。结果和每轮用量见 [修复验收](../experiments/desktop_workbench/REPAIR_ACCEPTANCE.md)，问题定义见 [Demo 复盘清单](../experiments/desktop_workbench/DEMO_READINESS_REVIEW.md)。
 
+0.4.1 补齐首段回复前的 Agent 等待提示，移除重复用户标识，修复 `KeyError` 误报配置故障，并让模糊业务目标先补问。两轮真实模型复测及 ERP-Bench 可复用材料核对见 [用户反馈验收](../experiments/desktop_workbench/USER_FEEDBACK_041.md)。当前支持审批后创建订单及关联发票；聊天附件导入尚未实现。ERP-Bench 提供预置数据库任务，没有可直接拖入的订单 PDF 或 Excel。
+
 ## 使用
 
 解压 `dist/win-unpacked` 后运行 `Odoo Workbench.exe`；必须保留同目录资源。

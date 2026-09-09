@@ -62,11 +62,12 @@ const bridgeScript = String.raw`
     })
     const sessionDetails = {
       'session-a': { session: sessions[0], messages: [], businesses: sessions[0].businesses, conversation_runs: [], live_messages: [] },
-      'session-b': { session: sessions[1], messages: [{ id: 'm1', role: 'assistant', text: '已识别两个业务工作区。', created_at: '2026-09-08T08:01:00Z' }, { id: 'proposal-1', role: 'assistant', text: '发现一个新的业务意图。', created_at: '2026-09-08T08:02:00Z', proposal: { id: 'proposal-1', title: '新业务意图', goal: '处理一笔新的销售业务', type: 'sale_invoice', status: 'pending' } }], businesses: sessions[1].businesses, conversation_runs: [{ id: 'conversation-run-b', session_id: 'session-b', business_id: null, kind: 'conversation', status: 'running' }], live_messages: [] }
+      'session-b': { session: sessions[1], messages: [{ id: 'm1', role: 'assistant', text: '已识别两个业务工作区。', created_at: '2026-09-08T08:01:00Z' }, { id: 'm-user', role: 'user', text: '我想查看订单', created_at: '2026-09-08T08:01:30Z' }, { id: 'proposal-1', role: 'assistant', text: '发现一个新的业务意图。', created_at: '2026-09-08T08:02:00Z', proposal: { id: 'proposal-1', title: '新业务意图', goal: '处理一笔新的销售业务', type: 'sale_invoice', status: 'pending' } }], businesses: sessions[1].businesses, conversation_runs: [{ id: 'conversation-run-b', session_id: 'session-b', business_id: null, kind: 'conversation', status: 'running' }], live_messages: [] }
     }
     window.__bridgeCalls = calls
     window.__traceVersion = 0
     window.__persistConversationMessage = (message) => sessionDetails['session-b'].messages.push(message)
+    window.__removeConversationMessage = (id) => { sessionDetails['session-b'].messages = sessionDetails['session-b'].messages.filter((message) => message.id !== id) }
     window.__emitWorkbench = (event) => listeners.forEach((listener) => listener(event))
     window.workbench = {
       subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) },
@@ -113,7 +114,16 @@ const bridgeScript = String.raw`
         if (method === 'open_odoo_record') return { opened: true }
         if (method === 'reconcile_action') return details(b3)
         if (method === 'send_message') {
-          if (params.text === 'delayed mutation') await wait(180)
+          if (params.text === 'delayed mutation' || params.text === 'thinking hold') await wait(180)
+          if (params.text === 'snapshot public') {
+            sessionDetails['session-b'].messages.push({ id: 'snapshot-public', role: 'assistant', text: '快照中的公开回答', run_id: 'conversation-run-b', created_at: '2026-09-08T09:02:00Z' })
+            await wait(30)
+          }
+          if (params.text === 'completed retry') {
+            sessionDetails['session-b'].conversation_runs[0].status = 'completed'
+            await wait(180)
+            sessionDetails['session-b'].conversation_runs[0].status = 'running'
+          }
           if (params.text === 'failed conversation') {
             sessionDetails['session-b'].conversation_runs[0].status = 'failed'
             sessionDetails['session-b'].conversation_runs[0].error = 'CONVERSATION_TOOL_FAILED'
@@ -123,6 +133,9 @@ const bridgeScript = String.raw`
         }
         if (method === 'start_run') return { id: params.business_id + '-started-run', business_id: params.business_id, session_id: params.session_id, status: 'running', tool_count: 0, model_rounds: 0, elapsed_seconds: 0 }
         if (method === 'cancel_conversation') {
+          sessionDetails['session-b'].conversation_runs[0].status = 'cancel_requested'
+          window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', run_id: params.run_id, run_status: 'cancel_requested' } })
+          await wait(40)
           sessionDetails['session-b'].conversation_runs[0].status = 'cancelled'
           sessionDetails['session-b'].live_messages = [{ id: 'cancel-live', session_id: 'session-b', business_id: null, run_id: params.run_id, sequence: 0, text: '取消前已经收到的片段', role: 'assistant', status: 'interrupted' }]
           return { ok: true, run_id: params.run_id, status: 'cancelled' }
@@ -148,6 +161,10 @@ await page.getByText('主机断开').waitFor()
 // A is deliberately slow. Switching to B while A is in flight must leave B visible.
 await page.getByRole('button', { name: /Session B/ }).click()
 await page.getByRole('heading', { name: 'Session B' }).waitFor()
+const userMessage = page.locator('.message.user').filter({ hasText: '我想查看订单' })
+await userMessage.waitFor()
+assert.equal(await userMessage.locator('.message-meta strong').count(), 0)
+assert.equal(await userMessage.locator('.avatar').textContent(), '你')
 await page.locator('.conversation-pane').waitFor()
 await page.getByRole('button', { name: '收起会话', exact: true }).click()
 assert.equal(await page.locator('.conversation-pane').count(), 0)
@@ -223,6 +240,19 @@ assert.deepEqual(sentMessages.map(({ params }) => params), [
   { session_id: 'session-b', text: '继续处理当前业务', context_business_id: 'business-b2' },
   { session_id: 'session-b', text: '开始一个新的业务意图' }
 ])
+await messageTarget.selectOption('__conversation__')
+await composer.fill('thinking hold')
+await page.getByRole('button', { name: '发送' }).click()
+await page.locator('.thinking-message').waitFor()
+assert.equal(await page.locator('.thinking-message .agent-avatar').count(), 1)
+await page.getByRole('button', { name: /Session A/ }).click()
+await page.getByRole('heading', { name: 'Session A' }).waitFor()
+assert.equal(await page.locator('.thinking-message').count(), 0)
+await page.getByRole('button', { name: /Session B/ }).click()
+await page.getByRole('heading', { name: 'Session B' }).waitFor()
+await page.waitForTimeout(220)
+await page.getByRole('tab', { name: /Business B2/ }).click()
+await page.getByRole('heading', { name: 'Business B2' }).waitFor()
 await messageTarget.selectOption('business-b2')
 await composer.fill('dedupe send')
 await page.evaluate(() => {
@@ -248,6 +278,7 @@ await page.evaluate(() => {
   window.__emitWorkbench({ event: 'message_delta', data: { session_id: 'session-b', business_id: null, run_id: 'conversation-run-b', message_id: 'cancel-live', sequence: 0, text: '取消前已经收到的片段' } })
 })
 await page.getByText('最终回答：当前能力与业务范围已确认。', { exact: true }).waitFor()
+assert.equal(await page.locator('.thinking-message').count(), 0)
 assert.equal(await page.getByText('重复片段', { exact: true }).count(), 0)
 assert.equal(await page.getByText('终态后不应追加', { exact: true }).count(), 0)
 await page.getByText('业务流公开进度', { exact: true }).waitFor()
@@ -266,16 +297,34 @@ assert.ok(!visibleStreamText?.includes('不能显示'))
 const streamRows = await page.locator('.conversation-pane .live-message').count()
 assert.ok(streamRows >= 2)
 await page.getByRole('button', { name: /停止对话/ }).click()
+await page.getByRole('button', { name: /正在停止/ }).waitFor()
+assert.equal(await page.locator('.thinking-message').count(), 0)
 await page.waitForTimeout(25)
 const conversationCancelCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'cancel_conversation'))
 assert.deepEqual(conversationCancelCalls.map(({ params }) => params), [{ session_id: 'session-b', run_id: 'conversation-run-b' }])
 await page.getByText('已停止 · 回复未完成', { exact: true }).waitFor()
+assert.equal(await page.locator('.thinking-message').count(), 0)
 await composer.fill('failed conversation')
 await page.getByRole('button', { name: '发送' }).click()
 await page.getByText('对话失败，可继续输入', { exact: true }).waitFor()
 await page.getByText('查看错误详情', { exact: true }).click()
 await page.getByText('CONVERSATION_TOOL_FAILED', { exact: true }).waitFor()
 assert.ok((await page.locator('.conversation-run-status').textContent())?.includes('当前回复未完成'))
+await composer.fill('completed retry')
+await page.getByRole('button', { name: '发送' }).click()
+await page.locator('.thinking-message').waitFor()
+await page.waitForTimeout(220)
+await page.evaluate(() => window.__emitWorkbench({ event: 'message_delta', data: { session_id: 'session-b', business_id: null, run_id: 'conversation-run-b', message_id: 'retry-live', sequence: 0, text: '重试公开回复' } }))
+await page.getByText('重试公开回复', { exact: true }).waitFor()
+assert.equal(await page.locator('.thinking-message').count(), 0)
+
+// A persisted assistant message for the active run is public output, so a
+// reload snapshot must clear the thinking placeholder instead of duplicating it.
+await composer.fill('snapshot public')
+await page.getByRole('button', { name: '发送' }).click()
+await page.getByText('快照中的公开回答', { exact: true }).waitFor()
+assert.equal(await page.locator('.thinking-message').count(), 0)
+await page.evaluate(() => window.__removeConversationMessage('snapshot-public'))
 
 // A delayed send response from the old session must not reload that session over a newer selection.
 await messageTarget.selectOption('business-b2')

@@ -402,7 +402,7 @@ class Workbench:
         if feedback:
             context += "\nPrevious host feedback:\n" + "\n".join(feedback)
         return ("User message:\n" + text + "\n\nSelected business context:\n" + context +
-                "\n\nAnswer the user directly. If the goal is clearly a sales/invoice task, use propose_business for a reviewable proposal.")
+                "\n\nAnswer the user directly. For a concrete sales/invoicing workflow, ask for the smallest missing context first (usually the customer and desired action; pasted material or an existing order number is acceptable), then use propose_business for a reviewable proposal. An explicit read-only pending-order browsing request may be proposed without a customer. Do not ask for technical IDs or every field, do not invent a goal, and do not promise payment, procurement, manufacturing, external attachment upload, or OCR. Approved business-workspace runs may perform supported order/invoice writes and read back results; this conversation itself does not authorize execution.")
 
     def _launch_conversation(self, run: dict[str, Any]) -> None:
         try:

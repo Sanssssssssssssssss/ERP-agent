@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { publicSettings, saveSettings } from "./settings";
 import { assertRequest, businessScope, canChangeSettings, observedRecordUrl, recordedArtifactPath } from "./ipc-security";
+import { safeErrorMessage } from "./host";
 
 export async function runSelfCheck(): Promise<void> {
   // Even a manually invoked packaged --self-check must not overwrite settings.
@@ -68,6 +69,11 @@ export async function runSelfCheck(): Promise<void> {
   assert.throws(() => recordedArtifactPath([{ id: "a_receipt", path: join(isolated, "program.exe") }], "a_receipt"), /FORMAT_INVALID/);
   assert.throws(() => recordedArtifactPath([{ id: "a_receipt", path: "https://example.com/receipt.json" }], "a_receipt"), /FORMAT_INVALID/);
   assert.throws(() => assertRequest({ method: "_record_artifact", params: { path: artifactPath } }), /METHOD_NOT_ALLOWED/);
+  assert.equal(safeErrorMessage("ODOO_NOT_CONFIGURED", "internal detail"), "[ODOO_NOT_CONFIGURED] Odoo 尚未配置，请先填写连接设置。");
+  assert.equal(safeErrorMessage("KeyError", "'unknown proposal'"), "[KEYERROR] 未找到可处理的业务提案，可能已处理或已过期。");
+  const generic = safeErrorMessage("business_validation_failed", "Authorization: Bearer sk_actual_123 Cookie: a=abc; b=xyz");
+  assert.equal(generic, "[BUSINESS_VALIDATION_FAILED] 请求失败，请检查当前操作状态后重试。");
+  assert.doesNotMatch(generic, /sk_actual_123|a=abc|b=xyz/);
   console.log("desktop self-check: PASS (settings, secrets, busy guard, IPC allowlist)");
   } finally {
     app.setPath("userData", previous);

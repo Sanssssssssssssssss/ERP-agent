@@ -66,6 +66,7 @@ export default function App() {
   const [health, setHealth] = useState<Health | null>(null)
   const [error, setError] = useState('')
   const [liveMessages, setLiveMessages] = useState<LiveMessage[]>([])
+  const [thinkingRun, setThinkingRun] = useState<{ sessionId: string; runId: string } | null>(null)
   const [settings, setSettings] = useState<Settings | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [connectionDetailsOpen, setConnectionDetailsOpen] = useState(false)
@@ -146,6 +147,7 @@ export default function App() {
         })
         publishLiveMessages()
       }
+      if (event.businessId == null) setThinkingRun((current) => current && current.sessionId === event.sessionId && (!current.runId || current.runId === event.runId) ? null : current)
     } else if (!current || current.status !== 'ended') {
       conversationStreamsRef.current.set(key, {
         id: event.messageId,
@@ -160,6 +162,7 @@ export default function App() {
       })
       finalizedStreamKeysRef.current.add(key)
       publishLiveMessages()
+      if (event.businessId == null) setThinkingRun((current) => current && current.sessionId === event.sessionId && (!current.runId || current.runId === event.runId) ? null : current)
     }
     return true
   }
@@ -223,6 +226,10 @@ export default function App() {
     if (requestId !== sessionRequestRef.current || sessionIdRef.current !== sessionId) return
     setSession(result)
     conversationRunsRef.current = result.conversation_runs ?? []
+    const latestConversation = [...conversationRunsRef.current].filter((run) => run.business_id == null).sort((left, right) => String(right.started_at || '').localeCompare(String(left.started_at || '')))[0]
+    if (latestConversation && ['completed', 'failed', 'cancelled', 'interrupted'].includes(latestConversation.status)) {
+      setThinkingRun((current) => current && current.runId && current.sessionId === sessionId && current.runId === latestConversation.id ? null : current)
+    }
     const persistedMessageIds = new Set(result.messages.map((message) => message.id))
     for (const message of result.messages) {
       if (message.run_id) finalizedStreamKeysRef.current.add(liveMessageKey({ session_id: sessionId, business_id: message.business_id ?? null, run_id: message.run_id, id: message.id }))
@@ -478,6 +485,7 @@ export default function App() {
     setExportPath('')
     setSelectedRunId('')
     setMessageBusinessId('__conversation__')
+    setThinkingRun(null)
     setTab('execution')
     conversationStreamsRef.current.clear()
     conversationRunsRef.current = []
@@ -561,16 +569,19 @@ export default function App() {
     messageInFlightRef.current.add(messageKey)
     setLoading(true)
     setDraft('')
+    setThinkingRun({ sessionId: requestSessionId, runId: '' })
     const contextBusinessId = messageBusinessId === '__conversation__' ? '' : messageBusinessId || selectedBusinessId
     try {
-      await call('send_message', {
+      const result = await call<{ ok?: boolean; run_id?: string }>('send_message', {
         session_id: requestSessionId,
         text,
         ...(contextBusinessId ? { context_business_id: contextBusinessId } : {})
       })
+      if (sessionIdRef.current === requestSessionId) setThinkingRun((current) => current && current.sessionId === requestSessionId ? { ...current, runId: typeof result?.run_id === 'string' ? result.run_id : current.runId } : current)
       if (sessionIdRef.current === requestSessionId) await loadSession(requestSessionId)
     } catch (reason) {
       if (sessionIdRef.current === requestSessionId) {
+        setThinkingRun((current) => current?.sessionId === requestSessionId ? null : current)
         setDraft(text)
         setError(messageForError(reason))
       }
@@ -924,6 +935,7 @@ export default function App() {
           draft={draft}
           liveMessages={liveMessages}
           conversationRuns={conversationRunsRef.current}
+          thinkingRun={thinkingRun}
           selectedBusinessId={selectedBusinessId}
           loading={loading}
           pendingProposal={pendingProposal}
@@ -1002,11 +1014,12 @@ function SessionRail({
   )
 }
 
-function ConversationPane({ session, draft, liveMessages, conversationRuns, selectedBusinessId, loading, pendingProposal, businesses, messageBusinessId, onMessageBusinessChange, onDraftChange, onSubmit, onProposal, onCancelConversation }: {
+function ConversationPane({ session, draft, liveMessages, conversationRuns, thinkingRun, selectedBusinessId, loading, pendingProposal, businesses, messageBusinessId, onMessageBusinessChange, onDraftChange, onSubmit, onProposal, onCancelConversation }: {
   session: SessionDetail | null
   draft: string
   liveMessages: LiveMessage[]
   conversationRuns: ConversationRun[]
+  thinkingRun: { sessionId: string; runId: string } | null
   selectedBusinessId: string
   loading: boolean
   pendingProposal?: ProposalLike
@@ -1031,6 +1044,16 @@ function ConversationPane({ session, draft, liveMessages, conversationRuns, sele
     ...messages.map((message) => ({ kind: 'message' as const, message, created_at: message.created_at })),
     ...visibleLiveMessages.filter((message) => !persistedMessageKeys.has(`${message.business_id ?? '__conversation__'}:${message.id}`)).map((message) => ({ kind: 'live' as const, message, created_at: message.created_at || '' }))
   ].sort((left, right) => left.created_at.localeCompare(right.created_at))
+  const localThinking = Boolean(thinkingRun && thinkingRun.sessionId === session?.session.id && (!thinkingRun.runId || latestConversation?.id === thinkingRun.runId))
+  const activePublicText = activeConversation && (
+    visibleLiveMessages.some((message) => message.run_id === activeConversation.id && message.text.trim())
+    || messages.some((message) => message.role === 'assistant' && message.run_id === activeConversation.id && message.text.trim())
+  )
+  const localThinkingForRun = Boolean(
+    localThinking
+    && !(thinkingRun?.runId && latestConversation?.id === thinkingRun.runId && latestConversation.status === 'cancel_requested')
+  )
+  const showThinking = Boolean(!activePublicText && (localThinkingForRun || activeConversation?.status === 'running'))
   const scrollToLatest = () => {
     const element = scrollRef.current
     if (!element) return
@@ -1045,7 +1068,7 @@ function ConversationPane({ session, draft, liveMessages, conversationRuns, sele
       return
     }
     setHasNew(true)
-  }, [atLatest, liveMessages, messages])
+  }, [atLatest, liveMessages, messages, showThinking])
   return (
     <section className={`conversation-pane ${terminalConversation ? 'has-run-status' : ''}`}>
       <header className="conversation-header">
@@ -1057,6 +1080,7 @@ function ConversationPane({ session, draft, liveMessages, conversationRuns, sele
         {!session && <EmptyState title="选择一个会话" detail="左侧会话列表会显示已持久化的工作。" />}
         {session && messages.length === 0 && visibleLiveMessages.length === 0 && <EmptyState title="从会话开始" detail="先问我能做什么，或描述想解决的业务问题。" />}
         {orderedMessages.map((item) => item.kind === 'message' ? <MessageRow key={`message:${item.message.id}`} message={item.message} /> : <article className="message assistant live-message" key={`live:${item.message.run_id}:${item.message.id}`}><span className="avatar agent-avatar">A</span><div><div className="message-meta"><strong>Agent</strong><span>{item.message.status === 'ended' ? '回复完成' : item.message.status === 'interrupted' || item.message.status === 'failed' ? '已停止 · 回复未完成' : '实时回复'}</span></div><MessageText text={item.message.text} collapsible={false} /></div></article>)}
+        {showThinking && <article className="message assistant thinking-message" aria-live="polite"><span className="avatar agent-avatar">A</span><div><div className="message-meta"><strong>Agent</strong></div><p className="thinking-copy">正在思考…</p></div></article>}
         {pendingProposal && <ProposalCard proposal={pendingProposal} disabled={loading} onDecision={onProposal} />}
         {hasNew && <button className="new-message-indicator" type="button" onClick={scrollToLatest}>有新消息 · 回到最新</button>}
       </div>
@@ -1080,7 +1104,7 @@ function MessageText({ text, collapsible = true }: { text: string; collapsible?:
 
 function MessageRow({ message }: { message: Message }) {
   const role = message.role === 'user' ? 'user' : message.role === 'system' ? 'system' : 'assistant'
-  return <article className={`message ${role}`}><span className={`avatar ${role === 'user' ? 'user-avatar' : role === 'system' ? 'system-avatar' : 'agent-avatar'}`}>{role === 'user' ? '你' : role === 'system' ? '·' : 'A'}</span><div><div className="message-meta"><strong>{role === 'user' ? '你' : role === 'system' ? '系统' : 'Agent'}</strong><span>{formatInstant(message.created_at)}</span></div><MessageText text={message.text} /></div></article>
+  return <article className={`message ${role}`}><span className={`avatar ${role === 'user' ? 'user-avatar' : role === 'system' ? 'system-avatar' : 'agent-avatar'}`}>{role === 'user' ? '你' : role === 'system' ? '·' : 'A'}</span><div><div className="message-meta">{role !== 'user' && <strong>{role === 'system' ? '系统' : 'Agent'}</strong>}<span>{formatInstant(message.created_at)}</span></div><MessageText text={message.text} /></div></article>
 }
 
 function ProposalCard({ proposal, disabled, onDecision }: { proposal: ProposalLike; disabled: boolean; onDecision: (proposal: ProposalLike, confirmed: boolean) => void }) {
