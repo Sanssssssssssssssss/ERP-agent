@@ -31,13 +31,16 @@ const bridgeScript = String.raw`
     const calls = []
     let traceVersion = 0
     let materialVersion = 0
+    const importedMaterials = new Map()
     let saveBlocked = true
     let failInitialConnectionCheck = true
+    let delayedPurchaseDecision = true
+    let showAcceptedProjection = false
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
     const session = (id, title, businesses) => ({ id, title, created_at: '2026-09-08T08:00:00Z', updated_at: '2026-09-08T09:00:00Z', archived: false, status: 'idle', businesses })
     const business = (id, session_id, title, status = 'idle', goal = '处理订单与发票') => ({ id, session_id, type: id === 'business-b2' ? 'sale_purchase_invoice' : 'sale_invoice', title, goal, status, created_at: '2026-09-08T08:00:00Z', updated_at: '2026-09-08T09:00:00Z', active_run_id: id + '-run' })
     const b1 = business('business-b1', 'session-b', 'Business B1')
-    const b2 = business('business-b2', 'session-b', 'Business B2', 'awaiting_approval')
+    const b2 = { ...business('business-b2', 'session-b', 'Business B2', 'awaiting_approval'), material_ids: ['material-b2'] }
     const b3 = business('business-b3', 'session-b', 'Business B3', 'needs_reconciliation', '核对中断写入是否已经落库，并保留当前运行与历史单据证据。')
     const b4 = business('business-b4', 'session-b', 'Business B4', 'completed')
     const sessions = [session('session-a', 'Session A', [business('business-a1', 'session-a', 'Business A1')]), session('session-b', 'Session B', [b1, b2, b3, b4])]
@@ -50,11 +53,13 @@ const bridgeScript = String.raw`
       approvals: b.id === 'business-b2' ? [{ action_id: 'action-b2', run_id: 'business-b2-run', business_id: 'business-b2', status: 'pending_approval', title: 'ERP write approval', model: 'account.move', operation: 'create', record_ids: [42], values: { client_order_ref: 'PI-DYNAMIC-MVP-20260908', commitment_date: '2026-09-16 08:00:00', order_line: [[0, 0, { product_id: 2, product_uom_qty: 1, price_unit: 695.22 }]], partner_id: 10, payment_term_id: 4 }, prestate: { records: [] }, result: { ok: true, preflight: true }, expires_at: Math.floor(Date.now() / 1000) + 60 }, { action_id: 'action-b2-purchase', run_id: 'business-b2-run', business_id: 'business-b2', status: 'pending_approval', title: 'ERP write approval', model: 'purchase.order', operation: 'button_confirm', record_ids: [1], values: { partner_id: 10, order_line: [[0, 0, { product_id: 2, product_qty: 3, price_unit: 12 }] ] }, prestate: { state: 'draft' }, result: { ok: true, preflight: true }, expires_at: Math.floor(Date.now() / 1000) + 60 }, { action_id: 'action-b2-send-file', run_id: 'business-b2-run', business_id: 'business-b2', status: 'pending_approval', title: '生成客户发票正式文件', model: 'account.move.send.wizard', operation: 'action_send_and_print', record_ids: [42], values: { sending_methods: [] }, prestate: { is_move_sent: false }, result: { ok: true, preflight: true }, expires_at: Math.floor(Date.now() / 1000) + 60 }] : b.id === 'business-b3' ? [{ action_id: 'action-b3', run_id: 'business-b3-run', business_id: 'business-b3', status: 'needs_reconciliation', title: '执行客户发票写入', model: 'account.move', operation: 'create', record_ids: [99], values: { state: 'posted' }, prestate: { state: 'draft' }, result: { status: 'unknown', retryable: false, detail: '主机中断，无法确认写入是否落库' }, expires_at: Math.floor(Date.now() / 1000) + 60 }] : b.id === 'business-b4' ? [{ action_id: 'action-b4-verified', run_id: 'business-b4-run', business_id: 'business-b4', status: 'verified', title: '客户发票写入', model: 'account.move', operation: 'create', record_ids: [101], values: { state: 'posted' }, prestate: { state: 'draft' }, result: { ok: true, executed: true }, expires_at: Math.floor(Date.now() / 1000) - 60 }, { action_id: 'action-b4-rejected', run_id: 'business-b4-run', business_id: 'business-b4', status: 'rejected', title: '重复发票写入', model: 'account.move', operation: 'create', record_ids: [102], values: { state: 'posted' }, prestate: { state: 'posted' }, result: { ok: false, reason: 'approval_rejected' }, expires_at: Math.floor(Date.now() / 1000) - 60 }] : [],
       documents: b.id === 'business-b2' ? [
         { id: '1', model: 'sale.order', name: 'SO-B2', state: 'sale', source: 'native_read_receipt', observed_at: '2026-09-08T08:45:00Z', fields: { partner_name: 'Nimbus Bureau', amount_total: 695.22, currency: 'USD', invoice_status: 'invoiced', delivery_status: 'pending' } },
+        { id: 'legacy-so', model: 'sale.order', name: 'S00001', state: 'sale', source: 'native_read_receipt', observed_at: '2026-08-08T08:45:00Z', is_reference: true, document_scope: 'reference', fields: { partner_name: 'Legacy Customer', amount_total: 99, currency: 'USD', invoice_status: 'invoiced' } },
         { id: '2', model: 'sale.order', name: 'SO-B2-SECOND', state: 'draft', source: 'native_read_receipt', observed_at: '2026-09-08T08:45:30Z', fields: { partner_name: 'Nimbus Bureau', amount_total: 10, currency: 'USD', invoice_status: 'to invoice' } },
         { id: 'po-1', model: 'purchase.order', name: 'PO-B2', state: 'to approve', source: 'native_read_receipt', observed_at: '2026-09-08T08:45:45Z', fields: { partner_name: 'Nimbus Supplier', amount_total: 120, currency: 'USD' } },
         { id: '1', model: 'purchase.order', name: 'P00001', state: 'to approve', source: 'native_read_receipt', observed_at: '2026-09-08T08:45:46Z', fields: { partner_name: 'Alpine Supplier', amount_total: 36, currency: 'USD' } },
         { id: '1', model: 'account.move', name: 'INV-B2', state: 'posted', source: 'refresh_native_read', observed_at: '2026-09-08T08:46:00Z', fields: { partner_name: 'Nimbus Bureau', amount_total: 695.22, currency: 'USD', payment_state: 'not_paid', amount_residual: 695.22, invoice_pdf_report_id: null } },
         { id: 'line-1', model: 'sale.order.line', name: 'SO-B2 明细 1', source: 'native_read_receipt', observed_at: '2026-09-08T08:46:10Z', fields: { product_name: '服务项目', product_uom_qty: 1, price_unit: 695.22 } },
+        { id: 'legacy-line', model: 'sale.order.line', name: 'S00001 明细 1', source: 'native_read_receipt', observed_at: '2026-08-08T08:46:10Z', is_reference: true, document_scope: 'reference', fields: { product_name: '旧服务', product_uom_qty: 1, price_unit: 99 } },
         { id: 'line-2', model: 'account.move.line', name: 'INV-B2 分录 1', source: 'native_read_receipt', observed_at: '2026-09-08T08:46:11Z', fields: { account_name: '应收账款', debit: 695.22, credit: 0 } },
         { id: '4', model: 'account.payment.term', name: '30Days', source: 'native_read_receipt', observed_at: '2026-09-08T08:46:12Z', fields: { name: '30Days' } },
         { id: '10', model: 'res.partner', name: 'Nimbus Bureau', source: 'native_read_receipt', observed_at: '2026-09-08T08:46:12Z', fields: { name: 'Nimbus Bureau' } },
@@ -76,12 +81,14 @@ const bridgeScript = String.raw`
       'session-a': { session: sessions[0], messages: [], businesses: sessions[0].businesses, conversation_runs: [], live_messages: [] },
       'session-b': { session: sessions[1], messages: [{ id: 'm1', role: 'assistant', text: '已识别两个业务工作区。', created_at: '2026-09-08T08:01:00Z' }, { id: 'm-user', role: 'user', text: '我想查看订单', created_at: '2026-09-08T08:01:30Z' }, { id: 'proposal-1', role: 'assistant', text: '主机合成的提案正文不应重复显示', created_at: '2026-09-08T08:02:00Z', proposal: { id: 'proposal-1', title: '新业务意图', goal: '处理一笔新的销售业务', type: 'sale_invoice', completion_target: 'posted', status: 'pending' } }], businesses: sessions[1].businesses, conversation_runs: [{ id: 'conversation-run-b', session_id: 'session-b', business_id: null, kind: 'conversation', status: 'running' }], live_messages: [] }
     }
+    sessionDetails['session-b'].materials = [{ id: 'material-b2', session_id: 'session-b', name: '订单材料.csv', size: 42, sha256: 'sha-b2', created_at: '2026-09-08T08:44:00Z', row_count: 5, preview: '客户,产品,数量\\nNimbus,服务,2', media_type: 'text/csv' }]
     window.__bridgeCalls = calls
     window.__traceVersion = 0
     window.__persistConversationMessage = (message) => sessionDetails['session-b'].messages.push(message)
     window.__setSessionMessages = (id, messages) => { sessionDetails[id].messages = messages }
     window.__removeConversationMessage = (id) => { sessionDetails['session-b'].messages = sessionDetails['session-b'].messages.filter((message) => message.id !== id) }
     window.__emitWorkbench = (event) => listeners.forEach((listener) => listener(event))
+    window.__showAcceptedProjection = () => { showAcceptedProjection = true }
     window.workbench = {
       subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) },
       windowControl() { return Promise.resolve() },
@@ -100,7 +107,9 @@ const bridgeScript = String.raw`
         if (method === 'get_business' || method === 'refresh_business') {
           const id = params.business_id
           await wait(id === 'business-b1' ? 180 : 12)
-          return details(sessions.flatMap((item) => item.businesses).find((item) => item.id === id))
+          const result = details(sessions.flatMap((item) => item.businesses).find((item) => item.id === id))
+          if (id === 'business-b2' && showAcceptedProjection) { result.approvals = []; result.business.status = 'running'; result.runs[1].status = 'running'; result.activity = { phase: 'model', label: '等待模型响应', detail: '审批已完成，模型正在继续处理。' } }
+          return result
         }
         if (method === 'get_trace') {
           await wait(params.business_id === 'business-b1' ? 12 : 220)
@@ -118,15 +127,23 @@ const bridgeScript = String.raw`
         }
         if (method === 'import_material') {
           if (params.name === 'cross.csv') await wait(120)
-          materialVersion += 1
-          return { id: 'material-' + materialVersion, session_id: params.session_id, name: params.name, size: 24, sha256: 'sha-' + materialVersion, created_at: '2026-09-08T09:03:00Z', row_count: 2, preview: '客户,产品,数量', media_type: 'text/csv' }
+          const importedKey = params.session_id + ':' + params.name + ':sha-fixture'
+          if (!importedMaterials.has(importedKey)) { materialVersion += 1; importedMaterials.set(importedKey, { id: 'material-' + materialVersion, session_id: params.session_id, name: params.name, size: 24, sha256: 'sha-fixture', created_at: '2026-09-08T09:03:00Z', row_count: 2, preview: '客户,产品,数量', media_type: 'text/csv' }) }
+          return importedMaterials.get(importedKey)
         }
         if (method === 'download_document') {
           if (params.format === 'pdf' && params.model === 'account.move') throw new Error("Error invoking remote method 'workbench:call': Error: [VALUEERROR] 发票已过账，但尚未生成正式 PDF，请先生成发票文件后再下载。")
           if (params.format === 'pdf') return { cancelled: true }
           return { cancelled: false, path: 'C:\\runtime\\SO-B2.csv', artifact: { id: 'artifact-doc-csv', name: 'SO-B2.csv', path: 'C:\\runtime\\SO-B2.csv', kind: 'document_csv', available: true } }
         }
-        if (method === 'decide_approval') return { ok: true }
+        if (method === 'decide_approval') {
+          if (params.action_id === 'action-b2-purchase' && params.decision === 'approve') {
+            if (delayedPurchaseDecision) { delayedPurchaseDecision = false; await wait(4300) }
+            return { ok: false, status: 'stale' }
+          }
+          if (params.action_id === 'action-b2-send-file' && params.decision === 'approve') throw new Error('DECISION_NETWORK_DOWN')
+          return { ok: true }
+        }
         if (method === 'get_settings') return { model: 'deepseek/deepseek-v4-flash/high', base_url: 'http://model.invalid', odoo_url: 'http://odoo.invalid', odoo_db: 'demo', odoo_username: 'admin', has_model_key: false, has_odoo_key: false, environment: 'demo' }
         if (method === 'save_settings') {
           if (saveBlocked) { saveBlocked = false; throw new Error("Error invoking remote method 'workbench:call': Error: CONFIG_BUSY") }
@@ -497,11 +514,19 @@ await page.getByRole('tab', { name: /^单据/ }).click()
 await page.getByText('业务单据', { exact: true }).waitFor()
 await page.getByText('往来单位与明细', { exact: true }).waitFor()
 await page.getByText('参考记录', { exact: true }).waitFor()
+assert.equal(await page.locator('.resource-preview h3').textContent(), 'SO-B2')
 assert.equal(await page.locator('.resource-group').filter({ hasText: '业务单据' }).getByRole('button', { name: /SO-B2/ }).count(), 2)
 assert.equal(await page.locator('.resource-group').filter({ hasText: '业务单据' }).getByRole('button', { name: /PO-B2/ }).count(), 1)
 assert.ok((await page.getByRole('button', { name: /PO-B2/ }).textContent())?.includes('待二次确认'))
 assert.equal(await page.locator('.resource-row').filter({ hasText: '业务留言' }).count(), 7)
-assert.equal(await page.locator('.resource-row').filter({ hasText: '销售明细' }).count(), 1)
+assert.equal(await page.locator('.resource-row').filter({ hasText: '销售明细' }).count(), 2)
+assert.equal(await page.locator('.resource-group').filter({ hasText: '往来单位与明细' }).getByRole('button', { name: /S00001 明细/ }).count(), 0)
+assert.equal(await page.locator('.resource-group').filter({ hasText: '参考记录' }).getByRole('button', { name: /S00001/ }).count(), 2)
+await page.getByRole('button', { name: /S00001/ }).first().click()
+assert.equal(await page.locator('.resource-preview h3').textContent(), 'S00001')
+await page.evaluate(() => window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b2', type: 'artifact_created' } }))
+await page.waitForTimeout(80)
+assert.equal(await page.locator('.resource-preview h3').textContent(), 'S00001')
 assert.ok((await page.getByRole('button', { name: /Alpine Supplier/ }).textContent())?.includes('往来单位 · —（不适用）'))
 assert.ok((await page.getByRole('button', { name: /Alpine 供货信息/ }).textContent())?.includes('—（不适用）'))
 assert.ok((await page.getByRole('button', { name: /销售税/ }).textContent())?.includes('—（不适用）'))
@@ -634,6 +659,19 @@ assert.deepEqual(approvalCalls.map(({ params }) => params), [
   { session_id: 'session-b', business_id: 'business-b2', run_id: 'business-b2-run', action_id: 'action-b2', decision: 'approve' },
   { session_id: 'session-b', business_id: 'business-b2', run_id: 'business-b2-run', action_id: 'action-b2', decision: 'reject' }
 ])
+
+// A stale decision stays visibly unresolved while the host call is pending,
+// then reports failure without ever presenting the action as approved. Other
+// pending actions remain available, and a thrown decision clears submitting.
+await purchaseApproval.getByRole('button', { name: '批准这项业务动作' }).click()
+await page.waitForTimeout(120)
+assert.ok((await page.locator('.approval-progress').textContent())?.includes('正在提交审批决定'))
+await page.getByText('业务状态已变化，审批未生效。', { exact: true }).first().waitFor({ timeout: 6000 })
+assert.equal(await page.getByText('正在提交审批决定…', { exact: true }).count(), 0)
+assert.ok((await page.locator('.approval-row').allTextContents()).join('\n').includes('生成正式发票文件'))
+await sendFileApproval.getByRole('button', { name: '批准这项业务动作' }).click()
+await page.getByText('DECISION_NETWORK_DOWN', { exact: true }).waitFor()
+assert.equal(await page.getByText('正在提交审批决定…', { exact: true }).count(), 0)
 
 // A delayed trace must not leak into another business; the final trace displays null usage as unknown.
 await page.getByRole('tab', { name: /^运行详情/ }).click()
@@ -815,8 +853,26 @@ assert.ok(narrowOverflow.grid <= narrowOverflow.gridClient + 1, JSON.stringify(n
 // At the compact viewport, the resource list scrolls independently so the
 // selected document preview heading remains visible in the active tab.
 await page.getByRole('tab', { name: /Business B2/ }).click()
+await page.evaluate(() => window.__showAcceptedProjection())
+await page.evaluate(() => window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b2', run_status: 'running' } }))
+await page.getByText('等待模型响应', { exact: true }).waitFor()
+await page.waitForTimeout(4600)
+await page.locator('.conversation-pane .approval-inbox-card').waitFor()
+assert.ok((await page.locator('.conversation-pane .approval-inbox-card').textContent())?.includes('等待模型响应'))
+assert.equal(await page.getByText('正在提交审批决定…', { exact: true }).count(), 0)
+await page.locator('.material-reuse-tray summary').click()
+await page.getByText('沿用历史材料', { exact: true }).waitFor()
+assert.ok((await page.locator('.material-reuse-tray').textContent()).includes('订单材料.csv'))
+const b2MaterialInput = page.locator('input[type="file"]').first()
+await b2MaterialInput.setInputFiles({ name: 'orders.csv', mimeType: 'text/csv', buffer: Buffer.from('客户,产品,数量\nNimbus,服务,2') })
+await page.getByText('orders.csv', { exact: true }).waitFor()
+await b2MaterialInput.setInputFiles({ name: 'orders.csv', mimeType: 'text/csv', buffer: Buffer.from('客户,产品,数量\nNimbus,服务,2') })
+await page.waitForTimeout(40)
+assert.equal(await page.locator('.material-chip').filter({ hasText: 'orders.csv' }).count(), 1)
+assert.ok((await page.locator('.material-reuse-tray').textContent()).includes('本轮不附'))
+await page.locator('.material-chip button').click()
 await page.getByRole('tab', { name: /^单据/ }).click()
-await page.getByText('订单材料.csv', { exact: true }).waitFor()
+await page.locator('.material-history').getByText('订单材料.csv', { exact: true }).waitFor()
 await page.locator('.material-history-row span').filter({ hasText: '4 条数据' }).waitFor()
 await page.getByRole('button', { name: /^INV-B2 客户发票/ }).click()
 const previewHeading = page.locator('.resource-preview h3')

@@ -10,6 +10,7 @@ export interface SessionSummary {
   updated_at: string;
   archived: boolean;
   status: string;
+  pending_material_ids?: string[];
 }
 
 export interface Message {
@@ -130,6 +131,8 @@ export interface Document {
   source: string;
   source_run_id?: string;
   source_tool_id?: string;
+  document_scope?: string;
+  is_reference?: boolean;
 }
 
 export interface BusinessArtifact {
@@ -193,6 +196,8 @@ export interface Usage {
   output: number | null;
   reasoning: number | null;
   total: number | null;
+  reported_total?: number | null;
+  missing_usage_rounds?: number;
 }
 
 export interface Round {

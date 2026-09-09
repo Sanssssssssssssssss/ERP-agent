@@ -66,6 +66,7 @@ export interface SessionDetail {
   businesses: Business[]
   conversation_runs?: ConversationRun[]
   live_messages?: LiveMessage[]
+  materials?: Array<{ id: string; session_id: string; name: string; size: number; sha256: string; created_at: string; row_count?: number; preview?: string; media_type?: string }>
 }
 
 export type ToolReceipt = Tool

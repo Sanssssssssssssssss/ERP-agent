@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from pi_agent.messages import AssistantMessage
@@ -23,6 +24,8 @@ from pi_coding.session import CodingSession, CodingSessionConfig
 from integration.stream_events import public_events
 
 CONTEXT_WINDOW = 128_000
+READ_MAX_ROWS = 5
+READ_MAX_BYTES = 16_384
 MODEL_COMPAT = {
     "supportsReasoningEffort": True,
     "requiresReasoningContentOnAssistantMessages": True,
@@ -36,7 +39,7 @@ CONVERSATION_POLICY = (
     "and read back their results. It can help prepare an order for an existing "
     "customer and product, or a purchase request with a supplier and lines, then "
     "confirm supported records or create and post an invoice when the user approves. "
-    "Do not claim to have read Odoo or changed records before execution, and do not "
+    "Do not claim to have changed records before execution, and do not "
     "invent live ERP facts. For a vague sales or invoicing request, first ask for "
     "the customer and what they want done; pasted material or an existing order "
     "number is useful context. Do not ask for technical IDs or every field, and do "
@@ -46,6 +49,13 @@ CONVERSATION_POLICY = (
     "target and commercial choices they must decide. Read Odoo price lists, customer "
     "profiles, addresses, and tax defaults during execution instead of asking for "
     "each one; accept an explicit request to use ERP defaults and never invent values. "
+    "When the user explicitly asks to check a current customer, product, price, or payment "
+    "term, use the read-only Odoo reference tool. Its result is an observed snapshot with "
+    "a source and timestamp, not permission to write. If it fails or returns no match, say "
+    "that the fact could not be verified. Do not call it merely because a sales word appears. "
+    "Respect explicit material headers and user-provided meanings; do not ask the user to "
+    "restate a value that is already labeled, and ask only when a genuinely necessary choice "
+    "is missing or ambiguous. "
     "Keep the reply concise: a short summary and usually no more than two necessary "
     "questions. Do not promise "
     "payment, manufacturing, external attachment upload, or OCR, and do not claim "
@@ -55,6 +65,129 @@ CONVERSATION_POLICY = (
     "then click '开始执行'. Do not ask the user to reply with confirmation and do "
     "not imply that execution starts automatically. Never use shell, filesystem, "
     "network, MCP, or hidden reasoning as user-facing progress."
+)
+
+
+_REFERENCE_SPECS = {
+    "customer": ("res.partner", ["id", "name", "display_name", "property_payment_term_id"]),
+    "product": ("product.product", ["id", "name", "display_name", "default_code", "list_price"]),
+    "payment_term": ("account.payment.term", ["id", "name"]),
+    "sale_order": ("sale.order", ["id", "name", "state", "partner_id", "amount_total", "currency_id", "invoice_status"]),
+    "purchase_order": ("purchase.order", ["id", "name", "state", "partner_id", "amount_total", "currency_id"]),
+    "invoice": ("account.move", ["id", "name", "state", "move_type", "partner_id", "amount_total", "currency_id", "payment_state", "invoice_origin"]),
+}
+_ODOO_READS = None
+
+
+def _odoo_reads():
+    """Build the explicit, read-only Odoo facade for this worker."""
+    global _ODOO_READS
+    if _ODOO_READS is not None:
+        return _ODOO_READS
+    required = ("ODOO_URL", "ODOO_DB", "ODOO_USERNAME", "ODOO_API_KEY")
+    if any(not os.environ.get(key) for key in required):
+        raise RuntimeError("explicit Odoo connection settings are required")
+    from odoo_runtime.gateway import Json2ReadClient
+    from odoo_runtime.reads import NativeReads
+    client = Json2ReadClient(
+        url=os.environ["ODOO_URL"], db=os.environ["ODOO_DB"],
+        username=os.environ["ODOO_USERNAME"], password=os.environ["ODOO_API_KEY"],
+        api_key=os.environ["ODOO_API_KEY"], transport="json2", timeout=10,
+    )
+    _ODOO_READS = NativeReads(client)
+    return _ODOO_READS
+
+
+def _observed_at() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _bounded_reference_rows(rows, max_rows: int) -> tuple[list[dict], bool]:
+    bounded: list[dict] = []
+    truncated = False
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        if len(bounded) >= max_rows:
+            truncated = True
+            break
+        candidate = dict(row)
+        # Leave room for the source, timestamp, model, and status envelope.
+        if len(json.dumps([*bounded, candidate], ensure_ascii=False).encode("utf-8")) > READ_MAX_BYTES - 2_048:
+            truncated = True
+            break
+        bounded.append(candidate)
+    return bounded, truncated
+
+
+async def _read_odoo_reference(_call_id, arguments, _signal=None, _on_update=None):
+    values = dict(arguments or {})
+    unknown = sorted(set(values) - {"resource", "query", "limit"})
+    if unknown:
+        error = "unsupported reference arguments"
+        payload = {"success": False, "status": "invalid", "error": error}
+        return AgentToolResult(content=json.dumps(payload), details=payload)
+    resource = values.get("resource")
+    query = values.get("query", "")
+    limit = values.get("limit", READ_MAX_ROWS)
+    if not isinstance(resource, str) or resource not in _REFERENCE_SPECS:
+        error = "resource must be customer, product, payment_term, sale_order, purchase_order, or invoice"
+        payload = {"success": False, "status": "invalid", "error": error}
+        return AgentToolResult(content=json.dumps(payload), details=payload)
+    if not isinstance(query, str) or len(query.strip()) > 200:
+        error = "query must be at most 200 characters"
+        payload = {"success": False, "status": "invalid", "error": error}
+        return AgentToolResult(content=json.dumps(payload), details=payload)
+    if type(limit) is not int or not 1 <= limit <= READ_MAX_ROWS:
+        error = f"limit must be an integer from 1 to {READ_MAX_ROWS}"
+        payload = {"success": False, "status": "invalid", "error": error}
+        return AgentToolResult(content=json.dumps(payload), details=payload)
+    model, fields = _REFERENCE_SPECS[resource]
+    observed_at = _observed_at()
+    try:
+        result = _odoo_reads().call("search_records", {
+            "model": model, "fields": fields, "query": query.strip() or None,
+            "limit": min(limit + 1, READ_MAX_ROWS + 1), "offset": 0,
+        })
+        if not isinstance(result, dict) or result.get("success") is not True:
+            raise RuntimeError("native read was unavailable")
+        raw_records = result.get("result")
+        if not isinstance(raw_records, list) or any(not isinstance(row, dict) for row in raw_records):
+            raise RuntimeError("native read returned malformed records")
+        records, truncated = _bounded_reference_rows(raw_records[:limit], limit)
+        truncated = truncated or len(raw_records) > limit
+        payload = {"success": True, "status": "observed", "source": "native_odoo_read",
+                   "observed_at": observed_at, "resource": resource, "model": model,
+                   "count": len(records), "records": records, "truncated": truncated,
+                   "may_have_more": truncated}
+        if resource == "product":
+            payload["price_semantics"] = "list_price only; customer pricelist, tax, and currency are not resolved"
+    except Exception:
+        payload = {"success": False, "status": "unavailable", "source": "native_odoo_read",
+                   "observed_at": observed_at, "resource": resource, "model": model,
+                   "verified": False, "error": "Odoo read could not be verified"}
+    return AgentToolResult(content=json.dumps(payload, ensure_ascii=False), details=payload)
+
+
+READ_ODOO_REFERENCE = AgentTool(
+    name="read_odoo_reference",
+    label="Read Odoo reference",
+    description=(
+        "Read a small, current Odoo reference snapshot only when the user explicitly asks "
+        "to check a customer, product/price, payment term, order, or invoice. Fixed resources and fields; "
+        "read-only, no writes, no arbitrary model or method. A failed read is unknown."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "resource": {"type": "string", "enum": ["customer", "product", "payment_term", "sale_order", "purchase_order", "invoice"]},
+            "query": {"type": "string", "maxLength": 200},
+            "limit": {"type": "integer", "minimum": 1, "maximum": READ_MAX_ROWS},
+        },
+        "required": ["resource"],
+        "additionalProperties": False,
+    },
+    execute_fn=_read_odoo_reference,
 )
 
 
@@ -210,7 +343,7 @@ async def run(args: argparse.Namespace) -> None:
             model=model,
             storage=JsonlSessionStorage(args.session_file),
             cwd=Path.cwd(),
-            tools=[PROPOSE_BUSINESS],
+            tools=[READ_ODOO_REFERENCE, PROPOSE_BUSINESS],
             max_turns=None,
             resource_paths=PiResourcePaths(
                 root=args.receipt_dir / ".pi-agent",
@@ -230,8 +363,8 @@ async def run(args: argparse.Namespace) -> None:
     try:
         print(json.dumps({
             "type": "run_metadata", "kind": "conversation", "model": model,
-            "runtime": "CodingSession", "toolNames": [PROPOSE_BUSINESS.name],
-            "toolMode": "proposal_only", "odooToolCount": 0,
+            "runtime": "CodingSession", "toolNames": [READ_ODOO_REFERENCE.name, PROPOSE_BUSINESS.name],
+            "toolMode": "proposal_plus_readonly", "odooToolCount": 1,
         }, ensure_ascii=False), flush=True)
         assistant_before = sum(isinstance(message, AssistantMessage) for message in session.messages)
         source = session.prompt(args.instruction_file.read_text(encoding="utf-8"))
@@ -251,7 +384,7 @@ async def run(args: argparse.Namespace) -> None:
             "reasoning": sum((getattr(message.usage, "reasoning", 0) or 0) for message in assistant) or None,
             "modelCalls": receipts.number,
             "runtimeMode": "conversation",
-            "toolMode": "proposal_only",
+            "toolMode": "proposal_plus_readonly",
         }
         args.usage_file.write_text(json.dumps(usage), encoding="utf-8")
     finally:

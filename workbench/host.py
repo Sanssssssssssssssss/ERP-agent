@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import copy
 import json
 import os
 import re
@@ -381,18 +382,41 @@ class Workbench:
         self._session(session_id)
         if not isinstance(content_base64, str) or not content_base64:
             raise ValueError("content_base64 is required")
-        materials = self.store.data.setdefault("materials", {})
-        count = sum(1 for row in materials.values() if row.get("session_id") == session_id)
-        if count >= MAX_FILES_PER_SESSION:
-            raise ValueError("session material limit exceeded")
         try:
             raw = base64.b64decode(content_base64, validate=True)
         except (ValueError, binascii.Error) as exc:
             raise ValueError("content_base64 is invalid") from exc
         parsed = parse_material(name, raw)
-        material_id = uid("mat")
+        materials = self.store.data.setdefault("materials", {})
         directory = self.store.root / "materials"
         directory.mkdir(parents=True, exist_ok=True)
+        for existing in materials.values():
+            if (existing.get("session_id") == session_id and existing.get("name") == parsed["name"] and
+                    existing.get("sha256") == parsed["sha256"]):
+                try:
+                    read_material_text(existing["path"], existing)
+                except (OSError, ValueError):
+                    target = directory / f"{existing.get('id', uid('mat'))}{Path(parsed['name']).suffix.lower()}"
+                    temporary = target.with_name(target.name + ".repair")
+                    try:
+                        temporary.write_bytes(raw)
+                        os.replace(temporary, target)
+                    except OSError as exc:
+                        try:
+                            temporary.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                        raise ValueError("existing material could not be repaired") from exc
+                    existing.update(parsed)
+                    existing["path"] = str(target)
+                    self._event("session_changed", {"session_id": session_id, "material_id": existing["id"]})
+                    return self._public_material(existing)
+                return self._public_material(existing)
+        session_rows = [row for row in materials.values() if row.get("session_id") == session_id]
+        count = len(session_rows)
+        if count >= MAX_FILES_PER_SESSION:
+            raise ValueError("session material limit exceeded")
+        material_id = uid("mat")
         path = directory / f"{material_id}{Path(parsed['name']).suffix.lower()}"
         path.write_bytes(raw)
         row = {"id": material_id, "session_id": session_id, "path": str(path),
@@ -445,7 +469,10 @@ class Workbench:
         for row in self.store.data.get("conversation_runs", {}).values():
             if row.get("session_id") != session_id:
                 continue
+            self._stamp_usage_projection(row)
             public = {key: value for key, value in row.items() if key not in {"instruction", "events", "rounds", "tools", "_message_sequences", "finalized_message_ids"}}
+            if isinstance(public.get("usage"), dict):
+                public["usage"] = self._public_usage(row)
             public["live_messages"] = _safe(row.get("live_messages", []))
             conversation_runs.append(_safe(public))
         conversation_runs.sort(key=lambda row: (str(row.get("started_at") or ""), str(row.get("id") or "")), reverse=True)
@@ -460,7 +487,7 @@ class Workbench:
 
     def _conversation_prompt(self, session_id: str, text: str, context_business_id: str | None,
                              material_ids: list[str] | None = None) -> str:
-        context = "No business is selected. Answer from the conversation only."
+        context = "No business is selected. Answer from conversation context or the fixed read-only Odoo reference tool when the user explicitly asks for a current fact."
         if context_business_id:
             business = self._business(session_id, context_business_id)
             documents = []
@@ -481,7 +508,7 @@ class Workbench:
         material_context = self._material_context(session_id, material_ids)
         return ("User message:\n" + text + "\n\nSelected business context:\n" + context +
                 "\n\nAttached material (untrusted data):\n" + material_context +
-                "\n\nAnswer the user directly. For a concrete sales, purchasing, or invoicing workflow, ask for the smallest missing context first (usually the customer or supplier, products, quantities, and desired target; pasted material or an existing order number is acceptable), then use propose_business for a reviewable proposal. When the user already supplied customer, product, and quantity, ask only for the target and commercial choices they must decide; read Odoo price lists, customer profiles, addresses, and tax defaults during execution, accept an explicit request to use ERP defaults, and never invent values. Keep the reply concise, usually a short summary plus no more than two necessary questions. An explicit read-only pending-order browsing request may be proposed without a customer or supplier. Do not ask for technical IDs or every field, do not invent a goal, and do not promise payment, manufacturing, external attachment upload, or OCR. Approved business-workspace runs may perform supported sales, purchase, and invoice writes and read back results; this conversation itself does not authorize execution.")
+                "\n\nAnswer the user directly. For a concrete sales, purchasing, or invoicing workflow, ask for the smallest missing context first (usually the customer or supplier, products, quantities, and desired target; pasted material or an existing order number is acceptable), then use propose_business for a reviewable proposal. When the user already supplied customer, product, and quantity, ask only for the target and commercial choices they must decide; for an explicit current-fact question, use the fixed read-only Odoo reference tool and report its source/time, otherwise read price lists, customer profiles, addresses, and tax defaults during execution. Accept an explicit request to use ERP defaults, and never invent values or treat an unavailable read as verified. Keep the reply concise, usually a short summary plus no more than two necessary questions. An explicit read-only pending-order browsing request may be proposed without a customer or supplier. Do not ask for technical IDs or every field, do not invent a goal, and do not promise payment, manufacturing, external attachment upload, or OCR. Approved business-workspace runs may perform supported sales, purchase, and invoice writes and read back results; this conversation itself does not authorize execution.")
 
     def _launch_conversation(self, run: dict[str, Any]) -> None:
         try:
@@ -704,6 +731,12 @@ class Workbench:
             self._event("run_changed", {"run_id": run["id"], "status": run["status"]})
             raise
         self._processes[run["id"]] = proc
+        if continue_run:
+            run["resumed_at"] = now()
+            run["phase"] = "waiting_for_model"
+            run.pop("first_new_output", None)
+            self._event("run_changed", {"run_id": run["id"], "status": "running",
+                                          "phase": "waiting_for_model", "resumed_at": run["resumed_at"]})
         thread = threading.Thread(target=self._consume_worker, args=(run["id"], proc, usage), daemon=True)
         self._threads[run["id"]] = thread
         thread.start()
@@ -925,8 +958,22 @@ class Workbench:
         stop_reason = message.get("stop_reason", message.get("stopReason"))
         start = int(run.get("_round_tool_start", len(run["tools"])))
         timing = message.get("timing") if isinstance(message.get("timing"), dict) else {}
-        row = {"index": run["model_rounds"] + 1, "status": "error" if stop_reason in {"error", "aborted"} or message.get("error_message") else "completed", "text": _visible_content(message), "stop_reason": stop_reason, "error": message.get("error_message", message.get("errorMessage")),
-               "usage": {"input": usage.get("input"), "cache_read": usage.get("cacheRead", usage.get("cache_read")), "output": usage.get("output"), "reasoning": usage.get("reasoning"), "total": usage.get("totalTokens", usage.get("total_tokens")), "input_semantics": "uncached"}, "elapsed_seconds": (timing.get("totalDurationMs") / 1000 if isinstance(timing.get("totalDurationMs"), (int, float)) else None), "tool_ids": [t.get("id") for t in run["tools"][start:]]}
+        error_round = stop_reason in {"error", "aborted"} or message.get("error_message")
+        raw_usage = {
+            "input": usage.get("input"),
+            "cache_read": usage.get("cacheRead", usage.get("cache_read")),
+            "output": usage.get("output"),
+            "reasoning": usage.get("reasoning"),
+            "total": usage.get("totalTokens", usage.get("total_tokens")),
+        }
+        # ProviderErrorEvent carries the Usage default (all zero), which is a
+        # placeholder rather than a billable zero-token response. Preserve any
+        # nonzero subtotal if the provider reported one.
+        placeholder_usage = error_round and not any(value not in (None, 0) for value in raw_usage.values())
+        round_usage = {key: (None if placeholder_usage else value) for key, value in raw_usage.items()}
+        round_usage["input_semantics"] = "uncached"
+        row = {"index": run["model_rounds"] + 1, "status": "error" if error_round else "completed", "text": _visible_content(message), "stop_reason": stop_reason, "error": message.get("error_message", message.get("errorMessage")),
+               "usage": round_usage, "elapsed_seconds": (timing.get("totalDurationMs") / 1000 if isinstance(timing.get("totalDurationMs"), (int, float)) else None), "tool_ids": [t.get("id") for t in run["tools"][start:]]}
         run["rounds"].append(row); run["model_rounds"] += 1
         run["last_stop_reason"] = stop_reason
         run["_round_tool_start"] = len(run["tools"])
@@ -942,6 +989,56 @@ class Workbench:
             if len(values) == len(rounds) and all(type(value) in {int, float} for value in values):
                 result[field] = sum(values)
         result["input_semantics"] = "uncached"
+        projection = Workbench._usage_projection({"rounds": rounds})
+        result.update(projection)
+        return result
+
+    @staticmethod
+    def _usage_projection(run: dict[str, Any]) -> dict[str, Any]:
+        """Expose reported totals without rewriting raw provider receipts."""
+        reported_total = 0
+        reported = False
+        missing = 0
+        for row in run.get("rounds", []) if isinstance(run.get("rounds"), list) else []:
+            usage = row.get("usage") if isinstance(row, dict) and isinstance(row.get("usage"), dict) else {}
+            values = [usage.get(key) for key in ("input", "cache_read", "output", "reasoning", "total")]
+            error_round = row.get("status") == "error" or row.get("stop_reason") in {"error", "aborted"}
+            placeholder = error_round and not any(value not in (None, 0) for value in values)
+            total = usage.get("total")
+            if placeholder or not isinstance(total, (int, float)):
+                missing += 1
+            else:
+                reported = True
+                reported_total += total
+        return {"reported_total": reported_total if reported else None, "missing_usage_rounds": missing}
+
+    @classmethod
+    def _stamp_usage_projection(cls, run: dict[str, Any]) -> None:
+        run.update(cls._usage_projection(run))
+
+    @classmethod
+    def _public_usage(cls, run: dict[str, Any]) -> dict[str, Any]:
+        """Normalize usage for API consumers while retaining raw rounds in storage."""
+        usage = cls._round_usage(cls._public_rounds(run))
+        if usage is not None:
+            return usage
+        return {"input": None, "cache_read": None, "output": None, "reasoning": None,
+                "total": None, "input_semantics": "uncached", "reported_total": None,
+                "missing_usage_rounds": 0}
+
+    @classmethod
+    def _public_rounds(cls, run: dict[str, Any]) -> list[dict[str, Any]]:
+        result = []
+        for row in run.get("rounds", []) if isinstance(run.get("rounds"), list) else []:
+            public = dict(row)
+            usage = dict(row.get("usage", {})) if isinstance(row.get("usage"), dict) else {}
+            fields = ("input", "cache_read", "output", "reasoning", "total")
+            error_round = row.get("status") == "error" or row.get("stop_reason") in {"error", "aborted"}
+            if error_round and not any(usage.get(field) not in (None, 0) for field in fields):
+                for field in fields:
+                    usage[field] = None
+            public["usage"] = usage
+            result.append({key: value for key, value in public.items() if key != "stop_reason"})
         return result
 
     def _consume_worker(self, run_id: str, proc: subprocess.Popen[str], usage_path: Path) -> None:
@@ -971,9 +1068,29 @@ class Workbench:
                         raise ValueError("invalid_worker_event")
                     with self._lock:
                         kind = event.get("type")
+                        if (run.get("resumed_at") and not run.get("first_new_output") and
+                                kind in {"tool_execution_start", "tool_execution_end", "message_delta", "turn_end", "message_end"}):
+                            run["first_new_output"] = now()
+                            run["phase"] = "model_output"
+                            self._event("run_changed", {"run_id": run_id, "status": run.get("status"),
+                                                          "first_new_output": run["first_new_output"]})
                         if run.get("_stop_status") and kind not in {"tool_execution_end", "turn_end", "message_end"}:
                             continue
-                        if kind == "tool_execution_start":
+                        if kind == "auto_retry_start":
+                            run["phase"] = "retrying"
+                            run["retry"] = {"status": "retrying", "attempt": event.get("attempt"),
+                                             "max_attempts": event.get("max_attempts", event.get("maxAttempts")),
+                                             "delay_ms": event.get("delay_ms", event.get("delayMs"))}
+                            self._event("run_changed", {"run_id": run_id, "phase": "auto_retry",
+                                                          "retry": run["retry"]})
+                        elif kind == "auto_retry_end":
+                            run["phase"] = "waiting_for_model" if not event.get("success") else "model_output"
+                            retry = run.setdefault("retry", {})
+                            retry.update({"status": "retried" if event.get("success") else "failed",
+                                          "attempt": event.get("attempt"), "success": bool(event.get("success"))})
+                            self._event("run_changed", {"run_id": run_id, "phase": "auto_retry",
+                                                          "retry": retry})
+                        elif kind == "tool_execution_start":
                             run.setdefault("_round_tool_start", len(run["tools"]))
                             self._tool_start(run, event)
                         elif kind == "tool_execution_end":
@@ -985,6 +1102,7 @@ class Workbench:
                         elif kind == "turn_end":
                             self._round_end(run, event)
                             run["usage"] = self._round_usage(run["rounds"])
+                            self._stamp_usage_projection(run)
                         elif kind == "run_metadata":
                             run["metadata"] = {key: event.get(key) for key in ("model", "runtimeMode", "toolMode", "worldMode", "odooToolCount", "toolNames", "maxOutputTokens", "maxModelRequests")}
                         elif kind == "message_end" and (
@@ -1006,9 +1124,11 @@ class Workbench:
             self._processes.pop(run_id)
             self._threads.pop(run_id, None)
             run["usage"] = self._round_usage(run.get("rounds", []))
+            self._stamp_usage_projection(run)
             pending_ids = run.get("pending_approval_action_ids", [])
             if conversation:
                 run["usage"] = self._round_usage(run.get("rounds", []))
+                self._stamp_usage_projection(run)
                 if run.get("_stop_status"):
                     status, failure = run.pop("_stop_status"), "execution_stopped"
                 elif failure or code != 0:
@@ -1059,12 +1179,19 @@ class Workbench:
                         detail = detail.replace(os.environ[key], "<redacted>")
                 run["error_detail"] = detail
             self._event("run_changed", {"run_id": run_id, "status": run["status"]})
+            if status == "completed" and run.get("business_id"):
+                threading.Thread(
+                    target=self._refresh_after_completed_run,
+                    args=(run["session_id"], run["business_id"], run_id),
+                    daemon=True,
+                ).start()
 
     def get_business(self, session_id: str, business_id: str) -> dict[str, Any]:
         self._business(session_id, business_id)
         for run in self.store.data["runs"].values():
             if run.get("business_id") != business_id:
                 continue
+            self._stamp_usage_projection(run)
             for action_id, approval in self.store.data["approvals"].items():
                 if approval.get("run_id") != run.get("id"):
                     continue
@@ -1074,7 +1201,13 @@ class Workbench:
                         approval["status"] = row["status"]
                     approval["result"], approval["verification"] = _safe(row.get("result")), _safe(row.get("verification"))
                     self._apply_action_readback(run, approval, row)
-        return business_detail(self.store.data, business_id)
+        public_state = copy.deepcopy(self.store.data)
+        for row in public_state["runs"].values():
+            if row.get("business_id") != business_id:
+                continue
+            self._stamp_usage_projection(row)
+            row["usage"] = self._public_usage(row)
+        return business_detail(public_state, business_id)
 
     @staticmethod
     def _apply_action_readback(run: dict[str, Any], approval: dict[str, Any], row: dict[str, Any]) -> None:
@@ -1139,6 +1272,71 @@ class Workbench:
         self._event("business_refreshed", {"session_id": session_id, "business_id": business_id})
         return detail
 
+    def _refresh_after_completed_run(self, session_id: str, business_id: str, run_id: str) -> None:
+        """Perform one independent readback without holding the host lock over I/O."""
+        with self._lock:
+            run = self.store.data["runs"].get(run_id)
+            business = self.store.data["businesses"].get(business_id)
+            if (self._closing or not run or run.get("status") != "completed" or not business or
+                    business.get("active_run_id") or self._processes):
+                return
+            snapshot = {
+                "businesses": {business_id: copy.deepcopy(business)},
+                "runs": {key: copy.deepcopy(row) for key, row in self.store.data["runs"].items()
+                          if row.get("business_id") == business_id},
+                "approvals": {key: copy.deepcopy(row) for key, row in self.store.data.get("approvals", {}).items()
+                              if row.get("business_id") == business_id},
+                "materials": {key: copy.deepcopy(row) for key, row in self.store.data.get("materials", {}).items()
+                              if row.get("session_id") == session_id},
+            }
+            business["readback_status"] = "verifying"
+            business["readback_run_id"] = run_id
+            business["readback_started_at"] = now()
+            self._event("business_refreshed", {"session_id": session_id, "business_id": business_id,
+                                                "run_id": run_id, "status": "verifying"})
+        readback = None
+        failure = None
+        try:
+            reads = self._native_reads()
+            readback_business(snapshot, business_id, reads)
+            readback = snapshot["businesses"][business_id].get("readback")
+        except Exception as exc:
+            failure = type(exc).__name__
+        with self._lock:
+            current = self.store.data["businesses"].get(business_id)
+            if self._closing:
+                return
+            current_runs = [row for row in self.store.data["runs"].values() if row.get("business_id") == business_id]
+            latest = max(current_runs, key=lambda row: (str(row.get("started_at") or ""), str(row.get("id") or "")), default=None)
+            snapshot_business = snapshot["businesses"][business_id]
+            if (not current or current.get("active_run_id") or
+                    self._processes or not latest or latest.get("id") != run_id or
+                    any(current.get(key) != snapshot_business.get(key)
+                        for key in ("goal", "type", "completion_target"))):
+                if current and current.get("readback_run_id") == run_id:
+                    current["readback_status"] = "discarded"
+                    self._event("business_refreshed", {"session_id": session_id, "business_id": business_id,
+                                                        "run_id": run_id, "status": "discarded"})
+                return
+            if failure is None and isinstance(readback, dict):
+                current["readback"] = readback
+                current["readback_status"] = "ready"
+                current["readback_finished_at"] = now()
+                self._event("business_refreshed", {"session_id": session_id, "business_id": business_id,
+                                                    "run_id": run_id, "status": "ready"})
+                return
+            old = current.get("readback") if isinstance(current.get("readback"), dict) else {}
+            stale = copy.deepcopy(old)
+            stale.update({"stale": True, "latest_run_id": run_id, "verification_status": "unknown",
+                          "checks": [], "observed_at": now(),
+                          "outcome": {"status": "unknown", "label": "当前状态未知",
+                                       "detail": "独立回读不可用，不能确认完成状态。", "scope": "business_readback"}})
+            current["readback"] = stale
+            current["readback_status"] = "unavailable"
+            current["readback_finished_at"] = now()
+            self._event("business_refreshed", {"session_id": session_id, "business_id": business_id,
+                                                "run_id": run_id, "status": "unavailable", "error": failure or "malformed_readback"})
+
     def _record_artifact(self, session_id: str, business_id: str, path: str, name: str,
                          run_id: str | None = None, kind: str = "business_receipt",
                          model: str | None = None, record_id: int | None = None) -> dict[str, Any]:
@@ -1197,11 +1395,11 @@ class Workbench:
         runs.sort(key=lambda row: (str(row.get("started_at") or ""), str(row.get("id") or "")))
         run = runs[-1] if run_id is None and runs else (runs[0] if runs else None)
         if run is None: return {"run": None, "rounds": [], "tools": [], "events": []}
+        self._stamp_usage_projection(run)
         public_run = {key: value for key, value in run.items() if key not in {"rounds", "tools", "events", "_round_tool_start", "assistant_text"}}
         if isinstance(public_run.get("usage"), dict):
-            usage = public_run["usage"]
-            public_run["usage"] = {"input": usage.get("input"), "cache_read": usage.get("cache_read", usage.get("cacheRead")), "output": usage.get("output"), "reasoning": usage.get("reasoning"), "total": usage.get("total")}
-        rounds = [{key: value for key, value in row.items() if key != "stop_reason"} for row in run.get("rounds", [])]
+            public_run["usage"] = self._public_usage(run)
+        rounds = self._public_rounds(run)
         tools = [{key: value for key, value in row.items() if key not in {"tool_call_id", "started_at", "ended_at"}} for row in run.get("tools", [])]
         return {"run": _safe(public_run), "rounds": _safe(rounds), "tools": _safe(tools), "events": _safe(run.get("events", []))}
 
@@ -1271,6 +1469,7 @@ class Workbench:
         row = self._action_for_approval(run, action_id)
         if not row or row.get("session_id") != session_id or row.get("run_id") != run_id or row.get("status") != "pending_approval": raise ValueError("action scope or state is invalid")
         if float(row.get("expires_at", 0)) < time.time():
+            approval["decided_at"] = now()
             for item in run.get("pending_approval_action_ids", [action_id]):
                 item_row = self._action_row(run, item)
                 if item_row and item_row.get("status") in {"pending_approval", "approved"}:
@@ -1294,6 +1493,7 @@ class Workbench:
                 if not store.approve(action_id, "desktop_host"): raise ValueError("action was not pending approval")
                 approval["status"] = "approved"
                 approval["source"] = "desktop_host"
+                approval["decided_at"] = now()
                 remaining = [item for item in run.get("pending_approval_action_ids", []) if item != action_id and self.store.data["approvals"].get(item, {}).get("status") == "pending_approval"]
                 if remaining:
                     self.store.data["sessions"][session_id]["status"] = "awaiting_approval"
@@ -1314,6 +1514,7 @@ class Workbench:
                     self._terminalize_action(run, item, "desktop approval rejected")
                 if item in self.store.data["approvals"]:
                     self.store.data["approvals"][item]["status"] = "rejected" if item == action_id else "cancelled"
+            approval["decided_at"] = now()
             run["error"] = "approval_rejected"
             self._finalize_run(run, "failed", "approval_rejected")
             self._event("approval_changed", {"session_id": session_id, "business_id": business_id, "run_id": run_id, "action_id": action_id, "status": "rejected"})

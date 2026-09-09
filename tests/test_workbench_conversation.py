@@ -62,7 +62,7 @@ class WorkbenchConversationTests(unittest.TestCase):
             asyncio.run(run())
             return requests, [json.loads(line) for line in output.getvalue().splitlines() if line.strip()]
 
-    def test_real_coding_session_answers_without_odoo_and_advertises_only_proposal(self):
+    def test_real_coding_session_answers_without_read_request_and_advertises_fixed_tools(self):
         requests, events = self._run(
             [{"choices": [{"delta": {"content": "可以先回答问题，再在你确认后建立业务。"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 4, "completion_tokens": 8, "total_tokens": 12}}],
             "你好，你能做什么？",
@@ -70,7 +70,7 @@ class WorkbenchConversationTests(unittest.TestCase):
         self.assertEqual(len(requests), 1)
         self.assertEqual(
             [row["function"]["name"] for row in requests[0]["tools"]],
-            ["propose_business"],
+            ["read_odoo_reference", "propose_business"],
         )
         self.assertEqual("".join(event.get("text", "") for event in events if event.get("type") == "message_delta"), "可以先回答问题，再在你确认后建立业务。")
         self.assertNotIn("mcp_odoo_read", json.dumps(requests[0]))
@@ -91,6 +91,64 @@ class WorkbenchConversationTests(unittest.TestCase):
         self.assertIn("创建业务工作区", system_text)
         self.assertIn("开始执行", system_text)
         self.assertIn("Do not ask the user to reply with confirmation", system_text)
+
+    def test_read_odoo_reference_is_bounded_and_source_stamped(self):
+        class FakeReads:
+            def call(self, name, arguments):
+                self.name, self.arguments = name, arguments
+                return {"success": True, "result": [{"id": i, "name": "客户" + str(i)} for i in range(20)]}
+
+        fake = FakeReads()
+        with patch.object(conversation, "_ODOO_READS", fake):
+            result = asyncio.run(conversation._read_odoo_reference("call", {"resource": "customer", "query": "N", "limit": 5}))
+        details = result.details
+        self.assertEqual(fake.name, "search_records")
+        self.assertEqual(fake.arguments["model"], "res.partner")
+        self.assertEqual(fake.arguments["fields"], conversation._REFERENCE_SPECS["customer"][1])
+        self.assertEqual(len(details["records"]), 5)
+        self.assertTrue(details["truncated"])
+        self.assertEqual(details["source"], "native_odoo_read")
+        self.assertTrue(details["observed_at"].endswith("Z"))
+
+    def test_read_odoo_reference_failure_is_unknown(self):
+        class FailedReads:
+            def call(self, _name, _arguments):
+                return {"success": False, "error": "connection refused"}
+
+        with patch.object(conversation, "_ODOO_READS", FailedReads()):
+            result = asyncio.run(conversation._read_odoo_reference("call", {"resource": "product"}))
+        self.assertFalse(result.details["success"])
+        self.assertEqual(result.details["status"], "unavailable")
+        self.assertFalse(result.details["verified"])
+
+    def test_read_odoo_reference_rejects_bad_shapes_and_caps_large_rows(self):
+        for arguments in (
+            {"resource": "not_a_resource"},
+            {"resource": []},
+            {"resource": "customer", "unexpected": True},
+            {"resource": "customer", "limit": True},
+            {"resource": "customer", "limit": 6},
+        ):
+            with self.subTest(arguments=arguments):
+                result = asyncio.run(conversation._read_odoo_reference("call", arguments))
+                self.assertEqual(result.details["status"], "invalid")
+
+        class MalformedReads:
+            def call(self, _name, _arguments):
+                return {"success": True, "result": [{"id": 1}, "bad"]}
+
+        with patch.object(conversation, "_ODOO_READS", MalformedReads()):
+            result = asyncio.run(conversation._read_odoo_reference("call", {"resource": "customer"}))
+        self.assertEqual(result.details["status"], "unavailable")
+
+        class HugeReads:
+            def call(self, _name, _arguments):
+                return {"success": True, "result": [{"id": 1, "name": "x" * 20_000}]}
+
+        with patch.object(conversation, "_ODOO_READS", HugeReads()):
+            result = asyncio.run(conversation._read_odoo_reference("call", {"resource": "customer"}))
+        self.assertTrue(result.details["truncated"])
+        self.assertLess(len(json.dumps(result.details, ensure_ascii=False).encode("utf-8")), conversation.READ_MAX_BYTES)
 
 
 if __name__ == "__main__":

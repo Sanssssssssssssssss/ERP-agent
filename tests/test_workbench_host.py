@@ -127,6 +127,111 @@ class WorkbenchHostTests(unittest.TestCase):
         self.assertEqual(run["error"], "approval_prestate_changed")
         self.assertEqual(self.host._action_row(run, row["action_id"])["status"], "known_failed")
 
+    def test_approval_decision_and_error_round_keep_recovery_observable(self):
+        business, run = self._run("observable approval")
+        row = self._action(run, key="observable")
+        self._approval_state(run, row)
+        result = self.host.decide_approval(self.sid, business["id"], run["id"], row["action_id"], "approve")
+        self.assertEqual(result["status"], "approved")
+        self.assertIsInstance(self.host.store.data["approvals"][row["action_id"]].get("decided_at"), str)
+
+        run["_round_tool_start"] = 0
+        self.host._round_end(run, {"message": {"stop_reason": "error", "usage": {"input": 0, "output": 0, "total_tokens": 0}}})
+        self.assertIsNone(run["rounds"][-1]["usage"]["input"])
+        self.assertIsNone(run["rounds"][-1]["usage"]["total"])
+
+    def test_public_usage_projection_marks_historical_error_placeholder_unknown(self):
+        business, run = self._run("usage projection")
+        run["rounds"] = [
+            {"index": 1, "status": "completed", "stop_reason": "stop", "usage": {"total": 10, "input": 7, "output": 3}},
+            {"index": 2, "status": "error", "stop_reason": "error", "usage": {"total": 0, "input": 0, "output": 0}},
+        ]
+        run["usage"] = {"total": 10}
+        trace = self.host.get_trace(self.sid, business["id"], run["id"])
+        self.assertEqual(trace["run"]["reported_total"], 10)
+        self.assertEqual(trace["run"]["missing_usage_rounds"], 1)
+        self.assertIsNone(trace["run"]["usage"]["total"])
+        self.assertEqual(trace["run"]["usage"]["reported_total"], 10)
+        self.assertIsNone(trace["rounds"][1]["usage"]["total"])
+        detail = self.host.get_business(self.sid, business["id"])
+        self.assertEqual(detail["runs"][0]["reported_total"], 10)
+        self.assertEqual(detail["runs"][0]["missing_usage_rounds"], 1)
+        self.assertIsNone(detail["runs"][0]["usage"]["total"])
+
+    def test_completed_readback_does_not_hold_host_lock_during_slow_read(self):
+        business, run = self._run("slow completion readback")
+        run["status"] = "completed"
+        run["documents"] = [{"model": "sale.order", "id": 7, "fields": {}, "observed_at": "2026-01-01T00:00:00Z"}]
+        business["active_run_id"] = None
+        self.host.store.data["sessions"][self.sid]["active_run_id"] = None
+        started, release = threading.Event(), threading.Event()
+
+        class SlowReads:
+            def call(self, _name, _arguments):
+                started.set()
+                release.wait(2)
+                return {"success": True, "result": []}
+
+        self.host._native_reads = lambda: SlowReads()
+        worker = threading.Thread(target=self.host._refresh_after_completed_run, args=(self.sid, business["id"], run["id"]))
+        worker.start()
+        self.assertTrue(started.wait(1))
+        begin = time.perf_counter()
+        self.assertIn("odoo", self.host.health())
+        self.assertLess(time.perf_counter() - begin, 0.5)
+        self.assertEqual(business.get("readback_status"), "verifying")
+        release.set()
+        worker.join(2)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(business.get("readback_status"), "ready")
+
+    def test_late_completed_readback_cannot_overwrite_new_active_run(self):
+        business, run = self._run("late completion readback")
+        run["status"] = "completed"
+        run["documents"] = [{"model": "sale.order", "id": 7, "fields": {}, "observed_at": "2026-01-01T00:00:00Z"}]
+        business["active_run_id"] = None
+        self.host.store.data["sessions"][self.sid]["active_run_id"] = None
+        started, release = threading.Event(), threading.Event()
+
+        class SlowReads:
+            def call(self, _name, _arguments):
+                started.set()
+                release.wait(2)
+                return {"success": True, "result": []}
+
+        self.host._native_reads = lambda: SlowReads()
+        worker = threading.Thread(target=self.host._refresh_after_completed_run, args=(self.sid, business["id"], run["id"]))
+        worker.start()
+        self.assertTrue(started.wait(1))
+        business["active_run_id"] = "new-run"
+        release.set()
+        worker.join(2)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(business.get("readback_status"), "discarded")
+
+    def test_shutdown_drops_late_completed_readback_without_event_write(self):
+        business, run = self._run("shutdown readback")
+        run["status"] = "completed"
+        run["documents"] = [{"model": "sale.order", "id": 7, "fields": {}, "observed_at": "2026-01-01T00:00:00Z"}]
+        business["active_run_id"] = None
+        self.host.store.data["sessions"][self.sid]["active_run_id"] = None
+        started, release = threading.Event(), threading.Event()
+
+        class SlowReads:
+            def call(self, _name, _arguments):
+                started.set()
+                release.wait(2)
+                return {"success": True, "result": []}
+
+        self.host._native_reads = lambda: SlowReads()
+        worker = threading.Thread(target=self.host._refresh_after_completed_run, args=(self.sid, business["id"], run["id"]))
+        worker.start()
+        self.assertTrue(started.wait(1))
+        self.host.close()
+        release.set()
+        worker.join(2)
+        self.assertFalse(worker.is_alive())
+
     def test_worker_gets_isolated_home_and_failed_launch_restores_instruction(self):
         business, run = self._run("unique pending instruction")
         self.host._native_reads = lambda: SimpleNamespace(call=lambda *args: {"success": True})

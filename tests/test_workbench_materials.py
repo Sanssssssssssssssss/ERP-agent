@@ -42,6 +42,33 @@ class WorkbenchMaterialsTests(unittest.TestCase):
             self.assertTrue(Path(directory, "materials").exists())
             host.close()
 
+    def test_duplicate_material_reuses_intact_file_and_repairs_same_id(self):
+        with tempfile.TemporaryDirectory() as directory:
+            host = Workbench(directory)
+            session = host.create_session()
+            encoded = base64.b64encode(b"Nimbus 8").decode()
+            first = host._import_material(session["id"], "orders.txt", encoded)
+            duplicate = host._import_material(session["id"], "orders.txt", encoded)
+            self.assertEqual(duplicate["id"], first["id"])
+            Path(host.store.data["materials"][first["id"]]["path"]).write_text("changed", encoding="utf-8")
+            repaired = host._import_material(session["id"], "orders.txt", encoded)
+            self.assertEqual(repaired["id"], first["id"])
+            self.assertEqual(len(host.store.data["materials"]), 1)
+            host.close()
+
+    def test_unrelated_broken_material_does_not_free_a_full_session_slot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            host = Workbench(directory)
+            session = host.create_session()
+            for index in range(10):
+                host._import_material(session["id"], f"file{index}.txt", base64.b64encode(str(index).encode()).decode())
+            broken = next(iter(host.store.data["materials"].values()))
+            Path(broken["path"]).unlink()
+            with self.assertRaises(ValueError):
+                host._import_material(session["id"], "new.txt", base64.b64encode(b"new").decode())
+            self.assertEqual(len(host.store.data["materials"]), 10)
+            host.close()
+
     def test_material_context_survives_conversation_followup_then_is_cleared_on_proposal_decision(self):
         with tempfile.TemporaryDirectory() as directory:
             host = Workbench(directory)

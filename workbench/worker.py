@@ -62,10 +62,11 @@ def child_environment(session_id: str, run_id: str) -> dict[str, str]:
 
 
 def conversation_environment(session_id: str, run_id: str) -> dict[str, str]:
-    """Environment for ordinary conversation; deliberately excludes Odoo access."""
+    """Environment for ordinary conversation and its fixed read-only Odoo tool."""
     allowed = (
         "PATH", "SystemRoot", "TEMP", "TMP", "PYTHONUTF8", "PYTHONDONTWRITEBYTECODE",
         "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "LLM_THINKING_TYPE", "LLM_PROVIDER",
+        "ODOO_URL", "ODOO_DB", "ODOO_USERNAME", "ODOO_API_KEY",
     )
     env = {key: os.environ[key] for key in allowed if key in os.environ}
     env["PI_AGENT_SESSION_ID"] = session_id
