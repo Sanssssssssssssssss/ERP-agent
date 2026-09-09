@@ -14,12 +14,236 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 from integration import harbor_agent, pi_odoo_runner
+from pi_agent.messages import AssistantMessage, ToolResultMessage, UserMessage
 from pi_agent.tools import AgentTool, AgentToolResult
 from pi_coding.session import CodingSession
 from pi_ai.openai_compatible import OpenAICompatibleProvider
+from odoo_runtime.dynamic_tools import BASE_TOOLS, CAPABILITY_GROUPS
 
 
 class RunnerBudgetTest(unittest.TestCase):
+    def test_dynamic_history_recovery_is_typed_fail_closed_and_latest(self):
+        def result(payload, *, is_error=False):
+            return ToolResultMessage(
+                tool_call_id="configure",
+                tool_name="configure_odoo_tools",
+                content=json.dumps(payload),
+                details=None,
+                is_error=is_error,
+            )
+
+        valid = result({"success": True, "active": ["actions"]})
+        failed = result({"success": False, "error": "module unavailable"})
+        self.assertEqual(
+            pi_odoo_runner._history_dynamic_selection([valid]),
+            ("actions",),
+        )
+        self.assertEqual(
+            pi_odoo_runner._history_dynamic_selection([valid, failed]),
+            ("actions",),
+        )
+        self.assertEqual(
+            pi_odoo_runner._history_dynamic_selection(
+                [valid, result({"success": True, "active": []})]
+            ),
+            (),
+        )
+        self.assertEqual(
+            pi_odoo_runner._history_dynamic_selection(
+                [valid, result({"success": True, "active": ["actions", "actions"]})]
+            ),
+            None,
+        )
+        self.assertEqual(
+            pi_odoo_runner._history_dynamic_selection(
+                [UserMessage(content='{"success":true,"active":["actions"]}'),
+                 AssistantMessage(content='configure_odoo_tools')]
+            ),
+            None,
+        )
+
+    def test_new_receipt_history_selection_reaches_first_provider_request(self):
+        names = {
+            name
+            for name in BASE_TOOLS
+            if name not in {"get_current_time", "list_odoo_sops", "get_odoo_sop"}
+        } | {
+            name
+            for group in CAPABILITY_GROUPS.values()
+            for name in group["tools"]
+        }
+        request_payloads = []
+
+        async def execute(*_args, **_kwargs):
+            return AgentToolResult(content=json.dumps({"success": True, "result": []}))
+
+        class ToolSet:
+            def __init__(self, _url):
+                self.tools = [
+                    AgentTool(
+                        name=f"mcp_odoo_{name}",
+                        label=name,
+                        description=name,
+                        parameters={"type": "object"},
+                        execute_fn=execute,
+                    )
+                    for name in sorted(names)
+                ]
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+        def handler(request):
+            request_payloads.append(json.loads(request.content))
+            if len(request_payloads) == 1:
+                body = {
+                    "choices": [{
+                        "delta": {
+                            "tool_calls": [{
+                                "index": 0,
+                                "id": "configure-1",
+                                "type": "function",
+                                "function": {
+                                    "name": "configure_odoo_tools",
+                                    "arguments": '{"capabilities":["actions"]}',
+                                },
+                            }]
+                        },
+                        "finish_reason": "tool_calls",
+                    }],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+                }
+            else:
+                body = {
+                    "choices": [{"delta": {"content": "done"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+                }
+            return httpx.Response(
+                200,
+                text="data: " + json.dumps(body) + "\n\ndata: [DONE]\n\n",
+                headers={"content-type": "text/event-stream"},
+            )
+
+        def tool_names(payload):
+            return {
+                row["function"]["name"]
+                for row in payload["tools"]
+                if row.get("type") == "function"
+            }
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            instruction = root / "instruction.txt"
+            instruction.write_text("Use the available tools.", encoding="utf-8")
+            session_file = root / "shared-session.jsonl"
+            args = SimpleNamespace(
+                instruction_file=instruction,
+                session_file=session_file,
+                usage_file=root / "run1" / "usage.json",
+                receipt_dir=root / "run1",
+                mcp_url="http://unused.invalid",
+                max_turns=3,
+                max_model_requests=2,
+                max_output_tokens=None,
+                runtime_mode="mcp",
+                read_backend="mcp",
+                action_backend="mcp",
+                capability_backend="mcp",
+                sop_mode="controlled",
+                tool_mode="dynamic",
+                world_mode="off",
+                continue_run=False,
+                pause_on_approval=False,
+            )
+            async def check():
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    with (
+                        patch.object(pi_odoo_runner, "McpToolSet", ToolSet),
+                        patch.object(
+                            pi_odoo_runner,
+                            "OpenAICompatibleProvider",
+                            side_effect=lambda config: OpenAICompatibleProvider(config, client=client),
+                        ),
+                        patch.dict(
+                            os.environ,
+                            {
+                                "LLM_API_KEY": "test-only",
+                                "LLM_BASE_URL": "https://unused.invalid/v1",
+                                "LLM_MODEL": "deepseek/test",
+                                "LLM_PROVIDER": "openai-compatible",
+                                "LLM_THINKING_TYPE": "high",
+                            },
+                        ),
+                    ):
+                        await pi_odoo_runner.run(args)
+                        args.usage_file = root / "run2" / "usage.json"
+                        args.receipt_dir = root / "run2"
+                        await pi_odoo_runner.run(args)
+                        args.usage_file = root / "run3" / "usage.json"
+                        args.receipt_dir = root / "run3"
+                        args.receipt_dir.mkdir(parents=True)
+                        (args.receipt_dir / "dynamic-tools.jsonl").write_text(
+                            json.dumps({
+                                "event": "end",
+                                "tool": "configure_odoo_tools",
+                                "success": True,
+                                "active": [],
+                            }) + "\n",
+                            encoding="utf-8",
+                        )
+                        await pi_odoo_runner.run(args)
+
+            asyncio.run(check())
+
+            first, second, third, fourth = map(tool_names, request_payloads)
+            self.assertEqual(len(first), 14)
+            self.assertNotIn("mcp_odoo_preview_write", first)
+            self.assertEqual(len(second), 19)
+            self.assertIn("mcp_odoo_preview_write", second)
+            self.assertIn("mcp_odoo_preview_write", third)
+            self.assertEqual(len(fourth), 14)
+            self.assertNotIn("mcp_odoo_preview_write", fourth)
+
+    def test_corrupt_present_receipt_blocks_history_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "dynamic-tools.jsonl"
+            path.write_text("{not-json}\n", encoding="utf-8")
+            self.assertEqual(pi_odoo_runner._receipt_dynamic_selection(path), (True, None))
+
+    def test_receipt_selection_is_primary_over_history_and_failed_config_keeps_valid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "dynamic-tools.jsonl"
+            path.write_text(
+                "\n".join(
+                    [
+                        json.dumps({
+                            "event": "end", "tool": "configure_odoo_tools",
+                            "success": True, "active": ["actions"],
+                        }),
+                        json.dumps({
+                            "event": "end", "tool": "configure_odoo_tools",
+                            "success": False, "active": None,
+                        }),
+                    ]
+                ) + "\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                pi_odoo_runner._receipt_dynamic_selection(path),
+                (True, ("actions",)),
+            )
+            path.write_text(
+                json.dumps({
+                    "event": "end", "tool": "configure_odoo_tools",
+                    "success": True, "active": [],
+                }) + "\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(pi_odoo_runner._receipt_dynamic_selection(path), (True, ()))
+
     def test_resumed_receipts_keep_request_and_tool_chronology(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

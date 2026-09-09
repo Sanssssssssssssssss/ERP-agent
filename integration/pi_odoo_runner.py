@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from itertools import count
 from pathlib import Path
 
-from pi_agent.messages import AssistantMessage
+from pi_agent.messages import AssistantMessage, ToolResultMessage
 from pi_agent.session import JsonlSessionStorage
 from pi_agent.tools import AgentTool, AgentToolResult
 from pi_ai.env import OpenAICompatibleConfig
@@ -59,6 +59,85 @@ DYNAMIC_TOOL_POLICY = (
     "selected tool is rejected."
 )
 McpToolSet = None
+
+
+def _validated_dynamic_selection(active: object) -> tuple[str, ...] | None:
+    """Return a fail-closed, typed capability selection."""
+    if not isinstance(active, list) or any(type(item) is not str for item in active):
+        return None
+    if len(active) != len(set(active)) or any(item not in CAPABILITY_GROUPS for item in active):
+        return None
+    return tuple(active)
+
+
+def _tool_result_payload(message: ToolResultMessage) -> dict[str, object] | None:
+    details = message.details
+    if isinstance(details, dict):
+        structured = details.get("structuredContent")
+        if isinstance(structured, dict):
+            return structured
+        return details
+    try:
+        payload = json.loads(message.text)
+    except (TypeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _history_dynamic_selection(messages: object) -> tuple[str, ...] | None:
+    """Recover only the latest typed successful configure result from history.
+
+    A malformed latest successful result returns no selection instead of
+    falling back to an older selection; failed configure calls remain
+    non-authoritative.
+    """
+    if not isinstance(messages, (list, tuple)):
+        return None
+    for message in reversed(messages):
+        if not isinstance(message, ToolResultMessage) or message.tool_name != "configure_odoo_tools":
+            continue
+        if message.is_error:
+            continue
+        payload = _tool_result_payload(message)
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("success") is False:
+            continue
+        if payload.get("success") is not True:
+            return None
+        return _validated_dynamic_selection(payload.get("active"))
+    return None
+
+
+def _receipt_dynamic_selection(path: Path) -> tuple[bool, tuple[str, ...] | None]:
+    """Read the latest successful selection from this run's receipt only."""
+    try:
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    except FileNotFoundError:
+        return False, None
+    except (OSError, json.JSONDecodeError):
+        return True, None
+    for row in reversed(rows):
+        if not isinstance(row, dict) or row.get("event") != "end" or row.get("tool") != "configure_odoo_tools":
+            continue
+        if row.get("success") is not True:
+            continue
+        return True, _validated_dynamic_selection(row.get("active"))
+    return False, None
+
+
+def _restore_dynamic_selection(dynamic_tools: DynamicToolController, session: CodingSession, dynamic_log: Path) -> None:
+    receipt_found, active = _receipt_dynamic_selection(dynamic_log)
+    if not receipt_found:
+        # A new run keeps the business session transcript but has a new receipt
+        # directory. Recover only a typed, successful configure result from
+        # history; never copy approvals, action receipts, or arbitrary prose.
+        active = _history_dynamic_selection(session.messages)
+    if active is not None:
+        dynamic_tools._active = active
+        # The session was constructed with the base set before the selection
+        # was read; publish it for the next provider turn.
+        session.stage_tools_for_next_turn(dynamic_tools.tools)
 
 
 async def _get_current_time(_call_id, _arguments, _signal=None, _on_update=None):
@@ -414,19 +493,7 @@ async def run(args: argparse.Namespace) -> None:
                 # last published set from its append-only receipt before the
                 # continuation model turn is built.
                 dynamic_log = receipt_dir / "dynamic-tools.jsonl"
-                try:
-                    rows = [json.loads(line) for line in dynamic_log.read_text(encoding="utf-8").splitlines() if line.strip()]
-                    active = next((row.get("active") for row in reversed(rows) if isinstance(row.get("active"), list)), None)
-                    if active is not None:
-                        if any(group not in CAPABILITY_GROUPS for group in active):
-                            raise RuntimeError("Invalid saved dynamic tool selection")
-                        dynamic_tools._active = tuple(active)
-                        # The session was constructed with the base set before
-                        # the receipt was read; replace its next provider
-                        # context explicitly for a continuation.
-                        session.stage_tools_for_next_turn(dynamic_tools.tools)
-                except (OSError, json.JSONDecodeError):
-                    pass
+                _restore_dynamic_selection(dynamic_tools, session, dynamic_log)
                 dynamic_tools.bind(session.stage_tools_for_next_turn)
             if getattr(args, "pause_on_approval", False):
                 async def stop_after_approval(turn):
