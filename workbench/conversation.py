@@ -29,18 +29,27 @@ MODEL_COMPAT = {
 }
 CONVERSATION_POLICY = (
     "You are the ordinary conversation assistant for an ERP workbench. "
-    "The current business type is sales and invoicing (sale_invoice). The workbench "
-    "can read native Odoo data and, after approval for each write, carry out the "
-    "supported order and invoice operations and read back their results. It can "
-    "help create an order for an existing customer and product, then confirm the "
-    "order or create and post an invoice when the user approves those actions. "
+    "The workbench supports sales and invoicing (sale_invoice), purchasing "
+    "(purchase), and linked sales-purchase-invoice workspaces "
+    "(sale_purchase_invoice). It can read native Odoo data and, after approval "
+    "for each write, carry out supported order, purchase, and invoice operations "
+    "and read back their results. It can help prepare an order for an existing "
+    "customer and product, or a purchase request with a supplier and lines, then "
+    "confirm supported records or create and post an invoice when the user approves. "
     "Do not claim to have read Odoo or changed records before execution, and do not "
     "invent live ERP facts. For a vague sales or invoicing request, first ask for "
     "the customer and what they want done; pasted material or an existing order "
     "number is useful context. Do not ask for technical IDs or every field, and do "
     "not create an empty goal. An explicit request to browse pending orders "
-    "read-only may be proposed without first asking for a customer. Do not promise "
-    "payment, procurement, manufacturing, external attachment upload, or OCR. "
+    "read-only may be proposed without first asking for a customer. When the user "
+    "already supplied customer, product, and quantity, ask only for the business "
+    "target and commercial choices they must decide. Read Odoo price lists, customer "
+    "profiles, addresses, and tax defaults during execution instead of asking for "
+    "each one; accept an explicit request to use ERP defaults and never invent values. "
+    "Keep the reply concise: a short summary and usually no more than two necessary "
+    "questions. Do not promise "
+    "payment, manufacturing, external attachment upload, or OCR, and do not claim "
+    "a purchase is complete before the workspace has verified it. "
     "Ordinary discussion must not create a proposal. After a successful proposal "
     "tool call, tell the user briefly to click the card button '创建业务工作区', "
     "then click '开始执行'. Do not ask the user to reply with confirmation and do "
@@ -74,24 +83,36 @@ class _RequestReceipts:
 
 async def _propose_business(_call_id, arguments, _signal=None, _on_update=None):
     values = dict(arguments or {})
-    if values.get("type") != "sale_invoice":
+    kind = values.get("type")
+    if kind not in {"sale_invoice", "purchase", "sale_purchase_invoice"}:
         return AgentToolResult(
-            content=json.dumps({"success": False, "error": "type must be sale_invoice"}),
-            details={"success": False, "error": "type must be sale_invoice"},
+            content=json.dumps({"success": False, "error": "type must be sale_invoice, purchase, or sale_purchase_invoice"}),
+            details={"success": False, "error": "unsupported business type"},
         )
     title = values.get("title")
     goal = values.get("goal")
     existing = values.get("existing_business_id")
+    material_ids = values.get("material_ids")
+    completion_target = values.get("completion_target")
+    if completion_target is None:
+        completion_target = "confirmed" if kind == "purchase" else "posted"
     if not isinstance(title, str) or not 1 <= len(title.strip()) <= 200:
         error = "title must be 1..200 characters"
     elif not isinstance(goal, str) or not 1 <= len(goal.strip()) <= 20_000:
         error = "goal must be 1..20000 characters"
     elif existing is not None and (not isinstance(existing, str) or not existing.strip()):
         error = "existing_business_id must be a non-empty string"
+    elif material_ids is not None and (not isinstance(material_ids, list) or len(material_ids) > 3 or
+                                       any(not isinstance(item, str) or not item.strip() for item in material_ids)):
+        error = "material_ids must contain at most 3 non-empty strings"
+    elif completion_target not in {"read_only", "draft", "confirmed", "posted"}:
+        error = "completion_target must be read_only, draft, confirmed, or posted"
     else:
-        proposal = {"type": "sale_invoice", "title": title.strip(), "goal": goal.strip()}
+        proposal = {"type": kind, "title": title.strip(), "goal": goal.strip(), "completion_target": completion_target}
         if existing is not None:
             proposal["existing_business_id"] = existing.strip()
+        if material_ids is not None:
+            proposal["material_ids"] = [item.strip() for item in material_ids]
         return AgentToolResult(
             content=json.dumps({"success": True, "proposal": proposal}, ensure_ascii=False),
             details={"success": True, "proposal": proposal},
@@ -106,8 +127,9 @@ PROPOSE_BUSINESS = AgentTool(
     name="propose_business",
     label="Propose business",
     description=(
-        "Create a reviewable sale_invoice proposal after the user states a concrete "
-        "sales/invoicing goal or explicitly asks to browse pending orders read-only. "
+        "Create a reviewable sale_invoice, purchase, or sale_purchase_invoice proposal "
+        "after the user states a concrete business goal or explicitly asks to browse "
+        "pending orders read-only. "
         "Ask for the smallest missing business context first; do not invent a goal "
         "or technical fields. This prepares the proposal and does not execute ERP "
         "writes; execution happens in the business workspace after approval."
@@ -115,10 +137,12 @@ PROPOSE_BUSINESS = AgentTool(
     parameters={
         "type": "object",
         "properties": {
-            "type": {"type": "string", "enum": ["sale_invoice"]},
+            "type": {"type": "string", "enum": ["sale_invoice", "purchase", "sale_purchase_invoice"]},
             "title": {"type": "string", "minLength": 1, "maxLength": 200},
             "goal": {"type": "string", "minLength": 1, "maxLength": 20_000},
             "existing_business_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "material_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "maxItems": 3},
+            "completion_target": {"type": "string", "enum": ["read_only", "draft", "confirmed", "posted"]},
         },
         "required": ["type", "title", "goal"],
         "additionalProperties": False,

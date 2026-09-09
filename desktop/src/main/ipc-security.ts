@@ -1,8 +1,8 @@
-import { extname, isAbsolute } from "node:path";
+import { basename, extname, isAbsolute } from "node:path";
 import type { Document, WorkbenchMethod } from "../shared/protocol";
 import { validateEndpoint } from "./settings";
 
-const LOCAL_METHODS = new Set(["get_settings", "save_settings", "export_business_report", "open_odoo_record", "open_business_artifact", "reveal_business_artifact"]);
+const LOCAL_METHODS = new Set(["get_settings", "save_settings", "import_material", "download_document", "export_business_report", "open_odoo_record", "open_business_artifact", "reveal_business_artifact"]);
 
 export const METHODS = new Set<WorkbenchMethod>([
   "list_sessions", "create_session", "rename_session", "archive_session", "get_session",
@@ -55,11 +55,33 @@ export function observedRecordUrl(endpoint: string, documents: Document[], model
   return url.href;
 }
 
-export function recordedArtifactPath(artifacts: ReadonlyArray<{ id: string; path: string }>, artifactId: unknown): string {
+export function recordedArtifactPath(artifacts: ReadonlyArray<{ id: string; path: string; kind?: string }>, artifactId: unknown): string {
   if (typeof artifactId !== "string") throw new Error("ARTIFACT_NOT_FOUND");
   const artifact = artifacts.find(item => item.id === artifactId);
   if (!artifact) throw new Error("ARTIFACT_NOT_FOUND");
   // Only files registered after the native receipt save dialog can be opened.
-  if (!isAbsolute(artifact.path) || extname(artifact.path).toLowerCase() !== ".json") throw new Error("ARTIFACT_FORMAT_INVALID");
+  const extension = extname(artifact.path).toLowerCase();
+  const kindExtension: Record<string, string> = { business_receipt: ".json", odoo_pdf: ".pdf", odoo_csv: ".csv" };
+  if (!isAbsolute(artifact.path) || !kindExtension[artifact.kind ?? "business_receipt"] || extension !== kindExtension[artifact.kind ?? "business_receipt"]) throw new Error("ARTIFACT_FORMAT_INVALID");
   return artifact.path;
+}
+
+export function materialSessionId(value: unknown): string {
+  if (typeof value !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(value)) throw new Error("INVALID_SESSION_SCOPE");
+  return value;
+}
+
+export function safeMaterialName(value: unknown): string {
+  if (typeof value !== "string" || value.length < 1 || value.length > 255 || basename(value) !== value || value === "." || value === ".." || value.includes("\0")) throw new Error("MATERIAL_NAME_INVALID");
+  const extension = extname(value).toLowerCase();
+  if (!new Set([".csv", ".txt"]).has(extension)) throw new Error("MATERIAL_FORMAT_INVALID");
+  return value;
+}
+
+export function strictBase64(value: unknown, maxDecodedBytes = 2 * 1024 * 1024): Buffer {
+  const maxEncodedLength = 4 * Math.ceil(maxDecodedBytes / 3) + 4;
+  if (typeof value !== "string" || value.length < 4 || value.length > maxEncodedLength || value.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) throw new Error("MATERIAL_BASE64_INVALID");
+  const decoded = Buffer.from(value, "base64");
+  if (decoded.length > maxDecodedBytes) throw new Error("MATERIAL_TOO_LARGE");
+  return decoded;
 }

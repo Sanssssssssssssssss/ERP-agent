@@ -1,12 +1,15 @@
 # Odoo 业务工作台
 
-Windows 桌面工作台：会话、业务意图确认、销售与开票工作区、逐项动作审批、
+Windows 桌面工作台：会话、业务意图确认、销售、采购与开票工作区、逐项动作审批、
 Odoo 状态回读、运行 Trace。模型循环复用 Python Pi `CodingSession`，
 实际工具使用 `odoo_runtime`；不启动或导入 MCP。
 
-0.4.0 已接通普通 Pi 会话与公开文本流，补齐消息归并、取消反馈和业务文件索引。真实能力问答、提案及 Odoo 只读旅程通过；完整客户写入 Demo 仍待复跑。结果和每轮用量见 [修复验收](../experiments/desktop_workbench/REPAIR_ACCEPTANCE.md)，问题定义见 [Demo 复盘清单](../experiments/desktop_workbench/DEMO_READINESS_REVIEW.md)。
+0.4.0 是历史验收记录：已接通普通 Pi 会话与公开文本流，完整客户写入 Demo 当时仍待复跑；当前 0.5.0 的真实结果见 [拓扑验收](../experiments/desktop_workbench/TOPOLOGY_ACCEPTANCE_050.md)，问题定义见 [Demo 复盘清单](../experiments/desktop_workbench/DEMO_READINESS_REVIEW.md)。
 
-0.4.1 补齐首段回复前的 Agent 等待提示，移除重复用户标识，修复 `KeyError` 误报配置故障，并让模糊业务目标先补问。两轮真实模型复测及 ERP-Bench 可复用材料核对见 [用户反馈验收](../experiments/desktop_workbench/USER_FEEDBACK_041.md)。当前支持审批后创建订单及关联发票；聊天附件导入尚未实现。ERP-Bench 提供预置数据库任务，没有可直接拖入的订单 PDF 或 Excel。
+0.5.0 增加 `sale_invoice`、`sale_purchase_invoice`、`purchase` 工作区类型，以及 CSV/TXT 材料导入和 Odoo 单据下载。真实模型复测及 ERP-Bench 材料核对见 [拓扑验收](../experiments/desktop_workbench/TOPOLOGY_ACCEPTANCE_050.md)。正式发票 PDF 需经审批生成；尚未生成时阻止把 Proforma 当正式发票下载。
+
+材料入口只接受 UTF-8 CSV/TXT：单文件不超过 2 MiB、20000 字符、200 行；每会话最多 10 个材料，每条消息最多绑定 3 个。
+单据可下载真实 Odoo PDF 或中文 UTF-8 BOM CSV；下载文件不超过 32 MiB，CSV 单据最多 100 条明细。PDF/CSV 均只导出当前业务已观测记录；ERP 写操作仍逐项审批。
 
 ## 使用
 

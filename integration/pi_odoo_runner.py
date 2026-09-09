@@ -24,6 +24,7 @@ from pi_coding.provider_config import (
     ProviderModelMetadata,
     ProviderSettings,
 )
+from pi_coding.paths import PiPaths
 from pi_coding.resources import PiResourcePaths
 from pi_coding.session import CodingSession, CodingSessionConfig
 
@@ -262,6 +263,13 @@ def arguments() -> argparse.Namespace:
 
 def _approval_required(result: object) -> bool:
     """Read the native approval marker without coupling the runner to a tool."""
+    def pause_status(value: object) -> bool:
+        if isinstance(value, str):
+            return value in {"pending_approval", "needs_reconciliation"}
+        if isinstance(value, dict):
+            return pause_status(value.get("status"))
+        return False
+
     details = getattr(result, "details", None)
     if details is None and isinstance(result, dict):
         details = result.get("details", result)
@@ -274,14 +282,20 @@ def _approval_required(result: object) -> bool:
                 return True
             for key in ("approval_status", "action_status"):
                 marker = structured.get(key)
-                if isinstance(marker, dict) and marker.get("status") == "pending_approval":
+                if pause_status(marker):
                     return True
-                if marker == "pending_approval":
-                    return True
-            if structured.get("status") == "pending_approval":
+            if pause_status(structured.get("status")):
                 return True
     structured = getattr(result, "structuredContent", None)
-    return isinstance(structured, dict) and structured.get("approval_required") is True
+    return (
+        isinstance(structured, dict)
+        and (
+            structured.get("approval_required") is True
+            or pause_status(structured.get("status"))
+            or pause_status(structured.get("action_status"))
+            or pause_status(structured.get("approval_status"))
+        )
+    )
 
 
 def _next_receipt_sequence(directory: Path):
@@ -470,6 +484,10 @@ async def run(args: argparse.Namespace) -> None:
                     max_turns=args.max_turns,
                     resource_paths=PiResourcePaths(
                         root=receipt_dir / ".pi-agent",
+                        paths=PiPaths(
+                            home=receipt_dir / ".pi-agent",
+                            agents_home=receipt_dir / ".agents",
+                        ),
                         agents_root=receipt_dir / ".agents",
                         project_resources_enabled=False,
                     ),

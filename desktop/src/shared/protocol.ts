@@ -1,4 +1,5 @@
-export type BusinessType = "sale_invoice";
+export type BusinessType = "sale_invoice" | "sale_purchase_invoice" | "purchase";
+export type CompletionTarget = "read_only" | "draft" | "confirmed" | "posted";
 export type Role = "user" | "assistant" | "system";
 export type ApprovalDecision = "approve" | "reject";
 
@@ -21,6 +22,19 @@ export interface Message {
   run_id?: string;
   sequence?: number;
   proposal?: BusinessProposal;
+  material_ids?: string[];
+}
+
+export interface Material {
+  id: string;
+  session_id: string;
+  name: string;
+  size: number;
+  sha256: string;
+  created_at: string;
+  row_count?: number;
+  preview: string;
+  media_type: string;
 }
 
 export interface ConversationRun {
@@ -54,6 +68,8 @@ export interface BusinessProposal {
   title: string;
   goal: string;
   status: "pending" | "confirmed" | "rejected";
+  completion_target?: CompletionTarget;
+  material_ids?: string[];
 }
 
 export interface Business {
@@ -66,6 +82,8 @@ export interface Business {
   created_at: string;
   updated_at: string;
   active_run_id?: string;
+  material_ids?: string[];
+  completion_target?: CompletionTarget;
 }
 
 export interface Run {
@@ -119,7 +137,10 @@ export interface BusinessArtifact {
   name: string;
   path: string;
   created_at?: string;
-  kind: "business_receipt" | string;
+  kind: "business_receipt" | "odoo_pdf" | "odoo_csv" | string;
+  model?: string;
+  record_id?: number;
+  source?: string;
   run_id?: string;
   available?: boolean;
   error?: string;
@@ -219,6 +240,7 @@ export interface BusinessDetail {
     model_rounds?: number;
     last_event?: string;
   };
+  materials?: Material[];
 }
 
 export interface Health {
@@ -277,6 +299,8 @@ export type WorkbenchMethod =
   | "reveal_business_artifact"
   | "get_settings"
   | "save_settings"
+  | "import_material"
+  | "download_document"
   | "check_connection"
   | "health";
 

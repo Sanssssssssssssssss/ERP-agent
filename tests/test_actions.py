@@ -157,11 +157,12 @@ class _Writer:
         states = {
             ("sale.order", "action_confirm"): "sale",
             ("purchase.order", "button_confirm"): "purchase",
+            ("purchase.order", "button_approve"): "purchase",
             ("account.move", "action_post"): "posted",
         }
         if (model, method) in states:
             for record_id in kwargs["ids"]:
-                self.reader.records[model][record_id]["state"] = states[(model, method)]
+                self.reader.records[model][record_id]["state"] = "to approve" if (model, method) == ("purchase.order", "button_confirm") else states[(model, method)]
             return True
         if (model, method) == ("sale.advance.payment.inv", "create_invoices"):
             self.reader.records["sale.order"][7]["invoice_ids"] = [301]
@@ -609,6 +610,18 @@ class NativeActionCheckpointTests(unittest.TestCase):
             [(model, method, list(args), kwargs) for model, method, args, kwargs in writer.calls[1:]],
             list(methods),
         )
+
+    def test_purchase_two_step_confirm_intermediate_then_independent_approval(self):
+        actions, _, runtime = _actions()
+        allowed = "purchase.order.button_confirm,purchase.order.button_approve"
+        with patch.dict(os.environ, {"ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": allowed, "ODOO_MCP_ENABLE_WRITES": "1"}, clear=False):
+            confirmed = actions.execute_method("purchase.order", "button_confirm", kwargs={"ids": [8]})
+            self.assertTrue(confirmed["success"])
+            self.assertEqual(runtime.client.records["purchase.order"][8]["state"], "to approve")
+            self.assertEqual(confirmed["verification"]["status"], "satisfied")
+            approved = actions.execute_method("purchase.order", "button_approve", kwargs={"ids": [8]})
+        self.assertTrue(approved["success"])
+        self.assertEqual(runtime.client.records["purchase.order"][8]["state"], "purchase")
 
     def test_json2_custom_method_uses_named_ids_and_audit_is_retained(self):
         with patch.object(OdooClient, "_connect"):
@@ -1072,6 +1085,185 @@ class NativeActionCheckpointTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["action_status"], "verified")
         self.assertEqual(len(writer.calls), 1)
+
+    def test_official_invoice_pdf_requires_safe_wizard_and_verifies_report(self):
+        class PdfWriter(_Writer):
+            def __init__(self, reader, *, create_report):
+                super().__init__(reader)
+                self.create_report = create_report
+
+            def execute_method(self, model, method, *args, **kwargs):
+                if (model, method) == ("account.move.send.wizard", "action_send_and_print"):
+                    self.calls.append((model, method, args, kwargs))
+                    if self.create_report:
+                        self.reader.records["account.move"][10].update(
+                            invoice_pdf_report_id=[501, "INV/2026/00001.pdf"],
+                            is_move_sent=True,
+                        )
+                    return True
+                return super().execute_method(model, method, *args, **kwargs)
+
+        runtime = _Runtime()
+        runtime.client.records["account.move"][10].update(
+            state="posted", move_type="out_invoice"
+        )
+        runtime.client.records["account.move"][11] = {
+            "id": 11,
+            "state": "draft",
+            "move_type": "out_invoice",
+        }
+        runtime.client.records["account.move.send.wizard"] = {
+            20: {
+                "id": 20,
+                "move_id": [10, "INV/2026/00001"],
+                "sending_methods": False,
+                "invoice_edi_format": False,
+                "extra_edis": False,
+            },
+            21: {
+                "id": 21,
+                "move_id": [10, "INV/2026/00001"],
+                "sending_methods": ["email"],
+                "invoice_edi_format": False,
+                "extra_edis": [],
+            },
+            22: {
+                "id": 22,
+                "move_id": [11, "INV/2026/00002"],
+                "sending_methods": [],
+                "invoice_edi_format": False,
+                "extra_edis": [],
+            },
+        }
+        writer = PdfWriter(runtime.client, create_report=True)
+        actions, _, _ = _actions(runtime=runtime, writer=writer)
+        self.addCleanup(actions.store.close)
+        allowed = "account.move.send.wizard.action_send_and_print"
+        with patch.dict(
+            os.environ,
+            {"ODOO_MCP_ENABLE_WRITES": "1", "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": allowed},
+        ):
+            generated = actions.execute_method(
+                "account.move.send.wizard",
+                "action_send_and_print",
+                kwargs={"ids": [20]},
+            )
+            blocked = actions.execute_method(
+                "account.move.send.wizard",
+                "action_send_and_print",
+                kwargs={"ids": [21]},
+            )
+            blocked_draft = actions.execute_method(
+                "account.move.send.wizard",
+                "action_send_and_print",
+                kwargs={"ids": [22]},
+            )
+            blocked_batch = actions.execute_method(
+                "account.move.send.wizard",
+                "action_send_and_print",
+                kwargs={"ids": [20, 22]},
+            )
+        self.assertTrue(generated["success"])
+        self.assertEqual(generated["action_status"], "verified")
+        self.assertEqual(generated["verification"]["evidence"]["record_model"], "account.move")
+        self.assertEqual(generated["verification"]["evidence"]["invoice_records"][0]["id"], 10)
+        stored = actions.store.get(generated["action_id"])
+        self.assertIs(stored["prestate"]["wizard"][0]["sending_methods"], False)
+        self.assertIs(stored["prestate"]["wizard"][0]["extra_edis"], False)
+        self.assertIs(stored["prestate"]["wizard"][0]["invoice_edi_format"], False)
+        self.assertEqual(stored["prestate"]["invoice"][0]["id"], 10)
+        self.assertEqual(len(writer.calls), 1)
+        self.assertFalse(blocked["success"])
+        self.assertIn("sending_methods=false", blocked["error"])
+        self.assertFalse(blocked_draft["success"])
+        self.assertIn("posted customer invoice", blocked_draft["error"])
+        self.assertFalse(blocked_batch["success"])
+        self.assertIn("exactly one send wizard", blocked_batch["error"])
+        self.assertEqual(actions.store.summary()["actions"], 1)
+
+    def test_official_invoice_pdf_missing_report_is_reconciliation_only(self):
+        runtime = _Runtime()
+        runtime.client.records["account.move"][10].update(
+            state="posted", move_type="out_invoice"
+        )
+        runtime.client.records["account.move.send.wizard"] = {
+            20: {
+                "id": 20,
+                "move_id": [10, "INV/2026/00001"],
+                "sending_methods": [],
+                "invoice_edi_format": False,
+                "extra_edis": [],
+            }
+        }
+        writer = _Writer(runtime.client)
+        actions, _, _ = _actions(runtime=runtime, writer=writer)
+        self.addCleanup(actions.store.close)
+        with patch.dict(
+            os.environ,
+            {
+                "ODOO_MCP_ENABLE_WRITES": "1",
+                "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": "account.move.send.wizard.action_send_and_print",
+            },
+        ):
+            result = actions.execute_method(
+                "account.move.send.wizard",
+                "action_send_and_print",
+                kwargs={"ids": [20]},
+            )
+        self.assertFalse(result["success"])
+        self.assertEqual(result["action_status"], "needs_reconciliation")
+        self.assertFalse(result["verification"]["status"] == "satisfied")
+        self.assertEqual(len(writer.calls), 1)
+
+    def test_official_invoice_pdf_rejects_extra_kwargs_before_writer(self):
+        runtime = _Runtime()
+        writer = _Writer(runtime.client)
+        actions, _, _ = _actions(runtime=runtime, writer=writer)
+        self.addCleanup(actions.store.close)
+        with patch.dict(
+            os.environ,
+            {
+                "ODOO_MCP_ENABLE_WRITES": "1",
+                "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": "account.move.send.wizard.action_send_and_print",
+            },
+        ):
+            result = actions.execute_method(
+                "account.move.send.wizard",
+                "action_send_and_print",
+                kwargs={"ids": [20], "context": {"lang": "en_US"}},
+            )
+        self.assertFalse(result["success"])
+        self.assertIn("kwargs.ids only", result["error"])
+        self.assertEqual(writer.calls, [])
+
+    def test_official_wizard_create_and_write_accept_odoo_false_empty_relations(self):
+        runtime = _Runtime()
+        runtime.client.records["account.move.send.wizard"] = {
+            201: {
+                "id": 201,
+                "sending_methods": False,
+                "extra_edis": False,
+            }
+        }
+        actions, _, _ = _actions(runtime=runtime)
+        self.addCleanup(actions.store.close)
+        for operation, result, payload in (
+            ("create", 201, {"sending_methods": [], "extra_edis": []}),
+            ("write", True, {"sending_methods": [], "extra_edis": []}),
+        ):
+            row = {
+                "kind": "write",
+                "payload": {
+                    "instance": "default",
+                    "model": "account.move.send.wizard",
+                    "operation": operation,
+                    "record_ids": [201] if operation == "write" else [],
+                    "values": payload,
+                },
+                "file_digests": {},
+            }
+            verification = actions._verify(row, result)
+            self.assertEqual(verification["status"], "satisfied")
 
     def test_removed_method_target_after_approval_is_stale_without_send(self):
         actions, writer, runtime = _actions(approval_mode="host")

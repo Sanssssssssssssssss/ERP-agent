@@ -57,9 +57,41 @@ _FROM_PATH_SUFFIX = "_from_path"
 _NONE_MARSHAL_FAULT_MARKER = "cannot marshal None unless allow_none is enabled"
 _KNOWN_METHOD_STATES = {
     ("sale.order", "action_confirm"): ("state", {"sale", "done"}),
-    ("purchase.order", "button_confirm"): ("state", {"purchase", "done"}),
+    # Odoo two-step purchasing may leave a PO in ``to approve`` after the
+    # confirm action. That intermediate state is a verified confirm result,
+    # while ``button_approve`` has its own final-state verifier below.
+    ("purchase.order", "button_confirm"): ("state", {"purchase", "done", "to approve"}),
+    ("purchase.order", "button_approve"): ("state", {"purchase", "done"}),
     ("account.move", "action_post"): ("state", {"posted"}),
 }
+_OFFICIAL_INVOICE_PDF_METHOD = (
+    "account.move.send.wizard",
+    "action_send_and_print",
+)
+
+
+def _related_record_id(value: Any) -> int | None:
+    """Return a record id from Odoo's many2one read shape."""
+    if type(value) is int and value > 0:
+        return value
+    if isinstance(value, (list, tuple)) and value and type(value[0]) is int and value[0] > 0:
+        return value[0]
+    if isinstance(value, dict) and type(value.get("id")) is int and value["id"] > 0:
+        return value["id"]
+    return None
+
+
+def _official_empty_relation_matches(
+    model: str, field: str, actual: Any, expected: Any
+) -> bool:
+    """Odoo JSON-2 represents these two empty wizard fields as either [] or false."""
+    if model != "account.move.send.wizard" or field not in {"sending_methods", "extra_edis"}:
+        return False
+
+    def empty(value: Any) -> bool:
+        return value is False or (isinstance(value, list) and value == [])
+
+    return empty(actual) and empty(expected)
 
 
 def _writer_from_reader(reader: Any) -> OdooClient:
@@ -459,6 +491,59 @@ class NativeActions:
                 "last_message_id": int(rows[0]["id"]) if rows else 0,
             }
         ids = [int(value) for value in payload.get("kwargs", {}).get("ids") or []]
+        if (model, str(payload.get("method"))) == _OFFICIAL_INVOICE_PDF_METHOD:
+            if len(ids) != 1:
+                raise ValueError(
+                    "official invoice PDF generation requires exactly one send wizard"
+                )
+            wizard = self._read_rows(
+                instance,
+                model,
+                ids,
+                ["id", "move_id", "sending_methods", "invoice_edi_format", "extra_edis"],
+            )
+            requested_wizard_ids = {ids[0]}
+            returned_wizard_ids = {
+                int(row["id"]) for row in wizard if type(row.get("id")) is int
+            }
+            if returned_wizard_ids != requested_wizard_ids:
+                raise ValueError(f"native action target does not exist: {model} {ids}")
+            target = wizard[0]
+            sending_methods = target.get("sending_methods")
+            extra_edis = target.get("extra_edis")
+            if not (
+                sending_methods is False
+                or (isinstance(sending_methods, list) and sending_methods == [])
+            ):
+                raise ValueError(
+                    "official invoice PDF requires sending_methods=false or []; email sending is blocked"
+                )
+            if not (
+                extra_edis is False
+                or (isinstance(extra_edis, list) and extra_edis == [])
+            ) or target.get("invoice_edi_format") is not False:
+                raise ValueError(
+                    "official invoice PDF forbids extra_edis and invoice EDI configuration"
+                )
+            invoice_id = _related_record_id(target.get("move_id"))
+            if invoice_id is None:
+                raise ValueError(
+                    "official invoice PDF wizard must target exactly one invoice"
+                )
+            invoice = self._read_rows(
+                instance,
+                "account.move",
+                [invoice_id],
+                ["id", "state", "move_type", "invoice_pdf_report_id", "is_move_sent"],
+            )
+            if {int(row["id"]) for row in invoice if type(row.get("id")) is int} != {invoice_id}:
+                raise ValueError(f"official invoice PDF target does not exist: account.move {invoice_id}")
+            target_invoice = invoice[0]
+            if target_invoice.get("state") != "posted" or target_invoice.get("move_type") != "out_invoice":
+                raise ValueError(
+                    "official invoice PDF requires one posted customer invoice"
+                )
+            return {"wizard": wizard, "invoice": invoice}
         state = _KNOWN_METHOD_STATES.get((model, str(payload.get("method"))))
         if state:
             records = self._read_rows(instance, model, ids, ["id", state[0]])
@@ -650,6 +735,8 @@ class NativeActions:
                 for field, value in expected.items():
                     if field == "datas":
                         continue
+                    if _official_empty_relation_matches(model, field, actual.get(field), value):
+                        continue
                     relation_match = self._created_relation_matches(
                         instance, model, field, actual.get(field), value
                     )
@@ -715,6 +802,49 @@ class NativeActions:
             }
         method = str(payload["method"])
         ids = [int(value) for value in payload.get("kwargs", {}).get("ids") or []]
+        if (model, method) == _OFFICIAL_INVOICE_PDF_METHOD:
+            invoice_ids = [
+                int(item["id"])
+                for item in row.get("prestate", {}).get("invoice", [])
+                if type(item.get("id")) is int
+            ]
+            records = self._read_rows(
+                instance,
+                "account.move",
+                invoice_ids,
+                ["id", "state", "move_type", "invoice_pdf_report_id", "is_move_sent"],
+            )
+            requested_ids = set(invoice_ids)
+            returned_ids = {
+                int(item["id"]) for item in records if type(item.get("id")) is int
+            }
+            satisfied = (
+                len(ids) == 1
+                and len(invoice_ids) == 1
+                and returned_ids == requested_ids
+                and all(
+                    item.get("state") == "posted"
+                    and item.get("move_type") == "out_invoice"
+                    and _related_record_id(item.get("invoice_pdf_report_id")) is not None
+                    and item.get("is_move_sent") is True
+                    for item in records
+                )
+            )
+            return {
+                "status": "satisfied" if satisfied else "not_satisfied",
+                "evidence": {
+                    # Keep the model explicit: the action target is a send
+                    # wizard, while these records are the resulting invoice.
+                    "invoice_records": records,
+                    "record_model": "account.move",
+                    "required": {
+                        "state": "posted",
+                        "move_type": "out_invoice",
+                        "invoice_pdf_report_id": "present",
+                        "is_move_sent": True,
+                    },
+                },
+            }
         state = _KNOWN_METHOD_STATES.get((model, method))
         if state:
             records = self._read_rows(instance, model, ids, ["id", state[0]])
@@ -1387,6 +1517,14 @@ class NativeActions:
                 }
             args = list(args or [])
             kwargs = dict(kwargs or {})
+            if (model, method) == _OFFICIAL_INVOICE_PDF_METHOD:
+                extra = sorted(set(kwargs) - {"ids"})
+                if extra:
+                    return {
+                        "success": False,
+                        "error": "official invoice PDF accepts kwargs.ids only",
+                        "classification": safety,
+                    }
             names = JSON2_POSITIONAL_ARG_MAP.get(method, ())
             if "domain" in names:
                 index = names.index("domain")
@@ -1418,7 +1556,10 @@ class NativeActions:
             required_ids = (model, method) in _KNOWN_METHOD_STATES or (
                 model,
                 method,
-            ) == ("sale.advance.payment.inv", "create_invoices")
+            ) in {
+                ("sale.advance.payment.inv", "create_invoices"),
+                _OFFICIAL_INVOICE_PDF_METHOD,
+            }
             ids = kwargs.get("ids")
             if required_ids and (
                 not isinstance(ids, list)

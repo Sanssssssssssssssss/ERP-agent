@@ -5,7 +5,7 @@ import { basename, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { HostClient } from "./host";
 import { publicSettings, saveSettings } from "./settings";
-import { assertRequest, businessScope, canChangeSettings, METHODS, observedRecordUrl, recordedArtifactPath } from "./ipc-security";
+import { assertRequest, businessScope, canChangeSettings, METHODS, materialSessionId, observedRecordUrl, recordedArtifactPath, safeMaterialName, strictBase64 } from "./ipc-security";
 import { runSelfCheck } from "./self-check";
 import type { BusinessDetail, SettingsInput, WorkbenchMethod } from "../shared/protocol";
 
@@ -57,6 +57,30 @@ function createWindow(): BrowserWindow {
   return window;
 }
 
+const DOCUMENT_MODELS = new Set(["sale.order", "purchase.order", "account.move"]);
+const DOCUMENT_FORMATS = new Set(["pdf", "csv"]);
+const MAX_DOCUMENT_BYTES = 32 * 1024 * 1024;
+
+function documentRequest(params: Record<string, unknown>): { scope: ReturnType<typeof businessScope>; model: string; record_id: number; format: "pdf" | "csv" } {
+  const scope = businessScope(params);
+  if (typeof params.model !== "string" || !DOCUMENT_MODELS.has(params.model)) throw new Error("DOCUMENT_MODEL_NOT_ALLOWED");
+  if (typeof params.record_id !== "number" || !Number.isSafeInteger(params.record_id) || params.record_id < 1) throw new Error("DOCUMENT_RECORD_INVALID");
+  if (typeof params.format !== "string" || !DOCUMENT_FORMATS.has(params.format)) throw new Error("DOCUMENT_FORMAT_INVALID");
+  return { scope, model: params.model, record_id: params.record_id, format: params.format as "pdf" | "csv" };
+}
+
+function documentPayload(value: unknown, format: "pdf" | "csv"): { bytes: Buffer; name: string; mime: string } {
+  if (!value || typeof value !== "object") throw new Error("DOCUMENT_EXPORT_INVALID");
+  const candidate = value as { data_base64?: unknown; name?: unknown; mime?: unknown };
+  if (typeof candidate.data_base64 !== "string") throw new Error("DOCUMENT_EXPORT_INVALID");
+  const bytes = strictBase64(candidate.data_base64, MAX_DOCUMENT_BYTES);
+  const expectedMime = format === "pdf" ? "application/pdf" : "text/csv";
+  if (candidate.mime !== expectedMime || typeof candidate.name !== "string" || basename(candidate.name) !== candidate.name) throw new Error("DOCUMENT_EXPORT_INVALID");
+  const extension = extname(candidate.name).toLowerCase();
+  if (extension !== `.${format}` || (format === "pdf" && (bytes.length < 5 || bytes.subarray(0, 5).toString("ascii") !== "%PDF-"))) throw new Error("DOCUMENT_EXPORT_INVALID");
+  return { bytes, name: candidate.name, mime: expectedMime };
+}
+
 function registerIpc(): void {
   ipcMain.handle("workbench:call", async (event, request: { method: WorkbenchMethod; params?: Record<string, unknown> }) => {
     assertTrustedFrame(event);
@@ -83,11 +107,54 @@ function registerIpc(): void {
       }
     }
     if (settingsChanging) throw new Error("CONFIG_BUSY");
-    if (["export_business_report", "open_odoo_record", "open_business_artifact", "reveal_business_artifact"].includes(request.method)) {
+    if (request.method === "import_material") {
+      const params = request.params ?? {};
+      const session_id = materialSessionId(params.session_id);
+      const name = safeMaterialName(params.name);
+      const content = strictBase64(params.content_base64);
+      return host.call("_import_material" as WorkbenchMethod, {
+        session_id, name, content_base64: content.toString("base64"),
+      });
+    }
+    if (["download_document", "export_business_report", "open_odoo_record", "open_business_artifact", "reveal_business_artifact"].includes(request.method)) {
       const params = request.params ?? {};
       const scope = businessScope(params);
       const detail = await host.call("get_business", scope) as BusinessDetail;
       if (detail.business.id !== scope.business_id || detail.business.session_id !== scope.session_id) throw new Error("BUSINESS_SCOPE_MISMATCH");
+      if (request.method === "download_document") {
+        const document = documentRequest(params);
+        if (!detail.documents.some(item => item.model === document.model && String(item.id) === String(document.record_id))) throw new Error("RECORD_NOT_OBSERVED");
+        if (exportInProgress) throw new Error("EXPORT_BUSY");
+        exportInProgress = true;
+        let temporary: string | undefined;
+        try {
+          const payload = documentPayload(await host.call("_export_document" as WorkbenchMethod, {
+            ...document.scope, model: document.model, record_id: document.record_id, format: document.format,
+          }), document.format);
+          const window = BrowserWindow.fromWebContents(event.sender);
+          if (!window) throw new Error("WINDOW_CLOSED");
+          const result = await dialog.showSaveDialog(window, {
+            title: document.format === "pdf" ? "下载 Odoo 单据 PDF" : "导出 Odoo 单据 CSV",
+            defaultPath: payload.name,
+            filters: [{ name: document.format === "pdf" ? "PDF 单据" : "CSV 明细", extensions: [document.format] }],
+          });
+          if (result.canceled || !result.filePath) return { cancelled: true };
+          if (extname(result.filePath).toLowerCase() !== `.${document.format}`) throw new Error("ARTIFACT_FORMAT_INVALID");
+          temporary = `${result.filePath}.${randomUUID()}.tmp`;
+          await writeFile(temporary, payload.bytes, { flag: "wx", mode: 0o600 });
+          await rename(temporary, result.filePath);
+          temporary = undefined;
+          const artifact = await host.call("_record_artifact" as WorkbenchMethod, {
+            ...document.scope, path: result.filePath, name: basename(result.filePath),
+            kind: document.format === "pdf" ? "odoo_pdf" : "odoo_csv", model: document.model,
+            record_id: document.record_id, source: "odoo_report",
+          }).catch(() => { throw new Error(`ARTIFACT_INDEX_FAILED: 文件已保存，但业务索引保存失败。`); });
+          return { cancelled: false, path: result.filePath, artifact };
+        } finally {
+          exportInProgress = false;
+          if (temporary) await unlink(temporary).catch(() => undefined);
+        }
+      }
       if (request.method === "open_odoo_record") {
         const settings = await publicSettings();
         await shell.openExternal(observedRecordUrl(settings.odoo_url, detail.documents, params.model, params.record_id));

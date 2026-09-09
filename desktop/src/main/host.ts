@@ -218,6 +218,7 @@ const SAFE_ERROR_MESSAGES: Record<string, string> = {
   SECURE_STORAGE_UNAVAILABLE: "系统安全存储不可用，无法读取密钥。",
   ODOO_NOT_CONFIGURED: "Odoo 尚未配置，请先填写连接设置。",
   RECORD_NOT_OBSERVED: "该记录未被当前业务读取，无法打开。",
+  MATERIAL_UNAVAILABLE: "业务绑定的材料已缺失或内容已变化，请重新导入后再执行。",
 };
 
 const SAFE_LOCAL_ERROR_MESSAGES: Record<string, string> = {
@@ -228,6 +229,26 @@ const SAFE_LOCAL_ERROR_MESSAGES: Record<string, string> = {
   "KEYERROR\u0000'unknown method'": "主机不支持当前请求，请刷新桌面应用。",
   "VALUEERROR\u0000proposal already decided": "该业务提案已经处理，请刷新会话状态。",
   "RUNTIMEERROR\u0000only one active run is allowed on this host": "主机已有运行中的业务，请等待当前运行结束。",
+  "VALUEERROR\u0000content_base64 is required": "材料内容为空，请重新选择文件。",
+  "VALUEERROR\u0000content_base64 is invalid": "材料编码无效，请重新选择文件。",
+  "VALUEERROR\u0000session material limit exceeded": "当前会话已达到材料数量上限。",
+  "VALUEERROR\u0000material name is required": "材料文件名不能为空。",
+  "VALUEERROR\u0000material name must be a simple file name": "材料文件名无效，请选择 CSV 或 TXT 文件。",
+  "VALUEERROR\u0000only UTF-8 CSV and TXT materials are supported": "仅支持 UTF-8 CSV 或 TXT 材料。",
+  "VALUEERROR\u0000material must be valid UTF-8": "材料必须是有效的 UTF-8 文本。",
+  "VALUEERROR\u0000material exceeds the 2 MiB limit": "材料超过 2 MiB 大小限制。",
+  "VALUEERROR\u0000material exceeds the 20000 character limit": "材料超过文本长度限制。",
+  "VALUEERROR\u0000material exceeds the 200 row limit": "材料超过 200 行限制。",
+  "VALUEERROR\u0000document is not observed in this business": "该单据未被当前业务观测，无法下载。",
+  "VALUEERROR\u0000document scope is invalid": "单据下载参数无效。",
+  "VALUEERROR\u0000DOCUMENT_PORTAL_ACCESS_UNAVAILABLE": "Odoo 未提供该单据的下载授权，请检查当前账号权限。",
+  "VALUEERROR\u0000DOCUMENT_INVOICE_PDF_NOT_GENERATED": "发票已过账，但尚未生成正式 PDF，请先生成发票文件后再下载。",
+  "VALUEERROR\u0000DOCUMENT_PORTAL_PERMISSION_DENIED": "当前 Odoo 账号没有该单据的下载权限，请改用 CSV 或联系管理员。",
+  "VALUEERROR\u0000DOCUMENT_PORTAL_ORIGIN_INVALID": "Odoo 报告地址不属于当前配置服务，已拒绝下载。",
+  "VALUEERROR\u0000DOCUMENT_REPORT_UNAVAILABLE": "Odoo 报告暂时不可用，请稍后重试或导出 CSV。",
+  "VALUEERROR\u0000DOCUMENT_REPORT_CONTENT_TYPE_INVALID": "Odoo 返回的内容不是 PDF，请改用 CSV。",
+  "VALUEERROR\u0000DOCUMENT_LINES_TOO_MANY": "单据明细超过 100 行，暂不支持导出。",
+  "VALUEERROR\u0000DOCUMENT_LINES_NOT_READ": "单据明细读取不完整，无法生成 CSV。",
 };
 
 function safeErrorCode(code: string): string {

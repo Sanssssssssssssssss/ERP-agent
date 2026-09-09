@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { publicSettings, saveSettings } from "./settings";
-import { assertRequest, businessScope, canChangeSettings, observedRecordUrl, recordedArtifactPath } from "./ipc-security";
+import { assertRequest, businessScope, canChangeSettings, observedRecordUrl, recordedArtifactPath, safeMaterialName, strictBase64 } from "./ipc-security";
 import { safeErrorMessage } from "./host";
 
 export async function runSelfCheck(): Promise<void> {
@@ -69,8 +69,21 @@ export async function runSelfCheck(): Promise<void> {
   assert.throws(() => recordedArtifactPath([{ id: "a_receipt", path: join(isolated, "program.exe") }], "a_receipt"), /FORMAT_INVALID/);
   assert.throws(() => recordedArtifactPath([{ id: "a_receipt", path: "https://example.com/receipt.json" }], "a_receipt"), /FORMAT_INVALID/);
   assert.throws(() => assertRequest({ method: "_record_artifact", params: { path: artifactPath } }), /METHOD_NOT_ALLOWED/);
+  assert.doesNotThrow(() => assertRequest({ method: "import_material", params: { session_id: "s_a", name: "items.csv", content_base64: "YQ==" } }));
+  assert.doesNotThrow(() => assertRequest({ method: "download_document", params: { session_id: "s_a", business_id: "b_a", model: "sale.order", record_id: 1, format: "pdf" } }));
+  assert.equal(safeMaterialName("items.csv"), "items.csv");
+  assert.throws(() => safeMaterialName("..\\items.csv"), /MATERIAL_NAME_INVALID/);
+  assert.throws(() => safeMaterialName("items.pdf"), /MATERIAL_FORMAT_INVALID/);
+  assert.equal(strictBase64("YQ==").toString("utf8"), "a");
+  assert.throws(() => strictBase64("not base64"), /MATERIAL_BASE64_INVALID/);
+  assert.equal(recordedArtifactPath([{ id: "a_pdf", path: join(isolated, "doc.pdf"), kind: "odoo_pdf" }], "a_pdf"), join(isolated, "doc.pdf"));
+  assert.throws(() => recordedArtifactPath([{ id: "a_pdf", path: join(isolated, "doc.json"), kind: "odoo_pdf" }], "a_pdf"), /FORMAT_INVALID/);
   assert.equal(safeErrorMessage("ODOO_NOT_CONFIGURED", "internal detail"), "[ODOO_NOT_CONFIGURED] Odoo 尚未配置，请先填写连接设置。");
   assert.equal(safeErrorMessage("KeyError", "'unknown proposal'"), "[KEYERROR] 未找到可处理的业务提案，可能已处理或已过期。");
+  assert.equal(safeErrorMessage("ValueError", "material exceeds the 2 MiB limit"), "[VALUEERROR] 材料超过 2 MiB 大小限制。");
+  assert.equal(safeErrorMessage("ValueError", "DOCUMENT_PORTAL_ACCESS_UNAVAILABLE"), "[VALUEERROR] Odoo 未提供该单据的下载授权，请检查当前账号权限。");
+  assert.equal(safeErrorMessage("ValueError", "DOCUMENT_INVOICE_PDF_NOT_GENERATED"), "[VALUEERROR] 发票已过账，但尚未生成正式 PDF，请先生成发票文件后再下载。");
+  assert.equal(safeErrorMessage("ValueError", "document is not observed in this business"), "[VALUEERROR] 该单据未被当前业务观测，无法下载。");
   const generic = safeErrorMessage("business_validation_failed", "Authorization: Bearer sk_actual_123 Cookie: a=abc; b=xyz");
   assert.equal(generic, "[BUSINESS_VALIDATION_FAILED] 请求失败，请检查当前操作状态后重试。");
   assert.doesNotMatch(generic, /sk_actual_123|a=abc|b=xyz/);

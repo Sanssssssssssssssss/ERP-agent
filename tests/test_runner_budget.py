@@ -22,6 +22,95 @@ from odoo_runtime.dynamic_tools import BASE_TOOLS, CAPABILITY_GROUPS
 
 
 class RunnerBudgetTest(unittest.TestCase):
+    def test_pause_on_approval_stops_after_needs_reconciliation_before_next_model_request(self):
+        async def check(root: Path):
+            requests = []
+
+            async def execute(*_args, **_kwargs):
+                return AgentToolResult(
+                    content=json.dumps({"success": False, "action_status": "needs_reconciliation"}),
+                    details={"success": False, "action_status": "needs_reconciliation"},
+                )
+
+            class ToolSet:
+                def __init__(self, _url):
+                    self.tools = [AgentTool(
+                        name="execute_method", label="Execute", description="write",
+                        parameters={"type": "object", "properties": {}}, execute_fn=execute,
+                    )]
+
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, *args):
+                    return None
+
+            def handler(request):
+                requests.append(json.loads(request.content))
+                if len(requests) > 1:
+                    raise AssertionError("pause_on_approval requested a second model turn")
+                body = {
+                    "choices": [{"delta": {"tool_calls": [{
+                        "index": 0, "id": "write-1", "type": "function",
+                        "function": {"name": "execute_method", "arguments": "{}"},
+                    }]}, "finish_reason": "tool_calls"}],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+                }
+                return httpx.Response(
+                    200, text="data: " + json.dumps(body) + "\n\ndata: [DONE]\n\n",
+                    headers={"content-type": "text/event-stream"},
+                )
+
+            instruction = root / "instruction.txt"
+            instruction.write_text("Execute the write once.", encoding="utf-8")
+            args = SimpleNamespace(
+                instruction_file=instruction, session_file=root / "session.jsonl",
+                usage_file=root / "usage.json", receipt_dir=root / "run",
+                mcp_url="http://unused.invalid", max_turns=3, max_model_requests=3,
+                max_output_tokens=None, runtime_mode="mcp", read_backend="mcp",
+                action_backend="mcp", capability_backend="mcp", sop_mode="off",
+                tool_mode="static", world_mode="off", continue_run=False,
+                pause_on_approval=True,
+            )
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                with (
+                    patch.object(pi_odoo_runner, "McpToolSet", ToolSet),
+                    patch.object(
+                        pi_odoo_runner, "OpenAICompatibleProvider",
+                        side_effect=lambda config: OpenAICompatibleProvider(config, client=client),
+                    ),
+                    patch.dict(os.environ, {
+                        "LLM_API_KEY": "test-only", "LLM_BASE_URL": "https://unused.invalid/v1",
+                        "LLM_MODEL": "deepseek/test", "LLM_PROVIDER": "openai-compatible",
+                        "LLM_THINKING_TYPE": "high",
+                    }),
+                ):
+                    await pi_odoo_runner.run(args)
+
+            self.assertEqual(len(requests), 1)
+            rows = [json.loads(line) for line in args.session_file.read_text().splitlines()]
+            self.assertTrue(any(
+                row.get("type") == "message"
+                and row.get("message", {}).get("role") == "toolResult"
+                and "needs_reconciliation" in json.dumps(row.get("message", {}))
+                for row in rows
+            ))
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(check(Path(directory)))
+
+    def test_pause_marker_handles_nested_and_malformed_status_values(self):
+        nested = ToolResultMessage(
+            tool_call_id="x", tool_name="x", content="", is_error=False,
+            details={"structuredContent": {"action_status": {"status": "needs_reconciliation"}}},
+        )
+        malformed = ToolResultMessage(
+            tool_call_id="x", tool_name="x", content="", is_error=False,
+            details={"structuredContent": {"status": ["needs_reconciliation"], "action_status": {}}},
+        )
+        self.assertTrue(pi_odoo_runner._approval_required(nested))
+        self.assertFalse(pi_odoo_runner._approval_required(malformed))
+
     def test_dynamic_history_recovery_is_typed_fail_closed_and_latest(self):
         def result(payload, *, is_error=False):
             return ToolResultMessage(
@@ -404,6 +493,11 @@ class RunnerBudgetTest(unittest.TestCase):
             self.assertEqual(captured_configs[0].max_tokens, None)
             self.assertFalse(captured_session_configs[0].retry_enabled)
             self.assertFalse(captured_session_configs[0].auto_compact_enabled)
+            self.assertEqual(
+                captured_session_configs[0].resource_paths.paths.home,
+                root / ".pi-agent",
+            )
+            self.assertTrue((root / ".pi-agent" / "logs" / "agent-calls.jsonl").is_file())
             session_rows = [
                 json.loads(line)
                 for line in (root / "session.jsonl").read_text().splitlines()

@@ -178,6 +178,51 @@ class WorkbenchHostTests(unittest.TestCase):
         self.assertEqual(detail["outcome"]["status"], "unknown")
         self.assertTrue(all(not stage["evidence"] for stage in detail["execution"]["stages"]))
 
+    def test_verified_action_readback_updates_only_exact_current_document(self):
+        for case in ("valid", "wrong_id", "stale"):
+            with self.subTest(case=case):
+                business, run = self._run(f"action readback {case}")
+                run["documents"] = [{"model": "sale.order", "id": 7, "name": "SO0007", "state": "draft", "source_run_id": run["id"], "observed_at": "2026-01-01T00:00:00Z", "fields": {}}]
+                if case == "stale":
+                    run["documents"][0]["observed_at"] = "2999-01-01T00:00:00Z"
+                row = self._action(run, key=f"readback-{case}")
+                ledger = ActionStore(Path(self.tmp.name) / "runs" / run["id"] / "odoo-actions.sqlite3")
+                evidence_id = 8 if case == "wrong_id" else 7
+                ledger.finish(row["action_id"], "verified", result={"action_status": "verified"}, verification={
+                    "status": "satisfied", "evidence": {"records": [{"id": evidence_id, "state": "sale"}], "accepted_states": ["sale", "done"]},
+                })
+                ledger.close()
+                self.host.store.data["approvals"][row["action_id"]] = {
+                    "action_id": row["action_id"], "run_id": run["id"], "business_id": business["id"], "session_id": self.sid,
+                    "status": "approved", "model": "sale.order", "operation": "action_confirm", "record_ids": [7],
+                }
+                detail = self.host.get_business(self.sid, business["id"])
+                document = next(item for item in detail["documents"] if item["model"] == "sale.order" and item["id"] == 7)
+                if case == "valid":
+                    self.assertEqual(document["state"], "sale")
+                    self.assertEqual(document["source"], "native_action_readback")
+                else:
+                    self.assertEqual(document["state"], "draft")
+                run["status"] = "completed"
+                self.host.store.data["sessions"][self.sid]["active_run_id"] = None
+                self.host.store.data["businesses"][business["id"]]["active_run_id"] = None
+
+    def test_action_readback_freshness_survives_out_of_order_receipts(self):
+        run = {"documents": [{"model": "sale.order", "id": 7, "state": "draft", "observed_at": "1970-01-01T00:00:01Z"}]}
+        approval = {"model": "sale.order", "record_ids": [7]}
+        newer = {"action_id": "new", "status": "verified", "finished_at": 200.0,
+                 "verification": {"status": "satisfied", "evidence": {"records": [{"id": 7, "state": "sale"}], "accepted_states": ["sale"]}}}
+        older = {"action_id": "old", "status": "verified", "finished_at": 100.0,
+                 "verification": {"status": "satisfied", "evidence": {"records": [{"id": 7, "state": "draft"}], "accepted_states": ["draft"]}}}
+        Workbench._apply_action_readback(run, approval, newer)
+        Workbench._apply_action_readback(run, approval, older)
+        self.assertEqual(run["documents"][0]["state"], "sale")
+        self.assertEqual(run["documents"][0]["source_action_id"], "new")
+        missing_time = dict(older)
+        missing_time.pop("finished_at")
+        Workbench._apply_action_readback(run, approval, missing_time)
+        self.assertEqual(run["documents"][0]["state"], "sale")
+
     def test_reconcile_action_is_read_only_and_clears_run_to_interrupted(self):
         business, run = self._run("recover an uncertain write")
         row = self._action(run, key="uncertain")
@@ -301,6 +346,7 @@ class WorkbenchHostTests(unittest.TestCase):
         instruction = self.host._instruction(first, "r-test").read_text(encoding="utf-8")
         self.assertIn("first order", instruction)
         self.assertIn("follow up", instruction)
+        self.assertIn("简体中文", instruction)
         self.assertNotIn("secret internal reasoning", instruction)
 
     def test_one_active_run_does_not_change_view_target(self):
@@ -669,7 +715,7 @@ class WorkbenchHostTests(unittest.TestCase):
         env = child_environment("s", "r")
         self.assertEqual(env["ODOO_ACTION_APPROVAL_MODE"], "host")
         self.assertEqual(env["ODOO_MCP_ENABLE_WRITES"], "1")
-        self.assertEqual(env["ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS"], "sale.order.action_confirm,sale.advance.payment.inv.create_invoices,account.move.action_post")
+        self.assertEqual(env["ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS"], "sale.order.action_confirm,purchase.order.button_confirm,purchase.order.button_approve,sale.advance.payment.inv.create_invoices,account.move.action_post,account.move.send.wizard.action_send_and_print")
         self.assertNotIn("ODOO_MCP_POLICY_FILE", env)
         self.assertEqual(env["PYTHONPATH"].split(os.pathsep)[-1], str(Path.cwd()))
 
@@ -830,8 +876,14 @@ class WorkbenchHostTests(unittest.TestCase):
 
     def test_record_artifact_is_scoped_and_exposed(self):
         business = self._business("artifact")
-        artifact = self.host._record_artifact(self.sid, business["id"], "/tmp/receipt.json", "receipt.json")
+        self.host.store.data["runs"]["r-artifact"] = {
+            "id": "r-artifact", "business_id": business["id"], "session_id": self.sid,
+            "started_at": "2026-01-01T00:00:00Z",
+            "documents": [{"model": "sale.order", "id": 7, "name": "SO0007", "fields": {}}],
+        }
+        artifact = self.host._record_artifact(self.sid, business["id"], "/tmp/receipt.json", "receipt.json", model="sale.order", record_id=7)
         self.assertTrue(artifact["id"].startswith("a_"))
+        self.assertEqual(artifact["source"], "odoo:sale.order:7")
         detail = self.host.get_business(self.sid, business["id"])
         self.assertEqual(detail["artifacts"][0]["path"], "/tmp/receipt.json")
         with self.assertRaises(KeyError):

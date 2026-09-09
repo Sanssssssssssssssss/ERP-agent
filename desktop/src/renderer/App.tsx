@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { AlertDialog as RadixAlertDialog, Badge as RadixBadge, Button as RadixButton, Dialog as RadixDialog, IconButton as RadixIconButton, Tabs as RadixTabs, Tooltip as RadixTooltip } from '@radix-ui/themes'
-import { Activity, Archive, ArrowUpRight, Check as CheckIcon, CircleAlert, CircleCheck, CircleDashed, Clock3, FileText, FolderPlus, LoaderCircle, MessageSquare, Minus, PanelLeftClose, PanelLeftOpen, Play, RefreshCw, Search, Send, Settings2, Square, X } from 'lucide-react'
+import { Activity, Archive, ArrowUpRight, Check as CheckIcon, CircleAlert, CircleCheck, CircleDashed, Clock3, Download, ExternalLink, FilePlus2, FileText, FolderPlus, LoaderCircle, MessageSquare, Minus, PanelLeftClose, PanelLeftOpen, Play, RefreshCw, Search, Send, Settings2, Square, Trash2, Upload, X } from 'lucide-react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { WorkbenchMethod } from '../shared/protocol'
@@ -38,6 +38,12 @@ import {
 } from './protocol'
 
 type ConnectionState = 'checking' | 'connected' | 'disconnected' | 'crashed' | 'protocol_error'
+type BusinessTypeCode = 'sale_invoice' | 'purchase' | 'sale_purchase_invoice'
+type MaterialRecord = { id: string; session_id: string; name: string; size: number; sha256: string; created_at: string; row_count?: number; preview?: string; media_type?: string }
+type MessageWithMaterials = Message & { material_ids?: string[] }
+type BusinessWithType = Omit<Business, 'type'> & { type: BusinessTypeCode | string; completion_target?: string }
+type DetailWithMaterials = BusinessDetailProjection & { materials?: MaterialRecord[] }
+type DownloadReceipt = { status: 'downloading' | 'cancelled' | 'completed' | 'failed'; path?: string; artifact?: BusinessArtifact; error?: string }
 
 const liveMessageKey = (message: Pick<LiveMessage, 'session_id' | 'business_id' | 'run_id' | 'id'>) => `${message.session_id}:${message.business_id ?? '__conversation__'}:${message.run_id}:${message.id}`
 
@@ -64,6 +70,7 @@ export default function App() {
   const [traceLoading, setTraceLoading] = useState(false)
   const [connection, setConnection] = useState<ConnectionState>('checking')
   const [health, setHealth] = useState<Health | null>(null)
+  const hostReadyRef = useRef<boolean | null>(null)
   const [error, setError] = useState('')
   const [liveMessages, setLiveMessages] = useState<LiveMessage[]>([])
   const [thinkingRun, setThinkingRun] = useState<{ sessionId: string; runId: string } | null>(null)
@@ -89,6 +96,10 @@ export default function App() {
   const [railCollapsed, setRailCollapsed] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [exportPath, setExportPath] = useState('')
+  const [pendingMaterials, setPendingMaterials] = useState<MaterialRecord[]>([])
+  const [materialsBusy, setMaterialsBusy] = useState(false)
+  const [documentDownloads, setDocumentDownloads] = useState<Record<string, DownloadReceipt>>({})
+  const [selectedDocumentKey, setSelectedDocumentKey] = useState('')
   const [traceRefreshToken, setTraceRefreshToken] = useState(0)
   const settingsButtonRef = useRef<HTMLButtonElement>(null)
   const sessionIdRef = useRef('')
@@ -111,6 +122,7 @@ export default function App() {
   const pendingStreamEventsRef = useRef<Array<{ event: 'message_delta' | 'message_end'; sessionId: string; businessId: string | null; runId: string; messageId: string; sequence: number; text: string }>>([])
   const finalizedStreamKeysRef = useRef(new Set<string>())
   const streamRenderFrameRef = useRef<number | null>(null)
+  const materialRequestRef = useRef(0)
 
   const publishLiveMessages = () => {
     if (streamRenderFrameRef.current !== null) return
@@ -192,6 +204,7 @@ export default function App() {
     setConnection('checking')
     try {
       const result = await call<Health>('check_connection')
+      hostReadyRef.current = result.host_ready
       setHealth(result)
       setConnection(result.host_ready ? 'connected' : 'disconnected')
       if (showError) setError(result.host_ready ? '' : '本地 host 尚未就绪')
@@ -201,17 +214,18 @@ export default function App() {
       if (message.includes('CONNECTION_CHECK_BUSY')) {
         try {
           const cached = await call<Health>('health')
+          hostReadyRef.current = cached.host_ready
           setHealth((current) => cached.odoo ? cached : { ...cached, odoo: current?.odoo })
           setConnection(cached.host_ready ? 'connected' : 'disconnected')
           if (showError) setError('执行期间显示最近检查结果，结束后可重新检查。')
           return cached
         } catch {
-          setConnection('disconnected')
+          setConnection(hostReadyRef.current === true ? 'connected' : 'disconnected')
         }
         if (showError) setError('执行期间显示最近检查结果，结束后可重新检查。')
         return null
       }
-      setConnection('disconnected')
+      setConnection(hostReadyRef.current === true ? 'connected' : 'disconnected')
       if (showError) {
         setError(messageForError(reason))
       }
@@ -314,6 +328,7 @@ export default function App() {
       try {
         const result = await call<Health>('health')
         if (mounted) {
+          hostReadyRef.current = result.host_ready
           setHealth(result)
           setConnection(result.host_ready ? 'connected' : 'disconnected')
           if (!result.host_ready) setError('本地 host 尚未就绪')
@@ -344,6 +359,8 @@ export default function App() {
       setBusinessLoading(false)
     }
   }, [loadBusiness, selectedBusinessId, selectedSessionId])
+
+  useEffect(() => { setSelectedDocumentKey('') }, [selectedBusinessId, selectedSessionId])
 
   useEffect(() => {
     if (!selectedSessionId || tab !== 'trace' || !selectedBusinessId || !selectedRunId) {
@@ -493,6 +510,71 @@ export default function App() {
     pendingStreamEventsRef.current = []
     finalizedStreamKeysRef.current.clear()
     setLiveMessages([])
+    materialRequestRef.current += 1
+    setPendingMaterials([])
+    setMaterialsBusy(false)
+    setDocumentDownloads({})
+  }
+
+  const importMaterials = async (files: File[]) => {
+    if (!selectedSessionId || !files.length || materialsBusy) return
+    const requestSessionId = selectedSessionId
+    const requestId = ++materialRequestRef.current
+    const available = Math.max(0, 3 - pendingMaterials.length)
+    if (files.length > available) {
+      setError(available ? `本次最多再添加 ${available} 个文件。` : '本次消息最多附带 3 个文件。')
+      files = files.slice(0, available)
+    }
+    if (!files.length) return
+    setMaterialsBusy(true)
+    try {
+      for (const file of files) {
+        if (file.size > 2 * 1024 * 1024) throw new Error(`文件“${file.name}”超过 2 MiB 限制。`)
+        if (!/\.(csv|txt)$/i.test(file.name) && !['text/csv', 'text/plain'].includes(file.type)) throw new Error(`文件“${file.name}”仅支持 CSV 或 TXT。`)
+        const bytes = new Uint8Array(await file.arrayBuffer())
+        let binary = ''
+        const chunkSize = 0x8000
+        for (let offset = 0; offset < bytes.length; offset += chunkSize) binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length)))
+        const response = await call<MaterialRecord | { material?: MaterialRecord }>('import_material', { session_id: requestSessionId, name: file.name, content_base64: btoa(binary) })
+        const material = (response && 'material' in response ? response.material : response) as MaterialRecord | undefined
+        if (!material?.id) throw new Error(`文件“${file.name}”解析失败，请检查内容。`)
+        if (sessionIdRef.current === requestSessionId && materialRequestRef.current === requestId) setPendingMaterials((current) => current.length >= 3 ? current : [...current, material])
+      }
+    } catch (reason) {
+      if (sessionIdRef.current === requestSessionId && materialRequestRef.current === requestId) setError(messageForError(reason))
+    } finally {
+      if (materialRequestRef.current === requestId) setMaterialsBusy(false)
+    }
+  }
+
+  const downloadDocument = async (document: Document, format: 'pdf' | 'csv') => {
+    if (!selectedSessionId || !selectedBusinessId) return
+    const recordId = Number(document.id)
+    if (!Number.isInteger(recordId) || recordId <= 0) {
+      setError('该单据没有可用的 Odoo 记录 ID。')
+      return
+    }
+    const requestSessionId = selectedSessionId
+    const requestBusinessId = selectedBusinessId
+    const key = `${documentKey(document)}:${format}`
+    setDocumentDownloads((current) => ({ ...current, [key]: { status: 'downloading' } }))
+    try {
+      const result = await call<{ cancelled?: boolean; path?: string; artifact?: BusinessArtifact }>('download_document', { session_id: requestSessionId, business_id: requestBusinessId, model: document.model, record_id: recordId, format })
+      if (sessionIdRef.current !== requestSessionId || businessIdRef.current !== requestBusinessId) return
+      if (result.cancelled) {
+        setDocumentDownloads((current) => ({ ...current, [key]: { status: 'cancelled' } }))
+        return
+      }
+      setDocumentDownloads((current) => ({ ...current, [key]: { status: 'completed', path: result.path, artifact: result.artifact } }))
+      setNotice(`${format.toUpperCase()} 已下载：${result.artifact?.name || result.path || document.name}`)
+      window.setTimeout(() => setNotice(''), 2600)
+    } catch (reason) {
+      if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) {
+        const message = messageForError(reason)
+        setDocumentDownloads((current) => ({ ...current, [key]: { status: 'failed', error: message } }))
+        setError(message)
+      }
+    }
   }
 
   const chooseBusiness = (id: string) => {
@@ -561,10 +643,11 @@ export default function App() {
 
   const sendMessage = async (event: FormEvent) => {
     event.preventDefault()
-    const text = draft.trim()
-    if (!text || !selectedSessionId || loading) return
+    const attachedMaterials = pendingMaterials
+    const text = draft.trim() || (attachedMaterials.length ? '请先整理这些业务材料，说明需要补充的信息' : '')
+    if (!text || !selectedSessionId || loading || materialsBusy) return
     const requestSessionId = selectedSessionId
-    const messageKey = `${requestSessionId}:${text}`
+    const messageKey = `${requestSessionId}:${text}:${attachedMaterials.map((material) => material.id).join(',')}`
     if (messageInFlightRef.current.has(messageKey)) return
     messageInFlightRef.current.add(messageKey)
     setLoading(true)
@@ -575,10 +658,14 @@ export default function App() {
       const result = await call<{ ok?: boolean; run_id?: string }>('send_message', {
         session_id: requestSessionId,
         text,
+        ...(attachedMaterials.length ? { material_ids: attachedMaterials.map((material) => material.id) } : {}),
         ...(contextBusinessId ? { context_business_id: contextBusinessId } : {})
       })
       if (sessionIdRef.current === requestSessionId) setThinkingRun((current) => current && current.sessionId === requestSessionId ? { ...current, runId: typeof result?.run_id === 'string' ? result.run_id : current.runId } : current)
-      if (sessionIdRef.current === requestSessionId) await loadSession(requestSessionId)
+      if (sessionIdRef.current === requestSessionId) {
+        setPendingMaterials([])
+        await loadSession(requestSessionId)
+      }
     } catch (reason) {
       if (sessionIdRef.current === requestSessionId) {
         setThinkingRun((current) => current?.sessionId === requestSessionId ? null : current)
@@ -926,6 +1013,10 @@ export default function App() {
           exporting={exporting}
           exportPath={exportPath}
           onOpenDocument={(document) => void openOdooRecord(document)}
+          onDownloadDocument={(document, format) => void downloadDocument(document, format)}
+          documentDownloads={documentDownloads}
+          selectedDocumentKey={selectedDocumentKey}
+          onSelectedDocumentKey={setSelectedDocumentKey}
           onOpenArtifact={(artifact) => void openArtifact(artifact)}
           onRevealArtifact={(artifact) => void openArtifact(artifact, true)}
         />
@@ -944,6 +1035,11 @@ export default function App() {
           onMessageBusinessChange={setMessageBusinessId}
           onDraftChange={setDraft}
           onSubmit={sendMessage}
+          pendingMaterials={pendingMaterials}
+          materialsBusy={materialsBusy}
+          onFiles={(files) => void importMaterials(files)}
+          onRemoveMaterial={(id) => setPendingMaterials((current) => current.filter((material) => material.id !== id))}
+          onStarter={(goal) => setDraft(goal)}
           onProposal={(proposal, confirmed) => void confirmProposal(proposal, confirmed)}
           onCancelConversation={(run) => void cancelConversation(run)}
         />}
@@ -952,7 +1048,7 @@ export default function App() {
   )
 }
 
-type ProposalLike = { id: string; title: string; goal: string; type: string }
+type ProposalLike = { id: string; title: string; goal: string; type: string; completion_target?: string; material_ids?: string[]; existing_business_id?: string }
 
 function SessionRail({
   sessions,
@@ -1014,7 +1110,7 @@ function SessionRail({
   )
 }
 
-function ConversationPane({ session, draft, liveMessages, conversationRuns, thinkingRun, selectedBusinessId, loading, pendingProposal, businesses, messageBusinessId, onMessageBusinessChange, onDraftChange, onSubmit, onProposal, onCancelConversation }: {
+function ConversationPane({ session, draft, liveMessages, conversationRuns, thinkingRun, selectedBusinessId, loading, pendingProposal, businesses, messageBusinessId, onMessageBusinessChange, onDraftChange, onSubmit, onProposal, onCancelConversation, pendingMaterials, materialsBusy, onFiles, onRemoveMaterial, onStarter }: {
   session: SessionDetail | null
   draft: string
   liveMessages: LiveMessage[]
@@ -1030,6 +1126,11 @@ function ConversationPane({ session, draft, liveMessages, conversationRuns, thin
   onSubmit: (event: FormEvent) => void
   onProposal: (proposal: ProposalLike, confirmed: boolean) => void
   onCancelConversation: (run: ConversationRun) => void
+  pendingMaterials: MaterialRecord[]
+  materialsBusy: boolean
+  onFiles: (files: File[]) => void
+  onRemoveMaterial: (id: string) => void
+  onStarter: (goal: string) => void
 }) {
   const messages = session?.messages ?? []
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -1041,7 +1142,7 @@ function ConversationPane({ session, draft, liveMessages, conversationRuns, thin
   const visibleLiveMessages = liveMessages.filter((message) => message.session_id === session?.session.id && (message.business_id == null || message.business_id === selectedBusinessId))
   const persistedMessageKeys = new Set(messages.map((message) => `${message.business_id ?? '__conversation__'}:${message.id}`))
   const orderedMessages = [
-    ...messages.map((message) => ({ kind: 'message' as const, message, created_at: message.created_at })),
+    ...messages.filter((message) => message.text.trim() && !message.proposal).map((message) => ({ kind: 'message' as const, message, created_at: message.created_at })),
     ...visibleLiveMessages.filter((message) => !persistedMessageKeys.has(`${message.business_id ?? '__conversation__'}:${message.id}`)).map((message) => ({ kind: 'live' as const, message, created_at: message.created_at || '' }))
   ].sort((left, right) => left.created_at.localeCompare(right.created_at))
   const localThinking = Boolean(thinkingRun && thinkingRun.sessionId === session?.session.id && (!thinkingRun.runId || latestConversation?.id === thinkingRun.runId))
@@ -1078,17 +1179,18 @@ function ConversationPane({ session, draft, liveMessages, conversationRuns, thin
       {terminalConversation && <div className={`conversation-run-status status-${terminalConversation.status}`} role="status"><strong>{terminalConversation.status === 'failed' ? '对话失败，可继续输入' : terminalConversation.status === 'cancelled' ? '对话已停止，可继续输入' : '对话已中断，可继续输入'}</strong>{(terminalConversation.error || terminalConversation.error_detail) && <details><summary>查看错误详情</summary><code>{terminalConversation.error || terminalConversation.error_detail}</code>{terminalConversation.error_detail && terminalConversation.error_detail !== terminalConversation.error && <p>{terminalConversation.error_detail}</p>}</details>}</div>}
       <div ref={scrollRef} className="conversation-scroll" onScroll={(event) => { const element = event.currentTarget; const latest = element.scrollHeight - element.scrollTop - element.clientHeight < 24; setAtLatest(latest); if (latest) setHasNew(false) }}>
         {!session && <EmptyState title="选择一个会话" detail="左侧会话列表会显示已持久化的工作。" />}
-        {session && messages.length === 0 && visibleLiveMessages.length === 0 && <EmptyState title="从会话开始" detail="先问我能做什么，或描述想解决的业务问题。" />}
+        {session && orderedMessages.length === 0 && visibleLiveMessages.length === 0 && !pendingProposal && !showThinking && <ConversationWelcome onStarter={onStarter} />}
         {orderedMessages.map((item) => item.kind === 'message' ? <MessageRow key={`message:${item.message.id}`} message={item.message} /> : <article className="message assistant live-message" key={`live:${item.message.run_id}:${item.message.id}`}><span className="avatar agent-avatar">A</span><div><div className="message-meta"><strong>Agent</strong><span>{item.message.status === 'ended' ? '回复完成' : item.message.status === 'interrupted' || item.message.status === 'failed' ? '已停止 · 回复未完成' : '实时回复'}</span></div><MessageText text={item.message.text} collapsible={false} /></div></article>)}
         {showThinking && <article className="message assistant thinking-message" aria-live="polite"><span className="avatar agent-avatar">A</span><div><div className="message-meta"><strong>Agent</strong></div><p className="thinking-copy">正在思考…</p></div></article>}
         {pendingProposal && <ProposalCard proposal={pendingProposal} disabled={loading} onDecision={onProposal} />}
         {hasNew && <button className="new-message-indicator" type="button" onClick={scrollToLatest}>有新消息 · 回到最新</button>}
       </div>
-      <form className="composer" onSubmit={onSubmit}>
+      <form className="composer" onSubmit={onSubmit} onDragOver={(event) => { event.preventDefault(); event.currentTarget.classList.add('drop-active') }} onDragLeave={(event) => event.currentTarget.classList.remove('drop-active')} onDrop={(event) => { event.preventDefault(); event.currentTarget.classList.remove('drop-active'); onFiles(Array.from(event.dataTransfer.files)) }}>
+        <MaterialTray materials={pendingMaterials} busy={materialsBusy} onRemove={onRemoveMaterial} onFiles={onFiles} />
         <textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={!session || loading} placeholder={session ? '和 Agent 讨论目标、能力或业务范围…' : '先选择或创建一个会话'} aria-label="会话消息" />
         <div className="composer-footer">
           <div className="composer-context"><label htmlFor="message-business-target">讨论范围</label><select id="message-business-target" value={messageBusinessId} onChange={(event) => onMessageBusinessChange(event.target.value)} disabled={!session || loading}><option value="__conversation__">整个会话（普通讨论）</option>{businesses.map((business) => <option key={business.id} value={business.id}>{business.title || '未命名业务'} · {labelFor(businessStatusLabel, business.status)}</option>)}</select><span>普通发送只会话，不会自动开始业务执行。</span></div>
-        <RadixButton type="submit" disabled={!session || loading || !draft.trim()}>{loading ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}{loading ? '处理中…' : '发送'}</RadixButton>
+        <div className="composer-actions"><label className="material-picker"><FilePlus2 size={15} />添加材料<input type="file" accept=".csv,.txt,text/csv,text/plain" multiple disabled={!session || loading || materialsBusy} onChange={(event) => { onFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = '' }} /></label><RadixButton type="submit" disabled={!session || loading || materialsBusy || (!draft.trim() && !pendingMaterials.length)}>{loading ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}{loading ? '处理中…' : '发送'}</RadixButton></div>
         </div>
       </form>
     </section>
@@ -1099,19 +1201,36 @@ function MessageText({ text, collapsible = true }: { text: string; collapsible?:
   const value = text || '（空消息）'
   const content = <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{ img: ({ alt }) => <span>{alt || '图片'}</span>, a: ({ children }) => <span>{children}</span>, table: ({ children }) => <div className="message-table-wrap"><table>{children}</table></div> }}>{value}</Markdown>
   if (value.length <= 900 || !collapsible) return <div className="message-text message-markdown">{content}</div>
-  return <div><p className="message-text">{value.slice(0, 360)}…</p><details className="message-full"><summary>查看完整消息（{value.length.toLocaleString('zh-CN')} 字）</summary><div className="message-text message-markdown">{content}</div></details></div>
+  return <div><MessageText text={`${value.slice(0, 360)}…`} collapsible={false} /><details className="message-full"><summary>查看完整消息（{value.length.toLocaleString('zh-CN')} 字）</summary><div className="message-text message-markdown">{content}</div></details></div>
 }
 
 function MessageRow({ message }: { message: Message }) {
   const role = message.role === 'user' ? 'user' : message.role === 'system' ? 'system' : 'assistant'
-  return <article className={`message ${role}`}><span className={`avatar ${role === 'user' ? 'user-avatar' : role === 'system' ? 'system-avatar' : 'agent-avatar'}`}>{role === 'user' ? '你' : role === 'system' ? '·' : 'A'}</span><div><div className="message-meta">{role !== 'user' && <strong>{role === 'system' ? '系统' : 'Agent'}</strong>}<span>{formatInstant(message.created_at)}</span></div><MessageText text={message.text} /></div></article>
+  const materialIds = (message as MessageWithMaterials).material_ids ?? []
+  const isProposalEnvelope = Boolean(message.proposal)
+  return <article className={`message ${role}`}><span className={`avatar ${role === 'user' ? 'user-avatar' : role === 'system' ? 'system-avatar' : 'agent-avatar'}`}>{role === 'user' ? '你' : role === 'system' ? '·' : 'A'}</span><div><div className="message-meta">{role !== 'user' && <strong>{role === 'system' ? '系统' : 'Agent'}</strong>}<span>{formatInstant(message.created_at)}</span></div>{!isProposalEnvelope && <MessageText text={message.text} />}{materialIds.length > 0 && <span className="message-materials"><FileText size={12} />已附 {materialIds.length} 个业务材料</span>}</div></article>
+}
+
+function ConversationWelcome({ onStarter }: { onStarter: (goal: string) => void }) {
+  const starters = [
+    { type: 'sale_invoice', title: '销售与开票', detail: '整理已有客户的销售订单，确认后继续开票。', goal: '我想为已有客户整理销售订单，确认后继续开票。' },
+    { type: 'purchase', title: '采购', detail: '先梳理采购需求与供应商信息，再确认执行范围。', goal: '我想整理一笔采购需求，请先告诉我需要补充哪些信息。' },
+    { type: 'sale_purchase_invoice', title: '销售 → 采购 → 开票', detail: '把销售需求、采购环节和开票关系放在同一条业务链里。', goal: '我想梳理销售、采购到开票的完整业务链，请先说明需要补充的信息。' }
+  ]
+  return <section className="conversation-welcome" aria-label="开始一个业务讨论"><div className="welcome-kicker">从一句自然语言开始</div><h3>你想先处理哪类业务？</h3><p>选择一个入口只会把目标填入输入框；发送后由 Agent 先澄清范围，不会自动写入 Odoo。</p><div className="welcome-actions">{starters.map((starter) => <button key={starter.type} type="button" className="welcome-card" onClick={() => onStarter(starter.goal)}><span className="welcome-card-title">{starter.title}</span><span>{starter.detail}</span><small>仅预填目标</small></button>)}</div></section>
+}
+
+function MaterialTray({ materials, busy, onRemove, onFiles }: { materials: MaterialRecord[]; busy: boolean; onRemove: (id: string) => void; onFiles: (files: File[]) => void }) {
+  if (!materials.length && !busy) return <div className="material-drop-hint"><Upload size={14} />拖入 CSV/TXT，或点击“添加材料”（每个文件 ≤ 2 MiB，最多 3 个）</div>
+  return <div className="material-tray" aria-label="本次消息材料"><div className="material-tray-head"><span><FileText size={14} />本次消息材料</span>{busy && <span className="material-uploading"><LoaderCircle className="spin" size={13} />正在上传与解析…</span>}</div>{materials.map((material) => <div className="material-chip" key={material.id}><div><strong>{material.name}</strong><span>{materialRowLabel(material)} · {material.preview || '暂无预览'}</span></div><button type="button" aria-label={`移除 ${material.name}`} onClick={() => onRemove(material.id)}><Trash2 size={14} /></button></div>)}{!busy && materials.length < 3 && <label className="material-inline-drop">继续添加<input type="file" accept=".csv,.txt,text/csv,text/plain" multiple onChange={(event) => { onFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = '' }} /></label>}</div>
 }
 
 function ProposalCard({ proposal, disabled, onDecision }: { proposal: ProposalLike; disabled: boolean; onDecision: (proposal: ProposalLike, confirmed: boolean) => void }) {
-  return <section className="proposal-card"><div className="proposal-icon"><FolderPlus size={18} /></div><div className="proposal-kicker">发现新的业务意图</div><h3>{proposal.title}</h3><p>{proposal.goal}</p><div className="proposal-actions"><RadixButton className="secondary-button" variant="soft" disabled={disabled} onClick={() => onDecision(proposal, false)}>暂不创建</RadixButton><RadixButton className="primary-button" disabled={disabled} onClick={() => onDecision(proposal, true)}><FolderPlus size={15} />创建业务工作区</RadixButton></div></section>
+  const continuesBusiness = Boolean(proposal.existing_business_id)
+  return <section className="proposal-card"><div className="proposal-icon"><FolderPlus size={18} /></div><div className="proposal-kicker">{continuesBusiness ? '延续当前业务' : '发现新的业务意图'} · {businessTypeMeta(proposal.type).title}</div><h3>{proposal.title}</h3><p>{proposal.goal}</p><div className="proposal-target">完成目标：{completionTargetLabel(proposal.completion_target, proposal.type)}</div><div className="proposal-actions"><RadixButton className="secondary-button" variant="soft" disabled={disabled} onClick={() => onDecision(proposal, false)}>{continuesBusiness ? '暂不更新' : '暂不创建'}</RadixButton><RadixButton className="primary-button" disabled={disabled} onClick={() => onDecision(proposal, true)}><FolderPlus size={15} />{continuesBusiness ? '更新业务目标' : '创建业务工作区'}</RadixButton></div></section>
 }
 
-function BusinessWorkspace({ session, activeBusiness, detail, tab, trace, traceTarget, traceLoading, businessLoading, loading, selectedRunId, onBusinessSelect, onTabChange, onRunSelect, onRefresh, onStart, onCancel, onApproval, onReconcile, onTraceTarget, onToggleConversation, conversationOpen, onExport, exporting, exportPath, onOpenDocument, onOpenArtifact, onRevealArtifact }: {
+function BusinessWorkspace({ session, activeBusiness, detail, tab, trace, traceTarget, traceLoading, businessLoading, loading, selectedRunId, onBusinessSelect, onTabChange, onRunSelect, onRefresh, onStart, onCancel, onApproval, onReconcile, onTraceTarget, onToggleConversation, conversationOpen, onExport, exporting, exportPath, onOpenDocument, onDownloadDocument, documentDownloads, selectedDocumentKey, onSelectedDocumentKey, onOpenArtifact, onRevealArtifact }: {
   session: SessionDetail | null
   activeBusiness: Business | null
   detail: BusinessDetailProjection | null
@@ -1137,10 +1256,15 @@ function BusinessWorkspace({ session, activeBusiness, detail, tab, trace, traceT
   exporting: boolean
   exportPath: string
   onOpenDocument: (document: Document) => void
+  onDownloadDocument: (document: Document, format: 'pdf' | 'csv') => void
+  documentDownloads: Record<string, DownloadReceipt>
+  selectedDocumentKey: string
+  onSelectedDocumentKey: (key: string) => void
   onOpenArtifact: (artifact: BusinessArtifact) => void
   onRevealArtifact: (artifact: BusinessArtifact) => void
 }) {
   const businessList = session?.businesses ?? []
+  const businessInfo = activeBusiness as BusinessWithType | null
   const activeRun = detail?.runs?.find((run) => run.id === detail.business.active_run_id)
     ?? detail?.runs?.find((run) => ['running', 'awaiting_approval', 'cancel_requested'].includes(run.status))
     ?? detail?.runs?.[0]
@@ -1149,12 +1273,12 @@ function BusinessWorkspace({ session, activeBusiness, detail, tab, trace, traceT
       <div className="business-tabs-bar">
         <div className="business-tabs-heading"><div><span className="eyebrow">业务工作区</span><strong>{businessList.length ? `${businessList.length} 个业务` : '业务页'}</strong></div><RadixButton className="conversation-toggle" variant="soft" aria-label={conversationOpen ? '收起会话' : '打开会话'} onClick={onToggleConversation}><MessageSquare size={15} />{conversationOpen ? '收起会话' : '打开会话'}</RadixButton></div>
         <div className="business-tabs" role="tablist" aria-label="业务工作区">
-          {businessList.map((business) => <button role="tab" aria-selected={business.id === activeBusiness?.id} key={business.id} className={business.id === activeBusiness?.id ? 'active' : ''} onClick={() => onBusinessSelect(business.id)}>{business.title || '销售发票'}<span>{labelFor(businessStatusLabel, business.status)}</span></button>)}
+          {businessList.map((business) => <button role="tab" aria-selected={business.id === activeBusiness?.id} key={business.id} className={business.id === activeBusiness?.id ? 'active' : ''} onClick={() => onBusinessSelect(business.id)}>{business.title || businessTypeMeta(business.type).title}<span>{businessTypeMeta(business.type).short} · {labelFor(businessStatusLabel, business.status)}</span></button>)}
         </div>
       </div>
       {!activeBusiness && <EmptyState title="等待业务工作区" detail="在会话中确认一个业务意图后，这里会打开对应工作区。" />}
       {activeBusiness && <>
-        <header className="business-header"><div><span className="eyebrow">业务目标</span><h2>{activeBusiness.title}</h2><p tabIndex={0} aria-label="业务目标">{compactGoal(activeBusiness.goal, detail?.documents ?? [])}</p><details className="goal-details"><summary>查看原始指令</summary><p>{activeBusiness.goal || '未知'}</p></details></div><StatusBadge status={activeBusiness.status} label={labelFor(businessStatusLabel, activeBusiness.status)} /></header>
+        <header className="business-header"><div><span className="eyebrow">{businessTypeMeta(activeBusiness.type).title}</span><h2>{activeBusiness.title}</h2><p tabIndex={0} aria-label="业务目标">{compactGoal(activeBusiness.goal, detail?.documents ?? [])}</p><div className="business-target-line"><span>完成目标</span><strong>{completionTargetLabel(businessInfo?.completion_target, activeBusiness.type)}</strong></div><details className="goal-details"><summary>查看原始指令</summary><p>{activeBusiness.goal || '未知'}</p></details></div><StatusBadge status={activeBusiness.status} label={labelFor(businessStatusLabel, activeBusiness.status)} /></header>
         <RadixTabs.Root className="business-tabs-root" value={tab} onValueChange={(value) => onTabChange(value as BusinessTab)}>
           <RadixTabs.List className="business-page-tabs" aria-label="业务页面">
             {tabs.map((item) => <RadixTabs.Trigger key={item.id} value={item.id}>{item.label}{item.id === 'approvals' && detail?.approvals?.filter(isPendingApproval).length ? <b>{detail.approvals.filter(isPendingApproval).length}</b> : null}</RadixTabs.Trigger>)}
@@ -1162,8 +1286,8 @@ function BusinessWorkspace({ session, activeBusiness, detail, tab, trace, traceT
           <div className="business-content">
           {businessLoading && <div className="loading-line"><LoaderCircle className="spin" size={16} />正在读取业务状态…</div>}
           <RadixTabs.Content value="execution">{!businessLoading && <ExecutionPage detail={detail} activeRun={activeRun} onRefresh={onRefresh} onStart={onStart} onCancel={onCancel} onEvidence={onTraceTarget} />}</RadixTabs.Content>
-           <RadixTabs.Content value="documents">{!businessLoading && <DocumentsPage documents={detail?.documents ?? []} artifacts={detail?.artifacts ?? []} goal={activeBusiness.goal} stale={detail?.stale ?? false} onExport={onExport} exporting={exporting} exportPath={exportPath} onOpenDocument={onOpenDocument} onOpenArtifact={onOpenArtifact} onRevealArtifact={onRevealArtifact} onTraceTarget={onTraceTarget} />}</RadixTabs.Content>
-          <RadixTabs.Content value="approvals">{!businessLoading && <ApprovalsPage approvals={detail?.approvals ?? []} disabled={loading || businessLoading} onDecision={onApproval} onReconcile={onReconcile} onTraceTarget={onTraceTarget} />}</RadixTabs.Content>
+           <RadixTabs.Content value="documents">{!businessLoading && <DocumentsPage documents={detail?.documents ?? []} materials={(detail as DetailWithMaterials | null)?.materials ?? []} artifacts={detail?.artifacts ?? []} goal={activeBusiness.goal} stale={detail?.stale ?? false} onExport={onExport} exporting={exporting} exportPath={exportPath} onOpenDocument={onOpenDocument} onDownloadDocument={onDownloadDocument} documentDownloads={documentDownloads} selectedDocumentKey={selectedDocumentKey} onSelectedDocumentKey={onSelectedDocumentKey} onOpenArtifact={onOpenArtifact} onRevealArtifact={onRevealArtifact} onTraceTarget={onTraceTarget} />}</RadixTabs.Content>
+          <RadixTabs.Content value="approvals">{!businessLoading && <ApprovalsPage approvals={detail?.approvals ?? []} documents={detail?.documents ?? []} disabled={loading || businessLoading} onDecision={onApproval} onReconcile={onReconcile} onTraceTarget={onTraceTarget} />}</RadixTabs.Content>
           <RadixTabs.Content value="trace">{!businessLoading && <TracePage trace={trace} runs={detail?.runs ?? []} readback={detail?.business.readback} selectedRunId={selectedRunId} loading={traceLoading} target={traceTarget} onRunSelect={onRunSelect} />}</RadixTabs.Content>
           </div>
         </RadixTabs.Root>
@@ -1229,6 +1353,7 @@ function ExecutionStages({ execution, runStatus, onEvidence }: { execution?: Bus
 
 function BusinessFacts({ documents }: { documents: Document[] }) {
   const orders = documents.filter((document) => document.model === 'sale.order')
+  const purchaseOrders = documents.filter((document) => document.model === 'purchase.order')
   const invoices = documents.filter((document) => document.model === 'account.move')
   const pickings = documents.filter((document) => document.model === 'stock.picking')
   const fact = (document: Document | undefined, keys: string[]) => {
@@ -1239,8 +1364,9 @@ function BusinessFacts({ documents }: { documents: Document[] }) {
   return (
     <section className="business-facts">
       <div className="section-heading"><div><span className="eyebrow">业务记录</span><h3>业务关键事实</h3></div><span>来自已观测单据</span></div>
-      {orders.length === 0 && invoices.length === 0 && <div className="facts-empty"><FileText size={16} /><span>尚未观察到订单或发票</span></div>}
+      {orders.length === 0 && purchaseOrders.length === 0 && invoices.length === 0 && <div className="facts-empty"><FileText size={16} /><span>尚未观察到销售订单、采购订单或发票</span></div>}
       {orders.length > 0 && <div className="record-fact-block"><div className="record-fact-heading"><strong>销售订单</strong><span>{orders.length} 张</span></div>{orders.map((order) => <div className="business-facts-grid" key={`order:${order.id}`}><div><span>订单</span><strong>{order.name || order.id}</strong></div><div><span>客户</span><strong>{fact(order, ['partner_name', 'customer', 'partner_id'])}</strong></div><div><span>金额</span><strong>{amountWithCurrency(fact(order, ['amount_total', 'total']), fact(order, ['currency', 'currency_name', 'currency_id']))}</strong></div><div><span>状态</span><strong>{documentStateLabel(order.model, order.state)} · 开票 {invoiceStatusLabel(fact(order, ['invoice_status']))}</strong></div></div>)}</div>}
+      {purchaseOrders.length > 0 && <div className="record-fact-block"><div className="record-fact-heading"><strong>采购订单</strong><span>{purchaseOrders.length} 张</span></div>{purchaseOrders.map((order) => <div className="business-facts-grid" key={`purchase:${order.id}`}><div><span>采购单</span><strong>{order.name || order.id}</strong></div><div><span>供应商</span><strong>{fact(order, ['partner_name', 'vendor', 'partner_id'])}</strong></div><div><span>金额</span><strong>{amountWithCurrency(fact(order, ['amount_total', 'total']), fact(order, ['currency', 'currency_name', 'currency_id']))}</strong></div><div><span>状态</span><strong>{documentStateLabel(order.model, order.state)}</strong></div></div>)}</div>}
       {invoices.length > 0 && <div className="record-fact-block"><div className="record-fact-heading"><strong>客户发票</strong><span>{invoices.length} 张</span></div>{invoices.map((invoice) => <div className="business-facts-grid" key={`invoice:${invoice.id}`}><div><span>发票</span><strong>{invoice.name || invoice.id}</strong></div><div><span>状态</span><strong>{documentStateLabel(invoice.model, invoice.state)}</strong></div><div><span>金额</span><strong>{amountWithCurrency(fact(invoice, ['amount_total', 'total']), fact(invoice, ['currency', 'currency_name', 'currency_id']))}</strong></div><div><span>未付余额</span><strong>{fact(invoice, ['amount_residual', 'residual'])}</strong></div><div><span>付款状态</span><strong>{paymentStatusLabel(fact(invoice, ['payment_state']))}</strong></div></div>)}</div>}
       {pickings.length > 0 && <div className="record-fact-block"><div className="record-fact-heading"><strong>出库状态</strong><span>{pickings.length} 张</span></div>{pickings.map((picking) => <div className="business-facts-grid" key={`picking:${picking.id}`}><div><span>出库单</span><strong>{picking.name || picking.id}</strong></div><div><span>状态</span><strong>{documentStateLabel(picking.model, picking.state)}</strong></div></div>)}</div>}
     </section>
@@ -1254,7 +1380,7 @@ function ActivityCard({ activity }: { activity: NonNullable<BusinessDetail['acti
   const intentPreview = intent && intent.length > 220 ? `${intent.slice(0, 217)}…` : intent
   return <section key={phase} className={`activity-card activity-phase-${phase}`} aria-label="当前动作">
     <div className="activity-icon">{moving ? <LoaderCircle className="spin" size={17} /> : phase === 'approval' ? <Clock3 size={17} /> : <Activity size={17} />}</div>
-    <div className="activity-copy"><span className="eyebrow">当前动作</span><strong>{activity.label || '读取状态中'}</strong><p>{activity.detail || '暂无动作详情'}</p>{intent && <div className="activity-intent"><span>Agent 当前说明</span><p>{intentPreview}</p>{intent.length > 220 && <details><summary>查看完整说明</summary><p>{intent}</p></details>}</div>}<div className="activity-meta"><span>{activityPhaseLabel(activity.phase)}</span>{activity.tool_name && <span title={activity.tool_name}>{toolLabel(activity.tool_name)}</span>}{activity.round != null && <span>第 {activity.round} 轮</span>}{activity.tool_count != null && <span>{activity.tool_count} 个工具</span>}{activity.model_rounds != null && <span>{activity.model_rounds} 轮模型</span>}{activity.at && <span>{formatInstant(activity.at)}</span>}</div></div>
+    <div className="activity-copy"><span className="eyebrow">当前动作</span><strong>{activity.label || '读取状态中'}</strong><p>{activity.detail || '暂无动作详情'}</p>{intent && <div className="activity-intent"><span>Agent 当前说明</span><MessageText text={intentPreview || ''} collapsible={false} />{intent.length > 220 && <details><summary>查看完整说明</summary><MessageText text={intent} collapsible={false} /></details>}</div>}<div className="activity-meta"><span>{activityPhaseLabel(activity.phase)}</span>{activity.tool_name && <span title={activity.tool_name}>{toolLabel(activity.tool_name)}</span>}{activity.round != null && <span>第 {activity.round} 轮</span>}{activity.tool_count != null && <span>{activity.tool_count} 个工具</span>}{activity.model_rounds != null && <span>{activity.model_rounds} 轮模型</span>}{activity.at && <span>{formatInstant(activity.at)}</span>}</div></div>
   </section>
 }
 
@@ -1272,21 +1398,22 @@ function StatusBadge({ status, label }: { status?: string; label: string }) {
 
 function RunRow({ run }: { run: Run }) { return <div className="run-row"><div><strong>{run.id}</strong><span>{formatInstant(run.started_at)} · {formatDuration(run.elapsed_seconds)}</span></div><div className="run-row-meta"><StatusBadge status={run.status} label={runDisplayLabel(run.status)} /><span>{formatCount(run.tool_count)} 工具</span></div></div> }
 
-function DocumentsPage({ documents, artifacts, goal, stale, onExport, exporting, exportPath, onOpenDocument, onOpenArtifact, onRevealArtifact, onTraceTarget }: { documents: Document[]; artifacts: BusinessArtifact[]; goal?: string; stale: boolean; onExport: () => void; exporting: boolean; exportPath: string; onOpenDocument: (document: Document) => void; onOpenArtifact: (artifact: BusinessArtifact) => void; onRevealArtifact: (artifact: BusinessArtifact) => void; onTraceTarget: (target: { run_id?: string; tool_id?: string; action_id?: string; kind?: string }) => void }) {
-  const [selectedKey, setSelectedKey] = useState('')
-  useEffect(() => { if (!documents.some((document) => documentKey(document) === selectedKey)) setSelectedKey(documents[0] ? documentKey(documents[0]) : '') }, [documents, selectedKey])
+function DocumentsPage({ documents, materials, artifacts, goal, stale, onExport, exporting, exportPath, onOpenDocument, onDownloadDocument, documentDownloads, selectedDocumentKey, onSelectedDocumentKey, onOpenArtifact, onRevealArtifact, onTraceTarget }: { documents: Document[]; materials: MaterialRecord[]; artifacts: BusinessArtifact[]; goal?: string; stale: boolean; onExport: () => void; exporting: boolean; exportPath: string; onOpenDocument: (document: Document) => void; onDownloadDocument: (document: Document, format: 'pdf' | 'csv') => void; documentDownloads: Record<string, DownloadReceipt>; selectedDocumentKey: string; onSelectedDocumentKey: (key: string) => void; onOpenArtifact: (artifact: BusinessArtifact) => void; onRevealArtifact: (artifact: BusinessArtifact) => void; onTraceTarget: (target: { run_id?: string; tool_id?: string; action_id?: string; kind?: string }) => void }) {
+  const selectedKey = selectedDocumentKey
+  useEffect(() => { const preferred = documents.find(isDownloadableDocument) ?? documents[0]; const hasSelected = documents.some((document) => documentKey(document) === selectedKey); if (!preferred) { if (selectedKey) onSelectedDocumentKey(''); return } if (!selectedKey || !hasSelected) onSelectedDocumentKey(documentKey(preferred)) }, [documents, onSelectedDocumentKey, selectedKey])
   const selected = documents.find((document) => documentKey(document) === selectedKey)
   const resourceGroups = [
-    { label: '业务单据', items: documents.filter((document) => ['sale.order', 'account.move', 'stock.picking'].includes(document.model)) },
-    { label: '客户与明细', items: documents.filter((document) => document.model === 'res.partner' || document.model.endsWith('.line')) },
-    { label: '参考记录', items: documents.filter((document) => !['sale.order', 'account.move', 'stock.picking', 'res.partner'].includes(document.model) && !document.model.endsWith('.line')) }
+    { label: '业务单据', items: documents.filter((document) => ['sale.order', 'purchase.order', 'account.move', 'stock.picking'].includes(document.model)) },
+    { label: '往来单位与明细', items: documents.filter((document) => document.model === 'res.partner' || document.model.endsWith('.line')) },
+    { label: '参考记录', items: documents.filter((document) => !['sale.order', 'purchase.order', 'account.move', 'stock.picking', 'res.partner'].includes(document.model) && !document.model.endsWith('.line')) }
   ].filter((group) => group.items.length > 0)
   return (
     <div className="page-stack">
       <div className="page-intro"><div><span className="eyebrow">已观测记录</span><h3>单据与文件</h3></div><div className="page-actions"><RadixButton className="secondary-button" variant="soft" disabled={exporting} onClick={onExport}>{exporting ? <LoaderCircle className="spin" size={15} /> : <FileText size={15} />}{exporting ? '导出中…' : '导出业务回执'}</RadixButton>{stale && <span className="warning-text">数据可能已过期</span>}</div></div>
       {exportPath && <div className="export-receipt" role="status"><strong>导出路径</strong><span>{exportPath}</span></div>}
-      <section className="artifact-section" aria-label="业务文件"><div className="section-heading"><div><span className="eyebrow">持久化产物</span><h3>文件与回执</h3></div><span>{artifacts.length} 项</span></div>{artifacts.length === 0 ? <p className="muted">当前业务没有已保存的文件产物。</p> : <div className="artifact-list">{artifacts.map((artifact) => <article className={`artifact-row ${artifact.available === false ? 'artifact-missing' : ''}`} key={artifact.id}><div><strong>{artifact.name}</strong><span>{artifact.kind === 'business_receipt' ? '业务回执' : artifact.kind} · {formatInstant(artifact.created_at)}{artifact.run_id ? ` · 运行 ${artifact.run_id}` : ''}</span>{artifact.available === false && <small>{artifact.error || '文件不可用'}</small>}</div><div className="artifact-actions"><RadixButton className="inline-action" variant="ghost" disabled={artifact.available === false} onClick={() => onOpenArtifact(artifact)}>打开文件</RadixButton><RadixButton className="inline-action" variant="ghost" disabled={artifact.available === false} onClick={() => onRevealArtifact(artifact)}>显示位置</RadixButton></div></article>)}</div>}</section>
-      {documents.length === 0 ? <><details className="goal-details resource-goal"><summary>查看原始目标输入</summary><p>{goal || '未知'}</p></details><EmptyState title="还没有单据回执" detail="单据将在主机完成只读读取后出现在这里。" /></> : <div className="resource-layout"><nav className="resource-list" aria-label="已观测单据">{resourceGroups.map((group) => <section className="resource-group" key={group.label}><h4>{group.label}</h4>{group.items.map((document) => <button className={`resource-row ${documentKey(document) === selectedKey ? 'active' : ''}`} type="button" key={documentKey(document)} onClick={() => setSelectedKey(documentKey(document))}><span className="resource-icon"><FileText size={14} /></span><span><strong>{document.name || String(document.id)}</strong><small>{documentModelLabel(document.model)} · {documentStateLabel(document.model, document.state)}</small></span><span className="resource-type">{documentSourceLabel(document.source)}</span></button>)}</section>)}</nav><section className="resource-preview">{selected ? <><div className="preview-head"><div><h3>{selected.name || String(selected.id)}</h3><p>{documentModelLabel(selected.model)} · 记录 {selected.id}</p></div><RadixButton className="secondary-button" variant="soft" onClick={() => onOpenDocument(selected)}>在 Odoo 打开</RadixButton></div><dl className="preview-meta"><dt>状态</dt><dd><StatusBadge status={selected.state} label={documentStateLabel(selected.model, selected.state)} /></dd><dt>关键事实</dt><dd>{documentFact(selected)}</dd><dt>来源</dt><dd>{documentSource(selected)}</dd><dt>刷新观测时间</dt><dd>{formatInstant(selected.observed_at)}</dd></dl><details className="goal-details resource-goal"><summary>查看原始目标输入</summary><p>{goal || '未知'}</p></details><div className="resource-receipt-actions"><RadixButton className="inline-action" variant="ghost" disabled={!documentSourceRun(selected) || !documentSourceTool(selected)} onClick={() => onTraceTarget({ run_id: documentSourceRun(selected), tool_id: documentSourceTool(selected) })}>查看原始读取回执</RadixButton><span>{documentSourceRun(selected) && documentSourceTool(selected) ? `原始读取时间：${formatInstant(documentSourceObservedAt(selected))}` : '原始读取回执不可用'}</span></div>{resourceText(selected.fields, 'goal') && <div className="resource-note"><strong>单据返回的目标上下文</strong><p>{resourceText(selected.fields, 'goal')}</p></div>}<details className="resource-fields"><summary>查看原始字段</summary><pre>{jsonText(selected.fields)}</pre></details>{resourceText(selected.fields, 'sop') && <div className="resource-note"><strong>已返回 SOP / 知识</strong><p>{resourceText(selected.fields, 'sop')}</p></div>}{exportPath && <div className="export-receipt"><strong>生成的业务回执</strong><span>{exportPath}</span></div>}</> : <EmptyState title="选择一项单据" detail="从左侧选择已观测的 Odoo 记录。" />}</section></div>}
+      {materials.length > 0 && <section className="material-history" aria-label="业务材料"><div className="section-heading"><div><span className="eyebrow">输入来源</span><h3>业务材料</h3></div><span>{materials.length} 个文件</span></div><div className="material-history-list">{materials.map((material) => <article className="material-history-row" key={material.id}><div><strong>{material.name}</strong><span>{materialRowLabel(material)} · {material.preview || '暂无预览'}</span></div><small>{material.media_type || '文本材料'}</small></article>)}</div></section>}
+      <section className="artifact-section" aria-label="业务文件"><div className="section-heading"><div><span className="eyebrow">持久化产物</span><h3>文件与回执</h3></div><span>{artifacts.length} 项</span></div>{artifacts.length === 0 ? <p className="muted">当前业务没有已保存的文件产物。</p> : <div className="artifact-list">{artifacts.map((artifact) => <article className={`artifact-row ${artifact.available === false ? 'artifact-missing' : ''}`} key={artifact.id}><div><strong>{artifact.name}</strong><span>{artifactKindLabel(artifact.kind)} · {formatInstant(artifact.created_at)}{artifact.run_id ? ` · 运行 ${artifact.run_id}` : ''}</span>{artifact.available === false && <small>{artifact.error || '文件不可用'}</small>}</div><div className="artifact-actions"><RadixButton className="inline-action" variant="ghost" disabled={artifact.available === false} onClick={() => onOpenArtifact(artifact)}>打开文件</RadixButton><RadixButton className="inline-action" variant="ghost" disabled={artifact.available === false} onClick={() => onRevealArtifact(artifact)}>显示位置</RadixButton></div></article>)}</div>}</section>
+      {documents.length === 0 ? <><details className="goal-details resource-goal"><summary>查看原始目标输入</summary><p>{goal || '未知'}</p></details><EmptyState title="还没有单据回执" detail="单据将在主机完成只读读取后出现在这里。" /></> : <div className="resource-layout"><nav className="resource-list" aria-label="已观测单据">{resourceGroups.map((group) => <section className="resource-group" key={group.label}><h4>{group.label}</h4>{group.items.map((document) => <button className={`resource-row ${documentKey(document) === selectedKey ? 'active' : ''}`} type="button" key={documentKey(document)} onClick={() => onSelectedDocumentKey(documentKey(document))}><span className="resource-icon"><FileText size={14} /></span><span><strong>{document.name || String(document.id)}</strong><small>{documentModelLabel(document.model)} · {documentStateLabel(document.model, document.state)}</small></span><span className="resource-type">{documentSourceLabel(document.source)}</span></button>)}</section>)}</nav><section className="resource-preview">{selected ? <><div className="preview-head"><div><h3>{selected.name || String(selected.id)}</h3><p>{documentModelLabel(selected.model)} · 记录 {selected.id}</p></div><div className="preview-actions"><RadixButton className="secondary-button" variant="soft" onClick={() => onOpenDocument(selected)}><ExternalLink size={14} />在 Odoo 打开</RadixButton><DocumentDownloadActions document={selected} receipts={documentDownloads} onDownload={onDownloadDocument} onOpenArtifact={onOpenArtifact} onRevealArtifact={onRevealArtifact} /></div></div><dl className="preview-meta"><dt>状态</dt><dd><StatusBadge status={selected.state} label={documentStateLabel(selected.model, selected.state)} /></dd><dt>关键事实</dt><dd>{documentFact(selected)}</dd><dt>来源</dt><dd>{documentSource(selected)}</dd><dt>刷新观测时间</dt><dd>{formatInstant(selected.observed_at)}</dd></dl><details className="goal-details resource-goal"><summary>查看原始目标输入</summary><p>{goal || '未知'}</p></details><div className="resource-receipt-actions"><RadixButton className="inline-action" variant="ghost" disabled={!documentSourceRun(selected) || !documentSourceTool(selected)} onClick={() => onTraceTarget({ run_id: documentSourceRun(selected), tool_id: documentSourceTool(selected) })}>查看原始读取回执</RadixButton><span>{documentSourceRun(selected) && documentSourceTool(selected) ? `原始读取时间：${formatInstant(documentSourceObservedAt(selected))}` : '原始读取回执不可用'}</span></div>{resourceText(selected.fields, 'goal') && <div className="resource-note"><strong>单据返回的目标上下文</strong><p>{resourceText(selected.fields, 'goal')}</p></div>}<details className="resource-fields"><summary>查看原始字段</summary><pre>{jsonText(selected.fields)}</pre></details>{resourceText(selected.fields, 'sop') && <div className="resource-note"><strong>已返回 SOP / 知识</strong><p>{resourceText(selected.fields, 'sop')}</p></div>}{exportPath && <div className="export-receipt"><strong>生成的业务回执</strong><span> {exportPath}</span></div>}</> : <EmptyState title="选择一项单据" detail="从左侧选择已观测的 Odoo 记录。" />}</section></div>}
     </div>
   )
 }
@@ -1296,7 +1423,7 @@ function documentFact(document: Document) {
   const entries = document.model === 'sale.order'
     ? [['客户', fields.partner_name ?? fields.customer ?? fields.partner_id], ['金额', fields.amount_total ?? fields.total], ['开票', invoiceStatusLabel(String(fields.invoice_status ?? '未知'))]]
     : document.model === 'account.move'
-      ? [['客户', fields.partner_name ?? fields.customer ?? fields.partner_id], ['金额', fields.amount_total ?? fields.total], ['付款', paymentStatusLabel(String(fields.payment_state ?? '未知'))], ['余额', fields.amount_residual ?? fields.residual]]
+      ? [['客户', fields.partner_name ?? fields.customer ?? fields.partner_id], ['金额', fields.amount_total ?? fields.total], ['付款', paymentStatusLabel(String(fields.payment_state ?? '未知'))], ['余额', fields.amount_residual ?? fields.residual], ['正式 PDF', invoicePdfStatus(fields)]]
       : document.model === 'mail.message'
         ? [['主题', fields.subject], ['作者', fields.author_name ?? fields.author_id], ['留言', fields.body ?? fields.message]]
         : document.model === 'sale.order.line'
@@ -1307,6 +1434,22 @@ function documentFact(document: Document) {
               ? [['付款条件', fields.name ?? fields.note], ['说明', fields.description]]
       : Object.entries(fields).slice(0, 3).map(([key, value]) => [key, value])
   return entries.filter(([, value]) => value !== undefined && value !== null && value !== '').map(([key, value]) => `${key}:${readableValue(value)}`).join(' · ') || '没有可显示的关键字段'
+}
+
+function invoicePdfStatus(fields: Record<string, unknown>) {
+  if (!Object.prototype.hasOwnProperty.call(fields, 'invoice_pdf_report_id')) return '未观测'
+  return fields.invoice_pdf_report_id ? '已生成' : '待生成'
+}
+
+function DocumentDownloadActions({ document, receipts, onDownload, onOpenArtifact, onRevealArtifact }: { document: Document; receipts: Record<string, DownloadReceipt>; onDownload: (document: Document, format: 'pdf' | 'csv') => void; onOpenArtifact: (artifact: BusinessArtifact) => void; onRevealArtifact: (artifact: BusinessArtifact) => void }) {
+  if (!isDownloadableDocument(document)) return null
+  const documentName = document.name || `${documentModelLabel(document.model)} ${String(document.id)}`
+  const action = (format: 'pdf' | 'csv') => receipts[`${documentKey(document)}:${format}`]
+  const renderAction = (format: 'pdf' | 'csv', label: string) => {
+    const receipt = action(format)
+    return <div className="document-download-action"><RadixButton className="inline-action" variant="ghost" aria-label={`${format === 'pdf' ? '下载' : '导出'} ${documentName} 的 ${format.toUpperCase()}`} disabled={receipt?.status === 'downloading'} onClick={() => onDownload(document, format)}>{receipt?.status === 'downloading' ? <LoaderCircle className="spin" size={13} /> : <Download size={13} />}{receipt?.status === 'downloading' ? '生成中…' : label}</RadixButton>{receipt?.status === 'cancelled' && <small>已取消，可重试</small>}{receipt?.status === 'failed' && <small className="download-error">{receipt.error || '下载失败'}</small>}{receipt?.status === 'completed' && receipt.artifact && <span className="download-receipt"><strong>{receipt.artifact.name}</strong><button type="button" onClick={() => onOpenArtifact(receipt.artifact!)}>打开</button><button type="button" onClick={() => onRevealArtifact(receipt.artifact!)}>位置</button></span>}{receipt?.status === 'completed' && !receipt.artifact && receipt.path && <span className="download-receipt"><strong>{receipt.path}</strong></span>}</div>
+  }
+  return <div className="document-download-actions" aria-label="单据下载">{renderAction('pdf', '下载 PDF')}{renderAction('csv', '导出明细 CSV')}</div>
 }
 
 function documentSource(document: Document) {
@@ -1329,25 +1472,28 @@ function resourceText(fields: Record<string, unknown>, key: string) {
   return value == null || value === '' ? '' : readableValue(value)
 }
 
-function documentModelLabel(model: string) { return ({ 'sale.order': '销售订单', 'account.move': '客户发票', 'stock.picking': '出库单', 'res.partner': '客户', 'mail.message': '业务留言', 'sale.order.line': '销售明细', 'account.move.line': '会计分录', 'account.payment.term': '付款条件', 'product.template': '产品', 'account.journal': '会计日记账', 'sale.advance.payment.inv': '开票向导' } as Record<string, string>)[model] || model }
-function documentSourceLabel(source?: string) { return ({ odoo: 'Odoo 观测', odoo_rpc: 'Odoo 观测', refresh_native_read: '独立回读', native_read_receipt: '原始读取回执', agent: 'Agent', host: '本地 host' } as Record<string, string>)[source || ''] || '其他来源' }
+function artifactKindLabel(kind?: string) { return ({ business_receipt: '业务回执', odoo_pdf: 'PDF 单据', odoo_csv: '明细 CSV', document_pdf: 'PDF 单据', document_csv: '明细 CSV' } as Record<string, string>)[kind || ''] || kind || '文件' }
+function documentModelLabel(model: string) { return ({ 'sale.order': '销售订单', 'purchase.order': '采购订单', 'account.move': '客户发票', 'stock.picking': '出库单', 'res.partner': '往来单位', 'mail.message': '业务留言', 'sale.order.line': '销售明细', 'purchase.order.line': '采购明细', 'account.move.line': '会计分录', 'account.payment.term': '付款条件', 'product.template': '产品', 'product.product': '商品', 'account.journal': '会计日记账', 'sale.advance.payment.inv': '开票向导', 'account.move.send.wizard': '发票PDF向导', 'ir.attachment': '附件' } as Record<string, string>)[model] || model }
+function documentSourceLabel(source?: string) { return ({ odoo: 'Odoo 观测', odoo_rpc: 'Odoo 观测', refresh_native_read: '独立回读', native_read_receipt: '原始读取回执', native_action_readback: '动作回读', agent: 'Agent', host: '本地 host' } as Record<string, string>)[source || ''] || '其他来源' }
+function isDownloadableDocument(document: Document) { return ['sale.order', 'purchase.order', 'account.move'].includes(document.model) }
 function documentKey(document: Document) { return `${document.model}:${String(document.id)}` }
 function documentStateLabel(model: string, state?: string) {
   const labels: Record<string, Record<string, string>> = {
     'sale.order': { draft: '草稿', sent: '已发送', sale: '已确认', cancel: '已取消' },
+    'purchase.order': { draft: '询价草稿', sent: '已发询价', 'to approve': '待二次确认', to_approve: '待二次确认', purchase: '已确认', done: '已锁定', cancel: '已取消' },
     'account.move': { draft: '草稿', posted: '已过账', cancel: '已取消' },
     'stock.picking': { draft: '草稿', waiting: '等待', confirmed: '待处理', assigned: '已分配', done: '已完成', cancel: '已取消' }
   }
-  const noIndependentState = ['res.partner', 'mail.message', 'sale.order.line', 'account.move.line', 'account.payment.term', 'product.template', 'account.journal', 'sale.advance.payment.inv'].includes(model)
+  const noIndependentState = ['res.partner', 'mail.message', 'sale.order.line', 'purchase.order.line', 'account.move.line', 'account.payment.term', 'product.template', 'product.product', 'account.journal', 'sale.advance.payment.inv', 'account.move.send.wizard', 'ir.attachment', 'product.supplierinfo', 'account.tax'].includes(model)
   return (state && labels[model]?.[state]) || (state ? '状态未知' : noIndependentState ? '—（不适用）' : '未知')
 }
 function invoiceStatusLabel(value: string) { return ({ invoiced: '已开票', 'to invoice': '待开票', to_invoice: '待开票', no: '无需开票' } as Record<string, string>)[value] || value }
 function paymentStatusLabel(value: string) { return ({ paid: '已付款', not_paid: '未付款', partial: '部分付款', in_payment: '付款处理中', reversed: '已冲销' } as Record<string, string>)[value] || value }
 function amountWithCurrency(amount: string, currency: string) { return currency === '未知' || currency === '未观测' || currency === '—（不适用）' ? amount : `${amount} ${currency}` }
 
-function ApprovalsPage({ approvals, disabled, onDecision, onReconcile, onTraceTarget }: { approvals: Approval[]; disabled: boolean; onDecision: (approval: Approval, decision: 'approve' | 'reject') => void; onReconcile: (approval: Approval) => void; onTraceTarget: (target: { run_id?: string; tool_id?: string; action_id?: string; kind?: string }) => void }) {
+function ApprovalsPage({ approvals, documents, disabled, onDecision, onReconcile, onTraceTarget }: { approvals: Approval[]; documents: Document[]; disabled: boolean; onDecision: (approval: Approval, decision: 'approve' | 'reject') => void; onReconcile: (approval: Approval) => void; onTraceTarget: (target: { run_id?: string; tool_id?: string; action_id?: string; kind?: string }) => void }) {
   const orderedApprovals = [...approvals].sort(compareApprovals)
-  return <div className="page-stack"><div className="page-intro"><div><span className="eyebrow">需要确认</span><h3>变更与审批</h3></div><span>{approvals.filter(isPendingApproval).length} 项待处理</span></div>{approvals.length === 0 ? <EmptyState title="没有审批记录" detail="主机产生需要人工确认的业务动作后，审批卡会保留在这里。" /> : <div className="approval-list">{orderedApprovals.map((approval) => <ApprovalRow key={approval.action_id} approval={approval} disabled={disabled} onDecision={onDecision} onReconcile={onReconcile} onTraceTarget={onTraceTarget} />)}</div>}</div>
+  return <div className="page-stack"><div className="page-intro"><div><span className="eyebrow">需要确认</span><h3>变更与审批</h3></div><span>{approvals.filter(isPendingApproval).length} 项待处理</span></div>{approvals.length === 0 ? <EmptyState title="没有审批记录" detail="主机产生需要人工确认的业务动作后，审批卡会保留在这里。" /> : <div className="approval-list">{orderedApprovals.map((approval) => <ApprovalRow key={approval.action_id} approval={approval} documents={documents} disabled={disabled} onDecision={onDecision} onReconcile={onReconcile} onTraceTarget={onTraceTarget} />)}</div>}</div>
 }
 
 function compareApprovals(left: Approval, right: Approval) {
@@ -1364,7 +1510,7 @@ function compareApprovals(left: Approval, right: Approval) {
   return createdDifference || right.action_id.localeCompare(left.action_id)
 }
 
-function ApprovalRow({ approval, disabled, onDecision, onReconcile, onTraceTarget }: { approval: Approval; disabled: boolean; onDecision: (approval: Approval, decision: 'approve' | 'reject') => void; onReconcile: (approval: Approval) => void; onTraceTarget: (target: { run_id?: string; tool_id?: string; action_id?: string; kind?: string }) => void }) {
+function ApprovalRow({ approval, documents, disabled, onDecision, onReconcile, onTraceTarget }: { approval: Approval; documents: Document[]; disabled: boolean; onDecision: (approval: Approval, decision: 'approve' | 'reject') => void; onReconcile: (approval: Approval) => void; onTraceTarget: (target: { run_id?: string; tool_id?: string; action_id?: string; kind?: string }) => void }) {
   const pending = isPendingApproval(approval)
   const expired = pending && isExpired(approval.expires_at)
   const title = readableApprovalTitle(approval)
@@ -1374,8 +1520,8 @@ function ApprovalRow({ approval, disabled, onDecision, onReconcile, onTraceTarge
         <div><strong>{title}</strong><span>{modelLabel(approval.model)} · {operationLabel(approval.operation)} · {approval.model} · {approval.action_id}</span></div>
         <StatusBadge status={expired ? 'expired' : approval.status} label={expired ? '已过期' : approvalStatusLabel(approval.status)} />
       </div>
-      <div className="approval-facts"><span>记录 ID {approval.record_ids.length ? approval.record_ids.join(', ') : '未知'}</span><span>{pending ? formatExpiry(approval.expires_at) : '审批已结束'}</span></div>
-      <ApprovalFieldDiff approval={approval} />
+      <div className="approval-facts"><span>{approvalRecordText(approval, documents)}</span><span>{pending ? formatExpiry(approval.expires_at) : '审批已结束'}</span></div>
+      <ApprovalFieldDiff approval={approval} documents={documents} />
       <details>
         <summary>查看拟提交值与执行前状态</summary>
         <div className="json-columns"><div><small>拟提交值</small><pre>{jsonText(approval.values)}</pre></div><div><small>执行前状态</small><pre>{approvalPrestateText(approval)}</pre></div></div>
@@ -1388,14 +1534,14 @@ function ApprovalRow({ approval, disabled, onDecision, onReconcile, onTraceTarge
   )
 }
 
-function ApprovalFieldDiff({ approval }: { approval: Approval }) {
+function ApprovalFieldDiff({ approval, documents }: { approval: Approval; documents: Document[] }) {
   const values = approval.values || {}
   const prestate = approvalPrestateView(approval)
   const before = prestate.fields
   const keys = Array.from(new Set([...Object.keys(before), ...Object.keys(values)]))
   if (!keys.length) return prestate.kind === 'multiple' ? <div className="field-diff"><p className="field-diff-note">执行前状态包含多条记录，无法压缩为单条字段对比；原始结构保留在下方。</p></div> : <p className="muted">没有可展示的字段前后值。</p>
-  const beforeText = (key: string) => prestate.kind === 'new' ? '新建 / 无前态' : prestate.kind === 'multiple' ? '多条记录（见下方原始状态）' : prestate.kind === 'unknown' ? '未知' : readableValue(before[key])
-  const row = (key: string) => <div className="field-diff-row" key={key}><span>{approvalFieldLabel(key)}</span><span className="diff-value">{beforeText(key)}</span><span className="diff-value after">{readableValue(values[key])}</span></div>
+  const beforeText = (key: string) => prestate.kind === 'new' ? '新建 / 无前态' : prestate.kind === 'multiple' ? '多条记录（见下方原始状态）' : prestate.kind === 'unknown' ? '未知' : approvalValueText(approval.model, key, before[key], documents)
+  const row = (key: string) => <div className="field-diff-row" key={key}><span>{approvalFieldLabel(key, approval.model)}</span><span className="diff-value">{beforeText(key)}</span><span className="diff-value after">{approvalValueText(approval.model, key, values[key], documents)}</span></div>
   const visible = keys.slice(0, 8)
   const remaining = keys.slice(8)
   return <div className="field-diff"><div className="field-diff-row field-diff-head"><span>字段</span><span>执行前</span><span>拟提交</span></div>{visible.map(row)}{remaining.length > 0 && <details className="field-diff-more"><summary>查看其余字段（共 {keys.length} 项）</summary>{remaining.map(row)}</details>}</div>
@@ -1417,9 +1563,49 @@ function approvalPrestateView(approval: Approval): { kind: 'new' | 'unknown' | '
 function approvalPrestateText(approval: Approval) {
   return approval.prestate == null || approval.prestate === '' ? (approval.operation === 'create' ? '新建 / 无前态' : '未知（未返回执行前状态）') : jsonText(approval.prestate)
 }
-function approvalFieldLabel(key: string) {
-  const labels: Record<string, string> = { partner_id: '客户', payment_term_id: '付款条件', order_line: '订单明细', commitment_date: '承诺日期', client_order_ref: '客户参考', records: '记录' }
+function approvalRecordText(approval: Approval, documents: Document[]) {
+  if (!approval.record_ids.length) return approval.operation === 'create' ? '新建，尚未生成编号' : '记录 ID 未知'
+  const records = approval.record_ids.map((id) => {
+    const document = documents.find((item) => item.model === approval.model && String(item.id) === String(id))
+    return document?.name ? `${document.name}（ID ${String(id)}）` : `ID ${String(id)}`
+  })
+  return `记录 ${records.join('、')}`
+}
+
+function approvalFieldLabel(key: string, model?: string) {
+  const labels: Record<string, string> = { partner_id: model === 'purchase.order' ? '供应商' : '客户', payment_term_id: '付款条件', partner_shipping_id: '收货地址', partner_invoice_id: '开票地址', date_order: '下单日期', invoice_status: '开票状态', invoice_line_ids: '发票明细', order_line: '订单明细', commitment_date: '承诺日期', client_order_ref: '客户参考', records: '记录' }
   return labels[key] ? `${labels[key]}（${key}）` : key
+}
+
+function approvalReferenceText(models: string[], value: unknown, documents: Document[], fallback: string) {
+  const id = Array.isArray(value) ? value[0] : value
+  if (id == null || id === '') return '未知'
+  const inlineName = Array.isArray(value) && typeof value[1] === 'string' ? value[1] : ''
+  const document = documents.find((item) => models.includes(item.model) && String(item.id) === String(id))
+  const name = document?.name || inlineName
+  return name ? `${name}（ID ${String(id)}）` : `${fallback} ID ${String(id)}`
+}
+
+function approvalLineText(value: unknown, documents: Document[]) {
+  if (!Array.isArray(value)) return readableValue(value)
+  const rows = value.map((line) => {
+    const data = Array.isArray(line) ? line[line.length - 1] : line
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return readableValue(line)
+    const row = data as Record<string, unknown>
+    const product = approvalReferenceText(['product.product', 'product.template'], row.product_id, documents, '商品')
+    const quantity = row.product_uom_qty ?? row.product_qty ?? row.quantity ?? row.qty
+    const price = row.price_unit ?? row.price
+    return [product, quantity == null ? '' : `数量 ${readableValue(quantity)}`, price == null ? '' : `单价 ${readableValue(price)}`].filter(Boolean).join(' · ')
+  }).filter(Boolean)
+  return rows.length ? rows.join('；') : readableValue(value)
+}
+
+function approvalValueText(model: string, key: string, value: unknown, documents: Document[]) {
+  if (key === 'partner_id' || key === 'partner_shipping_id' || key === 'partner_invoice_id') return approvalReferenceText(['res.partner'], value, documents, key === 'partner_id' ? (model === 'purchase.order' ? '供应商' : '客户') : '往来单位')
+  if (key === 'payment_term_id') return approvalReferenceText(['account.payment.term'], value, documents, '付款条件')
+  if (key === 'product_id') return approvalReferenceText(['product.product', 'product.template'], value, documents, '商品')
+  if (key === 'order_line' || key === 'invoice_line_ids') return approvalLineText(value, documents)
+  return readableValue(value)
 }
 
 function VerificationPage({ checks, observedAt, stale }: { checks: Check[]; observedAt?: string; stale: boolean }) { return <div className="page-stack"><div className="page-intro"><div><span className="eyebrow">独立回读</span><h3>业务核验</h3></div><span>{stale ? '可能过期' : `读取于 ${formatInstant(observedAt)}`}</span></div>{checks.length === 0 ? <EmptyState title="核验结果未知" detail="主机尚未提供独立业务检查回执。" /> : <div className="check-table">{checks.map((check) => <div className="check-row" key={check.name}><span className={`check-mark check-${check.status}`}>{check.status === 'passed' ? '✓' : check.status === 'failed' ? '!' : '?'}</span><div><strong>{check.label || check.name}</strong><span>{check.detail || '没有详细说明'}</span></div><span className={`state-badge state-${check.status}`}>{check.status === 'passed' ? '通过' : check.status === 'failed' ? '失败' : '未知'}</span></div>)}</div>}</div> }
@@ -1476,8 +1662,12 @@ function ToolReceiptRow({ tool }: { tool: ToolReceipt }) { return <details class
 function EmptyState({ title, detail }: { title: string; detail: string }) { return <div className="empty-state"><span className="empty-glyph">○</span><strong>{title}</strong><p>{detail}</p></div> }
 
 function messageForError(reason: unknown) {
-  const message = reason instanceof Error ? reason.message : String(reason)
-  return message.includes('CONFIG_BUSY') ? '当前有业务正在执行或等待审批，请结束后再修改连接设置。' : message.includes('CONNECTION_CHECK_BUSY') ? '执行期间显示最近检查结果，结束后可重新检查。' : message.includes('EXPORT_CANCELLED') ? '已取消导出业务回执。' : message.includes('ARTIFACT_FILE_MISSING') ? '文件已移动或删除，请重新导出。' : message.includes('ARTIFACT_NOT_FOUND') ? '当前业务没有此文件。' : message.includes('ARTIFACT_FORMAT_INVALID') ? '仅支持本业务已登记的 JSON 回执。' : message.includes('ARTIFACT_OPEN_FAILED') ? '系统无法打开文件，可尝试显示位置。' : message.includes('ARTIFACT_INDEX_FAILED') ? message : message.includes('ODOO_RECORD_NOT_FOUND') ? '该 Odoo 记录已不存在或不属于当前业务。' : message.includes('ODOO_OPEN_UNAVAILABLE') ? '当前无法打开 Odoo 记录，请检查 Odoo 连接。' : message.includes('ODOO_ORIGIN_MISMATCH') ? '该记录不属于当前配置的 Odoo 地址。' : message
+  let message = reason instanceof Error ? reason.message : String(reason)
+  message = message.replace(/^Error invoking remote method ['"]workbench:call['"]:\s*Error:\s*/i, '')
+  const knownCodes = new Set(['VALUEERROR', 'CONFIG_BUSY', 'CONNECTION_CHECK_BUSY', 'EXPORT_CANCELLED', 'ARTIFACT_FILE_MISSING', 'ARTIFACT_NOT_FOUND', 'ARTIFACT_FORMAT_INVALID', 'ARTIFACT_OPEN_FAILED', 'ARTIFACT_INDEX_FAILED', 'DOCUMENT_PDF_UNAVAILABLE', 'PDF_UNAVAILABLE', 'DOCUMENT_DOWNLOAD_FAILED', 'MATERIAL_TOO_LARGE', 'MATERIAL_UNSUPPORTED', 'MATERIAL_PARSE_FAILED', 'ODOO_RECORD_NOT_FOUND', 'ODOO_OPEN_UNAVAILABLE', 'ODOO_ORIGIN_MISMATCH'])
+  const codePrefix = message.match(/^\[([A-Z0-9_]+)\]\s*/)
+  if (codePrefix && knownCodes.has(codePrefix[1])) message = message.slice(codePrefix[0].length)
+  return message.includes('CONFIG_BUSY') ? '当前有业务正在执行或等待审批，请结束后再修改连接设置。' : message.includes('CONNECTION_CHECK_BUSY') ? '执行期间显示最近检查结果，结束后可重新检查。' : message.includes('EXPORT_CANCELLED') ? '已取消导出业务回执。' : message.includes('ARTIFACT_FILE_MISSING') ? '文件已移动或删除，请重新导出。' : message.includes('ARTIFACT_NOT_FOUND') ? '当前业务没有此文件。' : message.includes('ARTIFACT_FORMAT_INVALID') ? '仅支持本业务已登记的 JSON 回执。' : message.includes('ARTIFACT_OPEN_FAILED') ? '系统无法打开文件，可尝试显示位置。' : message.includes('ARTIFACT_INDEX_FAILED') ? message : message.includes('DOCUMENT_PDF_UNAVAILABLE') || message.includes('PDF_UNAVAILABLE') ? '当前单据没有可用 PDF，请改用导出明细 CSV。' : message.includes('DOCUMENT_DOWNLOAD_FAILED') ? '单据下载失败，请稍后重试。' : message.includes('MATERIAL_TOO_LARGE') ? '材料超过 2 MiB 限制。' : message.includes('MATERIAL_UNSUPPORTED') ? '仅支持 CSV 或 TXT 材料。' : message.includes('MATERIAL_PARSE_FAILED') ? '材料解析失败，请检查文件内容。' : message.includes('ODOO_RECORD_NOT_FOUND') ? '该 Odoo 记录已不存在或不属于当前业务。' : message.includes('ODOO_OPEN_UNAVAILABLE') ? '当前无法打开 Odoo 记录，请检查 Odoo 连接。' : message.includes('ODOO_ORIGIN_MISMATCH') ? '该记录不属于当前配置的 Odoo 地址。' : message
 }
 function connectionLabel(state: ConnectionState) { return state === 'connected' ? '主机已连接' : state === 'checking' ? '正在连接主机' : state === 'crashed' ? '主机已崩溃' : state === 'protocol_error' ? '主机协议错误' : '主机断开' }
 function odooHealthStatus(health: Health | null) { return health?.odoo?.status || health?.odoo_status || 'unchecked' }
@@ -1486,9 +1676,24 @@ function runDisplayLabel(status?: string) { return status === 'completed' ? '本
 function roundStatusLabel(status?: string) { return labelFor({ completed: '已完成', running: '进行中', pending: '待处理', failed: '失败', interrupted: '已中断', cancelled: '已取消', awaiting_approval: '等待审批' }, status) }
 function toolStatusLabel(status?: string) { return labelFor({ completed: '已完成', running: '进行中', error: '错误', failed: '失败', executed: '已执行', awaiting_approval: '等待审批', pending: '待处理', interrupted: '已中断', cancelled: '已取消', unknown: '未知' }, status) }
 function activityPhaseLabel(phase?: string) { return ({ idle: '待执行', planning: '准备中', model: '分析业务目标', reading: '读取业务数据', tool: '调用业务工具', approval: '等待确认', executing: '执行中', cancelling: '正在取消', verifying: '回读核验', completed: '本轮结束', failed: '执行失败', interrupted: '已中断', cancelled: '已取消', reconciliation: '等待对账', unknown: '状态未知' } as Record<string, string>)[phase || ''] || '状态未知' }
-function stageLabel(stage?: string) { return ({ read: '读取', quote: '报价', confirm: '确认', invoice: '开票', verify: '核验' } as Record<string, string>)[stage || ''] || '未知阶段' }
+function businessTypeMeta(type?: string) { return ({ sale_invoice: { title: '销售与开票', short: '销售发票' }, purchase: { title: '采购', short: '采购流程' }, sale_purchase_invoice: { title: '销售 → 采购 → 开票', short: '业务链' } } as Record<string, { title: string; short: string }>)[type || ''] || { title: '业务工作区', short: '业务' } }
+function completionTargetLabel(target?: string, type?: string) { const effective = target || (type === 'purchase' ? 'confirmed' : 'posted'); return ({ read_only: '只读浏览', draft: '保留草稿', confirmed: '完成确认', posted: '发票已过账' } as Record<string, string>)[effective] || '完成目标未知' }
+function materialRowLabel(material: MaterialRecord) { if (material.row_count == null) return '行数未知'; return material.media_type === 'text/csv' ? `${Math.max(0, material.row_count - 1)} 条数据` : `${material.row_count} 行`; }
+function stageLabel(stage?: string) { return ({ material: '材料', read: '读取', quote: '报价', sales: '销售', confirm: '确认', purchase: '采购', invoice: '开票', verify: '核验' } as Record<string, string>)[stage || ''] || '未知阶段' }
 function stageStatusLabel(status?: string) { return ({ pending: '待处理', active: '进行中', awaiting_approval: '等待审批', observed: '已观测', verified: '已核验', failed: '失败', unknown: '未知' } as Record<string, string>)[status || ''] || '未知' }
-function outcomeScopeLabel(scope?: string) { return ({ sale_invoice_basic_checks: '销售订单与客户发票基础核验' } as Record<string, string>)[scope || ''] || '业务范围未知' }
+function outcomeScopeLabel(scope?: string) { return ({
+  sale_invoice_read_only_checks: '销售订单与客户发票只读浏览',
+  sale_invoice_draft_checks: '销售订单与客户发票草稿核验',
+  sale_invoice_confirmed_checks: '销售订单与客户发票确认核验',
+  sale_invoice_basic_checks: '销售订单与客户发票基础核验',
+  purchase_read_only_checks: '采购订单只读浏览',
+  purchase_draft_checks: '采购订单草稿核验',
+  purchase_confirmed_checks: '采购订单确认核验',
+  sale_purchase_invoice_read_only_checks: '销售、采购与开票只读浏览',
+  sale_purchase_invoice_draft_checks: '销售、采购与开票草稿核验',
+  sale_purchase_invoice_confirmed_checks: '销售、采购与开票确认核验',
+  sale_purchase_invoice_posted_checks: '销售、采购与开票基础核验'
+} as Record<string, string>)[scope || ''] || '业务范围未知' }
 function outcomeStatusLabel(status?: string) { return ({ unknown: '未知', passed: '通过', failed: '失败' } as Record<string, string>)[status || ''] || '状态未知' }
 function toolLabel(tool?: string) { return ({ mcp_odoo_read_record: '读取业务记录', mcp_odoo_read: '读取业务记录', mcp_odoo_validate_write: '预检业务动作', execute_approved_write: '执行已批准动作', refresh_business: '读取最新状态' } as Record<string, string>)[tool || ''] || '业务工具' }
 function isPendingApproval(approval: Approval) { return approval.status === 'pending' || approval.status === 'pending_approval' }
@@ -1501,14 +1706,16 @@ function approvalStatusLabel(status: string) {
   return labels[status] || '状态未知'
 }
 function operationLabel(operation: string) {
-  const labels: Record<string, string> = { create: '创建', write: '修改', unlink: '删除', action_confirm: '确认', create_invoices: '创建发票', action_post: '过账' }
+  const labels: Record<string, string> = { create: '创建', write: '修改', unlink: '删除', action_confirm: '确认', button_confirm: '确认采购订单', button_approve: '批准采购订单', create_invoices: '创建发票', action_post: '过账', action_send_and_print: '生成正式发票文件' }
   return labels[operation] || operation
 }
-function modelLabel(model: string) { return model === 'sale.order' ? '销售订单' : model === 'account.move' ? '客户发票' : model === 'res.partner' ? '客户' : model }
+function modelLabel(model: string) { return model === 'sale.order' ? '销售订单' : model === 'purchase.order' ? '采购订单' : model === 'account.move' ? '客户发票' : model === 'account.move.send.wizard' ? '发票文件向导' : model === 'res.partner' ? '往来单位' : model }
 function readableApprovalTitle(approval: Approval) {
   const title = approval.title?.trim()
   const generic = !title || ['erp write approval', 'write approval', 'approval required', 'business approval', 'action approval'].includes(title.toLowerCase())
-  return generic ? `${operationLabel(approval.operation)}${modelLabel(approval.model)}` : title
+  if (!generic) return title
+  if (approval.operation === 'button_confirm' || approval.operation === 'button_approve') return operationLabel(approval.operation)
+  return `${operationLabel(approval.operation)}${modelLabel(approval.model)}`
 }
 function approvalResultLabel(status: string) {
   return status === 'pending' || status === 'pending_approval' ? '预检 / 动作回执（未执行）' : status === 'approved' ? '已批准 / 待执行' : status === 'rejected' || status === 'not_executed' ? '审批结果（未执行）' : ['verified', 'executed', 'completed', 'posted'].includes(status) ? '动作执行回执' : '动作回执'

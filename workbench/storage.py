@@ -58,14 +58,16 @@ class StateStore:
     def _load(self) -> dict[str, Any]:
         if not self.path.is_file():
             return {"version": 1, "sequence": 0, "sessions": {}, "businesses": {},
-                    "runs": {}, "messages": {}, "approvals": {}, "events": []}
+                    "runs": {}, "conversation_runs": {}, "messages": {}, "approvals": {},
+                    "materials": {}, "events": []}
         try:
             value = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise RuntimeError("workbench state is unreadable; refusing to start") from exc
         if not isinstance(value, dict) or value.get("version") != 1:
             raise RuntimeError("unsupported workbench state version")
-        for key, default in (("sessions", {}), ("businesses", {}), ("runs", {}), ("conversation_runs", {}), ("messages", {}), ("approvals", {}), ("events", [])):
+        for key, default in (("sessions", {}), ("businesses", {}), ("runs", {}), ("conversation_runs", {}),
+                             ("messages", {}), ("approvals", {}), ("materials", {}), ("events", [])):
             if not isinstance(value.get(key, default), type(default)):
                 raise RuntimeError(f"invalid workbench state field: {key}")
             value.setdefault(key, default)

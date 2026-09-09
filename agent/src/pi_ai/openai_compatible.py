@@ -71,6 +71,11 @@ from pi_ai.tool_call_ids import (
 _RESPONSES_ONLY_PREFIXES: tuple[str, ...] = ("gpt-5.5", "gpt-5.4")
 
 
+def _safe_transport_error_message(exc: BaseException) -> str:
+    """Keep provider failures diagnosable without exposing raw transport text."""
+    return f"Provider network error ({type(exc).__name__}): 请求模型服务失败，请稍后重试。"
+
+
 def _use_responses_api(model: str) -> bool:
     """Return whether ``model`` must be served over the Responses API."""
     normalized = model.strip().lower()
@@ -389,7 +394,7 @@ class OpenAICompatibleProvider:
                             return
                         continue
                     yield ProviderErrorEvent(
-                        message=str(exc),
+                        message=_safe_transport_error_message(exc),
                         data={"attempts": attempt + 1},
                     )
                     return

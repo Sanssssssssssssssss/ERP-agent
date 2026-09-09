@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from copy import deepcopy
 
-from workbench.sale_view import business_detail, collect_documents, refresh_business
+from workbench.sale_view import _run_has_relevant_evidence, _tool_stage, business_detail, collect_documents, refresh_business
 
 
 def _state() -> dict:
@@ -119,6 +119,41 @@ class SaleViewReadbackTests(unittest.TestCase):
         self.assertEqual(detail["outcome"]["status"], "failed")
         self.assertEqual(detail["execution"]["stages"][2]["status"], "failed")
 
+    def test_sale_draft_target_does_not_require_invoice_state(self):
+        records = deepcopy(RECORDS)
+        records[('sale.order', 7)] = {**records[('sale.order', 7)], 'state': 'draft', 'invoice_ids': []}
+        state = _state()
+        state['businesses']['b1']['completion_target'] = 'draft'
+        state['runs']['r2']['documents'][0].update({'source_run_id': 'r2'})
+        detail = refresh_business(state, 'b1', NativeReadFixture(records))
+        self.assertEqual(detail['outcome']['status'], 'passed')
+        self.assertEqual(detail['runs'][0]['verification_status'], 'passed')
+        self.assertIn('草稿', detail['outcome']['detail'])
+
+    def test_sale_confirmed_target_does_not_require_invoice_relation(self):
+        records = deepcopy(RECORDS)
+        records[('sale.order', 7)] = {**records[('sale.order', 7)], 'invoice_ids': []}
+        state = _state()
+        state['businesses']['b1']['completion_target'] = 'confirmed'
+        state['runs']['r2']['documents'][0].update({'source_run_id': 'r2'})
+        detail = refresh_business(state, 'b1', NativeReadFixture(records))
+        self.assertEqual(detail['outcome']['status'], 'passed')
+        self.assertEqual(detail['runs'][0]['verification_status'], 'passed')
+        self.assertIn('确认', detail['outcome']['detail'])
+
+    def test_chain_origin_requires_exact_order_token(self):
+        run = {
+            'id': 'r-chain',
+            'documents': [
+                {'model': 'sale.order', 'id': 7, 'name': 'SO00001', 'source_run_id': 'r-chain', 'fields': {'invoice_ids': [31]}},
+                {'model': 'account.move', 'id': 31, 'source_run_id': 'r-chain', 'fields': {}},
+                {'model': 'purchase.order', 'id': 8, 'source_run_id': 'r-chain', 'fields': {'origin': 'SO00001X'}},
+            ],
+        }
+        self.assertFalse(_run_has_relevant_evidence(run, [], 'sale_purchase_invoice'))
+        run['documents'][-1]['fields']['origin'] = 'SO00001'
+        self.assertTrue(_run_has_relevant_evidence(run, [], 'sale_purchase_invoice'))
+
     def test_stage_projection_ignores_legacy_docs_and_tool_name_only(self):
         state = _state()
         state["runs"]["r2"]["tools"] = [{"name": "account.move.action_post", "result": {"success": True}}]
@@ -139,6 +174,25 @@ class SaleViewReadbackTests(unittest.TestCase):
         self.assertEqual(confirm["status"], "verified")
         self.assertEqual(confirm["evidence"][0]["action_id"], "a-confirm")
         self.assertEqual(confirm["evidence"][0]["kind"], "action")
+
+    def test_history_from_chain_business_does_not_index_removed_purchase_stage(self):
+        state = _state()
+        state["runs"]["r1"]["tools"] = [{
+            "id": "tool-po",
+            "action_id": "a-po",
+            "name": "execute_method",
+            "arguments": {"model": "purchase.order", "method": "button_confirm"},
+            "result": {
+                "action_status": "verified",
+                "model": "purchase.order",
+                "operation": "button_confirm",
+                "verification": {"status": "satisfied"},
+            },
+        }]
+        detail = business_detail(state, "b1")
+        self.assertEqual(detail["business"]["type"], "sale_invoice")
+        self.assertNotIn("purchase", {stage["id"] for stage in detail["execution"]["stages"]})
+        self.assertTrue(detail["execution"]["stages"])
 
     def test_account_move_create_is_observed_only_and_does_not_verify_invoice_stage(self):
         state = _state()
@@ -237,6 +291,23 @@ class SaleViewReadbackTests(unittest.TestCase):
         })
         detail = business_detail(state, "b1")
         self.assertEqual(detail["execution"]["current_stage_id"], "confirm")
+
+    def test_explicit_native_read_tools_and_purchase_writes_map_to_stages(self):
+        self.assertEqual(_tool_stage({"name": "mcp_odoo_read_record", "arguments": {"model": "res.partner", "record_id": 9}}), "read")
+        self.assertEqual(_tool_stage({"name": "mcp_odoo_search_records", "arguments": {"model": "purchase.order.line", "domain": []}}), "read")
+        self.assertEqual(_tool_stage({"name": "execute_method", "arguments": {"model": "purchase.order", "operation": "create"}}), "purchase")
+        self.assertEqual(_tool_stage({"name": "execute_method", "arguments": {"model": "purchase.order.line", "operation": "write"}}), "purchase")
+
+    def test_chain_projection_accepts_verified_purchase_action_stage(self):
+        state = _state()
+        state["businesses"]["b1"].update({"type": "sale_purchase_invoice", "completion_target": "posted"})
+        state["runs"]["r2"]["tools"] = [{
+            "id": "po-create", "name": "execute_method",
+            "arguments": {"model": "purchase.order", "method": "create"},
+            "result": {"action_status": "verified", "model": "purchase.order", "operation": "create", "verification": {"status": "satisfied"}},
+        }]
+        detail = business_detail(state, "b1")
+        self.assertEqual(detail["execution"]["stages"][3]["id"], "purchase")
 
     def test_newer_same_run_observation_and_incomplete_cached_checks_cannot_remain_green(self):
         for change in ("new_observation", "missing_check"):

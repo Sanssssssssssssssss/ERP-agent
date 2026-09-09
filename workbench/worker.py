@@ -46,8 +46,11 @@ def child_environment(session_id: str, run_id: str) -> dict[str, str]:
     env["ODOO_MCP_ENABLE_WRITES"] = "1"
     env["ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS"] = ",".join((
         "sale.order.action_confirm",
+        "purchase.order.button_confirm",
+        "purchase.order.button_approve",
         "sale.advance.payment.inv.create_invoices",
         "account.move.action_post",
+        "account.move.send.wizard.action_send_and_print",
     ))
     # The shared parser uses legacy completeness detection before honoring API_KEY.
     if env.get("ODOO_API_KEY") and not env.get("ODOO_PASSWORD"):

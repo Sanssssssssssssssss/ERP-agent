@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from typing import Any, Callable
 
 
@@ -8,13 +9,17 @@ READBACK_FIELDS: dict[str, tuple[str, ...]] = {
     "res.partner": ("id", "name", "display_name", "email"),
     "sale.order": ("id", "name", "state", "partner_id", "amount_total", "currency_id", "payment_term_id", "order_line", "invoice_ids", "picking_ids", "invoice_status", "commitment_date", "client_order_ref"),
     "sale.order.line": ("id", "name", "order_id", "product_id", "product_uom_qty", "product_uom_id", "price_unit", "price_subtotal", "price_total"),
-    "account.move": ("id", "name", "state", "move_type", "partner_id", "amount_total", "currency_id", "invoice_payment_term_id", "invoice_origin", "invoice_line_ids", "payment_state", "amount_residual", "invoice_date"),
+    "purchase.order": ("id", "name", "state", "partner_id", "amount_total", "currency_id", "order_line", "origin", "date_order", "date_planned"),
+    "purchase.order.line": ("id", "name", "order_id", "sale_order_id", "sale_line_id", "product_id", "product_qty", "product_uom_id", "price_unit", "price_subtotal", "price_total", "date_planned"),
+    "account.move": ("id", "name", "state", "move_type", "partner_id", "amount_total", "currency_id", "invoice_payment_term_id", "invoice_origin", "invoice_line_ids", "payment_state", "amount_residual", "invoice_date", "invoice_pdf_report_id"),
     "account.move.line": ("id", "name", "move_id", "product_id", "quantity", "product_uom_id", "price_unit", "price_subtotal", "price_total"),
     "stock.picking": ("id", "name", "state", "sale_id", "origin", "partner_id", "scheduled_date"),
 }
 RELATION_FIELDS: dict[str, tuple[str, ...]] = {
     "sale.order": ("partner_id", "order_line", "invoice_ids", "picking_ids"),
     "sale.order.line": ("order_id",),
+    "purchase.order": ("partner_id", "order_line"),
+    "purchase.order.line": ("order_id", "sale_order_id", "sale_line_id"),
     "account.move": ("partner_id", "invoice_line_ids"),
     "account.move.line": ("move_id",),
     "stock.picking": ("sale_id", "partner_id"),
@@ -93,6 +98,14 @@ def _relation_ids(value: Any) -> list[int]:
     for item in value:
         result.extend(_relation_ids(item))
     return list(dict.fromkeys(result))
+
+
+def _origin_contains_exact(origin: Any, names: set[str]) -> bool:
+    """Match an Odoo origin token without treating S00001x as S00001."""
+    if not names:
+        return False
+    tokens = {token for token in re.split(r"[,;|\s]+", str(origin or "")) if token}
+    return bool(tokens & {name for name in names if isinstance(name, str) and name})
 
 
 def _read_result(payload: Any, expected_id: int) -> tuple[dict[str, Any] | None, str | None]:
@@ -221,15 +234,40 @@ STAGES = (
     ("verify", "独立核验"),
 )
 
+PURCHASE_STAGES = (
+    ("read", "读取当前状态"),
+    ("purchase", "确认采购订单"),
+    ("verify", "独立核验"),
+)
+
+CHAIN_STAGES = (
+    ("read", "读取当前状态"),
+    ("quote", "销售报价"),
+    ("confirm", "确认销售订单"),
+    ("purchase", "确认采购订单"),
+    ("invoice", "关联并过账发票"),
+    ("verify", "独立核验"),
+)
+
+
+def _stages_for(business_type: str) -> tuple[tuple[str, str], ...]:
+    if business_type == "purchase":
+        return PURCHASE_STAGES
+    if business_type == "sale_purchase_invoice":
+        return CHAIN_STAGES
+    return STAGES
+
 
 def _evidence(document: dict[str, Any], label: str) -> dict[str, Any] | None:
     run_id, tool_id = document.get("source_run_id"), document.get("source_tool_id")
     if not isinstance(run_id, str) or not run_id:
         return None
-    kind = "readback" if document.get("source") == "refresh_native_read" else "tool"
-    item: dict[str, Any] = {"run_id": run_id, "kind": kind, "label": "独立回读快照" if kind == "readback" else label}
+    kind = "readback" if document.get("source") == "refresh_native_read" else "action" if document.get("source") == "native_action_readback" else "tool"
+    item: dict[str, Any] = {"run_id": run_id, "kind": kind, "label": "独立回读快照" if kind == "readback" else "已核验动作状态回读" if kind == "action" else label}
     if document.get("source") == "native_read_receipt" and isinstance(tool_id, str) and tool_id:
         item["tool_id"] = tool_id
+    if kind == "action" and isinstance(document.get("source_action_id"), str):
+        item["action_id"] = document["source_action_id"]
     if isinstance(document.get("observed_at"), str):
         item["observed_at"] = document["observed_at"]
     return item
@@ -241,7 +279,11 @@ def _action_stage(model: Any, operation: Any) -> str | None:
         return "confirm"
     if model == "sale.order" and operation == "create":
         return "quote"
-    if (model == "account.move" and operation in {"create", "action_post"}) or (model == "sale.advance.payment.inv" and operation in {"create", "create_invoices"}):
+    if model == "purchase.order" and operation in {"create", "write", "button_confirm", "button_approve"}:
+        return "purchase"
+    if model == "purchase.order.line" and operation in {"create", "write"}:
+        return "purchase"
+    if (model == "account.move" and operation in {"create", "action_post"}) or (model == "sale.advance.payment.inv" and operation in {"create", "create_invoices"}) or (model == "account.move.send.wizard" and operation == "action_send_and_print"):
         return "invoice"
     return None
 
@@ -263,7 +305,10 @@ def _tool_stage(tool: dict[str, Any]) -> str | None:
             return stage
     model = next((candidate.get("model") for candidate in candidates if candidate.get("model")), None)
     operation = next((candidate.get("operation") or candidate.get("method") for candidate in candidates if candidate.get("operation") or candidate.get("method")), None)
-    return "read" if model in {"sale.order", "account.move"} and operation in {None, "read_record", "search_records"} else None
+    tool_name = str(tool.get("name") or "").lower().removeprefix("mcp_odoo_")
+    if tool_name in {"read_record", "search_records"} and isinstance(model, str) and model:
+        return "read"
+    return "read" if model in {"sale.order", "purchase.order", "account.move"} and operation in {None, "read_record", "search_records"} else None
 
 
 def _tool_action_fields(tool: dict[str, Any]) -> tuple[Any, Any]:
@@ -284,13 +329,42 @@ def _tool_action_fields(tool: dict[str, Any]) -> tuple[Any, Any]:
 
 
 def _run_has_relevant_evidence(
-    run: dict[str, Any], readback_documents: list[dict[str, Any]] | None = None
+    run: dict[str, Any], readback_documents: list[dict[str, Any]] | None = None,
+    business_type: str = "sale_invoice", completion_target: str = "posted",
 ) -> bool:
     documents = run.get("documents") if isinstance(run.get("documents"), list) else []
+    if business_type == "purchase":
+        orders = [doc for doc in documents if isinstance(doc, dict) and doc.get("model") == "purchase.order" and doc.get("source_run_id") == run.get("id")]
+        if not orders:
+            return False
+        ids = {doc.get("id") for doc in orders}
+        return any(doc.get("model") == "purchase.order" and doc.get("id") in ids and doc.get("source") == "refresh_native_read"
+                   for doc in (readback_documents or [])) or any(doc.get("state") in {"purchase", "done"} for doc in orders)
+    if business_type == "sale_purchase_invoice":
+        if not _run_has_relevant_evidence(run, readback_documents, "sale_invoice", "posted"):
+            return False
+        purchase_documents = [doc for doc in documents if isinstance(doc, dict) and doc.get("model") == "purchase.order" and doc.get("source_run_id") == run.get("id")]
+        if not purchase_documents:
+            return False
+        sale_ids = {doc.get("id") for doc in documents if doc.get("model") == "sale.order" and type(doc.get("id")) is int}
+        sale_names = {doc.get("name") for doc in documents if doc.get("model") == "sale.order"}
+        linked = False
+        for purchase in purchase_documents:
+            fields = purchase.get("fields") if isinstance(purchase.get("fields"), dict) else {}
+            linked_id = _relation_ids(fields.get("sale_order_id"))
+            origin = str(fields.get("origin") or "")
+            linked |= bool(set(linked_id) & sale_ids) or _origin_contains_exact(origin, sale_names)
+        return linked
     orders = [doc for doc in documents if isinstance(doc, dict) and doc.get("model") == "sale.order" and doc.get("source_run_id") == run.get("id")]
     if not orders:
         return False
     observed_order_ids = {doc.get("id") for doc in orders if type(doc.get("id")) is int}
+    if completion_target in {"draft", "confirmed"}:
+        return any(
+            isinstance(doc, dict) and doc.get("source") == "refresh_native_read"
+            and doc.get("model") == "sale.order" and doc.get("id") in observed_order_ids
+            for doc in (readback_documents or [])
+        )
     observed_invoice_ids = {
         doc.get("id") for doc in documents
         if isinstance(doc, dict) and doc.get("model") == "account.move"
@@ -323,34 +397,46 @@ def _execution_projection(
     outcome_status: str,
     approvals: list[dict[str, Any]] | None = None,
     readback_documents: list[dict[str, Any]] | None = None,
+    business_type: str = "sale_invoice",
+    completion_target: str = "posted",
 ) -> dict[str, Any]:
-    evidence_by_stage: dict[str, list[dict[str, Any]]] = {stage_id: [] for stage_id, _ in STAGES}
-    observed_by_stage: dict[str, bool] = {stage_id: False for stage_id, _ in STAGES}
+    stage_defs = _stages_for(business_type)
+    evidence_by_stage: dict[str, list[dict[str, Any]]] = {stage_id: [] for stage_id, _ in stage_defs}
+    observed_by_stage: dict[str, bool] = {stage_id: False for stage_id, _ in stage_defs}
     awaiting_stage_ids: set[str] = set()
     for document in documents:
         label = f"读取 {document.get('model', '单据')} {document.get('name') or document.get('id')}"
         item = _evidence(document, label)
         model = document.get("model")
         fields = document.get("fields") if isinstance(document.get("fields"), dict) else {}
-        relevant = model in {"sale.order", "account.move"}
+        relevant = model in {"sale.order", "purchase.order", "account.move"}
         if relevant:
             observed_by_stage["read"] = True
         if item is None:
             if model == "sale.order":
-                observed_by_stage["quote"] |= fields.get("amount_total") is not None or fields.get("order_line") is not None
-                observed_by_stage["confirm"] = True
+                if "quote" in observed_by_stage:
+                    observed_by_stage["quote"] |= fields.get("amount_total") is not None or fields.get("order_line") is not None
+                if "confirm" in observed_by_stage:
+                    observed_by_stage["confirm"] = True
+            elif model == "purchase.order" and "purchase" in observed_by_stage:
+                observed_by_stage["purchase"] = True
             elif model == "account.move":
-                observed_by_stage["invoice"] = True
+                if "invoice" in observed_by_stage:
+                    observed_by_stage["invoice"] = True
             continue
         evidence_by_stage["read"].append(item)
         if model == "sale.order":
-            if fields.get("amount_total") is not None or fields.get("order_line") is not None:
+            if "quote" in evidence_by_stage and (fields.get("amount_total") is not None or fields.get("order_line") is not None):
                 evidence_by_stage["quote"].append(item)
-            evidence_by_stage["confirm"].append(item)
+            if "confirm" in evidence_by_stage:
+                evidence_by_stage["confirm"].append(item)
         elif model == "account.move":
-            evidence_by_stage["invoice"].append(item)
+            if "invoice" in evidence_by_stage:
+                evidence_by_stage["invoice"].append(item)
+        elif model == "purchase.order" and "purchase" in evidence_by_stage:
+            evidence_by_stage["purchase"].append(item)
 
-    verified_actions: dict[str, list[dict[str, Any]]] = {stage_id: [] for stage_id, _ in STAGES}
+    verified_actions: dict[str, list[dict[str, Any]]] = {stage_id: [] for stage_id, _ in stage_defs}
     for run in runs:
         tools = run.get("tools") if isinstance(run.get("tools"), list) else []
         for tool in tools:
@@ -361,7 +447,7 @@ def _execution_projection(
             arguments = tool.get("arguments") if isinstance(tool.get("arguments"), dict) else {}
             model, operation = _tool_action_fields(tool)
             stage_id = _action_stage(model, operation)
-            if not stage_id or not isinstance(run.get("id"), str):
+            if not stage_id or stage_id not in verified_actions or not isinstance(run.get("id"), str):
                 continue
             verified_actions[stage_id].append({"run_id": run["id"], "tool_id": tool.get("id"), "action_id": tool.get("action_id") or result.get("action_id"), "kind": "action", "model": model, "operation": operation, "label": "结构化 ERP 动作已核验"})
 
@@ -370,7 +456,7 @@ def _execution_projection(
             continue
         operation = str(approval.get("operation") or approval.get("method") or "")
         stage_id = _action_stage(approval.get("model"), operation)
-        if not stage_id:
+        if not stage_id or stage_id not in evidence_by_stage:
             continue
         item = {"run_id": approval["run_id"], "action_id": approval.get("action_id"), "kind": "action", "label": "等待主机审批的 ERP 动作"}
         evidence_by_stage[stage_id].append({key: value for key, value in item.items() if value})
@@ -381,20 +467,21 @@ def _execution_projection(
         if approval.get("status") != "verified" or verification.get("status") != "satisfied":
             continue
         stage_id = _action_stage(approval.get("model"), approval.get("operation"))
-        if stage_id and isinstance(approval.get("run_id"), str):
+        if stage_id in verified_actions and isinstance(approval.get("run_id"), str):
             verified_actions[stage_id].append({"run_id": approval["run_id"], "action_id": approval.get("action_id"), "kind": "action", "model": approval.get("model"), "operation": approval.get("operation") or approval.get("method"), "label": "结构化 ERP 动作已核验"})
 
     for stage_id, items in verified_actions.items():
-        evidence_by_stage[stage_id].extend({key: value for key, value in item.items() if value} for item in items)
+        if stage_id in evidence_by_stage:
+            evidence_by_stage[stage_id].extend({key: value for key, value in item.items() if value} for item in items)
 
     evidence_by_stage["verify"] = list(evidence_by_stage["read"])
-    evidence_by_stage["verify"].extend(item for stage_id in ("confirm", "invoice") for item in verified_actions[stage_id])
+    evidence_by_stage["verify"].extend(item for stage_id in verified_actions if stage_id not in {"read", "verify"} for item in verified_actions[stage_id])
     observed_by_stage["verify"] = observed_by_stage["read"]
 
     check_by_name = {row.get("name"): row for row in checks if isinstance(row, dict)}
     current_run_id = runs[0].get("id") if runs else None
     stages: list[dict[str, Any]] = []
-    for stage_id, label in STAGES:
+    for stage_id, label in stage_defs:
         evidence = evidence_by_stage[stage_id]
         current_evidence = [row for row in evidence if not current_run_id or row.get("run_id") == current_run_id]
         status = "pending"
@@ -422,23 +509,33 @@ def _execution_projection(
                 status, detail = "observed", "仅有历史运行证据，当前运行尚未确认发票状态。"
             elif any(item.get("kind") == "action" for item in current_evidence):
                 current_run = runs[0] if runs else None
-                current_relevant = _run_has_relevant_evidence(current_run, readback_documents) if current_run else False
+                current_relevant = _run_has_relevant_evidence(current_run, readback_documents, business_type, completion_target) if current_run else False
                 check_complete = check_by_name.get("invoice_posted", {}).get("status") == "passed" and check_by_name.get("invoice_linked_to_order", {}).get("status") == "passed" and current_relevant
                 if check_complete:
                     status, detail = "verified", "结构化发票过账动作及关联回读已核验。"
                 else:
                     status, detail = "observed", "已核验发票动作，但仍缺少当前运行的过账及关联回读。"
             else:
+                    status = {"passed": "verified", "failed": "failed", "unknown": "unknown"}.get(check.get("status"), "unknown")
+                    detail = check.get("detail", detail)
+        elif stage_id == "purchase" and evidence:
+            check = check_by_name.get("purchase_confirmed", {})
+            if current_run_id and not current_evidence:
+                status, detail = "observed", "仅有历史运行证据，当前运行尚未确认采购订单。"
+            elif any(item.get("kind") == "action" for item in current_evidence):
+                status = "verified" if check.get("status") == "passed" else "observed"
+                detail = "结构化采购确认动作已核验。" if status == "verified" else "已核验采购动作，但终态回读尚未通过。"
+            else:
                 status = {"passed": "verified", "failed": "failed", "unknown": "unknown"}.get(check.get("status"), "unknown")
                 detail = check.get("detail", detail)
         elif stage_id == "verify":
             current_read = [row for row in evidence_by_stage["read"] if not current_run_id or row.get("run_id") == current_run_id]
             current_run = runs[0] if runs else None
-            current_relevant = _run_has_relevant_evidence(current_run, readback_documents) if current_run else False
+            current_relevant = _run_has_relevant_evidence(current_run, readback_documents, business_type, completion_target) if current_run else False
             if outcome_status == "passed" and current_relevant:
-                status, detail = "verified", "销售订单和关联发票的基础检查均通过。"
+                status, detail = "verified", "业务目标所需的基础检查均通过。"
             elif outcome_status == "failed" and current_relevant:
-                status, detail = "failed", "基础销售开票检查未通过。"
+                status, detail = "failed", "业务目标所需的基础检查未通过。"
             elif outcome_status in {"passed", "failed"} and evidence_by_stage["read"]:
                 status, detail = "unknown", "已有历史读取证据，但当前运行尚未完成核验。"
             elif evidence_by_stage["read"]:
@@ -469,8 +566,35 @@ def _execution_projection(
     return result
 
 
-def _outcome(checks: list[dict[str, Any]]) -> dict[str, str]:
-    required = {"observed_order", "observed_customer", "observed_payment_term", "observed_document_states", "order_confirmed", "invoice_linked_to_order", "invoice_posted"}
+def _outcome(checks: list[dict[str, Any]], business_type: str = "sale_invoice",
+             completion_target: str = "posted") -> dict[str, str]:
+    if business_type == "purchase":
+        required = {"observed_purchase", "observed_supplier"} if completion_target == "read_only" else ({
+            "observed_purchase", "observed_supplier", "observed_document_states", "purchase_lines_valid", "purchase_draft",
+        } if completion_target == "draft" else {
+            "observed_purchase", "observed_supplier", "observed_document_states", "purchase_lines_valid", "purchase_confirmed",
+        })
+        scope = f"purchase_{completion_target}_checks"
+    elif business_type == "sale_purchase_invoice":
+        required = {"observed_order", "observed_purchase"} if completion_target == "read_only" else {
+            "observed_order", "observed_customer", "observed_purchase", "observed_supplier",
+            "observed_payment_term", "observed_document_states", "order_confirmed",
+            "purchase_lines_valid", "purchase_confirmed", "purchase_linked_to_order",
+            "invoice_linked_to_order", "invoice_posted",
+        }
+        scope = f"sale_purchase_invoice_{completion_target}_checks"
+    elif completion_target == "read_only":
+        required = {"observed_order", "observed_customer"}
+        scope = "sale_invoice_read_only_checks"
+    elif completion_target == "draft":
+        required = {"observed_order", "observed_customer", "observed_payment_term", "observed_document_states", "order_draft"}
+        scope = "sale_invoice_draft_checks"
+    elif completion_target == "confirmed":
+        required = {"observed_order", "observed_customer", "observed_payment_term", "observed_document_states", "order_confirmed"}
+        scope = "sale_invoice_confirmed_checks"
+    else:
+        required = {"observed_order", "observed_customer", "observed_payment_term", "observed_document_states", "order_confirmed", "invoice_linked_to_order", "invoice_posted"}
+        scope = "sale_invoice_basic_checks"
     by_name = {row.get("name"): row for row in checks if isinstance(row, dict)}
     statuses = [by_name.get(name, {}).get("status") for name in required]
     linked = required.issubset(by_name) and all(by_name[name].get("source") == "native_readback" for name in required)
@@ -480,12 +604,120 @@ def _outcome(checks: list[dict[str, Any]]) -> dict[str, str]:
         status = "passed"
     else:
         status = "unknown"
-    detail = {
-        "passed": "销售订单已确认，关联发票已过账。",
-        "failed": "销售订单或关联发票的基础检查未通过。",
-        "unknown": "缺少足够的结构化读取证据，暂不能判断销售开票结果。",
-    }[status]
-    return {"status": status, "label": "销售与开票基础检查", "detail": detail, "scope": "sale_invoice_basic_checks"}
+    labels = {
+        "purchase": "采购基础检查",
+        "sale_purchase_invoice": "销售、采购与开票基础检查",
+        "sale_invoice": "销售与开票基础检查",
+    }
+    passed_details = {
+        ("purchase", "read_only"): "采购订单及供应商读取完成。",
+        ("purchase", "draft"): "采购草稿及供应商、采购行检查通过。",
+        ("purchase", "confirmed"): "采购订单已确认，供应商和采购行检查通过。",
+        ("sale_purchase_invoice", "read_only"): "销售与采购相关记录已读取。",
+        ("sale_purchase_invoice", "posted"): "销售订单已确认，采购订单已确认，关联发票已过账。",
+        ("sale_invoice", "read_only"): "销售订单与客户读取完成。",
+        ("sale_invoice", "draft"): "销售订单草稿及客户、付款条款检查通过。",
+        ("sale_invoice", "confirmed"): "销售订单已确认，客户和付款条款检查通过。",
+        ("sale_invoice", "posted"): "销售订单已确认，关联发票已过账。",
+    }
+    detail = passed_details.get((business_type, completion_target), "业务目标检查通过。") if status == "passed" else (
+        "业务目标所需的基础检查未通过。" if status == "failed" else
+        "缺少足够的结构化读取证据，暂不能判断业务目标结果。"
+    )
+    label = labels.get(business_type, labels["sale_invoice"])
+    return {"status": status, "label": label, "detail": detail, "scope": scope}
+
+
+def _finish_readback(state: dict[str, Any], business: dict[str, Any], runs: list[dict[str, Any]],
+                     observations: dict[tuple[str, int], dict[str, Any]], failures: dict[tuple[str, int], str],
+                     checks: list[dict[str, Any]], business_type: str, target: str) -> dict[str, Any]:
+    for (model, record_id), failure in failures.items():
+        checks.append(_check(f"read_{model}_{record_id}", f"读取 {model} {record_id}", "unknown", f"读取失败：{failure}"))
+    business["readback"] = {
+        "documents": list(observations.values()), "checks": checks, "observed_at": _now(),
+        "stale": bool(failures), "latest_run_id": runs[-1].get("id") if runs else None,
+        "verification_status": _outcome(checks, business_type, target)["status"],
+        "outcome": _outcome(checks, business_type, target),
+    }
+    return business_detail(state, business["id"])
+
+
+def _finish_purchase_readback(state: dict[str, Any], business: dict[str, Any], runs: list[dict[str, Any]],
+                              observations: dict[tuple[str, int], dict[str, Any]], failures: dict[tuple[str, int], str],
+                              fresh_by_model: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    orders = fresh_by_model.get("purchase.order", [])
+    order = orders[0] if len(orders) == 1 else None
+    fields = order.get("fields", {}) if order else {}
+    partner_ids = _relation_ids(fields.get("partner_id"))
+    partners = fresh_by_model.get("res.partner", [])
+    lines = fresh_by_model.get("purchase.order.line", [])
+    line_ids = set(_relation_ids(fields.get("order_line")))
+    valid_lines = bool(line_ids) and line_ids.issubset({row.get("id") for row in lines}) and all(
+        row.get("fields", {}).get("product_id") and row.get("fields", {}).get("product_qty") is not None
+        for row in lines if row.get("id") in line_ids
+    )
+    state_value = order.get("state") if order else None
+    target = business.get("completion_target", "confirmed")
+    checks = [
+        _check("observed_purchase", "当前采购订单", "passed" if order else "unknown", "采购订单由 native read 观测。" if order else "尚未观测到唯一采购订单。"),
+        _check("observed_supplier", "已读取供应商", "passed" if partner_ids and any(row.get("id") in partner_ids for row in partners) else "unknown", "供应商关系与记录均已观测。" if partner_ids and partners else "供应商关系或记录未观测完整。"),
+        _check("observed_document_states", "已读取采购单状态", "passed" if state_value else "unknown", "采购订单状态已观测。" if state_value else "没有足够读取结果确认采购单状态。"),
+        _check("purchase_lines_valid", "采购行有效", "passed" if valid_lines else "failed" if line_ids else "unknown", "采购行包含商品和数量。" if valid_lines else "采购行缺少商品或数量。" if line_ids else "尚未观测采购行。"),
+        _check("purchase_draft", "采购订单为草稿", "passed" if state_value == "draft" else "failed" if state_value is not None else "unknown", "采购订单状态为 draft。" if state_value == "draft" else "采购订单存在但不是 draft。" if state_value else "尚未确认采购订单状态。"),
+        _check("purchase_confirmed", "采购订单已确认", "passed" if state_value in {"purchase", "done"} else "unknown" if target != "confirmed" else "failed" if state_value is not None else "unknown", "采购订单状态为 purchase 或 done。" if state_value in {"purchase", "done"} else "采购订单尚未处于已确认状态。" if target != "confirmed" else "采购订单存在但未处于已确认状态。" if state_value else "尚未确认采购订单状态。"),
+    ]
+    return _finish_readback(state, business, runs, observations, failures, checks, "purchase", business.get("completion_target", "confirmed"))
+
+
+def _finish_chain_readback(state: dict[str, Any], business: dict[str, Any], runs: list[dict[str, Any]],
+                           observations: dict[tuple[str, int], dict[str, Any]], failures: dict[tuple[str, int], str],
+                           fresh_by_model: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    orders = fresh_by_model.get("sale.order", [])
+    purchases = fresh_by_model.get("purchase.order", [])
+    order = orders[0] if len(orders) == 1 else None
+    purchase = purchases[0] if len(purchases) == 1 else None
+    order_fields = order.get("fields", {}) if order else {}
+    purchase_fields = purchase.get("fields", {}) if purchase else {}
+    order_name = order.get("name") if order else None
+    origin = str(purchase_fields.get("origin") or "")
+    order_id_set = {order.get("id")} if order and type(order.get("id")) is int else set()
+    relation = bool(set(_relation_ids(purchase_fields.get("sale_order_id"))) & order_id_set) or _origin_contains_exact(origin, {order_name} if order_name else set())
+    invoice_ids = set(_relation_ids(order_fields.get("invoice_ids"))) if order else set()
+    invoices = [row for row in fresh_by_model.get("account.move", []) if row.get("id") in invoice_ids]
+    partner_ids = _relation_ids(order_fields.get("partner_id"))
+    purchase_partner_ids = _relation_ids(purchase_fields.get("partner_id"))
+    lines = fresh_by_model.get("purchase.order.line", [])
+    line_ids = set(_relation_ids(purchase_fields.get("order_line")))
+    order_line_ids = set(_relation_ids(order_fields.get("order_line")))
+    for line in lines:
+        if line.get("id") not in line_ids:
+            continue
+        line_fields = line.get("fields", {}) if isinstance(line.get("fields"), dict) else {}
+        relation = relation or bool(set(_relation_ids(line_fields.get("sale_order_id"))) & order_id_set)
+        relation = relation or bool(set(_relation_ids(line_fields.get("sale_line_id"))) & order_line_ids)
+    valid_lines = bool(line_ids) and line_ids.issubset({row.get("id") for row in lines}) and all(
+        row.get("fields", {}).get("product_id") and row.get("fields", {}).get("product_qty") is not None
+        for row in lines if row.get("id") in line_ids
+    )
+    order_state = order.get("state") if order else None
+    purchase_state = purchase.get("state") if purchase else None
+    invoice_states = [row.get("state") for row in invoices]
+    partners = fresh_by_model.get("res.partner", [])
+    checks = [
+        _check("observed_order", "当前销售订单", "passed" if order else "unknown", "销售订单由 native read 观测。" if order else "尚未观测到唯一销售订单。"),
+        _check("observed_customer", "已读取客户", "passed" if partner_ids and any(row.get("id") in partner_ids for row in partners) else "unknown", "客户关系与记录均已观测。" if partner_ids else "客户关系未观测完整。"),
+        _check("observed_purchase", "当前采购订单", "passed" if purchase else "unknown", "采购订单由 native read 观测。" if purchase else "尚未观测到唯一采购订单。"),
+        _check("observed_supplier", "已读取供应商", "passed" if purchase_partner_ids and any(row.get("id") in purchase_partner_ids for row in partners) else "unknown", "供应商关系与记录均已观测。" if purchase_partner_ids else "供应商关系未观测完整。"),
+        _check("observed_payment_term", "已读取付款条款", "passed" if _relation_ids(order_fields.get("payment_term_id")) else "unknown", "销售订单付款条款已观测。" if _relation_ids(order_fields.get("payment_term_id")) else "付款条款未观测完整。"),
+        _check("observed_document_states", "已读取单据状态", "passed" if order_state and purchase_state and invoice_states and all(invoice_states) else "unknown", "销售、采购和发票状态均已观测。" if order_state and purchase_state and invoice_states else "单据状态未完整观测。"),
+        _check("order_confirmed", "销售订单已确认", "passed" if order_state in {"sale", "done"} else "failed" if order_state else "unknown", "销售订单状态为 sale。" if order_state in {"sale", "done"} else "销售订单尚未确认。" if order_state else "销售订单状态未知。"),
+        _check("purchase_lines_valid", "采购行有效", "passed" if valid_lines else "failed" if line_ids else "unknown", "采购行包含商品和数量。" if valid_lines else "采购行缺少商品或数量。" if line_ids else "采购行未知。"),
+        _check("purchase_confirmed", "采购订单已确认", "passed" if purchase_state in {"purchase", "done"} else "failed" if purchase_state else "unknown", "采购订单已确认。" if purchase_state in {"purchase", "done"} else "采购订单未确认。" if purchase_state else "采购订单状态未知。"),
+        _check("purchase_linked_to_order", "采购单关联销售单", "passed" if relation else "failed" if purchase and order else "unknown", "采购单 origin 或结构化关系指向销售单。" if relation else "采购单未确认关联销售单。"),
+        _check("invoice_linked_to_order", "发票关联销售订单", "passed" if invoices else "unknown", "销售订单的 invoice_ids 包含已读取发票。" if invoices else "未确认关联发票。"),
+        _check("invoice_posted", "发票已过账", "passed" if invoices and all(value == "posted" for value in invoice_states) else "failed" if invoices and all(value is not None for value in invoice_states) else "unknown", "关联发票已过账。" if invoices and all(value == "posted" for value in invoice_states) else "关联发票未全部过账。" if invoices else "发票状态未知。"),
+    ]
+    return _finish_readback(state, business, runs, observations, failures, checks, "sale_purchase_invoice", business.get("completion_target", "posted"))
 
 
 def refresh_business(
@@ -548,6 +780,11 @@ def refresh_business(
                     ("sale.order", "invoice_ids"): "account.move",
                     ("sale.order", "picking_ids"): "stock.picking",
                     ("sale.order.line", "order_id"): "sale.order",
+                    ("purchase.order", "partner_id"): "res.partner",
+                    ("purchase.order", "order_line"): "purchase.order.line",
+                    ("purchase.order.line", "order_id"): "purchase.order",
+                    ("purchase.order.line", "sale_order_id"): "sale.order",
+                    ("purchase.order.line", "sale_line_id"): "sale.order.line",
                     ("account.move", "partner_id"): "res.partner",
                     ("account.move", "invoice_line_ids"): "account.move.line",
                     ("account.move.line", "move_id"): "account.move",
@@ -562,6 +799,11 @@ def refresh_business(
     for (model, record_id), document in observations.items():
         if (model, record_id) in fresh:
             fresh_by_model.setdefault(model, []).append(document)
+    business_type = business.get("type", "sale_invoice")
+    if business_type == "purchase":
+        return _finish_purchase_readback(state, business, runs, observations, failures, fresh_by_model)
+    if business_type == "sale_purchase_invoice":
+        return _finish_chain_readback(state, business, runs, observations, failures, fresh_by_model)
     orders = fresh_by_model.get("sale.order", [])
     invoices = fresh_by_model.get("account.move", [])
     # Reading a search result does not select one of its orders as this task's target.
@@ -580,7 +822,8 @@ def refresh_business(
     checks.append(_check("observed_payment_term", "已读取付款条款", "passed" if _relation_ids(term) else "unknown", "付款条款关系已由读取结果提供。" if _relation_ids(term) else "读取结果没有付款条款关系。"))
     order_state = order.get("state") if order else None
     invoice_states = [doc.get("state") for doc in linked_invoices]
-    states_known = bool(order_state) and bool(invoice_states) and all(bool(value) for value in invoice_states)
+    target = business.get("completion_target", "posted")
+    states_known = bool(order_state) if target in {"draft", "confirmed"} else bool(order_state) and bool(invoice_states) and all(bool(value) for value in invoice_states)
     checks.append(_check("observed_document_states", "已读取单据状态", "passed" if states_known else "unknown", "订单和关联发票状态均已观测。" if states_known else "订单或关联发票状态未完整观测。"))
     order_confirmed_status = (
         "passed" if order and order_state == "sale"
@@ -591,6 +834,9 @@ def refresh_business(
                          "销售订单状态为 sale。" if order_confirmed_status == "passed" else
                          "销售订单存在但尚未处于 sale 状态。" if order_confirmed_status == "failed" else
                          "没有足够读取结果确认销售订单状态。"))
+    if business.get("completion_target", "posted") == "draft":
+        checks.append(_check("order_draft", "销售订单为草稿", "passed" if order and order_state == "draft" else "failed" if order and order_state is not None else "unknown",
+                             "销售订单状态为 draft。" if order and order_state == "draft" else "销售订单存在但不是 draft。" if order else "没有足够读取结果确认销售订单状态。"))
     linked_status = "passed" if linked_invoices else "unknown"
     checks.append(_check("invoice_linked_to_order", "发票关联销售订单", linked_status, "销售订单的 invoice_ids 包含已读取发票。" if linked_invoices else "未从读取结果确认销售订单与发票关联。"))
     invoice_state_values = [doc.get("state") for doc in linked_invoices]
@@ -603,11 +849,8 @@ def refresh_business(
     for (model, record_id), failure in failures.items():
         checks.append(_check(f"read_{model}_{record_id}", f"读取 {model} {record_id}", "unknown", f"读取失败：{failure}"))
 
-    verification_status = (
-        "failed" if any(c["status"] == "failed" for c in checks)
-        else "passed" if checks and all(c["status"] == "passed" for c in checks)
-        else "unknown"
-    )
+    target_outcome = _outcome(checks, business.get("type", "sale_invoice"), business.get("completion_target", "posted"))
+    verification_status = target_outcome["status"]
     business["readback"] = {
         "documents": list(observations.values()),
         "checks": checks,
@@ -615,7 +858,7 @@ def refresh_business(
         "stale": bool(failures),
         "latest_run_id": runs[-1].get("id") if runs else None,
         "verification_status": verification_status,
-        "outcome": _outcome(checks),
+        "outcome": target_outcome,
     }
     return business_detail(state, business_id)
 
@@ -624,6 +867,8 @@ def business_detail(state: dict[str, Any], business_id: str) -> dict[str, Any]:
     business = state["businesses"].get(business_id)
     if business is None:
         raise KeyError("unknown business")
+    business_type = business.get("type", "sale_invoice")
+    completion_target = business.get("completion_target") or ("confirmed" if business_type == "purchase" else "posted")
     runs = sorted(
         [row for row in state["runs"].values() if row.get("business_id") == business_id],
         key=_run_sort_key,
@@ -658,10 +903,10 @@ def business_detail(state: dict[str, Any], business_id: str) -> dict[str, Any]:
         if isinstance(usage, dict):
             public["usage"] = {"input": usage.get("input"), "cache_read": usage.get("cache_read", usage.get("cacheRead")),
                                 "output": usage.get("output"), "reasoning": usage.get("reasoning"), "total": usage.get("total")}
-        linked_evidence = _run_has_relevant_evidence(run, matching_readback_documents)
+        linked_evidence = _run_has_relevant_evidence(run, matching_readback_documents, business_type, completion_target)
         if isinstance(readback, dict) and run.get("id") == readback_run_id:
             public["verification_status"] = (
-                _outcome(list(checks.values()))["status"]
+                _outcome(list(checks.values()), business_type, completion_target)["status"]
                 if readback_fresh and linked_evidence else "unknown"
             )
         elif isinstance(readback, dict) and run.get("id") == current_run_id:
@@ -681,7 +926,7 @@ def business_detail(state: dict[str, Any], business_id: str) -> dict[str, Any]:
         else max((doc.get("observed_at", "") for doc in docs.values()), default=None)
     )
     factual_checks = list(checks.values())
-    outcome = _outcome(factual_checks)
+    outcome = _outcome(factual_checks, business_type, completion_target)
     if isinstance(readback, dict) and not readback_fresh:
         outcome = {**outcome, "status": "unknown", "detail": "存在较新的运行、单据观察或不完整回读，请重新读取状态。"}
     execution = _execution_projection(
@@ -691,6 +936,8 @@ def business_detail(state: dict[str, Any], business_id: str) -> dict[str, Any]:
         outcome.get("status", "unknown"),
         approvals,
         matching_readback_documents,
+        business_type,
+        completion_target,
     )
     live_messages = []
     for run in runs:
@@ -698,8 +945,15 @@ def business_detail(state: dict[str, Any], business_id: str) -> dict[str, Any]:
             if isinstance(message, dict):
                 live_messages.append(dict(message))
     artifacts = [dict(item) for item in business.get("artifacts", []) if isinstance(item, dict)]
-    return {"business": business, "runs": public_runs, "approvals": approvals,
-            "artifacts": artifacts, "live_messages": live_messages, "documents": list(docs.values()), "checks": factual_checks,
+    material_rows = []
+    for material_id in business.get("material_ids", []) if isinstance(business.get("material_ids"), list) else []:
+        material = state.get("materials", {}).get(material_id)
+        if isinstance(material, dict):
+            material_rows.append({key: material.get(key) for key in ("id", "session_id", "name", "size", "sha256", "created_at", "row_count", "preview", "media_type")})
+    business_public = dict(business)
+    business_public["materials"] = material_rows
+    return {"business": business_public, "runs": public_runs, "approvals": approvals,
+            "artifacts": artifacts, "materials": material_rows, "live_messages": live_messages, "documents": list(docs.values()), "checks": factual_checks,
             "observed_at": observed_at,
             "stale": detail_stale,
             "summary": next((run.get("summary") for run in runs if run.get("summary")), None),
