@@ -55,6 +55,7 @@ from odoo_runtime._odoo_core.schemas import (
     ListModelsResponse,
     ReadAttachmentResponse,
     ReadRecordResponse,
+    ReadSupplyContextResponse,
     SchemaCatalogResponse,
     SearchRecordsResponse,
 )
@@ -92,7 +93,11 @@ READ_RESPONSES = {
     "search_employee": SearchEmployeeResponse,
     "search_holidays": SearchHolidaysResponse,
 }
-NATIVE_READ_RESPONSES = {**READ_RESPONSES, "health_check": HealthCheckResponse}
+NATIVE_READ_RESPONSES = {
+    **READ_RESPONSES,
+    "health_check": HealthCheckResponse,
+    "read_supply_context": ReadSupplyContextResponse,
+}
 
 _FIELD_SUMMARY_KEYS = (
     "type", "string", "help", "required", "readonly", "store", "searchable",
@@ -278,7 +283,7 @@ class NativeReads:
             "server": {
                 "name": "Odoo native Harness",
                 "instructions": "Direct Odoo capabilities without MCP transport",
-                "tool_count": 41,
+                "tool_count": 42,
                 "resource_count": 4,
                 "prompt_count": 11,
             },
@@ -740,7 +745,488 @@ class NativeReads:
                     for row in selected
                 ],
             }
+            result["_runtime_evidence"] = {
+                "kind": "search_records_rerank",
+                "pre_rerank_records": copy.deepcopy(records),
+                "fields": list(resolved or []),
+                "scope": "ACL-filtered candidate page before reranking",
+                "candidate_window_full": len(records) == limit,
+            }
         return result
+
+    def read_supply_context(
+        self, product_ids: list[int], include_manufacturing: bool = False,
+    ) -> dict[str, Any]:
+        """Read related supply facts for resolved products without selecting a plan.
+
+        All reads use the current identity, field policy, and stable ``id``
+        pagination.  Missing metadata, fields, or rows are reported as
+        incomplete context; they are never interpreted as a zero quantity or
+        an absent quotation.
+        """
+        if not isinstance(product_ids, list) or not product_ids:
+            raise ValueError("product_ids must be a non-empty list of positive integers")
+        if any(type(value) is not int or value < 1 for value in product_ids):
+            raise ValueError("product_ids must contain only positive integers")
+        if not isinstance(include_manufacturing, bool):
+            raise ValueError("include_manufacturing must be a boolean")
+
+        ids = list(dict.fromkeys(product_ids))
+        missing_fields: dict[str, list[str]] = {}
+        restricted_fields: dict[str, list[str]] = {}
+        read_failures: list[str] = []
+        warnings: list[str] = []
+        completeness: dict[str, dict[str, Any]] = {}
+        evidence: list[dict[str, Any]] = []
+
+        def relation_id(value: Any) -> int | None:
+            if isinstance(value, (list, tuple)) and value and type(value[0]) is int:
+                return value[0]
+            return value if type(value) is int else None
+
+        def relation_ids(rows: list[dict[str, Any]], field: str) -> list[int]:
+            return sorted({value for row in rows if (value := relation_id(row.get(field))) is not None})
+
+        def many_relation_ids(rows: list[dict[str, Any]], field: str) -> list[int]:
+            return sorted({
+                value for row in rows for value in (row.get(field) or []) if type(value) is int
+            })
+
+        def readable_field(model: str, field: str) -> bool:
+            try:
+                metadata = self._metadata(model)
+            except Exception:
+                return False
+            allowed, _ = self.policy.filter_fields(self.instance, model, metadata)
+            return field in metadata and field in allowed
+
+        def fields_for(
+            model: str, wanted: list[str], required: list[str], source: str,
+        ) -> list[str]:
+            state = completeness.setdefault(source, {
+                "model": model, "complete": True, "pages": 0, "rows": 0,
+                "missing_required_fields": [], "unavailable_optional_fields": [],
+                "redacted_fields": [], "failures": [],
+            })
+            try:
+                metadata = self._metadata(model)
+            except Exception as exc:
+                reason = f"{model} metadata unavailable: {exc}"
+                state.update(complete=False, metadata="unavailable", read_fields=[])
+                state["failures"].append(reason)
+                read_failures.append(reason)
+                warnings.append(reason)
+                missing_fields[model] = sorted(set(missing_fields.get(model, []) + wanted))
+                return []
+            allowed, denied = self.policy.filter_fields(self.instance, model, metadata)
+            unavailable = [name for name in wanted if name not in metadata or name in denied]
+            if unavailable:
+                missing_fields[model] = sorted(set(missing_fields.get(model, []) + unavailable))
+                required_unavailable = [name for name in unavailable if name in required]
+                optional_unavailable = [name for name in unavailable if name not in required]
+                if required_unavailable:
+                    state["complete"] = False
+                    state["missing_required_fields"] = sorted(set(
+                        state["missing_required_fields"] + required_unavailable
+                    ))
+                if optional_unavailable:
+                    state["unavailable_optional_fields"] = sorted(set(
+                        state["unavailable_optional_fields"] + optional_unavailable
+                    ))
+                hidden = [name for name in unavailable if name in denied]
+                if hidden:
+                    state["redacted_fields"] = sorted(set(state["redacted_fields"] + hidden))
+                    restricted_fields[model] = sorted(set(restricted_fields.get(model, []) + hidden))
+            available = [name for name in wanted if name in metadata and name in allowed]
+            return available
+
+        def read_all(
+            source: str, model: str, domain: list[Any], wanted: list[str],
+            identity_fields: list[str], critical_fields: list[str] | None = None,
+        ) -> list[dict[str, Any]]:
+            fields = fields_for(model, wanted, critical_fields or identity_fields, source)
+            state = completeness[source]
+            unavailable_identity = [name for name in identity_fields if name not in fields]
+            if unavailable_identity:
+                message = f"{model} identity fields unavailable: {unavailable_identity}"
+                state.update(complete=False, status="not_queried")
+                state["failures"].append(message)
+                warnings.append(message)
+                return []
+            rows: list[dict[str, Any]] = []
+            offset = 0
+            seen_ids: set[int] = set()
+            while True:
+                try:
+                    page = self.search_records(
+                        model, domain=domain, fields=fields, limit=100, offset=offset, order="id",
+                    )
+                except Exception as exc:
+                    message = f"{model} read failed: {exc}"
+                    state.update(complete=False, status="failed")
+                    state["failures"].append(message)
+                    read_failures.append(message)
+                    warnings.append(message)
+                    break
+                if not page.get("success"):
+                    message = f"{model} read failed: {page.get('error', 'unknown error')}"
+                    state.update(complete=False, status="failed")
+                    state["failures"].append(message)
+                    read_failures.append(message)
+                    warnings.append(message)
+                    break
+                redacted = list(page.get("redacted_fields") or [])
+                if redacted:
+                    state["complete"] = False
+                    state["redacted_fields"] = sorted(set(state["redacted_fields"] + redacted))
+                    restricted_fields[model] = sorted(set(restricted_fields.get(model, []) + redacted))
+                batch = list(page.get("result") or [])
+                missing = sorted({
+                    field for row in batch for field in identity_fields if field not in row
+                })
+                if missing:
+                    message = f"{model} rows missing identity fields: {missing}"
+                    state["complete"] = False
+                    state["failures"].append(message)
+                    warnings.append(message)
+                batch_ids = [row.get("id") for row in batch if type(row.get("id")) is int]
+                repeated = sorted(set(batch_ids) & seen_ids)
+                repeated_within_page = sorted({
+                    value for value in batch_ids if batch_ids.count(value) > 1
+                })
+                if repeated or repeated_within_page:
+                    duplicates = sorted(set(repeated) | set(repeated_within_page))
+                    message = f"{model} pagination repeated record IDs: {duplicates}"
+                    state["complete"] = False
+                    state["failures"].append(message)
+                    warnings.append(message)
+                accepted = []
+                page_seen: set[int] = set()
+                for row in batch:
+                    record_id = row.get("id")
+                    if type(record_id) is int and (record_id in seen_ids or record_id in page_seen):
+                        continue
+                    accepted.append(row)
+                    if type(record_id) is int:
+                        page_seen.add(record_id)
+                rows.extend(accepted)
+                state["pages"] += 1
+                state["rows"] += len(accepted)
+                if len(batch) == 100 and not batch_ids:
+                    message = f"{model} pagination returned a full page without record IDs at offset {offset}"
+                    state.update(complete=False, status="partial")
+                    state["failures"].append(message)
+                    read_failures.append(message)
+                    warnings.append(message)
+                    break
+                if len(batch) == 100 and batch_ids and not set(batch_ids) - seen_ids:
+                    message = f"{model} pagination made no ID progress at offset {offset}"
+                    state.update(complete=False, status="partial")
+                    state["failures"].append(message)
+                    read_failures.append(message)
+                    warnings.append(message)
+                    break
+                seen_ids.update(batch_ids)
+                if len(batch) < 100:
+                    break
+                offset += len(batch)
+            evidence.append({
+                "source": source, "model": model, "domain": copy.deepcopy(domain),
+                "fields": list(fields), "rows": copy.deepcopy(rows),
+                "complete": bool(state["complete"]), "pages": state["pages"],
+            })
+            return rows
+
+        product_fields = [
+            "id", "name", "default_code", "product_tmpl_id", "description",
+            "description_sale", "description_purchase", "list_price", "standard_price", "uom_id",
+        ]
+        template_fields = [
+            "id", "name", "default_code", "description", "description_sale",
+            "description_purchase", "company_id", "list_price", "standard_price", "uom_id",
+        ]
+        products = read_all(
+            "requested_products", "product.product", [["id", "in", ids]], product_fields,
+            ["id", "product_tmpl_id"], ["id", "product_tmpl_id", "description", "list_price", "standard_price", "uom_id"],
+        )
+        product_by_id = {row["id"]: row for row in products if type(row.get("id")) is int}
+        missing_product_ids = [value for value in ids if value not in product_by_id]
+        if missing_product_ids:
+            completeness["requested_products"]["complete"] = False
+            warnings.append(f"Unknown or hidden product IDs: {missing_product_ids}")
+
+        all_products = dict(product_by_id)
+        template_ids = set(relation_ids(products, "product_tmpl_id"))
+        templates = read_all(
+            "product_templates", "product.template", [["id", "in", sorted(template_ids)]],
+            template_fields, ["id"], ["id", "description", "list_price", "standard_price", "uom_id"],
+        ) if template_ids else []
+        missing_template_ids = sorted(template_ids - set(relation_ids(templates, "id")))
+        if missing_template_ids:
+            completeness["product_templates"]["complete"] = False
+            warnings.append(f"Missing readable product template IDs: {missing_template_ids}")
+
+        boms: list[dict[str, Any]] = []
+        bom_lines: list[dict[str, Any]] = []
+        operations: list[dict[str, Any]] = []
+        workcenters: list[dict[str, Any]] = []
+        workcenter_capacities: list[dict[str, Any]] = []
+        shared_workorders: list[dict[str, Any]] = []
+        supply_product_ids = set(all_products)
+
+        if include_manufacturing:
+            direct_capacity_field = next(
+                (field for field in ("capacity", "default_capacity")
+                 if readable_field("mrp.workcenter", field)),
+                None,
+            )
+            capacity_relation_available = readable_field("mrp.workcenter", "capacity_ids")
+            capacity_mode = (
+                f"workcenter.{direct_capacity_field}" if direct_capacity_field
+                else "workcenter.capacity_ids" if capacity_relation_available
+                else "unavailable"
+            )
+            workcenter_fields = [
+                "id", "name", "code", "time_efficiency", "costs_hour", "time_start",
+                "time_stop", "alternative_workcenter_ids", "note", "company_id",
+            ] + ([direct_capacity_field] if direct_capacity_field else ["capacity_ids"] if capacity_relation_available else [])
+            workcenter_critical = [
+                "id", "time_efficiency", "costs_hour", "time_start", "time_stop",
+                "alternative_workcenter_ids", "note",
+            ] + ([direct_capacity_field] if direct_capacity_field else ["capacity_ids"] if capacity_relation_available else [])
+            pending = set(all_products)
+            seen_product_ids = set(all_products)
+            seen_bom_ids: set[int] = set()
+            bom_fields = [
+                "id", "product_id", "product_tmpl_id", "code", "type", "product_qty",
+                "product_uom_id", "produce_delay", "company_id", "active",
+            ]
+            line_fields = [
+                "id", "bom_id", "product_id", "product_qty", "product_uom_id",
+                "child_bom_id", "operation_id", "company_id",
+                "bom_product_template_attribute_value_ids", "product_template_attribute_value_ids",
+                "apply_on_variants",
+            ]
+            while pending:
+                batch_ids = sorted(pending)
+                pending = set()
+                batch_templates = sorted({
+                    relation_id(all_products[product_id].get("product_tmpl_id"))
+                    for product_id in batch_ids if product_id in all_products
+                    and relation_id(all_products[product_id].get("product_tmpl_id")) is not None
+                })
+                if not batch_templates:
+                    continue
+                bom_domain: list[Any] = [
+                    "&", ["product_tmpl_id", "in", batch_templates],
+                    "|", ["product_id", "=", False], ["product_id", "in", batch_ids],
+                ]
+                active_filter = readable_field("mrp.bom", "active")
+                if active_filter:
+                    bom_domain = ["&", ["active", "=", True], *bom_domain]
+                candidates = read_all(
+                    "boms", "mrp.bom", bom_domain,
+                    bom_fields, ["id", "product_tmpl_id"],
+                    ["id", "product_tmpl_id", "product_qty", "product_uom_id", "produce_delay"],
+                )
+                completeness["boms"]["active_filter"] = "active=True" if active_filter else "field_unavailable"
+                new_boms = [row for row in candidates if type(row.get("id")) is int and row["id"] not in seen_bom_ids]
+                if not new_boms:
+                    continue
+                seen_bom_ids.update(row["id"] for row in new_boms)
+                boms.extend(new_boms)
+                new_lines = read_all(
+                    "bom_lines", "mrp.bom.line", [["bom_id", "in", [row["id"] for row in new_boms]]],
+                    line_fields, ["id", "bom_id", "product_id"],
+                )
+                bom_lines.extend(new_lines)
+                component_ids = set(relation_ids(new_lines, "product_id")) - seen_product_ids
+                if component_ids:
+                    component_rows = read_all(
+                        "component_products", "product.product", [["id", "in", sorted(component_ids)]],
+                        product_fields, ["id", "product_tmpl_id"],
+                        ["id", "product_tmpl_id", "description", "list_price", "standard_price", "uom_id"],
+                    )
+                    found = {row["id"]: row for row in component_rows if type(row.get("id")) is int}
+                    if component_ids - set(found):
+                        completeness["component_products"]["complete"] = False
+                        warnings.append(f"Unknown or hidden component product IDs: {sorted(component_ids - set(found))}")
+                    all_products.update(found)
+                    seen_product_ids.update(component_ids)
+                    supply_product_ids.update(found)
+                    pending.update(found)
+            all_template_ids = set(relation_ids(list(all_products.values()), "product_tmpl_id"))
+            missing_templates = all_template_ids - set(relation_ids(templates, "id"))
+            if missing_templates:
+                extra_templates = read_all(
+                    "component_templates", "product.template", [["id", "in", sorted(missing_templates)]],
+                    template_fields, ["id"], ["id", "description", "list_price", "standard_price", "uom_id"],
+                )
+                templates.extend(extra_templates)
+            unread_template_ids = sorted(all_template_ids - set(relation_ids(templates, "id")))
+            if unread_template_ids:
+                source = "component_templates" if "component_templates" in completeness else "product_templates"
+                completeness[source]["complete"] = False
+                warnings.append(f"Missing readable component template IDs: {unread_template_ids}")
+            product_templates = {
+                product_id: relation_id(row.get("product_tmpl_id"))
+                for product_id, row in all_products.items()
+            }
+            scoped_boms = []
+            for row in boms:
+                variant_id = relation_id(row.get("product_id"))
+                template_id = relation_id(row.get("product_tmpl_id"))
+                applicable = [variant_id] if variant_id in all_products else [
+                    product_id for product_id, product_template in product_templates.items()
+                    if product_template == template_id
+                ]
+                scoped_boms.append({"applicable_product_ids": sorted(applicable), **row})
+            boms = scoped_boms
+            bom_ids = sorted({row["id"] for row in boms if type(row.get("id")) is int})
+            if bom_ids:
+                operations = read_all(
+                    "operations", "mrp.routing.workcenter", [["bom_id", "in", bom_ids]],
+                    ["id", "bom_id", "workcenter_id", "name", "sequence", "time_cycle", "time_cycle_manual", "note"],
+                    ["id", "bom_id", "workcenter_id"],
+                    ["id", "bom_id", "workcenter_id", "time_cycle", "time_cycle_manual"],
+                )
+                center_ids = relation_ids(operations, "workcenter_id")
+                if center_ids:
+                    workcenters = read_all(
+                        "workcenters", "mrp.workcenter", [["id", "in", center_ids]],
+                        workcenter_fields, ["id"], workcenter_critical,
+                    )
+                    missing_center_ids = sorted(set(center_ids) - set(relation_ids(workcenters, "id")))
+                    if missing_center_ids:
+                        completeness["workcenters"]["complete"] = False
+                        warnings.append(f"Missing readable workcenter IDs: {missing_center_ids}")
+                    alternative_ids = sorted(set(many_relation_ids(workcenters, "alternative_workcenter_ids")) - set(center_ids))
+                    if alternative_ids:
+                        alternatives = read_all(
+                            "alternative_workcenters", "mrp.workcenter", [["id", "in", alternative_ids]],
+                            workcenter_fields, ["id"], workcenter_critical,
+                        )
+                        missing_alternative_ids = sorted(set(alternative_ids) - set(relation_ids(alternatives, "id")))
+                        if missing_alternative_ids:
+                            completeness["alternative_workcenters"]["complete"] = False
+                            warnings.append(f"Missing readable alternative workcenter IDs: {missing_alternative_ids}")
+                        workcenters.extend(alternatives)
+                        center_ids = sorted(set(center_ids) | set(alternative_ids))
+                    if capacity_relation_available:
+                        workcenter_capacities = read_all(
+                            "workcenter_capacities", "mrp.workcenter.capacity",
+                            ["&", ["workcenter_id", "in", center_ids], "|",
+                             ["product_id", "=", False], ["product_id", "in", sorted(supply_product_ids)]],
+                            ["id", "workcenter_id", "product_id", "product_uom_id", "capacity", "time_start", "time_stop"],
+                            ["id", "workcenter_id", "product_id"],
+                            ["id", "workcenter_id", "product_id", "product_uom_id", "capacity"],
+                        )
+                        completeness["workcenter_capacities"]["scope"] = (
+                            "Rows for related workcenters and requested/component products, plus generic product_id=False rows."
+                        )
+                    elif not direct_capacity_field:
+                        completeness["workcenters"]["complete"] = False
+                        completeness["workcenters"]["missing_required_fields"].append(
+                            "capacity/default_capacity/capacity_ids"
+                        )
+                        warnings.append("Workcenter capacity field is unavailable")
+                    shared_workorders = read_all(
+                        "shared_workorders", "mrp.workorder",
+                        ["&", ["workcenter_id", "in", center_ids], ["state", "not in", ["done", "cancel"]]],
+                        ["id", "workcenter_id", "production_id", "state", "date_start", "date_finished", "duration_expected", "duration"],
+                        ["id", "workcenter_id", "state"],
+                        ["id", "workcenter_id", "production_id", "state", "date_start", "date_finished", "duration_expected", "duration"],
+                    )
+                    completeness["shared_workorders"]["scope"] = (
+                        "all readable nonterminal work orders on related workcenters; no time horizon applied"
+                    )
+
+        supply_products = list(all_products.values())
+        supply_template_ids = set(relation_ids(supply_products, "product_tmpl_id"))
+        supplier_rows: list[dict[str, Any]] = []
+        if supply_template_ids:
+            supplier_rows = read_all(
+                "supplier_quotes", "product.supplierinfo",
+                ["&", ["product_tmpl_id", "in", sorted(supply_template_ids)],
+                 "|", ["product_id", "=", False], ["product_id", "in", sorted(supply_product_ids)]],
+                ["id", "product_id", "product_tmpl_id", "partner_id", "min_qty", "price", "delay",
+                 "date_start", "date_end", "currency_id", "company_id", "product_uom_id", "product_code", "product_name"],
+                ["id", "product_id", "product_tmpl_id", "partner_id"],
+                ["id", "product_id", "product_tmpl_id", "partner_id", "min_qty", "price", "delay",
+                 "date_start", "date_end", "currency_id", "company_id", "product_uom_id"],
+            )
+            product_templates = {
+                product_id: relation_id(row.get("product_tmpl_id"))
+                for product_id, row in all_products.items()
+            }
+            scoped_rows = []
+            for row in supplier_rows:
+                variant_id = relation_id(row.get("product_id"))
+                template_id = relation_id(row.get("product_tmpl_id"))
+                applicable = ([variant_id] if variant_id in supply_product_ids else [
+                    product_id for product_id, product_template in product_templates.items()
+                    if product_template == template_id
+                ])
+                scoped_rows.append({"applicable_product_ids": sorted(applicable), **row})
+            supplier_rows = scoped_rows
+
+        partner_ids = relation_ids(supplier_rows, "partner_id")
+        supplier_partners = read_all(
+            "supplier_partners", "res.partner", [["id", "in", partner_ids]], ["id", "name", "comment"], ["id", "name"],
+            ["id", "name", "comment"],
+        ) if partner_ids else []
+        missing_partner_ids = sorted(set(partner_ids) - set(relation_ids(supplier_partners, "id")))
+        if missing_partner_ids:
+            completeness["supplier_partners"]["complete"] = False
+            warnings.append(f"Missing readable supplier partner IDs: {missing_partner_ids}")
+        stock_quants = read_all(
+            "internal_stock", "stock.quant",
+            ["&", ["product_id", "in", sorted(supply_product_ids)], ["location_id.usage", "=", "internal"]],
+            ["id", "product_id", "location_id", "quantity", "reserved_quantity", "company_id"],
+            ["id", "product_id", "location_id"],
+            ["id", "product_id", "location_id", "quantity", "reserved_quantity", "company_id"],
+        ) if supply_product_ids else []
+
+        if not include_manufacturing:
+            completeness["manufacturing"] = {"complete": True, "status": "not_requested"}
+        complete = all(state.get("complete", False) for state in completeness.values())
+        return {
+            "success": True,
+            "tool": "read_supply_context",
+            "product_ids": ids,
+            "result": {
+                "products": products, "product_templates": templates,
+                "supplierinfo": supplier_rows, "supplier_partners": supplier_partners,
+                "stock_quants": stock_quants,
+                "quote_scope": {
+                    "product_relation_field": "applicable_product_ids",
+                    "eligibility": "Product relation only; evaluate each returned row's date_start, date_end, and company_id before choosing it.",
+                },
+                "stock_scope": "Raw internal stock.quant rows are not aggregated across company_id.",
+                "manufacturing": ({
+                    "boms": boms, "bom_lines": bom_lines, "operations": operations,
+                    "workcenters": workcenters, "workcenter_capacities": workcenter_capacities,
+                    "capacity_scope": (
+                        "Product-specific capacity rows are returned when configured; no row is not a zero capacity."
+                        if capacity_mode == "workcenter.capacity_ids" else
+                        "Capacity field used: " + capacity_mode
+                    ),
+                    "shared_workorders": shared_workorders,
+                    "component_products": [row for product_id, row in all_products.items() if product_id not in ids],
+                } if include_manufacturing else {"status": "not_requested"}),
+            },
+            "completeness": {"complete": complete, "sources": completeness},
+            "missing_product_ids": missing_product_ids,
+            "missing_fields": {key: value for key, value in missing_fields.items() if value},
+            "restricted_fields": {key: value for key, value in restricted_fields.items() if value},
+            "read_failures": list(dict.fromkeys(read_failures)),
+            "warnings": list(dict.fromkeys(warnings)),
+            "visibility_scope": (
+                "All returned rows are readable under the current identity and record rules. "
+                "Complete confirms stable pagination of that visible scope only; it cannot establish rows hidden by Odoo record rules."
+            ),
+            "_runtime_evidence": {"kind": "read_supply_context", "queries": evidence},
+        }
 
     def read_attachment(self, attachment_id: int, include_data: bool = True) -> dict[str, Any]:
         if attachment_id < 1:

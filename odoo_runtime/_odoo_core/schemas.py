@@ -121,6 +121,20 @@ class SearchRecordsResponse(ToolResponse):
     rerank: Optional[Dict[str, Any]] = Field(default=None, exclude_if=lambda value: value is None)
 
 
+class ReadSupplyContextResponse(ToolResponse):
+    """Identity-scoped product, supply, stock, and optional manufacturing facts."""
+
+    product_ids: Optional[List[int]] = None
+    result: Optional[Dict[str, Any]] = None
+    completeness: Optional[Dict[str, Any]] = None
+    missing_product_ids: Optional[List[int]] = None
+    missing_fields: Optional[Dict[str, List[str]]] = None
+    restricted_fields: Optional[Dict[str, List[str]]] = None
+    read_failures: Optional[List[str]] = None
+    warnings: Optional[List[str]] = None
+    visibility_scope: Optional[str] = None
+
+
 class ReadRecordResponse(ToolResponse):
     result: Optional[Dict[str, Any]] = Field(
         default=None, description="The record (field-ACL redacted)."

@@ -23,6 +23,7 @@ from odoo_runtime.reads import (
     NATIVE_READ_RESPONSES,
     READ_RESPONSES,
     NativeReads,
+    _summarize_field_metadata,
     normalize_read_arguments,
 )
 from odoo_runtime.world import SIDE_EFFECT_TOOLS, WorldStore
@@ -65,6 +66,63 @@ def _world_failed(world: WorldStore, operation: str, error: BaseException) -> No
     print(f"World {operation} failed open: {type(error).__name__}", file=sys.stderr)
 
 
+def _model_visible_native_read(name: str, arguments: dict, raw: object) -> object:
+    """Keep schema exploration compact while preserving exact explicit reads."""
+    if name != "get_model_fields" or not isinstance(raw, dict):
+        return raw
+    if arguments.get("field_names"):
+        return raw
+    result = raw.get("result")
+    if not isinstance(result, dict):
+        return raw
+    visible = dict(raw)
+    visible["result"] = {
+        field: (
+            metadata
+            if isinstance(metadata, dict)
+            and "selection_count" in metadata
+            and "selection" not in metadata
+            else _summarize_field_metadata(metadata)
+            if isinstance(metadata, dict)
+            else metadata
+        )
+        for field, metadata in result.items()
+    }
+    if visible["result"] != result:
+        visible["summary"] = True
+    return visible
+
+
+def _receipt_unavailable_result(
+    result: AgentToolResult, *, fallback_payload: dict | None = None,
+) -> AgentToolResult:
+    """Tell the model when the World receipt could not be persisted."""
+    visible = fallback_payload
+    if visible is None:
+        try:
+            visible = json.loads(result.text)
+        except (TypeError, json.JSONDecodeError):
+            visible = {"success": False, "error": "World receipt unavailable"}
+    visible = dict(visible) if isinstance(visible, dict) else {
+        "result": visible,
+    }
+    visible["receipt_status"] = "unavailable"
+    updated = result.model_copy(deep=True)
+    updated.content = [TextContent(text=to_json(visible, fallback=str).decode())]
+    details = dict(updated.details or {})
+    structured = details.get("structuredContent")
+    if fallback_payload is not None:
+        structured = visible
+    elif isinstance(structured, dict):
+        structured = dict(structured)
+        structured["receipt_status"] = "unavailable"
+    else:
+        structured = visible
+    details["structuredContent"] = structured
+    updated.details = details
+    return updated
+
+
 def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                 world: WorldStore | None = None,
                 actions: NativeActions | None = None,
@@ -97,9 +155,14 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                 stream.write(json.dumps(event) + "\n")
             token = READ_CALL_ID.set(call_id)
             observation = None
+            source_raw = None
+            runtime_evidence = None
+            world_receipt_unavailable = False
             side_effect_attempted = name in SIDE_EFFECT_TOOLS
             try:
-                if world is not None and name in READ_RESPONSES:
+                if world is not None and (
+                    name in READ_RESPONSES or (direct_read and name != "health_check")
+                ):
                     requested_instance = arguments.get("instance")
                     identity = None
                     identity_available = True
@@ -108,20 +171,26 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                             identity = native.identity_context(requested_instance)
                         except Exception as exc:
                             identity_available = False
+                            world_receipt_unavailable = True
                             _world_failed(world, "identity", exc)
                     if identity_available:
                         try:
                             observation = world.begin(call_id, name, dict(arguments), event["backend"], identity=identity)
                         except Exception as exc:
+                            world_receipt_unavailable = True
                             _world_failed(world, "begin", exc)
                 if direct_read:
                     normalized = normalize_read_arguments(name, dict(arguments))
                     raw = await asyncio.to_thread(native.call, name, normalized)
-                    structured = native_reads[name].model_validate(raw).model_dump(
+                    source_raw = dict(raw) if isinstance(raw, dict) else raw
+                    if isinstance(source_raw, dict):
+                        runtime_evidence = source_raw.pop("_runtime_evidence", None)
+                    visible_raw = _model_visible_native_read(name, normalized, source_raw)
+                    structured = native_reads[name].model_validate(visible_raw).model_dump(
                         mode="json", by_alias=True
                     )
                     result = AgentToolResult(
-                        content=to_json(raw, fallback=str).decode(),
+                        content=to_json(visible_raw, fallback=str).decode(),
                         details={"structuredContent": structured, "meta": None},
                     )
                 elif direct_action:
@@ -147,6 +216,14 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                     )
                 else:
                     result = await tool.execute(call_id, arguments, signal, on_update)
+                if world_receipt_unavailable:
+                    result = _receipt_unavailable_result(
+                        result,
+                        fallback_payload=(
+                            source_raw if name == "get_model_fields" and isinstance(source_raw, dict)
+                            else None
+                        ),
+                    )
                 if name == "health_check":
                     # A0: keep process-local counters in receipts, not model context.
                     # Policy/permission fields remain visible and unchanged in both arms.
@@ -177,13 +254,25 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                     observation = None
                     try:
                         metadata = native.world_metadata(name, normalized) if direct else {}
-                        evidence = native.world_rpc_evidence(call_id) if direct else None
+                        rpc_evidence = native.world_rpc_evidence(call_id) if direct else None
                         world.finish(
                             completed, result.text, field_metadata=metadata,
-                            rpc_evidence=evidence,
+                            rpc_evidence=rpc_evidence,
+                            raw_result=source_raw,
+                            evidence=runtime_evidence,
                         )
                     except Exception as exc:
+                        event["world_receipt_error"] = type(exc).__name__
+                        world_receipt_unavailable = True
+                        result = _receipt_unavailable_result(
+                            result,
+                            fallback_payload=(
+                                source_raw if name == "get_model_fields" and isinstance(source_raw, dict)
+                                else None
+                            ),
+                        )
                         _world_failed(world, "finish", exc)
+                event["result_sha256"] = hashlib.sha256(result.text.encode()).hexdigest()
                 if direct_read:
                     try:
                         event["native_telemetry"] = native.telemetry()

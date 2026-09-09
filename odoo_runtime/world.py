@@ -21,7 +21,7 @@ from odoo_runtime._odoo_core.odoo_client import (
 READ_TOOLS = frozenset({
     "get_odoo_profile", "get_model_fields", "search_records", "read_record",
     "list_instances", "list_models", "schema_catalog", "read_attachment",
-    "aggregate_records", "search_employee", "search_holidays",
+    "aggregate_records", "search_employee", "search_holidays", "read_supply_context",
 })
 SIDE_EFFECT_TOOLS = frozenset({"execute_approved_write", "chatter_post", "execute_method"})
 RELATION_TYPES = frozenset({"many2one", "one2many", "many2many"})
@@ -201,7 +201,9 @@ class WorldStore:
     def finish(self, handle: dict[str, Any], result_text: str | None = None, *,
                error: BaseException | None = None,
                field_metadata: dict[str, dict[str, Any]] | None = None,
-               rpc_evidence: dict[str, Any] | None = None) -> dict[str, Any]:
+               rpc_evidence: dict[str, Any] | None = None,
+               raw_result: Any | None = None,
+               evidence: Any | None = None) -> dict[str, Any]:
         with self._lock:
             call_id = str(handle["call_id"])
             pending = self._pending.pop(call_id, None)
@@ -245,6 +247,7 @@ class WorldStore:
                     "reason": "the separate MCP process does not receive the Pi tool_call_id",
                 }
             receipt_id = f"obs-{pending['sequence']:06d}-{hashlib.sha256(call_id.encode()).hexdigest()[:10]}"
+            stored_raw = payload if raw_result is None else raw_result
             receipt = {
                 "schema_version": 1, "type": "world_observation",
                 "receipt_id": receipt_id, "sequence": pending["sequence"],
@@ -261,7 +264,7 @@ class WorldStore:
                         "status_code": None, "odoo_code": None, "retryable": False}
                        if success else error_details),
                 },
-                "raw_result": _scrub_payload(payload, error_strings=not success),
+                "raw_result": _scrub_payload(_json_copy(stored_raw), error_strings=not success),
                 "delivery": self._delivery(payload),
                 "targets": self._targets(pending["tool"], pending["arguments"], payload,
                                          field_metadata or {}, receipt_id),
@@ -272,6 +275,8 @@ class WorldStore:
                     "ordering": "request-start sequence; overlapping requests are not a snapshot",
                 },
             }
+            if evidence is not None:
+                receipt["evidence"] = _scrub_payload(_json_copy(evidence), error_strings=not success)
             self._merge(receipt)
             self._append(self.path, receipt)
             self._receipts[receipt_id] = receipt

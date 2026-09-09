@@ -76,6 +76,18 @@ class DynamicToolsTest(unittest.TestCase):
                 count(1).__next__,
             )
 
+    def test_optional_native_supply_tool_is_published_when_present(self) -> None:
+        tools = fake_tools(set())
+        tools.append(AgentTool(
+            name="mcp_odoo_read_supply_context", label="read_supply_context",
+            description="supply facts", parameters={"type": "object"}, execute_fn=tools[0].execute_fn,
+        ))
+        with tempfile.TemporaryDirectory() as directory:
+            controller = DynamicToolController(
+                tools, Path(directory) / "dynamic-tools.jsonl", count(1).__next__,
+            )
+            self.assertIn("mcp_odoo_read_supply_context", {tool.name for tool in controller.tools})
+
     def test_discovery_and_next_turn_publication_keep_every_group_reachable(
         self,
     ) -> None:

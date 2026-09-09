@@ -67,8 +67,8 @@ class CleanHarnessTest(unittest.TestCase):
             (ROOT / "configs" / "capabilities.json").read_text(encoding="utf-8")
         )
         self.assertEqual(inventory["compiler"], "out_of_scope")
-        self.assertEqual(len(inventory["tools"]), 41)
-        self.assertEqual(len({row["name"] for row in inventory["tools"]}), 41)
+        self.assertEqual(len(inventory["tools"]), 42)
+        self.assertEqual(len({row["name"] for row in inventory["tools"]}), 42)
         self.assertEqual(len(inventory["prompts"]), 11)
         self.assertEqual(len(inventory["resources"]), 4)
         self.assertEqual(
@@ -157,10 +157,10 @@ class CleanHarnessTest(unittest.TestCase):
             }
             for tool in tools
         ]
-        self.assertEqual(len(tools), 44)
+        self.assertEqual(len(tools), 45)
         self.assertEqual(
             hashlib.sha256(json.dumps(contract, sort_keys=True).encode()).hexdigest(),
-            "f70746bdd6afebe10ea018d6ac5521caf1e66fb375480ce4d5d4f72bad732c56",
+            "7da37c8005b0ccb70e7052fab7009e16b59fcaa3eb316ed2f6d27b16e9d57e34",
         )
 
 

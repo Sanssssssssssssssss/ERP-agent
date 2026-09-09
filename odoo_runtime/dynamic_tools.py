@@ -29,6 +29,10 @@ BASE_TOOLS = frozenset(
     }
 )
 
+# Published with the compact base when the native catalog supplies it.  Keeping
+# this optional preserves MCP-only inventories that predate the native helper.
+OPTIONAL_NATIVE_BASE_TOOLS = frozenset({"read_supply_context"})
+
 CAPABILITY_GROUPS = {
     "actions": {
         "description": "Preview, validate, execute, and verify Odoo mutations.",
@@ -140,7 +144,7 @@ class DynamicToolController:
             name for group in CAPABILITY_GROUPS.values() for name in group["tools"]
         }
         missing = sorted(required - available)
-        unmanaged = sorted(available - required)
+        unmanaged = sorted(available - required - OPTIONAL_NATIVE_BASE_TOOLS)
         duplicates = sorted(name for name, total in Counter(names).items() if total > 1)
         if missing or unmanaged or duplicates:
             raise RuntimeError(
@@ -156,7 +160,7 @@ class DynamicToolController:
 
     @property
     def tools(self) -> tuple[AgentTool, ...]:
-        selected = BASE_TOOLS | {
+        selected = (BASE_TOOLS | (OPTIONAL_NATIVE_BASE_TOOLS & {_base_name(tool.name) for tool in self._all})) | {
             name
             for group_id in self._active
             for name in CAPABILITY_GROUPS[group_id]["tools"]
