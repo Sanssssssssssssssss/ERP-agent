@@ -36,6 +36,7 @@ from odoo_runtime.reads import NativeReads
 from odoo_runtime.sops import build_sop_tools
 from odoo_runtime.store import ActionStore
 from odoo_runtime.world import WorldStore
+from odoo_runtime.world_tools import build_world_tools
 
 CONTEXT_WINDOW = 128_000
 MODEL_COMPAT = {
@@ -57,6 +58,13 @@ DYNAMIC_TOOL_POLICY = (
     "Select the complete optional capability set needed for the task. A configured "
     "tool set appears on the next model turn; a same-response call to a newly "
     "selected tool is rejected."
+)
+BUSINESS_EXECUTION_POLICY = (
+    " Determine the user-required scope and constraints before acting; for fulfillment, "
+    "procurement, or manufacturing work, determine the supply-and-demand gap. Do not "
+    "reinterpret established facts merely because adjacent records or another tool reveal "
+    "more data. Reuse facts already read and their observation receipts when there is no "
+    "new evidence; refresh Odoo only when current state is needed."
 )
 McpToolSet = None
 
@@ -291,6 +299,10 @@ async def run(args: argparse.Namespace) -> None:
                     if sop_mode == "controlled"
                     else ()
                 ),
+                *(build_world_tools(
+                    world,
+                    identity_context=(native_runtime.identity_context if native_runtime is not None else None),
+                ) if world is not None else ()),
             ]
             if tool_mode == "dynamic":
                 dynamic_tools = DynamicToolController(
@@ -347,6 +359,7 @@ async def run(args: argparse.Namespace) -> None:
                     extensions_enabled=False,
                     append_system_prompt=(
                         MCP_ONLY_POLICY
+                        + BUSINESS_EXECUTION_POLICY
                         + (SOP_POLICY if sop_mode == "controlled" else "")
                         + (DYNAMIC_TOOL_POLICY if tool_mode == "dynamic" else "")
                     ),

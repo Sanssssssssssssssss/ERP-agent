@@ -1145,10 +1145,19 @@ class NativeActionCheckpointTests(unittest.TestCase):
                 source, directory / "backends.jsonl", actions=actions
             )
             self.assertTrue(all(tool.execution_mode == "sequential" for tool in routed))
-            self.assertEqual(
-                [(tool.name, tool.label, tool.description, tool.parameters) for tool in source],
-                [(tool.name, tool.label, tool.description, tool.parameters) for tool in routed],
-            )
+            for original, routed_tool in zip(source, routed):
+                self.assertEqual(
+                    (routed_tool.name, routed_tool.label, routed_tool.parameters),
+                    (original.name, original.label, original.parameters),
+                )
+                if routed_tool.name in {
+                    "mcp_odoo_validate_write",
+                    "mcp_odoo_execute_approved_write",
+                }:
+                    self.assertIn("execution_request", routed_tool.description)
+                    self.assertIn("action_id", routed_tool.description)
+                else:
+                    self.assertEqual(routed_tool.description, original.description)
             preview = next(
                 tool for tool in routed if tool.name == "mcp_odoo_preview_write"
             )
@@ -1156,6 +1165,59 @@ class NativeActionCheckpointTests(unittest.TestCase):
                 "call-preview", {"model": "res.partner", "operation": "create", "values": {"name": "Ada"}}
             )
             self.assertTrue(json.loads(result.text)["success"])
+            validate = next(
+                tool for tool in routed if tool.name == "mcp_odoo_validate_write"
+            )
+            execute_write = next(
+                tool for tool in routed if tool.name == "mcp_odoo_execute_approved_write"
+            )
+            untrusted = json.loads(
+                (await validate.execute(
+                    "call-unstored",
+                    {
+                        "model": "res.partner",
+                        "operation": "create",
+                        "values": {"name": "Unstored"},
+                        "fields_metadata": runtime._metadata("res.partner"),
+                        "use_live_metadata": False,
+                    },
+                )).text
+            )
+            self.assertTrue(untrusted["success"])
+            self.assertFalse(untrusted["approval_status"]["stored"])
+            self.assertEqual(untrusted["approval"]["values"], {"name": "Unstored"})
+            with patch(
+                "integration.odoo_tools.BusinessFacts.inspect",
+                return_value={"facts": [{"source": "trusted"}], "issues": []},
+            ) as inspect:
+                validated_result = await validate.execute(
+                    "call-validate",
+                    {
+                        "model": "purchase.order",
+                        "operation": "create",
+                        "values": {"name": "PO-1"},
+                    },
+                )
+            validated = json.loads(validated_result.text)
+            inspected = inspect.call_args.args[0]
+            self.assertEqual(inspected["values"], {"name": "PO-1"})
+            self.assertEqual(validated["business_facts"], [{"source": "trusted"}])
+            self.assertEqual(validated["approval"], validated["execution_request"]["approval"])
+            self.assertEqual(set(validated["approval"]), {"action_id", "token"})
+            self.assertNotIn("values", validated["approval"])
+            action = actions.store.get(validated["approval"]["action_id"])
+            self.assertEqual(action["payload"]["values"], {"name": "PO-1"})
+            self.assertEqual(
+                validated_result.details["structuredContent"]["approval"],
+                validated["approval"],
+            )
+            with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1"}):
+                executed = json.loads(
+                    (await execute_write.execute(
+                        "call-execute", validated["execution_request"]
+                    )).text
+                )
+            self.assertTrue(executed["success"], executed)
             execute = next(
                 tool for tool in routed if tool.name == "mcp_odoo_execute_method"
             )
@@ -1163,13 +1225,13 @@ class NativeActionCheckpointTests(unittest.TestCase):
                 "call-method", {"model": "res.company", "method": "context_today"}
             )
             self.assertEqual(mcp_calls, [])
-            self.assertEqual(runtime.invalidations, 1)
+            self.assertEqual(runtime.invalidations, 2)
             starts = [
                 json.loads(line)
                 for line in (directory / "backends.jsonl").read_text().splitlines()
                 if json.loads(line)["event"] == "start"
             ]
-            self.assertEqual([row["backend"] for row in starts], ["native", "native"])
+            self.assertEqual([row["backend"] for row in starts], ["native"] * 5)
 
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(check(Path(directory)))

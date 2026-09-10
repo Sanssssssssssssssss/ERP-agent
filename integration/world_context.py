@@ -194,25 +194,25 @@ def project_messages(world: WorldStore, messages: Iterable[Any]) -> list[Any]:
 
 
 def project_read_history(world: WorldStore, messages: Iterable[Any]) -> list[Any]:
-    """Losslessly encode consumed read rows for the next provider request."""
+    """Project old consumed reads while retaining two recent observation rounds."""
     original = list(messages)
     try:
         if not world.telemetry().get("projection_enabled", True):
             return original
         output = list(original)
-        consumed = [False] * len(original)
-        assistant_seen = False
+        consumed_after = [0] * len(original)
+        assistant_seen = 0
         for index in range(len(original) - 1, -1, -1):
             message = original[index]
             if (isinstance(message, AssistantMessage)
                     and message.stop_reason not in {"error", "aborted"}):
-                assistant_seen = True
+                assistant_seen += 1
             elif isinstance(message, ToolResultMessage):
-                consumed[index] = assistant_seen
+                consumed_after[index] = assistant_seen
         compacted: list[str] = []
         original_bytes = projected_bytes = 0
         for index, message in enumerate(original):
-            if (not consumed[index] or not isinstance(message, ToolResultMessage)
+            if (not consumed_after[index] or not isinstance(message, ToolResultMessage)
                     or message.is_error or _native_tool_name(message.tool_name) not in READ_TOOLS):
                 continue
             receipt = world.receipt_for_call(message.tool_call_id)
@@ -224,18 +224,46 @@ def project_read_history(world: WorldStore, messages: Iterable[Any]) -> list[Any
                 payload = json.loads(message.text)
             except (TypeError, json.JSONDecodeError):
                 continue
-            if isinstance(payload, dict) and "world_projection" not in payload:
+            if not isinstance(payload, dict) or "world_projection" in payload:
+                continue
+            compact = None
+            # Keep recently consumed observations in the provider context.  Older
+            # large reads can be recalled by identity-scoped reference; this is a
+            # display policy, not a limit on tools or model turns.
+            if consumed_after[index] > 2:
+                reference = world.artifact_reference(message.tool_call_id, message.text)
+                if reference is not None:
+                    candidate = {
+                        "success": True,
+                        "world_observation": {
+                            "kind": "externalized_read",
+                            **reference,
+                            "recall_tools": ["read_observation", "search_observations"],
+                            "historical_notice": (
+                                "This is a historical read snapshot. Refresh Odoo when "
+                                "current state matters after a write."
+                            ),
+                        },
+                    }
+                    encoded = json.dumps(candidate, ensure_ascii=False, separators=(",", ":"))
+                    if len(encoded.encode()) < len(message.text.encode()):
+                        compact = encoded
+                elif world.observation_integrity(message.tool_call_id) == "corrupt":
+                    # The receipt cannot prove the stored model-visible payload;
+                    # retain the original provider message rather than substituting it.
+                    continue
+            if compact is None:
                 compact = _table_projection(
                     payload, source_text=message.text,
                     receipt_id=receipt["receipt_id"], result_sha256=receipt["result_sha256"],
                     schema=_native_tool_name(message.tool_name) == "get_model_fields",
                 )
-                if compact is None:
-                    continue
-                output[index] = message.model_copy(update={"content": [TextContent(text=compact)]}, deep=True)
-                original_bytes += len(message.text.encode())
-                projected_bytes += len(compact.encode())
-                compacted.append(message.tool_call_id)
+            if compact is None:
+                continue
+            output[index] = message.model_copy(update={"content": [TextContent(text=compact)]}, deep=True)
+            original_bytes += len(message.text.encode())
+            projected_bytes += len(compact.encode())
+            compacted.append(message.tool_call_id)
         world.record_projection(compacted, original_bytes, projected_bytes)
         return output
     except Exception as exc:  # observation must not break the provider request

@@ -202,6 +202,22 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                         if isinstance(payload, dict):
                             report = await asyncio.to_thread(business_facts.inspect, payload)
                             raw = attach_business_facts(raw, report)
+                    if name == "validate_write" and raw.get("success"):
+                        status = raw.get("approval_status")
+                        request = raw.get("execution_request")
+                        reference = request.get("approval") if isinstance(request, dict) else None
+                        if (
+                            isinstance(status, dict)
+                            and status.get("stored")
+                            and status.get("durable")
+                            and isinstance(reference, dict)
+                            and isinstance(reference.get("action_id"), str)
+                            and isinstance(reference.get("token"), str)
+                            and reference["action_id"]
+                            and reference["token"]
+                        ):
+                            raw = dict(raw)
+                            raw["approval"] = dict(reference)
                     result = AgentToolResult(
                         content=to_json(raw, fallback=str).decode(),
                         details={"structuredContent": raw, "meta": None},
@@ -320,9 +336,22 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                 except OSError:
                     print("Tool completion receipt could not be saved", file=sys.stderr)
 
+        description = tool.description
+        if direct_action and name == "validate_write":
+            description += (
+                " A successful persisted validation returns execution_request with "
+                "action_id and token; pass it unchanged to execute_approved_write."
+            )
+        elif direct_action and name == "execute_approved_write":
+            description += (
+                " Use execution_request with action_id and token from a successful "
+                "persisted validation unchanged; the runtime holds the canonical payload, "
+                "so do not reconstruct values or token."
+            )
         routed.append(replace(
             tool,
             execute_fn=execute,
+            description=description,
             execution_mode="sequential" if name in ACTION_TOOLS else tool.execution_mode,
         ))
     if native is not None:

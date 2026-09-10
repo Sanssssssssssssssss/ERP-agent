@@ -25,6 +25,13 @@ READ_TOOLS = frozenset({
 })
 SIDE_EFFECT_TOOLS = frozenset({"execute_approved_write", "chatter_post", "execute_method"})
 RELATION_TYPES = frozenset({"many2one", "one2many", "many2many"})
+ARTIFACT_REFERENCE_BYTES = 4096
+INLINE_VALUE_BYTES = 768
+MAX_READ_STRING_CHARS = 4096
+
+
+class ObservationIntegrityError(ValueError):
+    """A stored model-visible payload cannot safely be replayed."""
 
 
 def _now() -> str:
@@ -248,6 +255,7 @@ class WorldStore:
                 }
             receipt_id = f"obs-{pending['sequence']:06d}-{hashlib.sha256(call_id.encode()).hexdigest()[:10]}"
             stored_raw = payload if raw_result is None else raw_result
+            visible_payload = _scrub_payload(_json_copy(payload), error_strings=not success)
             receipt = {
                 "schema_version": 1, "type": "world_observation",
                 "receipt_id": receipt_id, "sequence": pending["sequence"],
@@ -265,6 +273,11 @@ class WorldStore:
                        if success else error_details),
                 },
                 "raw_result": _scrub_payload(_json_copy(stored_raw), error_strings=not success),
+                # This is the scrubbed payload that was visible to the model.  Native
+                # adapters may retain richer raw_result evidence, so never claim its
+                # contents are covered by result_sha256.
+                "visible_payload": visible_payload,
+                "visible_payload_sha256": _sha(visible_payload),
                 "delivery": self._delivery(payload),
                 "targets": self._targets(pending["tool"], pending["arguments"], payload,
                                          field_metadata or {}, receipt_id),
@@ -323,6 +336,425 @@ class WorldStore:
         with self._lock:
             value = self._by_call.get(call_id)
             return copy.deepcopy(value) if value else None
+
+    def artifact_reference(self, call_id: str, result_text: str) -> dict[str, Any] | None:
+        """Return a small, identity-scoped reference after a large visible read."""
+        with self._lock:
+            receipt = self._by_call.get(call_id)
+            integrity, _payload = self._visible_payload(receipt)
+            if (not receipt or receipt["tool"] not in READ_TOOLS
+                    or not receipt["outcome"]["success"]
+                    or integrity != "verified"
+                    or len(result_text.encode()) < ARTIFACT_REFERENCE_BYTES
+                    or receipt.get("result_sha256") != hashlib.sha256(result_text.encode()).hexdigest()):
+                return None
+            return self._observation_summary(receipt)
+
+    def observation_integrity(self, call_id: str) -> str:
+        with self._lock:
+            return self._visible_payload(self._by_call.get(call_id))[0]
+
+    def search_observations(
+        self, identity: dict[str, Any], *, query: str | None = None,
+        tool: str | None = None, model: str | None = None, cursor: int = 0,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """Find receipt summaries for exactly one credential-scoped identity."""
+        with self._lock:
+            selected = self._authorized_receipts(identity)
+            needle = query.casefold().strip() if isinstance(query, str) else ""
+            rows = []
+            for receipt in selected:
+                integrity, searchable_payload = self._visible_payload(receipt)
+                if integrity != "verified":
+                    continue
+                summary = self._observation_summary(receipt)
+                if tool and summary["tool"] != tool:
+                    continue
+                if model and summary.get("model") != model:
+                    continue
+                haystack = json.dumps(summary, ensure_ascii=False).casefold()
+                matches = []
+                if needle:
+                    matches = self._keyword_matches(searchable_payload, needle)
+                    if needle not in haystack and not matches:
+                        continue
+                if matches:
+                    summary["matches"] = matches
+                rows.append(summary)
+            return self._page(rows, cursor, limit)
+
+    def read_observation(
+        self, identity: dict[str, Any], receipt_id: str, *, path: str | None = None,
+        query: str | None = None, cursor: int = 0, limit: int = 20,
+        fields: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Read a bounded part of a receipt's model-visible payload."""
+        with self._lock:
+            receipt = self._receipts.get(receipt_id)
+            if receipt is None:
+                raise KeyError("Unknown observation reference")
+            if receipt["identity"].get("identity_id") != identity.get("identity_id"):
+                raise PermissionError("Observation belongs to a different identity")
+            integrity, payload = self._visible_payload(receipt)
+            if integrity != "verified":
+                raise ObservationIntegrityError(
+                    "Stored visible payload is legacy/unverified and cannot be replayed"
+                    if integrity == "legacy_unverified" else "Stored visible payload hash does not match"
+                )
+            source = "visible_payload"
+            resolved_path = path or ("$.result" if isinstance(payload, dict) and "result" in payload else "$")
+            value = self._json_path(payload, resolved_path)
+            if isinstance(value, list):
+                entries = list(enumerate(value))
+                if query:
+                    needle = query.casefold()
+                    entries = [
+                        (original_index, item) for original_index, item in entries
+                        if needle in json.dumps(item, ensure_ascii=False).casefold()
+                    ]
+                if fields:
+                    entries = [(original_index, self._select_fields(item, fields))
+                               for original_index, item in entries]
+                return {
+                    "observation": self._observation_summary(receipt),
+                    "payload_source": source, "integrity": integrity,
+                    "path": resolved_path,
+                    "result": self._page_located(entries, cursor, limit, resolved_path),
+                }
+            if query:
+                value = self._keyword_filter(value, query)
+            if fields:
+                value = self._select_fields(value, fields)
+            page = self._page_value(value, cursor, limit, resolved_path)
+            return {
+                "observation": self._observation_summary(receipt),
+                "payload_source": source,
+                "integrity": integrity,
+                "path": resolved_path,
+                **page,
+            }
+
+    def _authorized_receipts(self, identity: dict[str, Any]) -> list[dict[str, Any]]:
+        identity_id = identity.get("identity_id")
+        return [
+            receipt for receipt in sorted(self._receipts.values(), key=lambda item: item["sequence"])
+            if (receipt["identity"].get("identity_id") == identity_id
+                and receipt.get("outcome", {}).get("success") is True
+                and receipt.get("tool") in READ_TOOLS)
+        ]
+
+    @staticmethod
+    def _visible_payload(receipt: dict[str, Any] | None) -> tuple[str, Any]:
+        if not receipt:
+            return "missing", None
+        payload = receipt.get("visible_payload")
+        expected = receipt.get("visible_payload_sha256")
+        if not isinstance(expected, str):
+            return "legacy_unverified", None
+        if _sha(payload) != expected:
+            return "corrupt", None
+        return "verified", payload
+
+    @staticmethod
+    def _keyword_matches(value: Any, needle: str, path: str = "$", *, maximum: int = 3) -> list[dict[str, str]]:
+        """Literal receipt grep with paths; results are small indexes, never payload pages."""
+        matches: list[dict[str, str]] = []
+
+        def visit(item: Any, item_path: str) -> None:
+            if len(matches) >= maximum:
+                return
+            if isinstance(item, dict):
+                for key, child in item.items():
+                    child_path = WorldStore._path_key(item_path, key)
+                    if needle in key.casefold():
+                        matches.append({"path": child_path, "snippet": key[:160]})
+                        if len(matches) >= maximum:
+                            return
+                    visit(child, child_path)
+                    if len(matches) >= maximum:
+                        return
+                return
+            if isinstance(item, list):
+                for index, child in enumerate(item):
+                    visit(child, WorldStore._path_index(item_path, index))
+                    if len(matches) >= maximum:
+                        return
+                return
+            text = str(item)
+            position = text.casefold().find(needle)
+            if position >= 0:
+                start = max(0, position - 60)
+                end = min(len(text), position + len(needle) + 100)
+                matches.append({
+                    "path": item_path,
+                    "snippet": text[start:end] + ("…" if end < len(text) else ""),
+                })
+
+        visit(value, path)
+        return matches
+
+    def _observation_summary(self, receipt: dict[str, Any]) -> dict[str, Any]:
+        request = receipt.get("request") if isinstance(receipt.get("request"), dict) else {}
+        identity = receipt.get("identity") if isinstance(receipt.get("identity"), dict) else {}
+        identity_id = identity.get("identity_id")
+        generation = receipt.get("generation")
+        payload = receipt.get("visible_payload", receipt.get("raw_result"))
+        return {
+            "observation_ref": receipt["receipt_id"],
+            "tool": receipt.get("tool"),
+            "success": receipt.get("outcome", {}).get("success") is True,
+            "model": request.get("model"),
+            "record_id": request.get("record_id"),
+            "source_tool_call_id": receipt.get("call_id"),
+            "request": self._request_summary(request),
+            "result_sha256": receipt.get("result_sha256"),
+            "response": self._response_summary(payload, receipt.get("delivery")),
+            "paths": self._payload_paths(payload),
+            "preview": self._payload_preview(payload),
+            "access_scope": {
+                "same_identity_required": True,
+                "identity_id": identity_id,
+                "instance": identity.get("instance"),
+            },
+            "freshness": {
+                **copy.deepcopy(receipt.get("freshness", {})),
+                "snapshot_at": receipt.get("finished_at"),
+                "historical_snapshot": True,
+                "stale_after_write": generation != self._generation.get(identity_id, 0),
+                "live_refresh_required_for_current_state": generation != self._generation.get(identity_id, 0),
+            },
+        }
+
+    @staticmethod
+    def _request_summary(request: dict[str, Any]) -> dict[str, Any]:
+        allowed = ("instance", "model", "record_id", "fields", "domain", "limit", "offset", "order")
+        return {
+            key: WorldStore._request_value(request[key])
+            for key in allowed if key in request
+        }
+
+    @staticmethod
+    def _request_value(value: Any) -> Any:
+        encoded = json.dumps(value, ensure_ascii=False, default=str).encode()
+        if len(encoded) <= INLINE_VALUE_BYTES:
+            return _json_copy(value)
+        descriptor = WorldStore._value_descriptor(value, "original_tool_request")
+        descriptor.pop("path", None)
+        descriptor["source"] = "original_tool_request"
+        return descriptor
+
+    @staticmethod
+    def _response_summary(payload: Any, delivery: Any) -> dict[str, Any]:
+        envelope: dict[str, Any] = {}
+        if isinstance(payload, dict):
+            for key in (
+                "success", "count", "has_more", "offset", "next_offset", "truncated",
+                "warnings", "redacted_fields", "fields_used", "metadata_used", "acl",
+            ):
+                if key in payload:
+                    envelope[key] = WorldStore._bounded_value(payload[key], f"$.{key}")
+            result = payload.get("result")
+            if isinstance(result, list):
+                envelope["result_returned_items"] = len(result)
+            elif isinstance(result, dict):
+                envelope["result_returned_fields"] = len(result)
+        if isinstance(delivery, dict):
+            envelope["delivery"] = {
+                key: _json_copy(delivery[key]) for key in (
+                    "truncated", "truncation_reason", "metadata_cache_hit",
+                ) if key in delivery
+            }
+        return envelope
+
+    @staticmethod
+    def _payload_paths(payload: Any) -> list[dict[str, Any]]:
+        if not isinstance(payload, dict):
+            return [{"path": "$", **WorldStore._value_descriptor(payload, "$")}]
+        return [
+            {"path": f"$.{key}", **WorldStore._value_descriptor(value, f"$.{key}")}
+            for key, value in payload.items()
+        ]
+
+    @classmethod
+    def _payload_preview(cls, payload: Any) -> Any:
+        """Return a bounded locator, never a replacement for the stored payload."""
+        if not isinstance(payload, dict):
+            return None
+        result = payload.get("result")
+        if isinstance(result, list):
+            return [cls._preview_row(item) for item in result[:2]]
+        if isinstance(result, dict):
+            return cls._preview_row(result)
+        return None
+
+    @staticmethod
+    def _preview_row(value: Any) -> Any:
+        if not isinstance(value, dict):
+            if isinstance(value, str):
+                return value[:160] + ("…" if len(value) > 160 else "")
+            return _json_copy(value) if isinstance(value, (int, float, bool)) or value is None else type(value).__name__
+        preview: dict[str, Any] = {}
+        for key in sorted(value)[:8]:
+            item = value[key]
+            if isinstance(item, str):
+                preview[key] = item[:160] + ("…" if len(item) > 160 else "")
+            elif isinstance(item, (str, int, float, bool)) or item is None:
+                preview[key] = _json_copy(item)
+            elif isinstance(item, list):
+                preview[key] = {"type": "list", "length": len(item)}
+            elif isinstance(item, dict):
+                preview[key] = {"type": "object", "fields": sorted(item)[:8]}
+            else:
+                preview[key] = {"type": type(item).__name__}
+        return preview
+
+    @staticmethod
+    def _page(rows: list[Any], cursor: int, limit: int) -> dict[str, Any]:
+        if type(cursor) is not int or cursor < 0 or type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("cursor must be non-negative and limit must be 1..100")
+        page = rows[cursor:cursor + limit]
+        next_cursor = cursor + len(page)
+        return {"items": _json_copy(page), "cursor": cursor,
+                "next_cursor": next_cursor if next_cursor < len(rows) else None, "total": len(rows)}
+
+    def _page_value(self, value: Any, cursor: int, limit: int, path: str) -> dict[str, Any]:
+        if isinstance(value, list):
+            page = self._page(value, cursor, limit)
+            page["items"] = [
+                self._bounded_value(item, self._path_index(path, cursor + index))
+                for index, item in enumerate(page["items"])
+            ]
+            return {"result": page}
+        if isinstance(value, dict):
+            rows = [
+                {"key": key, "value": self._bounded_value(item, self._path_key(path, key))}
+                for key, item in value.items()
+            ]
+            return {"result": self._page(rows, cursor, limit)}
+        if isinstance(value, str):
+            if type(cursor) is not int or cursor < 0 or type(limit) is not int or not 1 <= limit <= MAX_READ_STRING_CHARS:
+                raise ValueError(f"string cursor must be non-negative and limit must be 1..{MAX_READ_STRING_CHARS}")
+            text = value[cursor:cursor + limit]
+            next_cursor = cursor + len(text)
+            return {"result": {
+                "kind": "string_chunk", "text": text, "cursor": cursor,
+                "next_cursor": next_cursor if next_cursor < len(value) else None,
+                "total_characters": len(value),
+            }}
+        if cursor:
+            raise ValueError("cursor only applies to array or object results")
+        return {"result": {"items": [_json_copy(value)], "cursor": 0, "next_cursor": None, "total": 1}}
+
+    def _page_located(
+        self, entries: list[tuple[int, Any]], cursor: int, limit: int, path: str,
+    ) -> dict[str, Any]:
+        rows = [
+            {"path": self._path_index(path, original_index), "value": self._bounded_value(value, self._path_index(path, original_index))}
+            for original_index, value in entries
+        ]
+        return self._page(rows, cursor, limit)
+
+    @staticmethod
+    def _value_descriptor(value: Any, path: str) -> dict[str, Any]:
+        if isinstance(value, list):
+            return {"kind": "array", "items": len(value), "path": path}
+        if isinstance(value, dict):
+            return {"kind": "object", "fields": len(value), "path": path}
+        if isinstance(value, str):
+            return {"kind": "string", "characters": len(value), "path": path}
+        return {"kind": type(value).__name__, "path": path}
+
+    @staticmethod
+    def _bounded_value(value: Any, path: str) -> Any:
+        """Show scalars and bounded record fields; describe large child containers."""
+        if isinstance(value, str):
+            if len(value.encode()) <= INLINE_VALUE_BYTES:
+                return value
+            return {
+                **WorldStore._value_descriptor(value, path),
+                "preview": value[:160] + ("…" if len(value) > 160 else ""),
+            }
+        if isinstance(value, list):
+            return WorldStore._value_descriptor(value, path)
+        if isinstance(value, dict):
+            candidate = {
+                key: WorldStore._bounded_value(item, WorldStore._path_key(path, key))
+                for key, item in list(value.items())[:32]
+            } | ({"__more_fields__": len(value) - 32} if len(value) > 32 else {})
+            if len(json.dumps(candidate, ensure_ascii=False, default=str).encode()) <= INLINE_VALUE_BYTES:
+                return candidate
+            descriptor = WorldStore._value_descriptor(value, path)
+            descriptor["field_names"] = list(value)[:16]
+            return descriptor
+        return _json_copy(value)
+
+    @staticmethod
+    def _json_path(value: Any, path: str | None) -> Any:
+        if path in {None, "", "$"}:
+            return value
+        if not isinstance(path, str) or not path.startswith("$"):
+            raise ValueError("path must start with $")
+        current = value
+        for token in WorldStore._path_tokens(path):
+            if isinstance(current, dict) and token in current:
+                current = current[token]
+            elif isinstance(current, list) and token.isdigit() and int(token) < len(current):
+                current = current[int(token)]
+            else:
+                raise ValueError("Unknown JSON path")
+        return current
+
+    @staticmethod
+    def _path_key(path: str, key: str) -> str:
+        return f"{path}.{key}" if key and all(char.isalnum() or char == "_" for char in key) else f"{path}[{json.dumps(key, ensure_ascii=False)}]"
+
+    @staticmethod
+    def _path_index(path: str, index: int) -> str:
+        return f"{path}.{index}"
+
+    @staticmethod
+    def _path_tokens(path: str) -> list[str]:
+        tokens, position = [], 1
+        while position < len(path):
+            if path[position] == ".":
+                position += 1
+                end = position
+                while end < len(path) and path[end] not in ".[":
+                    end += 1
+                if end == position:
+                    raise ValueError("Invalid JSON path")
+                tokens.append(path[position:end]); position = end
+            elif path[position] == "[":
+                decoder = json.JSONDecoder()
+                try:
+                    token, end = decoder.raw_decode(path[position + 1:])
+                except json.JSONDecodeError as exc:
+                    raise ValueError("Invalid JSON path") from exc
+                if not isinstance(token, str) or position + 1 + end >= len(path) or path[position + 1 + end] != "]":
+                    raise ValueError("Invalid JSON path")
+                tokens.append(token); position += end + 2
+            else:
+                raise ValueError("Invalid JSON path")
+        return tokens
+
+    @staticmethod
+    def _keyword_filter(value: Any, query: str) -> Any:
+        needle = query.casefold()
+        if isinstance(value, list):
+            return [item for item in value if needle in json.dumps(item, ensure_ascii=False).casefold()]
+        if isinstance(value, dict):
+            return {key: item for key, item in value.items()
+                    if needle in key.casefold() or needle in json.dumps(item, ensure_ascii=False).casefold()}
+        return value if needle in str(value).casefold() else []
+
+    @staticmethod
+    def _select_fields(value: Any, fields: list[str]) -> Any:
+        if not all(isinstance(field, str) and field for field in fields):
+            raise ValueError("fields must be non-empty strings")
+        def select(row: Any) -> Any:
+            return {field: row.get(field) for field in fields if field in row} if isinstance(row, dict) else row
+        return [select(row) for row in value] if isinstance(value, list) else select(value)
 
     def record_view(self, identity_id: str, model: str, record_id: int) -> dict[str, Any] | None:
         with self._lock:

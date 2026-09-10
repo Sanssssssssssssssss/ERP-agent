@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import inspect
 import io
 import json
@@ -22,6 +23,8 @@ from pi_ai.openai_compatible import OpenAICompatibleProvider
 
 from integration import harbor_agent, pi_odoo_runner
 from integration.world_context import expand_lossless_tables
+from odoo_runtime.world import WorldStore
+from odoo_runtime.world_tools import build_world_tools
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -333,9 +336,10 @@ class BaselineFixTest(unittest.TestCase):
         async def check(root, world_mode):
             requests = []
             rows = [
-                {"id": index, "display_name": f"Partner {index} " + "x" * 90,
+                {"id": index, "display_name": (
+                    "VENDOR-UNIQUE-99 " * 20 if index == 99 else f"Partner {index} " + "x" * 90),
                  "default_code": f"P{index:03d}"}
-                for index in range(1, 21)
+                for index in range(1, 101)
             ]
             raw = {
                 "success": True, "tool": "find_records", "count": len(rows),
@@ -350,11 +354,15 @@ class BaselineFixTest(unittest.TestCase):
                     self.calls = []
 
                 def identity_context(self, instance=None):
-                    return {
+                    identity = {
                         "instance": instance or self.instance, "url": "http://odoo.invalid",
                         "database": "bench", "username": "reader", "lang": "en_US",
                         "context": {}, "transport": "json2", "credential_scope_sha256": "fixture",
                     }
+                    identity["identity_id"] = hashlib.sha256(json.dumps([
+                        identity["instance"], identity["credential_scope_sha256"],
+                    ], sort_keys=True).encode()).hexdigest()[:20]
+                    return identity
 
                 def call(self, name, arguments):
                     self.calls.append((name, arguments))
@@ -400,11 +408,19 @@ class BaselineFixTest(unittest.TestCase):
                         },
                     }]}
                     finish_reason = "tool_calls"
-                elif len(requests) == 2:
+                elif len(requests) < 5:
                     delta = {"tool_calls": [{
-                        "index": 0, "id": "time-call", "type": "function",
+                        "index": 0, "id": f"time-call-{len(requests)}", "type": "function",
                         "function": {"name": "get_current_time", "arguments": "{}"},
                     }]}
+                    finish_reason = "tool_calls"
+                elif len(requests) == 5:
+                    ref = "obs-000001-" + hashlib.sha256(b"find-call").hexdigest()[:10]
+                    delta = {"tool_calls": [{"index": 0, "id": "search-call", "type": "function", "function": {"name": "search_observations", "arguments": '{"query":"VENDOR-UNIQUE-99"}'}}]}
+                    finish_reason = "tool_calls"
+                elif len(requests) == 6:
+                    ref = "obs-000001-" + hashlib.sha256(b"find-call").hexdigest()[:10]
+                    delta = {"tool_calls": [{"index": 0, "id": "read-call", "type": "function", "function": {"name": "read_observation", "arguments": json.dumps({"observation_ref": ref, "path": "$.result", "query": "VENDOR-UNIQUE-99", "fields": ["id", "display_name"], "limit": 1})}}]}
                     finish_reason = "tool_calls"
                 else:
                     delta, finish_reason = {"content": "done"}, "stop"
@@ -421,9 +437,10 @@ class BaselineFixTest(unittest.TestCase):
             instruction.write_text("Find partners.")
             args = SimpleNamespace(
                 instruction_file=instruction, session_file=root / "session.jsonl",
-                usage_file=root / "usage.json", mcp_url="http://unused.invalid", max_turns=3,
+                usage_file=root / "usage.json", mcp_url="http://unused.invalid", max_turns=7,
                 world_mode=world_mode, runtime_mode="native", read_backend="native",
                 action_backend="native", capability_backend="native",
+                tool_mode="dynamic", sop_mode="controlled",
             )
             original_hook = pi_odoo_runner.project_read_history
             async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
@@ -447,14 +464,14 @@ class BaselineFixTest(unittest.TestCase):
                     await pi_odoo_runner.run(args)
 
             self.assertEqual([name for name, _arguments in native.calls], ["find_records"])
-            self.assertGreaterEqual(history_hook.call_count, 3)
-            self.assertEqual(len(requests), 3)
+            self.assertGreaterEqual(history_hook.call_count, 7)
+            self.assertEqual(len(requests), 7)
             self.assertEqual(json.loads((root / "requests" / "0001.request.json").read_text(encoding="utf-8")), requests[0])
             self.assertEqual(json.loads((root / "requests" / "0002.request.json").read_text(encoding="utf-8")), requests[1])
             self.assertEqual(json.loads((root / "requests" / "0003.request.json").read_text(encoding="utf-8")), requests[2])
             second = next(message for message in requests[1]["messages"] if message.get("role") == "tool")
             self.assertEqual(json.loads(second["content"]), raw)
-            third = next(message for message in requests[2]["messages"] if message.get("tool_call_id") == "find-call")
+            third = next(message for message in requests[4]["messages"] if message.get("tool_call_id") == "find-call")
             second_call = next(
                 message for message in requests[1]["messages"]
                 if message.get("role") == "assistant" and any(
@@ -470,10 +487,8 @@ class BaselineFixTest(unittest.TestCase):
             self.assertEqual(third_call, second_call)
             projected = json.loads(third["content"])
             self.assertEqual(third["tool_call_id"], "find-call")
-            self.assertEqual(projected["world_projection"]["kind"], "lossless_table")
-            restored = expand_lossless_tables(projected)
-            restored.pop("world_projection", None)
-            self.assertEqual(restored, raw)
+            self.assertEqual(projected["world_observation"]["kind"], "externalized_read")
+            self.assertNotIn("VENDOR-UNIQUE-99", third["content"])
             session_rows = [
                 json.loads(line)["message"]
                 for line in args.session_file.read_text(encoding="utf-8").splitlines()
@@ -485,6 +500,10 @@ class BaselineFixTest(unittest.TestCase):
             )
             self.assertEqual(session_result["content"][0]["text"], json.dumps(raw, separators=(",", ":")))
             self.assertLess(len(third["content"].encode()), len(second["content"].encode()))
+            search_result = next(message for message in requests[5]["messages"] if message.get("tool_call_id") == "search-call")
+            self.assertEqual(json.loads(search_result["content"])["items"][0]["matches"][0]["path"], "$.result.98.display_name")
+            read_result = next(message for message in requests[6]["messages"] if message.get("tool_call_id") == "read-call")
+            self.assertEqual(json.loads(read_result["content"])["result"]["items"][0]["value"]["id"], 99)
 
         for world_mode in ("record", "project"):
             with self.subTest(world_mode=world_mode), tempfile.TemporaryDirectory() as directory:

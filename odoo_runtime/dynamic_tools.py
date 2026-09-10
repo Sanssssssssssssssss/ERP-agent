@@ -31,7 +31,9 @@ BASE_TOOLS = frozenset(
 
 # Published with the compact base when the native catalog supplies it.  Keeping
 # this optional preserves MCP-only inventories that predate the native helper.
-OPTIONAL_NATIVE_BASE_TOOLS = frozenset({"read_supply_context"})
+OPTIONAL_NATIVE_BASE_TOOLS = frozenset({
+    "read_supply_context", "search_observations", "read_observation",
+})
 _FIND_BASE_TOOLS = frozenset((BASE_TOOLS - {"search_records"}) | {"find_records"})
 
 CAPABILITY_GROUPS = {
