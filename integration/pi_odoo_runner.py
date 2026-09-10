@@ -28,7 +28,7 @@ from pi_coding.resources import PiResourcePaths
 from pi_coding.session import CodingSession, CodingSessionConfig
 
 from integration.odoo_tools import native_tool_catalog, route_tools
-from integration.world_context import project_messages
+from integration.world_context import project_messages, project_read_history
 from odoo_runtime.actions import NativeActions
 from odoo_runtime.capabilities import NativeCapabilities
 from odoo_runtime.dynamic_tools import DynamicToolController
@@ -361,11 +361,16 @@ async def run(args: argparse.Namespace) -> None:
             )
             if dynamic_tools is not None:
                 dynamic_tools.bind(session.stage_tools_for_next_turn)
-            if world is not None and world_mode == "project":
+            if world is not None and (world_mode == "project" or runtime_mode == "native"):
                 existing_transform = session._harness.config.transform_context
 
                 async def project_context(messages, signal):
-                    projected = project_messages(world, messages)
+                    projected = (
+                        project_messages(world, messages)
+                        if world_mode == "project" else list(messages)
+                    )
+                    if runtime_mode == "native":
+                        projected = project_read_history(world, projected)
                     transformed = existing_transform(projected, signal) if existing_transform else projected
                     return await transformed if inspect.isawaitable(transformed) else transformed
 

@@ -8,11 +8,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from pi_agent.messages import TextContent, ToolResultMessage
+from pi_agent.messages import AssistantMessage, TextContent, ToolResultMessage
 from pi_agent.tools import AgentTool, AgentToolResult
 
 from integration.odoo_tools import route_tools
-from integration.world_context import project_messages
+from integration.world_context import expand_lossless_tables, project_messages, project_read_history
 from odoo_runtime.world import WorldStore
 
 
@@ -166,6 +166,127 @@ class WorldStoreTest(unittest.TestCase):
             recovered = self.store(path)
             self.assertEqual([message.text for message in project_messages(recovered, messages)], [text, text])
             self.assertEqual(recovered.telemetry()["projection_calls"], 2)
+
+    def test_consumed_read_table_projection_is_lossless_and_preserves_envelope(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, ENV):
+            root = Path(directory)
+            world = self.store(root)
+            payload = {
+                "success": True, "count": 2, "has_more": False, "offset": 0,
+                "redacted_fields": [], "result": [
+                    {"id": 1, "name": "A" * 160, "qty": 0, "enabled": False,
+                     "empty": [], "note": {"body": "first"}, "missing": None,
+                     "quotes": [{"vendor": "V" * 70, "price": 1}, {"vendor": "W" * 70, "price": 2}]},
+                    {"id": 2, "name": "B" * 160, "qty": 3, "enabled": True,
+                     "empty": [], "note": {"body": "second"}, "missing": None,
+                     "quotes": [{"vendor": "V" * 70, "price": 3}, {"vendor": "W" * 70, "price": 4}]},
+                ],
+            }
+            payload["result"] = [
+                {**payload["result"][index % 2], "id": index + 1,
+                 "name": chr(65 + index) * 160}
+                for index in range(8)
+            ]
+            payload["count"] = len(payload["result"])
+            text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+            receipt = world.finish(world.begin("rows", "find_records", {"model": "x.model"}, "native"), text)
+            message = ToolResultMessage(
+                tool_call_id="rows", tool_name="mcp_odoo_find_records",
+                content=[TextContent(text=text)],
+            )
+            self.assertEqual(project_read_history(world, [message])[0].text, text)
+            for stop_reason in ("error", "aborted"):
+                failed_followup = AssistantMessage(content="failed", stop_reason=stop_reason)
+                self.assertEqual(project_read_history(world, [message, failed_followup])[0].text, text)
+            projected = project_read_history(world, [message, AssistantMessage(content="used")])
+            projected_payload = json.loads(projected[0].text)
+            self.assertEqual(projected_payload["world_projection"]["kind"], "lossless_table")
+            self.assertLess(len(projected[0].text.encode()), len(text.encode()))
+            self.assertEqual(projected_payload["count"], payload["count"])
+            self.assertEqual(projected_payload["has_more"], payload["has_more"])
+            self.assertEqual(projected_payload["redacted_fields"], payload["redacted_fields"])
+            self.assertEqual(
+                expand_lossless_tables(projected_payload)["result"], payload["result"]
+            )
+            self.assertEqual(message.text, text)
+            self.assertEqual(world.lookup(receipt["receipt_id"])["raw_result"], payload)
+            tool_use = project_read_history(
+                world, [message, AssistantMessage(content="calling", stop_reason="toolUse")]
+            )
+            self.assertEqual(json.loads(tool_use[0].text)["world_projection"]["kind"], "lossless_table")
+            world.invalidate(instance="default", reason="write boundary", call_id="write")
+            after_generation = project_read_history(world, [message, AssistantMessage(content="used")])
+            self.assertEqual(json.loads(after_generation[0].text)["world_projection"]["kind"], "lossless_table")
+
+    def test_schema_table_projection_and_heterogeneous_rows_are_safe(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, ENV):
+            world = self.store(Path(directory))
+            schema = {
+                f"field_{i}": {
+                    "type": "char", "string": f"Field {i}", "readonly": False,
+                    "required": False, "searchable": True, "store": True, **extra,
+                }
+                for i, extra in enumerate((
+                    {"help": "H" * 180, "relation": "res.partner"},
+                    {"help": "K" * 180, "selection": [["a", "A"], ["b", "B"]]},
+                    {"help": "L" * 180, "relation": None},
+                    {"help": "M" * 180, "selection": [["x", "X"]]},
+                    {"help": "N" * 180, "relation": "res.company"},
+                    {"help": "P" * 180, "selection": []},
+                    {"help": "Q" * 180, "relation": None},
+                    {"help": "R" * 180, "selection": [["z", "Z"]]},
+                ))
+            }
+            payload = {"success": True, "count": 2, "result": schema}
+            text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+            world.finish(world.begin("schema", "get_model_fields", {"model": "x.model"}, "native"), text)
+            message = ToolResultMessage(
+                tool_call_id="schema", tool_name="mcp_odoo_get_model_fields",
+                content=[TextContent(text=text)],
+            )
+            projected = project_read_history(world, [message, AssistantMessage(content="used")])
+            projected_payload = json.loads(projected[0].text)
+            self.assertEqual(projected_payload["world_projection"]["kind"], "lossless_table")
+            self.assertLess(len(projected[0].text.encode()), len(text.encode()))
+            expanded = expand_lossless_tables(projected_payload)
+            expanded.pop("world_projection", None)
+            self.assertEqual(expanded, payload)
+            heterogeneous = json.dumps({"success": True, "result": [{"id": 1}, {"id": 2, "x": 3}]})
+            world.finish(world.begin("hetero", "find_records", {"model": "x.model"}, "native"), heterogeneous)
+            hetero = ToolResultMessage(
+                tool_call_id="hetero", tool_name="mcp_odoo_find_records",
+                content=[TextContent(text=heterogeneous)],
+            )
+            self.assertEqual(project_read_history(world, [hetero, AssistantMessage(content="used")])[0].text, heterogeneous)
+
+            marker_payload = {"success": True, "result": [
+                {"id": 1, "value": "x" * 200, "nested": {"__world_table__": True}},
+                {"id": 2, "value": "y" * 200, "nested": {"ok": True}},
+            ]}
+            marker_text = json.dumps(marker_payload, separators=(",", ":"))
+            world.finish(world.begin("marker", "find_records", {"model": "x.model"}, "native"), marker_text)
+            marker_message = ToolResultMessage(
+                tool_call_id="marker", tool_name="mcp_odoo_find_records",
+                content=[TextContent(text=marker_text)],
+            )
+            self.assertEqual(
+                project_read_history(world, [marker_message, AssistantMessage(content="used")])[0].text,
+                marker_text,
+            )
+            failed_text = json.dumps({"success": False, "error": "denied", "result": schema})
+            world.finish(world.begin("failed", "find_records", {"model": "x.model"}, "native"), failed_text)
+            failed = ToolResultMessage(
+                tool_call_id="failed", tool_name="mcp_odoo_find_records",
+                content=[TextContent(text=failed_text)], is_error=True,
+            )
+            self.assertEqual(project_read_history(world, [failed, AssistantMessage(content="used")])[0].text, failed_text)
+            write_text = json.dumps({"success": True, "result": [{"id": 1, "value": "x" * 200}, {"id": 2, "value": "y" * 200}]})
+            world.finish(world.begin("write", "execute_method", {"model": "x.model"}, "native"), write_text)
+            write = ToolResultMessage(
+                tool_call_id="write", tool_name="mcp_odoo_execute_method",
+                content=[TextContent(text=write_text)],
+            )
+            self.assertEqual(project_read_history(world, [write, AssistantMessage(content="used")])[0].text, write_text)
 
     def test_route_records_without_changing_tool_result(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, ENV):
