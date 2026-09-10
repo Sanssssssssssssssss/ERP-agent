@@ -40,6 +40,7 @@ from odoo_runtime.reads import (
     Json2ReadClient,
     NativeReads,
 )
+from odoo_runtime.world import WorldStore
 
 
 class FakeOdoo:
@@ -47,6 +48,8 @@ class FakeOdoo:
     hostname = "fixture"
     db = "bench"
     username = "admin"
+    lang = "en_US"
+    context = {"lang": "en_US", "allowed_company_ids": [1]}
     transport = "json2"
     timeout = 10
     verify_ssl = True
@@ -67,6 +70,9 @@ class FakeOdoo:
             "comment": {"type": "text"},
             "chart_template": {"type": "selection", "selection": [[str(i), f"Template {i}"] for i in range(151)]},
         }
+
+    def scope_fingerprint(self):
+        return hashlib.sha256(b"native-reads-fixture").hexdigest()
 
     def get_model_fields(self, model):
         self.requests.append(("fields_get", model))
@@ -112,6 +118,82 @@ class FakeOdoo:
 
 
 class NativeReadsTest(unittest.TestCase):
+    @staticmethod
+    def _canonical_result_dump(value):
+        """Ignore only JSON whitespace in text content; keep details and metadata exact."""
+        value = copy.deepcopy(value)
+        content = value.get("content") if isinstance(value, dict) else None
+        if isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text" and isinstance(item.get("text"), str):
+                    try:
+                        item["text"] = json.dumps(
+                            json.loads(item["text"]),
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        )
+                    except (TypeError, ValueError):
+                        pass
+
+        def normalize_cache_hit(item):
+            if isinstance(item, dict):
+                return {
+                    key: None if key == "cache_hit" and isinstance(child, bool)
+                    else normalize_cache_hit(child)
+                    for key, child in item.items()
+                }
+            if isinstance(item, list):
+                return [normalize_cache_hit(child) for child in item]
+            return item
+
+        return normalize_cache_hit(value)
+
+    def test_native_catalog_contracts_and_compact_world_receipt(self):
+        tools = {tool.name: tool for tool in native_tool_catalog()}
+        fields = tools["mcp_odoo_get_model_fields"]
+        import jsonschema
+
+        validator = jsonschema.Draft202012Validator(fields.parameters)
+        validator.validate({"model": "res.partner", "relevance": "top"})
+        validator.validate({"model": "res.partner", "relevance": None})
+        with self.assertRaises(jsonschema.ValidationError):
+            validator.validate({"model": "res.partner", "relevance": "exact"})
+
+        async def check(directory):
+            native = NativeReads(FakeOdoo())
+            with patch("odoo_runtime.world.load_instances_config", return_value=("default", {})):
+                world = WorldStore(directory / "world.jsonl")
+            routed = next(
+                tool for tool in route_tools(
+                    list(tools.values()), directory / "backends.jsonl", native, world=world
+                )
+                if tool.name == "mcp_odoo_read_record"
+            )
+            result = await routed.execute(
+                "compact-read",
+                {"model": "res.partner", "record_id": 1, "fields": ["name"]},
+            )
+            parsed = json.loads(result.text)
+            self.assertEqual(
+                result.text,
+                json.dumps(parsed, ensure_ascii=False, separators=(",", ":")),
+            )
+            structured = result.details["structuredContent"]
+            self.assertEqual(structured["success"], parsed["success"])
+            self.assertEqual(structured["result"], parsed["result"])
+            receipts = [
+                json.loads(line)
+                for line in (directory / "world.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(
+                receipts[-1]["result_sha256"],
+                hashlib.sha256(result.text.encode()).hexdigest(),
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(check(Path(directory)))
+
     def test_native_health_has_no_mcp_fallback(self):
         async def check(directory: Path):
             native = NativeReads(FakeOdoo())
@@ -445,14 +527,14 @@ print('MCP_FREE_CORE_IMPORT_OK')
                 "search_holidays": {"start_date": "2026-01-01", "end_date": "2026-01-02"},
             }
             for old, new in zip(a, b, strict=True):
-                self.assertEqual((old.name, old.label, old.description, old.parameters), (new.name, new.label, new.description, new.parameters))
+                self.assertEqual(
+                    (old.name, old.label, old.description, old.parameters),
+                    (new.name, new.label, new.description, new.parameters),
+                )
                 name = old.name.removeprefix("mcp_odoo_")
                 if name in READ_RESPONSES:
-                    left = json.dumps((await old.execute(name, args[name])).model_dump(), sort_keys=True)
-                    right = json.dumps((await new.execute(name, args[name])).model_dump(), sort_keys=True)
-                    for value in ("true", "false"):
-                        left = left.replace(f'"cache_hit": {value}', '"cache_hit": null')
-                        right = right.replace(f'"cache_hit": {value}', '"cache_hit": null')
+                    left = self._canonical_result_dump((await old.execute(name, args[name])).model_dump())
+                    right = self._canonical_result_dump((await new.execute(name, args[name])).model_dump())
                     self.assertEqual(left, right)
             a_by_name, b_by_name = {t.name: t for t in a}, {t.name: t for t in b}
             for name, arguments in (
@@ -466,7 +548,10 @@ print('MCP_FREE_CORE_IMPORT_OK')
                         return (await tool.execute(name, arguments)).model_dump()
                     except RuntimeError as exc:
                         return {"protocol_error": str(exc)}
-                self.assertEqual(await outcome(a_by_name[f"mcp_odoo_{name}"]), await outcome(b_by_name[f"mcp_odoo_{name}"]))
+                self.assertEqual(
+                    self._canonical_result_dump(await outcome(a_by_name[f"mcp_odoo_{name}"])),
+                    self._canonical_result_dump(await outcome(b_by_name[f"mcp_odoo_{name}"])),
+                )
             starts = [json.loads(line) for line in (directory / "b.jsonl").read_text().splitlines() if json.loads(line)["event"] == "start"]
             self.assertEqual(len(starts), len(READ_RESPONSES) + 4)
             self.assertTrue(all(event["backend"] == "native" for event in starts))
