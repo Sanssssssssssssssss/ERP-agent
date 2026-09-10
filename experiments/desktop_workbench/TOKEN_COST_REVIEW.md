@@ -96,3 +96,18 @@ SHA-256：`b217eeb5f4f272c54a26da90fb0a67476d94d98c654d44aead61e993d45d0097`。
 与同目录 `portable-031-*.png`，仅保留本地。此次启动时隔离 Odoo `127.0.0.1:18069` 不可达，
 界面明确显示“Odoo 不可用”。页面中的通过状态与观测时间属于此前保存的核验快照；
 本轮不计为新的在线回读或真实业务完成，也没有启动新的模型运行。
+
+## 2026-09-10 企业检索与工具改造待办（低优先级，暂缓）
+
+当前运行保持 native；MCP 仅保留历史来源与对照。公司级模拟与检索验收尚待建立，
+先冻结检索与工具方案，再考虑生成数据和实验。
+
+| 待办 | 规则/边界 | 真实源码参考 |
+| --- | --- | --- |
+| 规划前规则装配 | 规划前自动加载适用的必需规则并召回相关操作说明；规则按公司/业务/版本选取，不依赖 TopK；入口为 `host._conversation_prompt`/`_instruction` + SOP | [`workbench/host.py`](../../workbench/host.py) |
+| Odoo 19 操作文档检索 | 复用 `odoo-semantic-retrieval-lab`；独立只读 doc 工具，接入 capabilities/dynamic_tools；不接入实验评测流程 | [`odoo_runtime/capabilities.py`](../../odoo_runtime/capabilities.py)、[`odoo_runtime/dynamic_tools.py`](../../odoo_runtime/dynamic_tools.py) |
+| 企业业务文字索引 | 现状为进程内 BM25（默认 5000/单次 2000）；待升级持久化关键词/向量索引、增量删除、版本与权限 | [`odoo_runtime/knowledge.py`](../../odoo_runtime/knowledge.py) |
+| 精确查询与混合检索 | 保留 `search_records`/`aggregate_records` 实时精确查询；业务语义查询先混合检索，再回读权威记录 | [`odoo_runtime/reads.py`](../../odoo_runtime/reads.py)、[`odoo_runtime/knowledge.py`](../../odoo_runtime/knowledge.py) |
+| Top3 结果扩展 | 先 Top3，按缺证据/冲突/版本扩展同一候选 Top20；查询改写锁定公司/权限/日期/实体，保留停止条件 | [`odoo_runtime/knowledge.py`](../../odoo_runtime/knowledge.py) |
+| 动作与前端证据 | 补 actions 业务模型/字段/前后状态规则；前端显示引用、版本、更新时间与覆盖状态 | [`odoo_runtime/actions.py`](../../odoo_runtime/actions.py)、[`desktop/src/renderer/App.tsx`](../../desktop/src/renderer/App.tsx) |
+| 模拟企业数据 | 待检索与工具方案冻结后再生成公司关联数据、附件、规则、异常与预期答案；先小后扩，隔离 Odoo | [`experiments/desktop_workbench/fixtures`](fixtures) |
