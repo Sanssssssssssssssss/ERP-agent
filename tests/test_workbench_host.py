@@ -994,6 +994,118 @@ class WorkbenchHostTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.host._record_artifact("other", business["id"], "/tmp/x.json", "x.json")
 
+    def test_compaction_usage_reads_new_persisted_entries(self):
+        path = Path(self.tmp.name) / "session.jsonl"
+        path.write_text(json.dumps({"id": "old", "type": "message"}) + "\n" +
+                        json.dumps({"id": "compact", "type": "compaction",
+                                    "usage": {"totalTokens": 100}}) + "\n", encoding="utf-8")
+        self.host._session_entry_baselines["r_compact"] = {"old"}
+        run = {"id": "r_compact"}
+        self.host._merge_compaction_usage(run, path)
+        self.assertEqual(run["compaction_total"], 100)
+        self.assertEqual(run["compaction_calls"], 1)
+
+    def test_compaction_usage_missing_is_unknown(self):
+        path = Path(self.tmp.name) / "session.jsonl"
+        path.write_text(json.dumps({"id": "compact-ok", "type": "compaction",
+                                    "usage": {"totalTokens": 100}}) + "\n" +
+                        json.dumps({"id": "compact-missing", "type": "compaction"}) + "\n", encoding="utf-8")
+        self.host._session_entry_baselines["r_missing"] = set()
+        run = {"id": "r_missing"}
+        self.host._merge_compaction_usage(run, path)
+        self.assertIsNone(run["compaction_total"])
+        self.assertEqual(run["compaction_calls"], 2)
+        self.assertEqual(self.host._public_usage({"rounds": [], **run})["reported_total"], 100)
+
+    def test_compaction_usage_baseline_prevents_resume_double_count(self):
+        path = Path(self.tmp.name) / "session.jsonl"
+        path.write_text(json.dumps({"id": "compact", "type": "compaction",
+                                    "usage": {"totalTokens": 100}}) + "\n", encoding="utf-8")
+        run = {"id": "r_resume"}
+        self.host._session_entry_baselines["r_resume"] = set()
+        self.host._merge_compaction_usage(run, path)
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps({"id": "compact-2", "type": "compaction",
+                                     "usage": {"totalTokens": 50}}) + "\n")
+        self.host._session_entry_baselines["r_resume"] = {"compact"}
+        self.host._merge_compaction_usage(run, path)
+        self.assertEqual(run["compaction_total"], 150)
+        self.assertEqual(run["compaction_calls"], 2)
+        self.host._merge_compaction_usage(run, path)
+        self.assertEqual(run["compaction_total"], 150)
+        self.assertEqual(run["compaction_calls"], 2)
+
+    def test_compaction_usage_restores_persisted_components_after_restart(self):
+        path = Path(self.tmp.name) / "session-restart.jsonl"
+        path.write_text(json.dumps({"id": "compact-1", "type": "compaction",
+                                    "usage": {"input": 40, "output": 30, "totalTokens": 100}}) + "\n", encoding="utf-8")
+        run = {"id": "r_restart", "compaction_calls": 1, "compaction_total": 100,
+               "_compaction_known_total": 100, "compaction_input": 40, "compaction_output": 30,
+               "compaction_cache_read": 0, "compaction_reasoning": 0}
+        self.host._session_compaction_totals.clear()
+        self.host._session_entry_baselines.clear()
+        self.host._session_entry_baselines[run["id"]] = self.host._session_entry_ids(path)
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps({"id": "compact-2", "type": "compaction",
+                                     "usage": {"input": 10, "output": 5, "totalTokens": 20}}) + "\n")
+        self.host._merge_compaction_usage(run, path)
+        self.assertEqual(run["compaction_input"], 50)
+        self.assertEqual(run["compaction_output"], 35)
+        self.assertEqual(run["compaction_total"], 120)
+
+    def test_consume_worker_adds_session_compaction_to_public_usage(self):
+        events = [
+            {"type": "turn_end", "message": {"role": "assistant", "content": [],
+             "stop_reason": "toolUse", "usage": {"input": 1, "output": 1, "totalTokens": 10}}},
+            {"type": "turn_end", "message": {"role": "assistant", "content": [],
+             "stop_reason": "stop", "usage": {"input": 1, "output": 1, "totalTokens": 20}}},
+        ]
+        business = self._business("compaction business")
+        run = {"id": "r_consume_compaction", "business_id": business["id"], "session_id": self.sid,
+               "status": "running", "started_at": "2026-01-01T00:00:00Z", "rounds": [], "tools": [],
+               "events": [], "model_rounds": 0, "tool_count": 0, "documents": [], "checks": [], "stale": False}
+        self.host.store.data["runs"][run["id"]] = run
+        session_file = Path(self.tmp.name) / "sessions" / business["id"] / "pi-agent-session.jsonl"
+        session_file.parent.mkdir(parents=True)
+        session_file.write_text(json.dumps({"id": "compact", "type": "compaction",
+                                            "usage": {"input": 40, "output": 30, "cacheRead": 20,
+                                                      "cacheWrite": 10, "reasoning": 5, "totalTokens": 100}}) + "\n", encoding="utf-8")
+        self.host._session_entry_baselines[run["id"]] = set()
+        process = _EventProcess(events)
+        self.host._processes[run["id"]] = process
+        self.host._consume_worker(run["id"], process, Path(self.tmp.name) / "usage.json")
+        self.assertEqual(run["usage"]["total"], 130)
+        self.assertEqual(run["usage"]["reported_total"], 130)
+        self.assertEqual(run["usage"]["compaction_total"], 100)
+        self.assertEqual(run["usage"]["input"], 42)
+        self.assertEqual(run["usage"]["output"], 32)
+        self.assertEqual(self.host.get_business(self.sid, business["id"])["runs"][0]["usage"]["total"], 130)
+        self.assertEqual(self.host.get_trace(self.sid, business["id"], run["id"])["run"]["usage"]["compaction_total"], 100)
+
+    def test_consume_worker_missing_compaction_usage_keeps_total_unknown(self):
+        business = self._business("missing compaction")
+        run = {"id": "r_consume_missing", "business_id": business["id"], "session_id": self.sid,
+               "status": "running", "started_at": "2026-01-01T00:00:00Z", "rounds": [], "tools": [],
+               "events": [], "model_rounds": 0, "tool_count": 0, "documents": [], "checks": [], "stale": False}
+        self.host.store.data["runs"][run["id"]] = run
+        session_file = Path(self.tmp.name) / "sessions" / business["id"] / "pi-agent-session.jsonl"
+        session_file.parent.mkdir(parents=True)
+        session_file.write_text(json.dumps({"id": "compact", "type": "compaction"}) + "\n", encoding="utf-8")
+        self.host._session_entry_baselines[run["id"]] = set()
+        process = _EventProcess([{"type": "turn_end", "message": {"role": "assistant", "content": [],
+             "stop_reason": "stop", "usage": {"input": 1, "output": 1, "totalTokens": 30}}}])
+        self.host._processes[run["id"]] = process
+        self.host._consume_worker(run["id"], process, Path(self.tmp.name) / "usage.json")
+        self.assertIsNone(run["usage"]["total"])
+        self.assertEqual(run["usage"]["compaction_calls"], 1)
+        self.assertEqual(self.host.get_business(self.sid, business["id"])["runs"][0]["usage"]["reported_total"], 30)
+
+    def test_old_run_without_compaction_fields_remains_compatible(self):
+        self.assertEqual(self.host._public_usage({"rounds": []}),
+                         {"input": None, "cache_read": None, "output": None,
+                          "reasoning": None, "total": None, "input_semantics": "uncached",
+                          "reported_total": None, "missing_usage_rounds": 0})
+
 
 if __name__ == "__main__":
     unittest.main()

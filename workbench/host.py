@@ -120,6 +120,8 @@ class Workbench:
         self._lock = threading.RLock()
         self._processes: dict[str, subprocess.Popen[str]] = {}
         self._threads: dict[str, threading.Thread] = {}
+        self._session_entry_baselines: dict[str, set[str]] = {}
+        self._session_compaction_totals: dict[str, dict[str, Any]] = {}
         self._closing = False
         self._event_sink = event_sink
         self.store.data.setdefault("conversation_runs", {})
@@ -470,7 +472,7 @@ class Workbench:
             if row.get("session_id") != session_id:
                 continue
             self._stamp_usage_projection(row)
-            public = {key: value for key, value in row.items() if key not in {"instruction", "events", "rounds", "tools", "_message_sequences", "finalized_message_ids"}}
+            public = {key: value for key, value in row.items() if key not in {"instruction", "events", "rounds", "tools", "_message_sequences", "finalized_message_ids", "_compaction_known_total"}}
             if isinstance(public.get("usage"), dict):
                 public["usage"] = self._public_usage(row)
             public["live_messages"] = _safe(row.get("live_messages", []))
@@ -522,6 +524,7 @@ class Workbench:
             usage = self.store.root / "conversation-runs" / run["id"] / "usage.json"
             session_file = self.store.root / "sessions" / run["session_id"] / "conversation.jsonl"
             session_file.parent.mkdir(parents=True, exist_ok=True)
+            self._session_entry_baselines.setdefault(run["id"], self._session_entry_ids(session_file))
             runtime_home = self.store.root / "runtime-home"
             runtime_home.mkdir(exist_ok=True)
             proc = subprocess.Popen(
@@ -721,6 +724,7 @@ class Workbench:
             usage = self.store.root / "runs" / run["id"] / ("usage-%d.json" % len(run["events"]))
             session_file = self.store.root / "sessions" / run["business_id"] / "pi-agent-session.jsonl"
             session_file.parent.mkdir(parents=True, exist_ok=True)
+            self._session_entry_baselines.setdefault(run["id"], self._session_entry_ids(session_file))
             runtime_home = self.store.root / "runtime-home"
             runtime_home.mkdir(exist_ok=True)
             proc = subprocess.Popen(worker_command(self.root, instruction, usage, session_file, continue_run=continue_run), cwd=self.root,
@@ -740,6 +744,101 @@ class Workbench:
         thread = threading.Thread(target=self._consume_worker, args=(run["id"], proc, usage), daemon=True)
         self._threads[run["id"]] = thread
         thread.start()
+
+    @staticmethod
+    def _session_entry_ids(path: Path) -> set[str]:
+        if not path.is_file():
+            return set()
+        ids: set[str] = set()
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(entry, dict) and isinstance(entry.get("id"), str):
+                    ids.add(entry["id"])
+        except OSError:
+            return set()
+        return ids
+
+    def _merge_compaction_usage(self, run: dict[str, Any], session_file: Path) -> None:
+        baseline = self._session_entry_baselines.setdefault(run["id"], set())
+        state = self._session_compaction_totals.setdefault(
+            run["id"], {"calls": int(run.get("compaction_calls", 0) or 0),
+                         "totals": {key: int((run.get("_compaction_known_total", 0)
+                                                if key == "total" else run.get(f"compaction_{key}", 0)) or 0)
+                                    for key in ("total", "input", "output", "cache_read", "reasoning")
+                                    if isinstance((run.get("_compaction_known_total")
+                                                   if key == "total" else run.get(f"compaction_{key}")), int)},
+                         "missing": {key for key in ("total", "input", "output", "cache_read", "reasoning")
+                                     if run.get(f"compaction_{key}") is None and "compaction_total" in run}
+                         }
+        )
+        if not session_file.is_file():
+            return
+        try:
+            lines = session_file.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return
+        for line in lines:
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(entry, dict) or not isinstance(entry.get("id"), str) or entry["id"] in baseline:
+                continue
+            if entry.get("type") not in {"compaction", "branch_summary"}:
+                continue
+            state["calls"] += 1
+            usage = entry.get("usage")
+            for key, aliases in {"total": ("totalTokens", "total_tokens"),
+                                 "input": ("input",), "output": ("output",),
+                                 "cache_read": ("cacheRead", "cache_read"),
+                                 "reasoning": ("reasoning",)}.items():
+                value = next((usage.get(alias) for alias in aliases if isinstance(usage, dict) and alias in usage), None)
+                if type(value) is int and value >= 0:
+                    state["totals"][key] = state["totals"].get(key, 0) + value
+                else:
+                    state["missing"].add(key)
+            baseline.add(entry["id"])
+        run["compaction_calls"] = state["calls"]
+        run["compaction_total"] = (None if "total" in state["missing"]
+                                    else state["totals"].get("total", 0))
+        run["_compaction_known_total"] = state["totals"].get("total", 0)
+        for key in ("input", "output", "cache_read", "reasoning"):
+            run[f"compaction_{key}"] = (None if key in state["missing"] else state["totals"].get(key, 0))
+
+    def _session_file_for_run(self, run: dict[str, Any]) -> Path:
+        if run.get("kind") == "conversation":
+            return self.store.root / "sessions" / run["session_id"] / "conversation.jsonl"
+        return self.store.root / "sessions" / run["business_id"] / "pi-agent-session.jsonl"
+
+    @staticmethod
+    def _apply_compaction_usage(usage: dict[str, Any], run: dict[str, Any]) -> None:
+        if "compaction_total" not in run:
+            return
+        compaction_total = run["compaction_total"]
+        usage["compaction_total"] = compaction_total
+        usage["compaction_calls"] = run.get("compaction_calls", 0)
+        base_total = usage.get("total")
+        if compaction_total is None or not isinstance(base_total, (int, float)):
+            usage["total"] = None
+        else:
+            usage["total"] = base_total + compaction_total
+        for key in ("input", "output", "cache_read", "reasoning"):
+            extra = run.get(f"compaction_{key}")
+            current = usage.get(key)
+            if extra is None:
+                usage[key] = None
+            elif isinstance(current, (int, float)):
+                usage[key] = current + extra
+        reported = usage.get("reported_total")
+        known_total = run.get("_compaction_known_total")
+        if isinstance(known_total, int) and known_total > 0:
+            usage["reported_total"] = (reported + known_total
+                                        if isinstance(reported, (int, float))
+                                        else known_total)
 
     def _trace(self, run: dict[str, Any], kind: str, data: dict[str, Any]) -> None:
         row = {"type": kind, "at": now(), **_safe(data)}
@@ -1021,10 +1120,13 @@ class Workbench:
         """Normalize usage for API consumers while retaining raw rounds in storage."""
         usage = cls._round_usage(cls._public_rounds(run))
         if usage is not None:
+            cls._apply_compaction_usage(usage, run)
             return usage
-        return {"input": None, "cache_read": None, "output": None, "reasoning": None,
-                "total": None, "input_semantics": "uncached", "reported_total": None,
-                "missing_usage_rounds": 0}
+        usage = {"input": None, "cache_read": None, "output": None, "reasoning": None,
+                 "total": None, "input_semantics": "uncached", "reported_total": None,
+                 "missing_usage_rounds": 0}
+        cls._apply_compaction_usage(usage, run)
+        return usage
 
     @classmethod
     def _public_rounds(cls, run: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1124,11 +1226,12 @@ class Workbench:
             self._processes.pop(run_id)
             self._threads.pop(run_id, None)
             run["usage"] = self._round_usage(run.get("rounds", []))
+            self._merge_compaction_usage(run, self._session_file_for_run(run))
+            if isinstance(run.get("usage"), dict):
+                self._apply_compaction_usage(run["usage"], run)
             self._stamp_usage_projection(run)
             pending_ids = run.get("pending_approval_action_ids", [])
             if conversation:
-                run["usage"] = self._round_usage(run.get("rounds", []))
-                self._stamp_usage_projection(run)
                 if run.get("_stop_status"):
                     status, failure = run.pop("_stop_status"), "execution_stopped"
                 elif failure or code != 0:
@@ -1396,7 +1499,7 @@ class Workbench:
         run = runs[-1] if run_id is None and runs else (runs[0] if runs else None)
         if run is None: return {"run": None, "rounds": [], "tools": [], "events": []}
         self._stamp_usage_projection(run)
-        public_run = {key: value for key, value in run.items() if key not in {"rounds", "tools", "events", "_round_tool_start", "assistant_text"}}
+        public_run = {key: value for key, value in run.items() if key not in {"rounds", "tools", "events", "_round_tool_start", "_compaction_known_total", "assistant_text"}}
         if isinstance(public_run.get("usage"), dict):
             public_run["usage"] = self._public_usage(run)
         rounds = self._public_rounds(run)

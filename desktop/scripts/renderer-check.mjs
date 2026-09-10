@@ -36,17 +36,18 @@ const bridgeScript = String.raw`
     let failInitialConnectionCheck = true
     let delayedPurchaseDecision = true
     let showAcceptedProjection = false
+    let showCompactionUsage = false
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
     const session = (id, title, businesses) => ({ id, title, created_at: '2026-09-08T08:00:00Z', updated_at: '2026-09-08T09:00:00Z', archived: false, status: 'idle', businesses })
     const business = (id, session_id, title, status = 'idle', goal = '处理订单与发票') => ({ id, session_id, type: id === 'business-b2' ? 'sale_purchase_invoice' : 'sale_invoice', title, goal, status, created_at: '2026-09-08T08:00:00Z', updated_at: '2026-09-08T09:00:00Z', active_run_id: id + '-run' })
     const b1 = business('business-b1', 'session-b', 'Business B1')
     const b2 = { ...business('business-b2', 'session-b', 'Business B2', 'awaiting_approval'), material_ids: ['material-b2'] }
-    const b3 = business('business-b3', 'session-b', 'Business B3', 'needs_reconciliation', '核对中断写入是否已经落库，并保留当前运行与历史单据证据。')
+    const b3 = business('business-b3', 'session-b', 'Business B3｜这是一个很长的企业业务标题用于窄面板换行检查', 'needs_reconciliation', '核对中断写入是否已经落库，并保留当前运行与历史单据证据。')
     const b4 = business('business-b4', 'session-b', 'Business B4', 'completed')
     const sessions = [session('session-a', 'Session A', [business('business-a1', 'session-a', 'Business A1')]), session('session-b', 'Session B', [b1, b2, b3, b4])]
     const details = (b) => ({
       business: b.id === 'business-b2' ? { ...b, readback: { latest_run_id: 'business-b2-run', observed_at: '2026-09-08T08:49:00Z', stale: false, checks: [{ name: 'invoice_readback', label: '客户发票回读', status: 'passed', detail: '当前运行后的 Odoo 快照已返回。', source: 'odoo' }] } } : b,
-      runs: [{ id: b.id + '-old-run', business_id: b.id, session_id: b.session_id, status: 'completed', started_at: '2026-09-08T08:00:00Z', tool_count: 1, model_rounds: 1, elapsed_seconds: 0.8, verification_status: 'passed', usage: { input: null, cache_read: null, output: null, reasoning: null, total: null } }, { id: b.id + '-run', business_id: b.id, session_id: b.session_id, status: b.id === 'business-b2' ? 'awaiting_approval' : b.id === 'business-b3' ? 'needs_reconciliation' : 'completed', started_at: '2026-09-08T08:30:00Z', tool_count: 2, model_rounds: 2, elapsed_seconds: 1.2, verification_status: b.id === 'business-b2' || b.id === 'business-b3' ? '未知' : 'passed', usage: { input: null, cache_read: null, output: null, reasoning: null, total: null } }],
+      runs: [{ id: b.id + '-old-run', business_id: b.id, session_id: b.session_id, status: 'completed', started_at: '2026-09-08T08:00:00Z', tool_count: 1, model_rounds: 1, elapsed_seconds: 0.8, verification_status: 'passed', usage: { input: null, cache_read: null, output: null, reasoning: null, total: null } }, { id: b.id + '-run', business_id: b.id, session_id: b.session_id, status: b.id === 'business-b2' ? 'awaiting_approval' : b.id === 'business-b3' ? 'needs_reconciliation' : 'completed', started_at: '2026-09-08T08:30:00Z', tool_count: 2, model_rounds: 2, elapsed_seconds: 1.2, verification_status: b.id === 'business-b2' || b.id === 'business-b3' ? '未知' : 'passed', usage: showCompactionUsage && b.id === 'business-b2' ? { input: 20, cache_read: 0, output: 10, reasoning: 0, total: 130, compaction_total: 100, compaction_calls: 1 } : { input: null, cache_read: null, output: null, reasoning: null, total: null } }],
       live_messages: b.id === 'business-b2' ? [{ id: 'business-live-1', session_id: b.session_id, business_id: b.id, run_id: b.id + '-run', sequence: 1, text: '业务执行公开进度：正在读取 Odoo。', role: 'assistant', status: 'streaming' }] : [],
       artifacts: b.id === 'business-b2' ? [{ id: 'artifact-b2', name: 'Business B2 回执.json', path: 'C:\\runtime\\business-b2-receipt.json', created_at: '2026-09-08T08:50:00Z', kind: 'business_receipt', run_id: 'business-b2-run', available: true }, { id: 'artifact-pdf', name: 'INV-B2.pdf', path: 'C:\\runtime\\INV-B2.pdf', created_at: '2026-09-08T08:51:00Z', kind: 'odoo_pdf', run_id: 'business-b2-run', available: true }, { id: 'artifact-csv', name: 'INV-B2.csv', path: 'C:\\runtime\\INV-B2.csv', created_at: '2026-09-08T08:52:00Z', kind: 'odoo_csv', run_id: 'business-b2-run', available: true }] : [],
       materials: b.id === 'business-b2' ? [{ id: 'material-b2', session_id: b.session_id, name: '订单材料.csv', size: 42, sha256: 'sha-b2', created_at: '2026-09-08T08:44:00Z', row_count: 5, preview: '客户,产品,数量\\nNimbus,服务,2', media_type: 'text/csv' }] : [],
@@ -88,7 +89,8 @@ const bridgeScript = String.raw`
     window.__setSessionMessages = (id, messages) => { sessionDetails[id].messages = messages }
     window.__removeConversationMessage = (id) => { sessionDetails['session-b'].messages = sessionDetails['session-b'].messages.filter((message) => message.id !== id) }
     window.__emitWorkbench = (event) => listeners.forEach((listener) => listener(event))
-    window.__showAcceptedProjection = () => { showAcceptedProjection = true }
+    window.__showAcceptedProjection = (value = true) => { showAcceptedProjection = value }
+    window.__showCompactionUsage = () => { showCompactionUsage = true }
     window.workbench = {
       subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) },
       windowControl() { return Promise.resolve() },
@@ -877,6 +879,7 @@ await page.locator('.material-history-row span').filter({ hasText: '4 条数据'
 await page.getByRole('button', { name: /^INV-B2 客户发票/ }).click()
 const previewHeading = page.locator('.resource-preview h3')
 await previewHeading.waitFor()
+await previewHeading.scrollIntoViewIfNeeded()
 assert.equal(await previewHeading.textContent(), 'INV-B2')
 const previewVisibility = await page.evaluate(() => {
   const heading = document.querySelector('.resource-preview h3')?.getBoundingClientRect()
@@ -907,6 +910,66 @@ await page.setViewportSize({ width: 1600, height: 1000 })
 await page.getByLabel('业务目标', {exact: true}).evaluate(e => { e.textContent = '完整业务目标 '.repeat(1000) })
 assert.ok(await page.getByLabel('业务目标', {exact: true}).evaluate(e => e.clientHeight < 100 && e.scrollHeight > e.clientHeight))
 await page.getByLabel('业务目标', {exact: true}).evaluate(e => { e.textContent = '处理订单与发票' })
+const globalAlert = page.locator('.global-alert')
+if (await globalAlert.isVisible().catch(() => false)) {
+  await globalAlert.getByRole('button', { name: '关闭', exact: true }).click()
+}
+await page.setViewportSize({ width: 1100, height: 640 })
+await page.getByRole('tab', { name: /Business B3/ }).click()
+await page.locator('.business-header h2').waitFor()
+const compactLayout = await page.evaluate(() => ({
+  document: document.documentElement.scrollWidth,
+  viewport: window.innerWidth,
+  header: document.querySelector('.business-header h2')?.getBoundingClientRect(),
+  composer: document.querySelector('.composer-footer')?.getBoundingClientRect(),
+  actions: document.querySelector('.composer-actions')?.getBoundingClientRect(),
+  send: document.querySelector('.composer-actions button[type="submit"]')?.getBoundingClientRect(),
+  sendScrollWidth: document.querySelector('.composer-actions button[type="submit"]')?.scrollWidth,
+  sendClientWidth: document.querySelector('.composer-actions button[type="submit"]')?.clientWidth,
+  titleScrollWidth: document.querySelector('.business-header h2')?.scrollWidth,
+  titleClientWidth: document.querySelector('.business-header h2')?.clientWidth,
+}))
+assert.ok(compactLayout.document <= compactLayout.viewport + 1, JSON.stringify(compactLayout))
+assert.ok(compactLayout.header && compactLayout.header.width > 0 && compactLayout.header.height > 0, JSON.stringify(compactLayout))
+assert.ok(compactLayout.composer && compactLayout.actions && compactLayout.send, JSON.stringify(compactLayout))
+assert.ok(compactLayout.actions.right <= compactLayout.composer.right + 1 && compactLayout.actions.left >= compactLayout.composer.left - 1, JSON.stringify(compactLayout))
+assert.ok(compactLayout.send.right <= compactLayout.actions.right + 1 && compactLayout.send.left >= compactLayout.actions.left - 1 && compactLayout.send.top >= compactLayout.composer.top - 1 && compactLayout.send.bottom <= compactLayout.composer.bottom + 1, JSON.stringify(compactLayout))
+assert.ok(compactLayout.sendScrollWidth <= compactLayout.sendClientWidth, JSON.stringify(compactLayout))
+assert.equal(compactLayout.titleScrollWidth, compactLayout.titleClientWidth)
+await page.setViewportSize({ width: 1280, height: 800 })
+await page.getByRole('tab', { name: /Business B2/ }).click()
+await page.evaluate(() => window.__showCompactionUsage())
+await page.getByRole('tab', { name: /^运行详情/ }).click()
+await page.locator('.trace-toolbar select').selectOption('business-b2-run')
+await page.locator('.trace-detail-content').getByText('含上下文压缩 1 次 · 100 token', { exact: true }).waitFor()
+assert.equal(await page.getByText('含上下文压缩 0 次', { exact: false }).count(), 0)
+await page.evaluate(() => window.__showAcceptedProjection(false))
+const businessB3Tab = page.getByRole('tab', { name: /Business B3/ })
+await businessB3Tab.evaluate((element) => {
+  const list = element.parentElement
+  if (list) list.scrollLeft = Math.max(0, element.offsetLeft + element.offsetWidth - list.clientWidth + 12)
+})
+await businessB3Tab.click()
+const businessB2Tab = page.getByRole('tab', { name: /Business B2/ })
+await businessB2Tab.evaluate((element) => {
+  const list = element.parentElement
+  if (list) list.scrollLeft = Math.max(0, element.offsetLeft + element.offsetWidth - list.clientWidth + 12)
+})
+await businessB2Tab.click()
+await page.getByRole('tab', { name: /^变更与审批/ }).click()
+const approvalLayout = await page.locator('.approval-actions:visible').evaluateAll((rows) => rows.flatMap((row) => Array.from(row.querySelectorAll('button')).map((button) => {
+  const rowBox = row.getBoundingClientRect()
+  const buttonBox = button.getBoundingClientRect()
+  return { rowBox, buttonBox, disabled: button.disabled }
+})))
+assert.ok(approvalLayout.length > 0, 'expected visible approval actions')
+const approvalBounds = await page.locator('.approval-row').first().evaluate((row) => ({ row: row.getBoundingClientRect(), pane: document.querySelector('.business-workspace')?.getBoundingClientRect() }))
+assert.ok(approvalBounds.pane && approvalBounds.row.right <= approvalBounds.pane.right + 1, JSON.stringify(approvalBounds))
+for (const { rowBox, buttonBox, disabled } of approvalLayout) {
+  assert.ok(buttonBox.width > 0 && buttonBox.height > 0 && buttonBox.left >= rowBox.left - 1 && buttonBox.right <= rowBox.right + 1, JSON.stringify({ rowBox, buttonBox }))
+  assert.equal(disabled, false)
+}
+await page.setViewportSize({ width: 1600, height: 1000 })
 assert.equal(pageErrors.length, 0, pageErrors.join('\n'))
 
 const calls = await page.evaluate(() => window.__bridgeCalls.map(({ method }) => method))
@@ -918,6 +981,7 @@ if (process.env.RENDERER_CHECK_SCREENSHOTS) {
     await page.setViewportSize({ width, height })
     for (const [name, label] of [['execution', /^执行台/], ['documents', /^单据/], ['approvals', /^变更与审批/], ['trace', /^运行详情/]]) {
       await page.getByRole('tab', { name: label }).click()
+      await page.locator('.business-content .loading-line').waitFor({ state: 'hidden' })
       await page.screenshot({ path: resolve(screenshotDir, `${name}-${width}x${height}.png`), fullPage: false })
     }
   }

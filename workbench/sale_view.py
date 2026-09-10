@@ -1069,11 +1069,13 @@ def business_detail(state: dict[str, Any], business_id: str) -> dict[str, Any]:
     matching_readback_documents = readback_documents if readback_fresh else None
     public_runs = []
     for run in runs:
-        public = {key: value for key, value in run.items() if key not in {"_round_tool_start", "assistant_text", "rounds", "tools", "events", "live_messages", "_message_sequences", "finalized_message_ids", "instruction"}}
+        public = {key: value for key, value in run.items() if key not in {"_round_tool_start", "_compaction_known_total", "assistant_text", "rounds", "tools", "events", "live_messages", "_message_sequences", "finalized_message_ids", "instruction"}}
         usage = public.get("usage")
         if isinstance(usage, dict):
-            public["usage"] = {"input": usage.get("input"), "cache_read": usage.get("cache_read", usage.get("cacheRead")),
-                                "output": usage.get("output"), "reasoning": usage.get("reasoning"), "total": usage.get("total")}
+            public["usage"] = {key: usage.get(key) for key in
+                                ("input", "cache_read", "output", "reasoning", "total",
+                                 "reported_total", "missing_usage_rounds", "compaction_total", "compaction_calls")}
+            public["usage"]["cache_read"] = usage.get("cache_read", usage.get("cacheRead"))
         linked_evidence = _run_has_relevant_evidence(run, matching_readback_documents, business_type, completion_target)
         if isinstance(readback, dict) and run.get("id") == readback_run_id:
             public["verification_status"] = (

@@ -196,6 +196,8 @@ export interface Usage {
   output: number | null;
   reasoning: number | null;
   total: number | null;
+  compaction_total?: number | null;
+  compaction_calls?: number;
   reported_total?: number | null;
   missing_usage_rounds?: number;
 }
