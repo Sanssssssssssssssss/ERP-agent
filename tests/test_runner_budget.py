@@ -22,6 +22,31 @@ from odoo_runtime.dynamic_tools import BASE_TOOLS, CAPABILITY_GROUPS
 
 
 class RunnerBudgetTest(unittest.TestCase):
+    def test_usage_aggregation_preserves_zero_and_missing_buckets(self):
+        zero = SimpleNamespace(input=0, cache_read=0, cache_write=0, output=0, total_tokens=0, reasoning=0)
+        partial = SimpleNamespace(input=4, output=2, total_tokens=6, reasoning=1)
+        self.assertEqual(pi_odoo_runner._nullable_usage_sum(
+            [SimpleNamespace(stop_reason="stop", usage=zero)], "input"
+        ), 0)
+        self.assertIsNone(pi_odoo_runner._nullable_usage_sum(
+            [SimpleNamespace(stop_reason="stop", usage=zero),
+             SimpleNamespace(stop_reason="stop", usage=partial)], "cache_read"
+        ))
+        self.assertEqual(pi_odoo_runner._nullable_usage_sum(
+            [SimpleNamespace(stop_reason="stop", usage=zero),
+             SimpleNamespace(stop_reason="stop", usage=partial)], "output"
+        ), 2)
+        self.assertIsNone(pi_odoo_runner._nullable_usage_sum(
+            [SimpleNamespace(stop_reason="error", usage=zero)], "total_tokens"
+        ))
+
+        compact = SimpleNamespace(usage=SimpleNamespace(input=20, cache_read=3, cache_write=2, output=1, total_tokens=26, reasoning=0))
+        self.assertEqual(pi_odoo_runner._nullable_entry_usage_sum([compact], "total_tokens"), 26)
+        self.assertEqual(pi_odoo_runner._nullable_entry_usage_sum([], "total_tokens"), 0)
+        self.assertIsNone(pi_odoo_runner._nullable_entry_usage_sum(
+            [compact, SimpleNamespace(usage=None)], "total_tokens"
+        ))
+
     def test_pause_on_approval_stops_after_needs_reconciliation_before_next_model_request(self):
         async def check(root: Path):
             requests = []

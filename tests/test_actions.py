@@ -14,7 +14,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from odoo_mcp.agent_tools import build_write_preview_report
+from odoo_runtime._odoo_core.agent_tools import build_write_preview_report
+from odoo_runtime._odoo_core.diagnostics import READ_ONLY_METHODS
+from odoo_runtime._odoo_core.field_policy import FieldPolicy, ModelFieldRule
 from pi_agent.tools import AgentTool, AgentToolResult
 
 from integration.odoo_tools import route_tools
@@ -196,10 +198,85 @@ def _actions(
     )
     if directory is not None:
         actions._test_directory = directory
+        unittest.addModuleCleanup(directory.cleanup)
+        unittest.addModuleCleanup(actions.store.close)
     return actions, writer, runtime
 
 
 class NativeActionCheckpointTests(unittest.TestCase):
+    def test_execute_method_rejects_read_surface_and_uses_native_reads(self):
+        for method in sorted(READ_ONLY_METHODS):
+            with self.subTest(method=method):
+                actions, writer, _ = _actions()
+                result = actions.execute_method(
+                    "res.partner", method, kwargs={"domain": []}
+                )
+                self.assertFalse(result["success"])
+                self.assertIn("NativeReads", result["error"])
+                self.assertEqual(writer.calls, [])
+
+    def test_nested_relation_policy_blocks_preview_validation_and_legacy_approval(self):
+        class RelationalReader(_Reader):
+            def get_model_fields(self, model):
+                if model == "sale.order":
+                    return {
+                        "name": {"type": "char", "readonly": False},
+                        "order_line": {
+                            "type": "one2many", "relation": "sale.order.line", "readonly": False,
+                        },
+                    }
+                if model == "sale.order.tax":
+                    return {
+                        "code": {"type": "char", "readonly": False},
+                    }
+                return {
+                    "name": {"type": "char", "readonly": False},
+                    "price_unit": {"type": "float", "readonly": False},
+                    "taxes": {
+                        "type": "many2many", "relation": "sale.order.tax", "readonly": False,
+                    },
+                }
+
+        runtime = _Runtime()
+        runtime.client = RelationalReader()
+        writer = _Writer(runtime.client)
+        actions, _, _ = _actions(runtime=runtime, writer=writer)
+        values = {"name": "SO-POLICY", "order_line": [[0, 0, {"name": "line", "price_unit": 99}]]}
+
+        runtime.policy = FieldPolicy({"default": {
+            "sale.order.line": ModelFieldRule("deny", frozenset({"price_unit"})),
+            "sale.order.tax": ModelFieldRule("deny", frozenset({"code"})),
+        }})
+        preview = actions.preview_write("sale.order", "create", values=values)
+        self.assertFalse(preview["success"])
+        self.assertIn("sale.order.order_line.price_unit", preview["error"])
+        validation = actions.validate_write("sale.order", "create", values=values)
+        self.assertFalse(validation["success"])
+        self.assertEqual(writer.calls, [])
+
+        nested_values_list = [
+            {"name": "safe", "order_line": [[1, 301, {"name": "line"}]]},
+            {"name": "nested", "order_line": [[1, 302, {"taxes": [[0, 0, {"code": "blocked"}]]}]]},
+        ]
+        preview = actions.preview_write("sale.order", "create", values_list=nested_values_list)
+        self.assertFalse(preview["success"])
+        self.assertIn("sale.order.order_line.taxes.code", preview["error"])
+        validation = actions.validate_write("sale.order", "create", values_list=nested_values_list)
+        self.assertFalse(validation["success"])
+        self.assertEqual(writer.calls, [])
+
+        runtime.policy = FieldPolicy({})
+        approval = actions.validate_write("sale.order", "create", values=values)["approval"]
+        runtime.policy = FieldPolicy({"default": {
+            "sale.order.line": ModelFieldRule("deny", frozenset({"price_unit"})),
+            "sale.order.tax": ModelFieldRule("deny", frozenset({"code"})),
+        }})
+        with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1"}):
+            result = actions.execute_approved_write(approval, confirm=True)
+        self.assertFalse(result["success"])
+        self.assertIn("field policy denies", result["error"])
+        self.assertEqual(writer.calls, [])
+
     def test_custom_approval_ttl_is_applied(self):
         actions, _, _ = _actions(approval_ttl_seconds=3600)
         validation = actions.validate_write(

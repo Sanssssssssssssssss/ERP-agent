@@ -44,10 +44,10 @@ RECORDS = {
 class SaleViewReadbackTests(unittest.TestCase):
     def test_verified_method_receipt_uses_argument_identity_and_evidence_records(self):
         runs = [{
-            "id": "r-create", "started_at": "2026-01-02T00:00:00Z",
+            "id": "r-confirm", "started_at": "2026-01-02T00:00:00Z",
             "tools": [{
                 "name": "execute_method",
-                "arguments": {"model": "sale.order", "method": "create"},
+                "arguments": {"model": "sale.order", "method": "action_confirm"},
                 "result": {
                     "action_status": "verified",
                     "model": "account.move",
@@ -56,7 +56,7 @@ class SaleViewReadbackTests(unittest.TestCase):
                 },
             }],
         }]
-        self.assertEqual(_verified_action_record_ids(runs, "sale.order", {"create"}), {8})
+        self.assertEqual(_verified_action_record_ids(runs, "sale.order", {"action_confirm"}), {8})
 
     def test_multiple_observed_orders_do_not_select_the_first_as_target(self):
         state = _state()
@@ -276,6 +276,67 @@ class SaleViewReadbackTests(unittest.TestCase):
         self.assertEqual([stage['id'] for stage in detail['execution']['stages']], ['read', 'purchase', 'verify'])
         self.assertEqual(next(stage for stage in detail['execution']['stages'] if stage['id'] == 'purchase')['status'], 'verified')
         self.assertNotIn('purchase_confirmed', {row['name'] for row in detail['checks']})
+
+    def test_verified_purchase_action_selects_target_among_multiple_orders(self):
+        state = _state()
+        state['businesses']['b1'].update({'type': 'purchase', 'completion_target': 'confirmed'})
+        state['runs']['r2']['documents'] = [
+            {'id': 8, 'model': 'purchase.order', 'source_run_id': 'r2', 'fields': {'partner_id': [10, 'Supplier'], 'order_line': [21]}},
+            {'id': 9, 'model': 'purchase.order', 'source_run_id': 'r2', 'fields': {'partner_id': [10, 'Supplier'], 'order_line': [22]}},
+        ]
+        state['runs']['r2']['tools'] = [{
+            'id': 'confirm-po-8', 'name': 'execute_method',
+            'arguments': {'model': 'purchase.order', 'method': 'button_confirm'},
+            'result': {'action_status': 'verified', 'verification': {'status': 'satisfied', 'evidence': {'records': [{'id': 8, 'state': 'purchase'}]}}},
+        }]
+        records = {
+            ('purchase.order', 8): {'id': 8, 'name': 'PO008', 'state': 'purchase', 'partner_id': [10, 'Supplier'], 'order_line': [[21, 'Line 8']]},
+            ('purchase.order', 9): {'id': 9, 'name': 'PO009', 'state': 'draft', 'partner_id': [10, 'Supplier'], 'order_line': [[22, 'Line 9']]},
+            ('res.partner', 10): {'id': 10, 'name': 'Supplier'},
+            ('purchase.order.line', 21): {'id': 21, 'name': 'Line 8', 'order_id': [8, 'PO008'], 'product_id': [99, 'Widget'], 'product_qty': 2, 'price_unit': 10},
+            ('purchase.order.line', 22): {'id': 22, 'name': 'Line 9', 'order_id': [9, 'PO009'], 'product_id': [99, 'Widget'], 'product_qty': 1, 'price_unit': 10},
+        }
+        detail = refresh_business(state, 'b1', NativeReadFixture(records))
+        orders = {row['id']: row for row in detail['documents'] if row['model'] == 'purchase.order'}
+        self.assertEqual(orders[8]['document_scope'], 'current')
+        self.assertEqual(orders[9]['document_scope'], 'reference')
+        self.assertEqual(next(row for row in detail['checks'] if row['name'] == 'purchase_confirmed')['status'], 'passed')
+
+    def test_multiple_purchase_orders_without_verified_action_stays_unknown(self):
+        state = _state()
+        state['businesses']['b1'].update({'type': 'purchase', 'completion_target': 'confirmed'})
+        state['runs']['r2']['documents'] = [
+            {'id': 8, 'model': 'purchase.order', 'source_run_id': 'r2', 'fields': {}},
+            {'id': 9, 'model': 'purchase.order', 'source_run_id': 'r2', 'fields': {}},
+        ]
+        records = {
+            ('purchase.order', 8): {'id': 8, 'name': 'PO008', 'state': 'purchase', 'partner_id': [10, 'Supplier'], 'order_line': []},
+            ('purchase.order', 9): {'id': 9, 'name': 'PO009', 'state': 'purchase', 'partner_id': [10, 'Supplier'], 'order_line': []},
+            ('res.partner', 10): {'id': 10, 'name': 'Supplier'},
+        }
+        detail = refresh_business(state, 'b1', NativeReadFixture(records))
+        self.assertEqual(next(row for row in detail['checks'] if row['name'] == 'observed_purchase')['status'], 'unknown')
+        self.assertEqual(detail['outcome']['status'], 'unknown')
+
+    def test_verified_purchase_target_missing_readback_cannot_fallback_to_other_order(self):
+        state = _state()
+        state['businesses']['b1'].update({'type': 'purchase', 'completion_target': 'confirmed'})
+        state['runs']['r2']['documents'] = [
+            {'id': 8, 'model': 'purchase.order', 'source_run_id': 'r2', 'fields': {}},
+            {'id': 9, 'model': 'purchase.order', 'source_run_id': 'r2', 'fields': {}},
+        ]
+        state['runs']['r2']['tools'] = [{
+            'id': 'confirm-po-8', 'name': 'execute_method',
+            'arguments': {'model': 'purchase.order', 'method': 'button_confirm'},
+            'result': {'action_status': 'verified', 'verification': {'status': 'satisfied', 'evidence': {'records': [{'id': 8}]}}},
+        }]
+        records = {
+            ('purchase.order', 9): {'id': 9, 'name': 'PO009', 'state': 'purchase', 'partner_id': [10, 'Supplier'], 'order_line': []},
+            ('res.partner', 10): {'id': 10, 'name': 'Supplier'},
+        }
+        detail = refresh_business(state, 'b1', NativeReadFixture(records))
+        self.assertEqual(next(row for row in detail['checks'] if row['name'] == 'observed_purchase')['status'], 'unknown')
+        self.assertEqual(detail['outcome']['status'], 'unknown')
 
     def test_sale_confirmed_target_does_not_require_invoice_relation(self):
         records = deepcopy(RECORDS)

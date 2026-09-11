@@ -16,6 +16,7 @@ from pathlib import Path
 
 from pi_agent.messages import AssistantMessage, ToolResultMessage
 from pi_agent.session import JsonlSessionStorage
+from pi_agent.session.entries import CompactionEntry, MessageEntry
 from pi_agent.tools import AgentTool, AgentToolResult
 from pi_ai.env import OpenAICompatibleConfig
 from pi_ai.openai_compatible import OpenAICompatibleProvider
@@ -61,6 +62,34 @@ DYNAMIC_TOOL_POLICY = (
     "selected tool is rejected."
 )
 McpToolSet = None
+
+
+def _usage_message_value(message: AssistantMessage, field: str) -> int | None:
+    usage = getattr(message, "usage", None)
+    if getattr(message, "stop_reason", None) in {"error", "aborted"}:
+        fields = ("input", "cache_read", "cache_write", "output", "total_tokens", "reasoning")
+        if usage is None or not any(getattr(usage, name, None) not in (None, 0) for name in fields):
+            return None
+    return getattr(usage, field, None) if usage is not None else None
+
+
+def _nullable_usage_sum(messages: list[AssistantMessage], field: str) -> int | None:
+    """Sum a reported usage bucket while preserving zero and missing values."""
+    if not messages:
+        return None
+    values = [_usage_message_value(message, field) for message in messages]
+    if any(value is None for value in values):
+        return None
+    return sum(values)
+
+
+def _nullable_entry_usage_sum(entries: list[CompactionEntry], field: str) -> int | None:
+    if not entries:
+        return 0
+    values = [getattr(entry.usage, field, None) if entry.usage is not None else None for entry in entries]
+    if any(value is None for value in values):
+        return None
+    return sum(values)
 
 
 def _validated_dynamic_selection(active: object) -> tuple[str, ...] | None:
@@ -583,9 +612,8 @@ async def run(args: argparse.Namespace) -> None:
                     ),
                     flush=True,
                 )
-                assistant_before = sum(
-                    isinstance(message, AssistantMessage) for message in session.messages
-                )
+                entries_before = await session.session_entries()
+                entry_ids_before = {entry.id for entry in entries_before}
                 if getattr(args, "continue_run", False) and getattr(args, "pause_on_approval", False):
                     # Persist the host notification in the same Pi session. The
                     # native action ledger remains the execution authority.
@@ -603,26 +631,31 @@ async def run(args: argparse.Namespace) -> None:
                 async for event in public_events(source):
                     print(json.dumps(event, ensure_ascii=False), flush=True)
 
-                assistant = [
-                    message
-                    for message in session.messages
-                    if isinstance(message, AssistantMessage)
-                ][assistant_before:]
-                def usage_sum(field):
-                    if not assistant:
-                        return None
-                    values = [getattr(message.usage, field, None) for message in assistant]
-                    if all(value is None for value in values):
-                        return None
-                    return sum(value or 0 for value in values)
+                new_entries = [entry for entry in await session.session_entries()
+                               if entry.id not in entry_ids_before]
+                assistant = [entry.message for entry in new_entries
+                             if isinstance(entry, MessageEntry)
+                             and isinstance(entry.message, AssistantMessage)]
+                compactions = [entry for entry in new_entries if isinstance(entry, CompactionEntry)]
 
                 usage = {
-                    "input": usage_sum("input"),
-                    "output": usage_sum("output"),
-                    "total": usage_sum("total_tokens"),
-                    "cacheRead": usage_sum("cache_read"),
-                    "cacheWrite": usage_sum("cache_write"),
-                    "reasoning": usage_sum("reasoning"),
+                    "input": _nullable_usage_sum(assistant, "input"),
+                    "output": _nullable_usage_sum(assistant, "output"),
+                    "total": _nullable_usage_sum(assistant, "total_tokens"),
+                    "cacheRead": _nullable_usage_sum(assistant, "cache_read"),
+                    "cacheWrite": _nullable_usage_sum(assistant, "cache_write"),
+                    "cacheWrite1H": _nullable_usage_sum(assistant, "cache_write_1h"),
+                    "reasoning": _nullable_usage_sum(assistant, "reasoning"),
+                    "compactionTotal": _nullable_entry_usage_sum(compactions, "total_tokens"),
+                    "compactionInput": _nullable_entry_usage_sum(compactions, "input"),
+                    "compactionCacheRead": _nullable_entry_usage_sum(compactions, "cache_read"),
+                    "compactionCacheWrite": _nullable_entry_usage_sum(compactions, "cache_write"),
+                    "compactionCacheWrite1H": _nullable_entry_usage_sum(compactions, "cache_write_1h"),
+                    "compactionOutput": _nullable_entry_usage_sum(compactions, "output"),
+                    "compactionReasoning": _nullable_entry_usage_sum(compactions, "reasoning"),
+                    "compactionCalls": len(compactions),
+                    "totalScope": "assistant_responses_only",
+                    "inputSemantics": "uncached",
                     "modelCalls": receipts.number,
                     "maxOutputTokens": max_output_tokens,
                     "maxModelRequests": max_model_requests,

@@ -343,13 +343,13 @@ def _verified_action_record_ids(
             if evidence_ids == "record_ids":
                 ids = evidence.get("record_ids")
                 if isinstance(ids, list):
-                    record_ids.update(record_id for record_id in ids if type(record_id) is int)
+                    record_ids.update(record_id for record_id in ids if type(record_id) is int and record_id > 0)
             else:
                 records = evidence.get("records")
                 if isinstance(records, list):
                     for record in records:
                         record_id = record.get("id") if isinstance(record, dict) else record
-                        if type(record_id) is int:
+                        if type(record_id) is int and record_id > 0:
                             record_ids.add(record_id)
         if found_action:
             return record_ids
@@ -366,6 +366,14 @@ def _target_order_ids(run: dict[str, Any] | None, business_type: str) -> set[int
 
 def _target_order_ids_for_runs(runs: list[dict[str, Any]], business_type: str) -> set[int]:
     return _verified_action_record_ids(runs, "purchase.order" if business_type == "purchase" else "sale.order", {"create", "write", "action_confirm", "button_confirm", "button_approve"})
+
+
+def _select_target_document(documents: list[dict[str, Any]], target_ids: set[int]) -> dict[str, Any] | None:
+    """Select only a uniquely verified and freshly observed target."""
+    if target_ids:
+        candidates = [document for document in documents if document.get("id") in target_ids]
+        return candidates[0] if len(target_ids) == 1 and len(candidates) == 1 else None
+    return documents[0] if len(documents) == 1 else None
 
 
 def _annotate_document_scope(
@@ -829,7 +837,8 @@ def _finish_purchase_readback(state: dict[str, Any], business: dict[str, Any], r
                               observations: dict[tuple[str, int], dict[str, Any]], failures: dict[tuple[str, int], str],
                               fresh_by_model: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     orders = fresh_by_model.get("purchase.order", [])
-    order = orders[0] if len(orders) == 1 else None
+    target_ids = _target_order_ids_for_runs(runs, "purchase")
+    order = _select_target_document(orders, target_ids)
     fields = order.get("fields", {}) if order else {}
     partner_ids = _relation_ids(fields.get("partner_id"))
     partners = fresh_by_model.get("res.partner", [])
@@ -857,8 +866,10 @@ def _finish_chain_readback(state: dict[str, Any], business: dict[str, Any], runs
                            fresh_by_model: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     orders = fresh_by_model.get("sale.order", [])
     purchases = fresh_by_model.get("purchase.order", [])
-    order = orders[0] if len(orders) == 1 else None
-    purchase = purchases[0] if len(purchases) == 1 else None
+    sale_target_ids = _target_order_ids_for_runs(runs, "sale_invoice")
+    purchase_target_ids = _target_order_ids_for_runs(runs, "purchase")
+    order = _select_target_document(orders, sale_target_ids)
+    purchase = _select_target_document(purchases, purchase_target_ids)
     order_fields = order.get("fields", {}) if order else {}
     purchase_fields = purchase.get("fields", {}) if purchase else {}
     order_name = order.get("name") if order else None
@@ -993,8 +1004,7 @@ def refresh_business(
     # also contains historical search results.  A search result alone never
     # selects a business target.
     target_ids = _target_order_ids_for_runs(runs, business_type)
-    target_orders = [document for document in orders if document.get("id") in target_ids]
-    order = target_orders[0] if len(target_orders) == 1 else orders[0] if len(orders) == 1 else None
+    order = _select_target_document(orders, target_ids)
     order_fields = order.get("fields", {}) if order else {}
     invoice_ids = set(_relation_ids(order_fields.get("invoice_ids"))) if order else set()
     linked_invoices = [doc for doc in invoices if doc["id"] in invoice_ids]

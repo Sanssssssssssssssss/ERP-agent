@@ -41,6 +41,12 @@ jobs:
           PYTHONPATH: ${{ github.workspace }};${{ github.workspace }}\agent\src
         run: python -m unittest discover -s tests -p 'test_document_export.py'
 
+      - name: Check native actions, field policy and usage
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }};${{ github.workspace }}\agent\src
+        run: python -m unittest tests.test_actions tests.test_runner_budget
+
   desktop:
     name: Desktop checks
     runs-on: windows-latest

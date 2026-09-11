@@ -24,7 +24,6 @@ from odoo_runtime._odoo_core.agent_tools import (
 from odoo_runtime._odoo_core.audit import record_write_event
 from odoo_runtime._odoo_core.diagnostics import (
     DESTRUCTIVE_METHODS,
-    JSON2_POSITIONAL_ARG_MAP,
     READ_ONLY_METHODS,
     classify_method_safety,
 )
@@ -32,7 +31,6 @@ from odoo_runtime._odoo_core.odoo_client import OdooClient, OdooJson2Error
 from odoo_runtime._odoo_core.rate_limit import check_rate
 from odoo_runtime._odoo_core.tool_helpers import (
     max_attachment_upload_bytes,
-    normalize_domain_input,
     validate_method_name,
     validate_model_name,
 )
@@ -270,6 +268,54 @@ def _collect_related_metadata(
 
     walk(fields_metadata, rows)
     return related
+
+
+def _policy_denials_for_values(
+    runtime: Any,
+    instance: str,
+    model: str,
+    fields_metadata: dict[str, Any],
+    rows: list[dict[str, Any]],
+    related_metadata: dict[str, dict[str, Any]] | None = None,
+) -> list[str]:
+    """Find policy-denied fields in parent values and nested relation commands."""
+    policy = getattr(runtime, "policy", None)
+    if policy is None or not rows:
+        return []
+    metadata_by_model = {model: fields_metadata, **(related_metadata or {})}
+    denied: set[str] = set()
+
+    def walk(current_model: str, metadata: dict[str, Any], current_rows: list[dict[str, Any]], path: str) -> None:
+        denied.update(
+            f"{path}.{field_name}"
+            for field_name in policy.restricted_fields(instance, current_model, {
+                str(field_name) for row in current_rows for field_name in row
+            })
+        )
+        for row in current_rows:
+            for field_name, value in row.items():
+                field = metadata.get(field_name)
+                relation = field.get("relation") if isinstance(field, dict) else None
+                if not relation or not isinstance(value, (list, tuple)):
+                    continue
+                nested_rows = [
+                    command[2]
+                    for command in value
+                    if isinstance(command, (list, tuple))
+                    and len(command) == 3
+                    and command[0] in {0, 1}
+                    and isinstance(command[2], dict)
+                ]
+                child_metadata = metadata_by_model.get(str(relation))
+                if nested_rows:
+                    if not isinstance(child_metadata, dict) or not child_metadata:
+                        raise ValueError(
+                            f"field policy metadata unavailable for relation {relation}"
+                        )
+                    walk(str(relation), child_metadata, nested_rows, f"{path}.{field_name}")
+
+    walk(model, fields_metadata, rows, model)
+    return sorted(denied)
 
 
 def _strip_html(value: Any) -> str:
@@ -1079,6 +1125,24 @@ class NativeActions:
                 **dict(getattr(runtime.client, "context", {}) or {}),
                 **dict(context or {}),
             }
+            policy = getattr(runtime, "policy", None)
+            if policy is not None and policy.active():
+                preview_metadata = runtime._metadata(model)
+                if not isinstance(preview_metadata, dict) or not preview_metadata or "error" in preview_metadata:
+                    raise ValueError("field policy metadata unavailable; refusing write preview")
+                preview_related = _collect_related_metadata(
+                    runtime.client, preview_metadata, [values or {}, *(values_list or [])]
+                )
+                denied = _policy_denials_for_values(
+                    runtime, name, model, preview_metadata,
+                    [values or {}, *(values_list or [])], preview_related,
+                )
+                if denied:
+                    return {
+                        "success": False,
+                        "tool": "preview_write",
+                        "error": f"field policy denies writes to {denied}",
+                    }
             report = build_write_preview_report(
                 model=model,
                 operation=operation,
@@ -1152,15 +1216,20 @@ class NativeActions:
                         },
                     }
             policy = getattr(runtime, "policy", None)
-            changed_fields = {
-                str(field)
-                for row in [values or {}, *(values_list or [])]
-                for field in row
-            }
+            related_metadata = (
+                _collect_related_metadata(
+                    runtime.client, fields_metadata or {}, [values or {}, *(values_list or [])]
+                )
+                if source == "server" and fields_metadata
+                else {}
+            )
             denied = (
-                policy.restricted_fields(name, model, changed_fields)
+                _policy_denials_for_values(
+                    runtime, name, model, fields_metadata or {},
+                    [values or {}, *(values_list or [])], related_metadata,
+                )
                 if policy is not None
-                else set()
+                else []
             )
             if denied:
                 return {
@@ -1194,15 +1263,7 @@ class NativeActions:
                 fields_metadata=fields_metadata,
                 metadata_source=source,
                 instance=name,
-                related_metadata=(
-                    _collect_related_metadata(
-                        runtime.client,
-                        fields_metadata or {},
-                        [values or {}, *(values_list or [])],
-                    )
-                    if source == "server" and fields_metadata
-                    else None
-                ),
+                related_metadata=related_metadata or None,
             )
             trusted = source == "server" and bool(fields_metadata)
             action = None
@@ -1322,7 +1383,38 @@ class NativeActions:
             validate_model_name(model)
             if operation not in DESTRUCTIVE_METHODS:
                 raise ValueError("operation must be one of create, write, or unlink")
-            name, _ = self._runtime(str(approval.get("instance") or "default"))
+            name, runtime = self._runtime(str(approval.get("instance") or "default"))
+            policy = getattr(runtime, "policy", None)
+            if policy is not None and policy.active():
+                payload = record["payload"]
+                values = dict(payload.get("values") or {})
+                values_list = (
+                    [dict(row) for row in payload["values_list"]]
+                    if payload.get("values_list") is not None
+                    else None
+                )
+                metadata = runtime._metadata(model)
+                if not isinstance(metadata, dict) or not metadata or "error" in metadata:
+                    return {
+                        "success": False,
+                        "tool": "execute_approved_write",
+                        "action_id": action_id,
+                        "error": "field policy metadata unavailable; refusing write",
+                    }
+                related_metadata = _collect_related_metadata(
+                    runtime.client, metadata, [values, *(values_list or [])]
+                )
+                denied = _policy_denials_for_values(
+                    runtime, name, model, metadata,
+                    [values, *(values_list or [])], related_metadata,
+                )
+                if denied:
+                    return {
+                        "success": False,
+                        "tool": "execute_approved_write",
+                        "action_id": action_id,
+                        "error": f"field policy denies writes to {denied}",
+                    }
 
             prepared: dict[str, Any] = {}
 
@@ -1500,9 +1592,14 @@ class NativeActions:
                         "preview_write -> validate_write -> execute_approved_write."
                     ),
                 }
+            if method in READ_ONLY_METHODS:
+                return {
+                    "success": False,
+                    "error": "Direct execute_method does not expose read methods; use NativeReads for policy-enforced reads.",
+                    "classification": safety,
+                }
             # Heuristic get_* names are not an authorization boundary.
-            mutating = method not in READ_ONLY_METHODS
-            if mutating and f"{model}.{method}" not in allowed_methods:
+            if f"{model}.{method}" not in allowed_methods:
                 return {
                     "success": False,
                     "error": (
@@ -1525,19 +1622,9 @@ class NativeActions:
                         "error": "official invoice PDF accepts kwargs.ids only",
                         "classification": safety,
                     }
-            names = JSON2_POSITIONAL_ARG_MAP.get(method, ())
-            if "domain" in names:
-                index = names.index("domain")
-                if len(args) > index:
-                    args[index] = normalize_domain_input(args[index])
-                for key in (("domain", "args") if method == "name_search" else ("domain",)):
-                    if key in kwargs:
-                        kwargs[key] = normalize_domain_input(kwargs[key])
             refusal = check_rate(name, "execute_method")
             if refusal is not None:
                 return refusal
-            if not mutating:
-                return {"success": True, "result": self._send(name, model, method, *args, **kwargs)}
             if not writes_enabled():
                 return {
                     "success": False,
