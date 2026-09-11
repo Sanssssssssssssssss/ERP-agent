@@ -295,7 +295,13 @@ class RunnerBudgetTest(unittest.TestCase):
                         await pi_odoo_runner.run(args)
                         args.usage_file = root / "run2" / "usage.json"
                         args.receipt_dir = root / "run2"
+                        resumed_requests = args.receipt_dir / "requests"
+                        resumed_requests.mkdir(parents=True)
+                        (resumed_requests / "0001.request.json").write_text("{}", encoding="utf-8")
                         await pi_odoo_runner.run(args)
+                        self.assertEqual(json.loads(args.usage_file.read_text())["modelCalls"], 1)
+                        self.assertEqual((resumed_requests / "0001.request.json").read_text(), "{}")
+                        self.assertTrue((resumed_requests / "0002.request.json").is_file())
                         args.usage_file = root / "run3" / "usage.json"
                         args.receipt_dir = root / "run3"
                         args.receipt_dir.mkdir(parents=True)
@@ -312,6 +318,8 @@ class RunnerBudgetTest(unittest.TestCase):
 
             asyncio.run(check())
 
+            self.assertEqual(json.loads((root / "run1" / "usage.json").read_text())["modelCalls"], 2)
+            self.assertEqual(json.loads((root / "run3" / "usage.json").read_text())["modelCalls"], 1)
             first, second, third, fourth = map(tool_names, request_payloads)
             self.assertEqual(len(first), 14)
             self.assertNotIn("mcp_odoo_preview_write", first)

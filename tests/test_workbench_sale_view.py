@@ -58,6 +58,43 @@ class SaleViewReadbackTests(unittest.TestCase):
         }]
         self.assertEqual(_verified_action_record_ids(runs, "sale.order", {"action_confirm"}), {8})
 
+    def test_host_reconciliation_selects_target_without_rewriting_tool_history(self):
+        for kind, operation, evidence in (
+            ("write", "create", {"record_ids": [8]}),
+            ("method", "action_confirm", {"records": [{"id": 8}]}),
+        ):
+            with self.subTest(kind=kind):
+                state = _state()
+                state["businesses"]["b1"]["completion_target"] = "draft"
+                run = state["runs"]["r2"]
+                run["documents"].append({"id": 8, "model": "sale.order", "fields": {}})
+                run["tools"] = [{"name": "execute_method", "arguments": {"model": "sale.order", "method": "action_confirm"},
+                                 "result": {"action_id": "a1", "action_status": "needs_reconciliation"}}]
+                original_tools = deepcopy(run["tools"])
+                run["events"] = [{"type": "reconciliation", "action_id": "a1", "kind": kind,
+                                  "model": "sale.order", "operation": operation, "action_status": "verified",
+                                  "verification": {"status": "satisfied", "evidence": evidence}}]
+                records = {**RECORDS, ("sale.order", 8): {**RECORDS[("sale.order", 7)], "id": 8, "state": "draft", "order_line": [], "invoice_ids": [], "picking_ids": []}}
+                detail = refresh_business(state, "b1", NativeReadFixture(records))
+                orders = {doc["id"]: doc for doc in detail["documents"] if doc["model"] == "sale.order"}
+                self.assertEqual(orders[8]["document_scope"], "current")
+                self.assertEqual(orders[7]["document_scope"], "reference")
+                self.assertEqual(run["tools"], original_tools)
+                for bad_evidence in ({}, {"record_ids": [99], "records": [{"id": 99}]},
+                                     {"record_ids": [7, 8], "records": [{"id": 7}, {"id": 8}]}):
+                    with self.subTest(evidence=bad_evidence):
+                        run["events"][-1]["verification"]["evidence"] = bad_evidence
+                        detail = refresh_business(state, "b1", NativeReadFixture(records))
+                        self.assertEqual(next(c for c in detail["checks"] if c["name"] == "observed_order")["status"], "unknown")
+
+    def test_latest_host_reconciliation_overrides_old_verified_receipt(self):
+        receipt = {"type": "reconciliation", "action_id": "a1", "kind": "write", "model": "sale.order",
+                   "operation": "create", "action_status": "verified", "verification": {"status": "satisfied", "evidence": {"record_ids": [8]}}}
+        old_run = {"started_at": "2026-01-01", "tools": [{"name": "execute_approved_write", "result": receipt}]}
+        run = {"started_at": "2026-01-02", "tools": deepcopy(old_run["tools"]),
+               "events": [receipt, {**receipt, "action_status": "needs_reconciliation", "verification": {"status": "unconfirmed"}}]}
+        self.assertEqual(_verified_action_record_ids([old_run, run], "sale.order", {"create"}), set())
+
     def test_multiple_observed_orders_do_not_select_the_first_as_target(self):
         state = _state()
         state["runs"]["r2"]["documents"].append({"id": 8, "model": "sale.order", "fields": {}})

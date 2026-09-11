@@ -310,47 +310,56 @@ def _verified_action_record_ids(
     """Get verified target ids from native action receipts.
 
     ``execute_method`` identifies the action in its recorded arguments. Native
-    verification puts the resulting records under ``verification.evidence.records``;
-    read/search results and result prose are never used to select a target.
+    verification puts the resulting records under ``verification.evidence.records``.
+    Host reconciliation events supersede the original receipt for the same action;
+    read/search results and result prose never select a target.
     """
     ordered = sorted((row for row in runs if isinstance(row, dict)), key=_run_sort_key, reverse=True)
     for run in ordered:
-        found_action = False
-        record_ids: set[int] = set()
+        events = run.get("events") if isinstance(run.get("events"), list) else []
+        reconciled = {
+            event["action_id"]: event
+            for event in events if isinstance(event, dict)
+            and event.get("type") == "reconciliation" and isinstance(event.get("action_id"), str)
+        }
+        receipts = []
         for tool in run.get("tools", []) if isinstance(run.get("tools"), list) else []:
             if not isinstance(tool, dict):
                 continue
             result = tool.get("result") if isinstance(tool.get("result"), dict) else {}
-            verification = result.get("verification") if isinstance(result.get("verification"), dict) else {}
-            if result.get("action_status") != "verified" or verification.get("status") != "satisfied":
+            action_id = result.get("action_id")
+            if isinstance(action_id, str) and action_id in reconciled:
                 continue
             arguments = tool.get("arguments") if isinstance(tool.get("arguments"), dict) else {}
             tool_name = str(tool.get("name") or "").removeprefix("mcp_odoo_")
             if tool_name == "execute_method":
-                action_model = arguments.get("model")
-                operation = arguments.get("method")
-                evidence_ids = "records"
+                receipts.append((arguments.get("model"), arguments.get("method"), "records", result))
             elif tool_name == "execute_approved_write":
-                action_model = result.get("model")
-                operation = result.get("operation")
-                evidence_ids = "record_ids"
-            else:
-                continue
+                receipts.append((result.get("model"), result.get("operation"), "record_ids", result))
+        for receipt in reconciled.values():
+            if receipt.get("kind") in {"write", "method"}:
+                receipts.append((receipt.get("model"), receipt.get("operation"),
+                                 "record_ids" if receipt["kind"] == "write" else "records", receipt))
+        found_action = False
+        record_ids: set[int] = set()
+        for action_model, operation, evidence_ids, result in receipts:
             if action_model != model or (operations and operation not in operations):
+                continue
+            verification = result.get("verification") if isinstance(result.get("verification"), dict) else {}
+            # A host reconciliation supersedes the original receipt, including
+            # an unconfirmed result; never recover a stale target from an older run.
+            if result.get("type") == "reconciliation":
+                found_action = True
+            if result.get("action_status") != "verified" or verification.get("status") != "satisfied":
                 continue
             found_action = True
             evidence = verification.get("evidence") if isinstance(verification.get("evidence"), dict) else {}
-            if evidence_ids == "record_ids":
-                ids = evidence.get("record_ids")
-                if isinstance(ids, list):
-                    record_ids.update(record_id for record_id in ids if type(record_id) is int and record_id > 0)
-            else:
-                records = evidence.get("records")
-                if isinstance(records, list):
-                    for record in records:
-                        record_id = record.get("id") if isinstance(record, dict) else record
-                        if type(record_id) is int and record_id > 0:
-                            record_ids.add(record_id)
+            ids = evidence.get(evidence_ids)
+            if isinstance(ids, list):
+                for record in ids:
+                    record_id = record.get("id") if evidence_ids == "records" and isinstance(record, dict) else record
+                    if type(record_id) is int and record_id > 0:
+                        record_ids.add(record_id)
         if found_action:
             return record_ids
     return set()

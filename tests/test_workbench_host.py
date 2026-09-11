@@ -346,7 +346,7 @@ class WorkbenchHostTests(unittest.TestCase):
                 ledger.finish(action, "verified", result={"readback": True}, verification={"status": "satisfied"})
             finally:
                 ledger.close()
-            return {"success": True, "action_id": action, "action_status": "verified", "verification": {"status": "satisfied"}}
+            return {"success": True, "action_id": action, "action_status": "verified", "verification": {"status": "satisfied", "evidence": {"records": [{"id": 7}]}}}
 
         fake_actions = SimpleNamespace(NativeActions=type("FakeNativeActions", (), {"__init__": lambda self, _reads, store: setattr(self, "store", store), "reconcile": reconcile}))
         with patch.dict(sys.modules, {"odoo_runtime.actions": fake_actions}), \
@@ -355,7 +355,10 @@ class WorkbenchHostTests(unittest.TestCase):
         self.assertEqual(result["business"]["id"], business["id"])
         self.assertEqual(run["status"], "interrupted")
         self.assertEqual(self.host.store.data["approvals"][row["action_id"]]["status"], "verified")
-        self.assertTrue(any(event["type"] == "reconciliation" for event in run["events"]))
+        event = next(event for event in run["events"] if event["type"] == "reconciliation")
+        self.assertEqual((event["kind"], event["model"], event["operation"]), ("method", "sale.order", "action_confirm"))
+        from workbench.sale_view import _verified_action_record_ids
+        self.assertEqual(_verified_action_record_ids([run], "sale.order", {"action_confirm"}), {7})
 
     def test_reconcile_refuses_pending_approval(self):
         business, run = self._run("do not replay pending")

@@ -394,6 +394,7 @@ async def run(args: argparse.Namespace) -> None:
         receipt_dir / "requests",
         max_model_requests=max_model_requests,
     )
+    receipt_start_number = receipts.number
     provider = OpenAICompatibleProvider(
         OpenAICompatibleConfig(
             api_key=api_key,
@@ -656,7 +657,7 @@ async def run(args: argparse.Namespace) -> None:
                     "compactionCalls": len(compactions),
                     "totalScope": "assistant_responses_only",
                     "inputSemantics": "uncached",
-                    "modelCalls": receipts.number,
+                    "modelCalls": receipts.number - receipt_start_number,
                     "maxOutputTokens": max_output_tokens,
                     "maxModelRequests": max_model_requests,
                     "assistantEntries": len(assistant),

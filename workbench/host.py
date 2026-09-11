@@ -1694,7 +1694,13 @@ class Workbench:
                 approval["result"] = result["result"]
             if "verification" in result:
                 approval["verification"] = result["verification"]
-            self._trace(run, "reconciliation", {"action_id": action_id, "action_status": approval["status"], "verification": result.get("verification")})
+            payload = row["payload"]
+            self._trace(run, "reconciliation", {
+                "action_id": action_id, "action_status": approval["status"],
+                "kind": row["kind"], "model": payload.get("model"),
+                "operation": payload.get("operation") if row["kind"] == "write" else payload.get("method"),
+                "verification": result.get("verification"),
+            })
             if approval["status"] == "verified":
                 statuses = self._ledger_statuses(run)
                 if was_uncertain and statuses and all(value in {"verified", "known_failed"} for value in statuses.values()):
