@@ -28,7 +28,7 @@ function createWindow(): BrowserWindow {
     minHeight: 640,
     frame: false,
     autoHideMenuBar: true,
-    title: "Odoo 业务工作台",
+    title: "Odoo Agent",
     icon: app.isPackaged ? join(process.resourcesPath, "workbench.png") : join(app.getAppPath(), "assets/workbench.png"),
     backgroundColor: "#f4f7f8",
     webPreferences: {

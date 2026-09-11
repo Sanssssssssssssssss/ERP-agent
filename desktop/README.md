@@ -1,4 +1,4 @@
-# Odoo 业务工作台
+# Odoo Agent
 
 Windows 桌面工作台：会话、业务意图确认、销售、采购与开票工作区、逐项动作审批、
 Odoo 状态回读、运行 Trace。模型循环复用 Python Pi `CodingSession`，

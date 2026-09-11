@@ -1,20 +1,20 @@
-# Odoo Workbench
+# Odoo Agent
 
 Native ERP Agent Harness
 
 [English](README.md) · 简体中文
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) [![Checks](https://github.com/Sanssssssssssssssss/pi-odoo-harness-lab/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/Sanssssssssssssssss/pi-odoo-harness-lab/actions/workflows/checks.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) [![Checks](https://github.com/Sanssssssssssssssss/odoo-agent/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/Sanssssssssssssssss/odoo-agent/actions/workflows/checks.yml)
 
-Odoo Workbench 让 Agent 起草 Odoo 业务动作，在写入前请求审批，并核对结果记录。本仓库包含 Windows 桌面工作台、原生 Odoo 19 运行时及其背后的 ERP-Bench 研究 Harness。
+Odoo Agent 用于起草 Odoo 业务动作，在写入前请求审批，并核对结果记录。本仓库包含 Windows 桌面工作台、原生 Odoo 19 运行时及其背后的 ERP-Bench 研究 Harness。
 
 **Windows 预览版 · v0.5.4 · Odoo 19**
 
-![Odoo Workbench](docs/media/hero.svg)
+![Odoo Agent](docs/media/hero.svg)
 
 ## Windows 预览版（0.5.4）
 
-[下载未签名 Windows 预览版](https://github.com/Sanssssssssssssssss/pi-odoo-harness-lab/releases/download/v0.5.4/Odoo-Workbench-0.5.4-windows-x64.zip) · [Release 说明](https://github.com/Sanssssssssssssssss/pi-odoo-harness-lab/releases/tag/v0.5.4)
+[下载未签名 Windows 预览版](https://github.com/Sanssssssssssssssss/odoo-agent/releases/download/v0.5.4/Odoo-Workbench-0.5.4-windows-x64.zip) · [Release 说明](https://github.com/Sanssssssssssssssss/odoo-agent/releases/tag/v0.5.4)
 
 1. 下载并解压，然后运行 `Odoo-Workbench-0.5.4-portable.exe`。
 2. 在连接设置中填写自己的 Odoo 19 和模型配置。
@@ -63,8 +63,8 @@ Trace 展示运行、工具和用量记录；截图使用合成演示数据。
 需要 Windows、Node.js 22 或更新版本，以及 Python 3.13。
 
 ```powershell
-git clone https://github.com/Sanssssssssssssssss/pi-odoo-harness-lab.git
-cd pi-odoo-harness-lab
+git clone https://github.com/Sanssssssssssssssss/odoo-agent.git
+cd odoo-agent
 
 py -3.13 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .\agent
