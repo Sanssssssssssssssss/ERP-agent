@@ -1,13 +1,10 @@
-"""Bounded host-side exports using authenticated Odoo JSON-2 and portal metadata."""
+"""Bounded host-side exports using authenticated, read-only Odoo data."""
 
 from __future__ import annotations
 
 import base64
 import csv
 import io
-import urllib.error
-import urllib.parse
-import urllib.request
 from collections.abc import Iterable, Mapping
 
 MAX_DOCUMENT_BYTES = 32 * 1024 * 1024
@@ -94,16 +91,6 @@ def result_payload(model: str, record_id: int, data: bytes, fmt: str) -> dict[st
     }
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
-        return None
-
-
-def _same_origin(base_url: str, candidate: str) -> bool:
-    base, target = urllib.parse.urlsplit(base_url), urllib.parse.urlsplit(candidate)
-    return (target.scheme, target.hostname, target.port) == (base.scheme, base.hostname, base.port)
-
-
 def _has_relation(value: object) -> bool:
     """Accept the JSON-2 shapes used for a non-empty many2one value."""
     if value in (None, False, 0, "", [], ()):
@@ -113,50 +100,37 @@ def _has_relation(value: object) -> bool:
     return bool(value)
 
 
-def _portal_pdf(client: object, model: str, record_id: int) -> bytes:
-    base_url = str(getattr(client, "url", "")).rstrip("/")
-    if not base_url or not hasattr(client, "_json2_call_once"):
-        raise ValueError("DOCUMENT_PORTAL_ACCESS_UNAVAILABLE")
+def _read_pdf_attachment(native_reads: object, model: str, record_id: int, attachment_id: int | None = None) -> bytes:
+    if attachment_id is None:
+        raise ValueError("DOCUMENT_PDF_UNAVAILABLE")
     try:
-        # This is the official public model method. Odoo may generate portal
-        # metadata/token here; it remains inside this host request and is never
-        # copied into the returned artifact metadata.
-        url = client._json2_call_once(model, "get_portal_url", {"ids": [record_id], "report_type": "pdf", "download": True})
+        result = native_reads.call("read_attachment", {"attachment_id": attachment_id, "include_data": True})
     except Exception as exc:
-        if getattr(exc, "status_code", None) in {401, 403}:
-            raise ValueError("DOCUMENT_PORTAL_PERMISSION_DENIED") from exc
-        raise ValueError("DOCUMENT_PORTAL_ACCESS_UNAVAILABLE") from exc
-    if not isinstance(url, str) or not url.startswith(("/", "http://", "https://")):
-        raise ValueError("DOCUMENT_PORTAL_ACCESS_UNAVAILABLE")
-    url = urllib.parse.urljoin(base_url + "/", url.lstrip("/")) if url.startswith("/") else url
-    if not _same_origin(base_url, url):
-        raise ValueError("DOCUMENT_PORTAL_ORIGIN_INVALID")
-    timeout = float(getattr(client, "timeout", 10) or 10)
-    request = urllib.request.Request(url, headers={"Accept": "application/pdf"}, method="GET")
+        raise ValueError("DOCUMENT_PDF_UNAVAILABLE") from exc
+    if not isinstance(result, Mapping) or result.get("success") is not True:
+        raise ValueError("DOCUMENT_PDF_UNAVAILABLE")
+    attachment = result.get("attachment")
+    if not isinstance(attachment, Mapping) or attachment.get("id") != attachment_id or attachment.get("res_model") != model or attachment.get("res_id") != record_id:
+        raise ValueError("DOCUMENT_PDF_UNAVAILABLE")
+    if attachment.get("mimetype") != "application/pdf" or result.get("data_included") is not True:
+        raise ValueError("DOCUMENT_PDF_UNAVAILABLE")
+    encoded = result.get("data_base64")
+    if not isinstance(encoded, str):
+        raise ValueError("DOCUMENT_PDF_UNAVAILABLE")
     try:
-        with urllib.request.build_opener(_NoRedirect()).open(request, timeout=min(max(timeout, 1), 30)) as response:
-            if not _same_origin(base_url, response.geturl()):
-                raise ValueError("DOCUMENT_PORTAL_ORIGIN_INVALID")
-            content_type = str(response.headers.get("Content-Type", "")).split(";", 1)[0].lower()
-            data = response.read(MAX_DOCUMENT_BYTES + 1)
-    except urllib.error.HTTPError as exc:
-        if exc.code in {401, 403}:
-            raise ValueError("DOCUMENT_PORTAL_PERMISSION_DENIED") from exc
-        raise ValueError("DOCUMENT_REPORT_UNAVAILABLE") from exc
-    except urllib.error.URLError as exc:
-        raise ValueError("DOCUMENT_REPORT_UNAVAILABLE") from exc
-    if content_type not in {"application/pdf", "application/octet-stream"}:
-        raise ValueError("DOCUMENT_REPORT_CONTENT_TYPE_INVALID")
-    return validate_document_bytes(data, "pdf")
+        data = base64.b64decode(encoded, validate=True)
+    except Exception as exc:
+        raise ValueError("DOCUMENT_PDF_UNAVAILABLE") from exc
+    try:
+        return validate_document_bytes(data, "pdf")
+    except ValueError as exc:
+        # Do not expose attachment validation details through the public export
+        # contract; an unreadable attachment is simply unavailable.
+        raise ValueError("DOCUMENT_PDF_UNAVAILABLE") from exc
 
 
 def generate_document_export(native_reads: object, model: str, record_id: int, fmt: str) -> dict[str, str | int]:
-    """Fresh-read and export one observed Odoo document using the host credential.
-
-    PDF uses the model's standard portal route and never returns its access token.
-    CSV rereads the document and its line model before serialization.  The caller
-    remains responsible for business/session scope and artifact registration.
-    """
+    """Fresh-read and export one observed Odoo document using read-only host calls."""
     if model not in _MODEL_NAMES:
         raise ValueError("DOCUMENT_MODEL_NOT_ALLOWED")
     if type(record_id) is not int or record_id < 1:
@@ -178,7 +152,14 @@ def generate_document_export(native_reads: object, model: str, record_id: int, f
             and not _has_relation(record.get("invoice_pdf_report_id"))
         ):
             raise ValueError("DOCUMENT_INVOICE_PDF_NOT_GENERATED")
-        data = _portal_pdf(native_reads.client, model, record_id)
+        attachment_id = None
+        if model == "account.move":
+            relation = record.get("invoice_pdf_report_id")
+            if isinstance(relation, (list, tuple)) and relation and type(relation[0]) is int and relation[0] > 0:
+                attachment_id = relation[0]
+            elif type(relation) is int and relation > 0:
+                attachment_id = relation
+        data = _read_pdf_attachment(native_reads, model, record_id, attachment_id)
         return result_payload(model, record_id, data, fmt)
     line_model, line_fields = _LINE_FIELDS[model]
     relation = "order_line" if model != "account.move" else "invoice_line_ids"

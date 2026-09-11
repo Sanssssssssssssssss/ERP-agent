@@ -8,15 +8,15 @@ Native ERP Agent Harness
 
 Odoo Workbench 让 Agent 起草 Odoo 业务动作，在写入前请求审批，并核对结果记录。本仓库包含 Windows 桌面工作台、原生 Odoo 19 运行时及其背后的 ERP-Bench 研究 Harness。
 
-**Windows 预览版 · v0.5.3 · Odoo 19**
+**Windows 预览版 · v0.5.4 · Odoo 19**
 
 ![Odoo Workbench](docs/media/hero.svg)
 
-## Windows 预览版（0.5.3）
+## Windows 预览版（0.5.4）
 
-[下载未签名 Windows 预览版](https://github.com/Sanssssssssssssssss/pi-odoo-harness-lab/releases/download/v0.5.3/Odoo-Workbench-0.5.3-windows-x64.zip) · [Release 说明](https://github.com/Sanssssssssssssssss/pi-odoo-harness-lab/releases/tag/v0.5.3)
+[下载未签名 Windows 预览版](https://github.com/Sanssssssssssssssss/pi-odoo-harness-lab/releases/download/v0.5.4/Odoo-Workbench-0.5.4-windows-x64.zip) · [Release 说明](https://github.com/Sanssssssssssssssss/pi-odoo-harness-lab/releases/tag/v0.5.4)
 
-1. 下载并解压，然后运行 `Odoo-Workbench-0.5.3-portable.exe`。
+1. 下载并解压，然后运行 `Odoo-Workbench-0.5.4-portable.exe`。
 2. 在连接设置中填写自己的 Odoo 19 和模型配置。
 3. 新建会话，说明业务目标，可选地附加 CSV/TXT 文件。
 
@@ -52,7 +52,7 @@ Trace 展示运行、工具和用量记录；截图使用合成演示数据。
 
 - 用 `odoo_runtime` 中的原生 Odoo 能力运行 Python Pi 风格会话循环。
 - 提供 Windows Electron 工作台，覆盖销售、采购、开票、审批、状态回读和运行 Trace。
-- 按工作台限制接收 UTF-8 CSV/TXT 材料，并把已观测的 Odoo 单据导出为 PDF 或 UTF-8 BOM CSV。
+- 按工作台限制接收 UTF-8 CSV/TXT 材料，把已观测单据明细导出为 UTF-8 BOM CSV；客户发票只有在 Odoo 已生成并可读的正式 PDF 附件存在时才提供 PDF 下载。
 - ERP 写操作逐项审批，记录操作前状态、结果和独立回读。
 - 保留研究阶段使用的 ERP-Bench 数据集和 Harbor 集成。
 

@@ -177,7 +177,7 @@ const bridgeScript = String.raw`
         if (method === 'cancel_conversation') {
           sessionDetails['session-b'].conversation_runs[0].status = 'cancel_requested'
           window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', run_id: params.run_id, run_status: 'cancel_requested' } })
-          await wait(40)
+          await new Promise((resolve) => { window.__finishCancellation = resolve })
           sessionDetails['session-b'].conversation_runs[0].status = 'cancelled'
           sessionDetails['session-b'].live_messages = [{ id: 'cancel-live', session_id: 'session-b', business_id: null, run_id: params.run_id, sequence: 0, text: '取消前已经收到的片段', role: 'assistant', status: 'interrupted' }]
           return { ok: true, run_id: params.run_id, status: 'cancelled' }
@@ -393,7 +393,7 @@ assert.ok(streamRows >= 2)
 await page.getByRole('button', { name: /停止对话/ }).click()
 await page.getByRole('button', { name: /正在停止/ }).waitFor()
 assert.equal(await page.locator('.thinking-message').count(), 0)
-await page.waitForTimeout(25)
+await page.evaluate(() => window.__finishCancellation())
 const conversationCancelCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'cancel_conversation'))
 assert.deepEqual(conversationCancelCalls.map(({ params }) => params), [{ session_id: 'session-b', run_id: 'conversation-run-b' }])
 await page.getByText('已停止 · 回复未完成', { exact: true }).waitFor()

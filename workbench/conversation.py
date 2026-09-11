@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from pi_agent.messages import AssistantMessage
+from pi_agent.session.entries import CompactionEntry, MessageEntry
 from pi_agent.session import JsonlSessionStorage
 from pi_agent.tools import AgentTool, AgentToolResult
 from pi_ai.env import OpenAICompatibleConfig
@@ -214,6 +215,54 @@ class _RequestReceipts:
         )
 
 
+def _sum_usage_bucket(usages: list[object], name: str, *, empty: int | None = None) -> int | None:
+    """Sum a bucket only when every participating receipt reported it.
+
+    A provider-reported zero is meaningful.  A missing bucket remains unknown
+    instead of being silently treated as zero and presented as a complete sum.
+    """
+    if not usages:
+        return empty
+    values = [getattr(usage, name, None) if usage is not None else None for usage in usages]
+    if any(value is None for value in values):
+        return None
+    return sum(values)
+
+
+def _message_usage(message: AssistantMessage) -> object | None:
+    usage = getattr(message, "usage", None)
+    if getattr(message, "stop_reason", None) in {"error", "aborted"}:
+        fields = ("input", "cache_read", "cache_write", "output", "total_tokens", "reasoning")
+        if usage is None or not any(getattr(usage, field, None) not in (None, 0) for field in fields):
+            return None
+    return usage
+
+
+def _aggregate_usage(assistant: list[AssistantMessage], compactions: list[CompactionEntry]) -> dict[str, int | None]:
+    assistant_usages = [_message_usage(message) for message in assistant]
+    compaction_usages = [getattr(entry, "usage", None) for entry in compactions]
+    usage = {
+        # Keep model responses separate from compaction work.  The host reads
+        # compaction entries independently and adds them to its public total.
+        "input": _sum_usage_bucket(assistant_usages, "input"),
+        "cache_read": _sum_usage_bucket(assistant_usages, "cache_read"),
+        "cache_write": _sum_usage_bucket(assistant_usages, "cache_write"),
+        "cache_write_1h": _sum_usage_bucket(assistant_usages, "cache_write_1h"),
+        "output": _sum_usage_bucket(assistant_usages, "output"),
+        "total": _sum_usage_bucket(assistant_usages, "total_tokens"),
+        "reasoning": _sum_usage_bucket(assistant_usages, "reasoning"),
+        "compaction_total": _sum_usage_bucket(compaction_usages, "total_tokens", empty=0),
+        "compaction_input": _sum_usage_bucket(compaction_usages, "input", empty=0),
+        "compaction_cache_read": _sum_usage_bucket(compaction_usages, "cache_read", empty=0),
+        "compaction_cache_write": _sum_usage_bucket(compaction_usages, "cache_write", empty=0),
+        "compaction_cache_write_1h": _sum_usage_bucket(compaction_usages, "cache_write_1h", empty=0),
+        "compaction_output": _sum_usage_bucket(compaction_usages, "output", empty=0),
+        "compaction_reasoning": _sum_usage_bucket(compaction_usages, "reasoning", empty=0),
+        "compaction_calls": len(compactions),
+    }
+    return usage
+
+
 async def _propose_business(_call_id, arguments, _signal=None, _on_update=None):
     values = dict(arguments or {})
     kind = values.get("type")
@@ -366,7 +415,11 @@ async def run(args: argparse.Namespace) -> None:
             "runtime": "CodingSession", "toolNames": [READ_ODOO_REFERENCE.name, PROPOSE_BUSINESS.name],
             "toolMode": "proposal_plus_readonly", "odooToolCount": 1,
         }, ensure_ascii=False), flush=True)
-        assistant_before = sum(isinstance(message, AssistantMessage) for message in session.messages)
+        # Use append-only journal entries rather than session.messages.  A
+        # compaction replaces old context in the latter and would make a
+        # count-based before/after slice lose part of this prompt's usage.
+        entries_before = await session.session_entries()
+        entry_ids_before = {entry.id for entry in entries_before}
         source = session.prompt(args.instruction_file.read_text(encoding="utf-8"))
         async for event in public_events(source):
             if hasattr(event, "model_dump_json"):
@@ -376,15 +429,18 @@ async def run(args: argparse.Namespace) -> None:
             else:
                 continue
             print(line, flush=True)
-        assistant = [message for message in session.messages if isinstance(message, AssistantMessage)][assistant_before:]
+        entries_after = await session.session_entries()
+        new_entries = [entry for entry in entries_after if entry.id not in entry_ids_before]
+        assistant = [entry.message for entry in new_entries
+                     if isinstance(entry, MessageEntry) and isinstance(entry.message, AssistantMessage)]
+        compactions = [entry for entry in new_entries if isinstance(entry, CompactionEntry)]
         usage = {
-            "input": sum((getattr(message.usage, "input", 0) or 0) for message in assistant) or None,
-            "output": sum((getattr(message.usage, "output", 0) or 0) for message in assistant) or None,
-            "total": sum((getattr(message.usage, "total_tokens", 0) or 0) for message in assistant) or None,
-            "reasoning": sum((getattr(message.usage, "reasoning", 0) or 0) for message in assistant) or None,
+            **_aggregate_usage(assistant, compactions),
             "modelCalls": receipts.number,
             "runtimeMode": "conversation",
             "toolMode": "proposal_plus_readonly",
+            "total_scope": "assistant_responses_only",
+            "input_semantics": "uncached",
         }
         args.usage_file.write_text(json.dumps(usage), encoding="utf-8")
     finally:

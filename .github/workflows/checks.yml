@@ -35,6 +35,12 @@ jobs:
           PYTHONPATH: ${{ github.workspace }};${{ github.workspace }}\agent\src
         run: python -m unittest discover -s tests -p 'test_workbench*.py'
 
+      - name: Check read-only document exports
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }};${{ github.workspace }}\agent\src
+        run: python -m unittest discover -s tests -p 'test_document_export.py'
+
   desktop:
     name: Desktop checks
     runs-on: windows-latest

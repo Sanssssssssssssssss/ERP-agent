@@ -81,7 +81,7 @@ export async function runSelfCheck(): Promise<void> {
   assert.equal(safeErrorMessage("ODOO_NOT_CONFIGURED", "internal detail"), "[ODOO_NOT_CONFIGURED] Odoo 尚未配置，请先填写连接设置。");
   assert.equal(safeErrorMessage("KeyError", "'unknown proposal'"), "[KEYERROR] 未找到可处理的业务提案，可能已处理或已过期。");
   assert.equal(safeErrorMessage("ValueError", "material exceeds the 2 MiB limit"), "[VALUEERROR] 材料超过 2 MiB 大小限制。");
-  assert.equal(safeErrorMessage("ValueError", "DOCUMENT_PORTAL_ACCESS_UNAVAILABLE"), "[VALUEERROR] Odoo 未提供该单据的下载授权，请检查当前账号权限。");
+  assert.equal(safeErrorMessage("ValueError", "DOCUMENT_PDF_UNAVAILABLE"), "[VALUEERROR] 当前单据没有可下载的正式 PDF，请改用 CSV 或先在 Odoo 生成正式报表。");
   assert.equal(safeErrorMessage("ValueError", "DOCUMENT_INVOICE_PDF_NOT_GENERATED"), "[VALUEERROR] 发票已过账，但尚未生成正式 PDF，请先生成发票文件后再下载。");
   assert.equal(safeErrorMessage("ValueError", "document is not observed in this business"), "[VALUEERROR] 该单据未被当前业务观测，无法下载。");
   const generic = safeErrorMessage("business_validation_failed", "Authorization: Bearer sk_actual_123 Cookie: a=abc; b=xyz");

@@ -112,6 +112,8 @@ for (const file of integrationFiles) {
   if (existsSync(source)) await cp(source, join(destination, "app", "integration", file), { filter: rejectJunk });
 }
 await mkdir(join(destination, "licenses"), { recursive: true });
+await cp(join(repoRoot, "LICENSE"), join(destination, "licenses", "workbench-MIT.txt"));
+await cp(join(repoRoot, "THIRD_PARTY_NOTICES.md"), join(destination, "licenses", "workbench-NOTICES.md"));
 await cp(join(repoRoot, "agent", "LICENSE"), join(destination, "licenses", "pi-agent-MIT.txt"));
 await cp(join(repoRoot, "agent", "THIRD_PARTY_NOTICES.md"), join(destination, "licenses", "pi-agent-NOTICES.md"));
 await cp(join(repoRoot, "mcp", "LICENSE"), join(destination, "licenses", "odoo-core-MIT.txt"));

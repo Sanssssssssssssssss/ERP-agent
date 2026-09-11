@@ -241,12 +241,8 @@ const SAFE_LOCAL_ERROR_MESSAGES: Record<string, string> = {
   "VALUEERROR\u0000material exceeds the 200 row limit": "材料超过 200 行限制。",
   "VALUEERROR\u0000document is not observed in this business": "该单据未被当前业务观测，无法下载。",
   "VALUEERROR\u0000document scope is invalid": "单据下载参数无效。",
-  "VALUEERROR\u0000DOCUMENT_PORTAL_ACCESS_UNAVAILABLE": "Odoo 未提供该单据的下载授权，请检查当前账号权限。",
+  "VALUEERROR\u0000DOCUMENT_PDF_UNAVAILABLE": "当前单据没有可下载的正式 PDF，请改用 CSV 或先在 Odoo 生成正式报表。",
   "VALUEERROR\u0000DOCUMENT_INVOICE_PDF_NOT_GENERATED": "发票已过账，但尚未生成正式 PDF，请先生成发票文件后再下载。",
-  "VALUEERROR\u0000DOCUMENT_PORTAL_PERMISSION_DENIED": "当前 Odoo 账号没有该单据的下载权限，请改用 CSV 或联系管理员。",
-  "VALUEERROR\u0000DOCUMENT_PORTAL_ORIGIN_INVALID": "Odoo 报告地址不属于当前配置服务，已拒绝下载。",
-  "VALUEERROR\u0000DOCUMENT_REPORT_UNAVAILABLE": "Odoo 报告暂时不可用，请稍后重试或导出 CSV。",
-  "VALUEERROR\u0000DOCUMENT_REPORT_CONTENT_TYPE_INVALID": "Odoo 返回的内容不是 PDF，请改用 CSV。",
   "VALUEERROR\u0000DOCUMENT_LINES_TOO_MANY": "单据明细超过 100 行，暂不支持导出。",
   "VALUEERROR\u0000DOCUMENT_LINES_NOT_READ": "单据明细读取不完整，无法生成 CSV。",
 };

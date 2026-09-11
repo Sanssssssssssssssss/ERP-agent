@@ -1,8 +1,7 @@
 import base64
-import threading
 import unittest
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import workbench.document_export as document_export
 from workbench.document_export import csv_bytes, generate_document_export, result_payload, validate_document_bytes
 
 
@@ -32,53 +31,83 @@ class DocumentExportTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "DOCUMENT_FORMAT_INVALID"):
             validate_document_bytes(b"x", "exe")
 
-    def test_generate_pdf_uses_same_origin_portal_route_without_returning_token(self):
-        seen: list[str] = []
+    def test_generate_pdf_without_deterministic_attachment_is_unavailable(self):
+        class Reads:
+            def __init__(self):
+                self.calls = []
 
-        class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):  # noqa: N802
-                seen.append(self.path)
-                self.send_response(200)
-                self.send_header("Content-Type", "application/pdf")
-                self.end_headers()
-                self.wfile.write(b"%PDF-1.7\nportal report")
-
-            def log_message(self, *_args):
-                pass
-
-        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            class Client:
-                url = f"http://127.0.0.1:{server.server_port}"
-                timeout = 3
-
-                def _json2_call_once(self, model, method, payload):
-                    self.called = (model, method, payload)
-                    return "/my/orders/9?access_token=opaque-token&report_type=pdf&download=true"
-
-            class Reads:
-                client = Client()
-
-                def call(self, name, args):
-                    self.assert_name = name
-                    self.args = args
+            def call(self, name, args):
+                self.calls.append((name, args))
+                if name == "read_record":
                     return {"success": True, "result": {"id": 9}}
+                raise AssertionError("sale.order PDF must not select an arbitrary attachment")
 
-            reads = Reads()
-            payload = generate_document_export(reads, "sale.order", 9, "pdf")
-            self.assertEqual(base64.b64decode(payload["data_base64"]), b"%PDF-1.7\nportal report")
-            self.assertIn("report_type=pdf", seen[0])
-            self.assertIn("download=true", seen[0])
-            self.assertIn("access_token=opaque-token", seen[0])
-            self.assertNotIn("opaque-token", str(payload))
-            self.assertNotIn("access_token", reads.args["fields"])
-            self.assertEqual(reads.client.called, ("sale.order", "get_portal_url", {"ids": [9], "report_type": "pdf", "download": True}))
+        with self.assertRaisesRegex(ValueError, "DOCUMENT_PDF_UNAVAILABLE"):
+            generate_document_export(Reads(), "sale.order", 9, "pdf")
+
+    def test_invoice_attachment_relation_and_cross_record_check(self):
+        class Reads:
+            def __init__(self, attachment):
+                self.attachment = attachment
+                self.calls = []
+
+            def call(self, name, args):
+                self.calls.append((name, args))
+                if name == "read_record":
+                    return {"success": True, "result": {"id": 4, "state": "posted", "move_type": "out_invoice", "invoice_pdf_report_id": [41, "invoice.pdf"]}}
+                return {"success": True, "attachment": self.attachment, "data_included": True, "data_base64": base64.b64encode(b"%PDF-1.7\ninvoice").decode()}
+
+        reads = Reads({"id": 41, "mimetype": "application/pdf", "res_model": "account.move", "res_id": 4})
+        payload = generate_document_export(reads, "account.move", 4, "pdf")
+        self.assertEqual(payload["size"], len(b"%PDF-1.7\ninvoice"))
+        self.assertEqual([name for name, _ in reads.calls], ["read_record", "read_attachment"])
+        self.assertEqual(reads.calls[1][1], {"attachment_id": 41, "include_data": True})
+
+        invalid = [
+            ({"id": 42, "mimetype": "application/pdf", "res_model": "account.move", "res_id": 4}, "wrong id"),
+            ({"id": 41, "mimetype": "application/pdf", "res_model": "sale.order", "res_id": 4}, "wrong model"),
+            ({"id": 41, "mimetype": "text/plain", "res_model": "account.move", "res_id": 4}, "wrong mime"),
+        ]
+        for attachment, label in invalid:
+            with self.subTest(label=label), self.assertRaisesRegex(ValueError, "DOCUMENT_PDF_UNAVAILABLE"):
+                generate_document_export(Reads(attachment), "account.move", 4, "pdf")
+
+        class InvalidDataReads(Reads):
+            def __init__(self, result):
+                super().__init__({"id": 41, "mimetype": "application/pdf", "res_model": "account.move", "res_id": 4})
+                self.result = result
+
+            def call(self, name, args):
+                if name == "read_record":
+                    return super().call(name, args)
+                return {"success": True, "attachment": self.attachment, **self.result}
+
+        invalid_data = [
+            ({"data_included": False, "data_base64": ""}, "data omitted"),
+            ({"data_included": True, "data_base64": "%%%"}, "invalid base64"),
+            ({"data_included": True, "data_base64": base64.b64encode(b"plain").decode()}, "not pdf"),
+        ]
+        for result, label in invalid_data:
+            with self.subTest(label=label), self.assertRaisesRegex(ValueError, "DOCUMENT_PDF_UNAVAILABLE"):
+                generate_document_export(InvalidDataReads(result), "account.move", 4, "pdf")
+
+        old_cap = document_export.MAX_DOCUMENT_BYTES
+        document_export.MAX_DOCUMENT_BYTES = 4
+        try:
+            with self.assertRaisesRegex(ValueError, "DOCUMENT_PDF_UNAVAILABLE"):
+                generate_document_export(InvalidDataReads({"data_included": True, "data_base64": base64.b64encode(b"%PDF-1.7").decode()}), "account.move", 4, "pdf")
         finally:
-            server.shutdown()
-            server.server_close()
-            thread.join(timeout=2)
+            document_export.MAX_DOCUMENT_BYTES = old_cap
+
+    def test_attachment_permission_failure_does_not_fallback_to_portal(self):
+        class Reads:
+            def call(self, name, args):
+                if name == "read_record":
+                    return {"success": True, "result": {"id": 4, "state": "posted", "move_type": "out_invoice", "invoice_pdf_report_id": [41, "invoice.pdf"]}}
+                raise PermissionError("attachment denied")
+
+        with self.assertRaisesRegex(ValueError, "DOCUMENT_PDF_UNAVAILABLE"):
+            generate_document_export(Reads(), "account.move", 4, "pdf")
 
     def test_generate_csv_rereads_lines_and_never_exports_portal_token(self):
         class Client:

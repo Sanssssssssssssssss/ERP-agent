@@ -307,11 +307,11 @@ def _stages_for(business_type: str, completion_target: str = "posted") -> tuple[
 def _verified_action_record_ids(
     runs: list[dict[str, Any]], model: str, operations: set[str] | None = None,
 ) -> set[int]:
-    """Get record ids from the newest run containing verified action evidence.
+    """Get verified target ids from native action receipts.
 
-    This is deliberately restricted to structured verification evidence. It
-    never uses assistant text, titles, or the order in which search results
-    happened to arrive.
+    ``execute_method`` identifies the action in its recorded arguments. Native
+    verification puts the resulting records under ``verification.evidence.records``;
+    read/search results and result prose are never used to select a target.
     """
     ordered = sorted((row for row in runs if isinstance(row, dict)), key=_run_sort_key, reverse=True)
     for run in ordered:
@@ -324,15 +324,33 @@ def _verified_action_record_ids(
             verification = result.get("verification") if isinstance(result.get("verification"), dict) else {}
             if result.get("action_status") != "verified" or verification.get("status") != "satisfied":
                 continue
-            action_model = result.get("model")
-            operation = result.get("operation") or result.get("method")
+            arguments = tool.get("arguments") if isinstance(tool.get("arguments"), dict) else {}
+            tool_name = str(tool.get("name") or "").removeprefix("mcp_odoo_")
+            if tool_name == "execute_method":
+                action_model = arguments.get("model")
+                operation = arguments.get("method")
+                evidence_ids = "records"
+            elif tool_name == "execute_approved_write":
+                action_model = result.get("model")
+                operation = result.get("operation")
+                evidence_ids = "record_ids"
+            else:
+                continue
             if action_model != model or (operations and operation not in operations):
                 continue
             found_action = True
             evidence = verification.get("evidence") if isinstance(verification.get("evidence"), dict) else {}
-            ids = evidence.get("record_ids")
-            if isinstance(ids, list):
-                record_ids.update(record_id for record_id in ids if type(record_id) is int)
+            if evidence_ids == "record_ids":
+                ids = evidence.get("record_ids")
+                if isinstance(ids, list):
+                    record_ids.update(record_id for record_id in ids if type(record_id) is int)
+            else:
+                records = evidence.get("records")
+                if isinstance(records, list):
+                    for record in records:
+                        record_id = record.get("id") if isinstance(record, dict) else record
+                        if type(record_id) is int:
+                            record_ids.add(record_id)
         if found_action:
             return record_ids
     return set()

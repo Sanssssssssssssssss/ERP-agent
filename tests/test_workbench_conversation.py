@@ -9,16 +9,70 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 
 from pi_ai.openai_compatible import OpenAICompatibleProvider
+from pi_agent.messages import AssistantMessage, Usage
+from pi_agent.session.entries import CompactionEntry, MessageEntry
 from workbench import conversation
 
 
 class WorkbenchConversationTests(unittest.TestCase):
-    def _run(self, responses: list[dict], instruction: str):
+    def test_usage_receipt_keeps_zero_and_marks_partial_buckets_unknown(self):
+        zero = SimpleNamespace(input=0, cache_read=0, output=0, total_tokens=0, reasoning=0)
+        result = conversation._aggregate_usage([SimpleNamespace(usage=zero)], [])
+        self.assertEqual({result[key] for key in ("input", "cache_read", "output", "total", "reasoning")}, {0})
+        self.assertEqual(result["compaction_total"], 0)
+        self.assertEqual(result["compaction_calls"], 0)
+
+        partial = SimpleNamespace(input=4, output=2, total_tokens=6, reasoning=1)
+        result = conversation._aggregate_usage(
+            [SimpleNamespace(usage=zero), SimpleNamespace(usage=partial)], []
+        )
+        self.assertIsNone(result["cache_read"])
+        self.assertEqual(result["input"], 4)
+        self.assertEqual(result["total"], 6)
+
+        error = SimpleNamespace(
+            usage=zero, stop_reason="error"
+        )
+        result = conversation._aggregate_usage([error], [])
+        self.assertIsNone(result["input"])
+        self.assertIsNone(result["total"])
+
+        aborted_with_subtotal = SimpleNamespace(
+            usage=SimpleNamespace(input=4, cache_read=0, cache_write=0, output=0, total_tokens=4, reasoning=0),
+            stop_reason="aborted",
+        )
+        result = conversation._aggregate_usage([aborted_with_subtotal], [])
+        self.assertEqual(result["input"], 4)
+        self.assertEqual(result["total"], 4)
+
+    def test_usage_receipt_keeps_compaction_separate_and_unknown(self):
+        assistant = SimpleNamespace(input=10, cache_read=5, cache_write=2, cache_write_1h=0, output=2, total_tokens=17, reasoning=0)
+        compaction = SimpleNamespace(
+            usage=SimpleNamespace(input=20, cache_read=3, cache_write=4, cache_write_1h=1, output=1, total_tokens=24, reasoning=0)
+        )
+        result = conversation._aggregate_usage([SimpleNamespace(usage=assistant)], [compaction])
+        self.assertEqual(result["total"], 17)
+        self.assertEqual(result["compaction_total"], 24)
+        self.assertEqual(result["compaction_input"], 20)
+        self.assertEqual(result["compaction_cache_read"], 3)
+        self.assertEqual(result["cache_write"], 2)
+        self.assertEqual(result["cache_write_1h"], 0)
+        self.assertEqual(result["compaction_cache_write"], 4)
+        self.assertEqual(result["compaction_cache_write_1h"], 1)
+        self.assertEqual(result["compaction_output"], 1)
+        self.assertEqual(result["compaction_reasoning"], 0)
+        self.assertEqual(result["compaction_calls"], 1)
+
+        result = conversation._aggregate_usage([SimpleNamespace(usage=assistant)], [SimpleNamespace(usage=None)])
+        self.assertIsNone(result["compaction_total"])
+        self.assertEqual(result["compaction_calls"], 1)
+
+    def _run(self, responses: list[dict], instruction: str, *, return_usage: bool = False):
         requests: list[dict] = []
 
         def handler(request):
@@ -60,7 +114,90 @@ class WorkbenchConversationTests(unittest.TestCase):
                         await conversation.run(args)
 
             asyncio.run(run())
-            return requests, [json.loads(line) for line in output.getvalue().splitlines() if line.strip()]
+            events = [json.loads(line) for line in output.getvalue().splitlines() if line.strip()]
+            if return_usage:
+                return requests, events, json.loads(args.usage_file.read_text(encoding="utf-8"))
+            return requests, events
+
+    def test_run_writes_scoped_usage_receipt(self):
+        _requests, _events, usage = self._run(
+            [{"choices": [{"delta": {"content": "完成"}, "finish_reason": "stop"}],
+              "usage": {"prompt_tokens": 4, "completion_tokens": 0, "total_tokens": 4}}],
+            "请简短回答。",
+            return_usage=True,
+        )
+        self.assertEqual(usage["input"], 4)
+        self.assertEqual(usage["output"], 0)
+        self.assertEqual(usage["total"], 4)
+        self.assertEqual(usage["compaction_total"], 0)
+        self.assertEqual(usage["total_scope"], "assistant_responses_only")
+        self.assertEqual(usage["input_semantics"], "uncached")
+
+    def test_run_uses_new_journal_entries_after_compaction(self):
+        old = MessageEntry(message=AssistantMessage(
+            content=[], usage=Usage(input=100, output=10, total_tokens=110)
+        ))
+        first = MessageEntry(message=AssistantMessage(
+            content=[], usage=Usage(input=4, output=2, total_tokens=6)
+        ))
+        second = MessageEntry(message=AssistantMessage(
+            content=[], usage=Usage(input=5, output=0, total_tokens=5)
+        ))
+        compact = CompactionEntry(
+            summary="old context", usage=Usage(input=20, output=3, total_tokens=23)
+        )
+
+        class FakeSession:
+            messages = [old.message]
+
+            def __init__(self):
+                self._entries = iter(((old,), (old, first, compact, second)))
+
+            async def session_entries(self):
+                return next(self._entries)
+
+            def prompt(self, _instruction):
+                async def empty_events():
+                    if False:
+                        yield None
+                return empty_events()
+
+            async def aclose(self):
+                return None
+
+        fake = FakeSession()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            instruction_file = root / "instruction.txt"
+            instruction_file.write_text("继续处理", encoding="utf-8")
+            args = SimpleNamespace(
+                instruction_file=instruction_file,
+                usage_file=root / "usage.json",
+                session_file=root / "conversation.jsonl",
+                receipt_dir=root / "receipts",
+            )
+            output = io.StringIO()
+
+            async def run():
+                with (
+                    patch.object(conversation.CodingSession, "load", new=AsyncMock(return_value=fake)),
+                    patch.dict(
+                        os.environ,
+                        {"LLM_API_KEY": "test-only", "LLM_BASE_URL": "https://unused.invalid/v1", "LLM_MODEL": "test/model"},
+                        clear=False,
+                    ),
+                    contextlib.redirect_stdout(output),
+                ):
+                    await conversation.run(args)
+
+            asyncio.run(run())
+            usage = json.loads(args.usage_file.read_text(encoding="utf-8"))
+        self.assertEqual(usage["input"], 9)
+        self.assertEqual(usage["output"], 2)
+        self.assertEqual(usage["total"], 11)
+        self.assertEqual(usage["compaction_total"], 23)
+        self.assertEqual(usage["compaction_input"], 20)
+        self.assertEqual(usage["compaction_calls"], 1)
 
     def test_real_coding_session_answers_without_read_request_and_advertises_fixed_tools(self):
         requests, events = self._run(

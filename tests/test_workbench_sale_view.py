@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from copy import deepcopy
 
-from workbench.sale_view import _run_has_relevant_evidence, _tool_stage, business_detail, collect_documents, refresh_business
+from workbench.sale_view import _run_has_relevant_evidence, _tool_stage, _verified_action_record_ids, business_detail, collect_documents, refresh_business
 
 
 def _state() -> dict:
@@ -42,6 +42,22 @@ RECORDS = {
 
 
 class SaleViewReadbackTests(unittest.TestCase):
+    def test_verified_method_receipt_uses_argument_identity_and_evidence_records(self):
+        runs = [{
+            "id": "r-create", "started_at": "2026-01-02T00:00:00Z",
+            "tools": [{
+                "name": "execute_method",
+                "arguments": {"model": "sale.order", "method": "create"},
+                "result": {
+                    "action_status": "verified",
+                    "model": "account.move",
+                    "operation": "write",
+                    "verification": {"status": "satisfied", "evidence": {"records": [{"id": 8}] }},
+                },
+            }],
+        }]
+        self.assertEqual(_verified_action_record_ids(runs, "sale.order", {"create"}), {8})
+
     def test_multiple_observed_orders_do_not_select_the_first_as_target(self):
         state = _state()
         state["runs"]["r2"]["documents"].append({"id": 8, "model": "sale.order", "fields": {}})
@@ -152,8 +168,8 @@ class SaleViewReadbackTests(unittest.TestCase):
         state['businesses']['b1']['completion_target'] = 'draft'
         state['runs']['r2']['documents'].append({'id': 8, 'model': 'sale.order', 'source_run_id': 'r2', 'fields': {}})
         state['runs']['r2']['tools'] = [{
-            'id': 'create-8', 'name': 'execute_method',
-            'arguments': {'model': 'sale.order', 'operation': 'create'},
+            'id': 'create-8', 'name': 'execute_approved_write',
+            'arguments': {'approval': {'action_id': 'a-create-8'}},
             'result': {
                 'action_status': 'verified', 'model': 'sale.order', 'operation': 'create',
                 'verification': {'status': 'satisfied', 'evidence': {'record_ids': [8]}},
@@ -167,6 +183,26 @@ class SaleViewReadbackTests(unittest.TestCase):
         self.assertTrue(orders[7]['is_reference'])
         self.assertEqual(next(row for row in detail['checks'] if row['name'] == 'observed_order')['status'], 'passed')
         self.assertEqual(next(row for row in detail['checks'] if row['name'] == 'order_draft')['status'], 'passed')
+
+    def test_verified_execute_method_confirm_selects_record_from_evidence_records(self):
+        records = deepcopy(RECORDS)
+        records[('sale.order', 8)] = {**records[('sale.order', 7)], 'id': 8, 'name': 'SO002'}
+        state = _state()
+        state['businesses']['b1']['completion_target'] = 'confirmed'
+        state['runs']['r2']['documents'].append({'id': 8, 'model': 'sale.order', 'source_run_id': 'r2', 'fields': {}})
+        state['runs']['r2']['tools'] = [{
+            'id': 'confirm-8', 'name': 'execute_method',
+            'arguments': {'model': 'sale.order', 'method': 'action_confirm'},
+            'result': {
+                'action_status': 'verified',
+                'verification': {'status': 'satisfied', 'evidence': {'records': [{'id': 8, 'state': 'sale'}]}},
+            },
+        }]
+        detail = refresh_business(state, 'b1', NativeReadFixture(records))
+        orders = {row['id']: row for row in detail['documents'] if row['model'] == 'sale.order'}
+        self.assertEqual(orders[8]['document_scope'], 'current')
+        self.assertEqual(orders[7]['document_scope'], 'reference')
+        self.assertEqual(next(row for row in detail['checks'] if row['name'] == 'order_confirmed')['status'], 'passed')
 
     def test_reference_order_scope_propagates_to_invoice_picking_and_lines(self):
         state = _state()
@@ -188,8 +224,8 @@ class SaleViewReadbackTests(unittest.TestCase):
             }},
         ]
         state['runs']['r2']['tools'] = [{
-            'id': 'create-8', 'name': 'execute_method',
-            'arguments': {'model': 'sale.order', 'operation': 'create'},
+            'id': 'create-8', 'name': 'execute_approved_write',
+            'arguments': {'approval': {'action_id': 'a-create-8'}},
             'result': {
                 'action_status': 'verified', 'model': 'sale.order', 'operation': 'create',
                 'verification': {'status': 'satisfied', 'evidence': {'record_ids': [8]}},
@@ -213,8 +249,8 @@ class SaleViewReadbackTests(unittest.TestCase):
         state['businesses']['b1']['completion_target'] = 'draft'
         state['runs']['r2']['documents'].append({'id': 8, 'model': 'sale.order', 'source_run_id': 'r2', 'fields': {}})
         state['runs']['r2']['tools'] = [{
-            'id': 'create-two', 'name': 'execute_method',
-            'arguments': {'model': 'sale.order', 'operation': 'create'},
+            'id': 'create-two', 'name': 'execute_approved_write',
+            'arguments': {'approval': {'action_id': 'a-create-two'}},
             'result': {
                 'action_status': 'verified', 'model': 'sale.order', 'operation': 'create',
                 'verification': {'status': 'satisfied', 'evidence': {'record_ids': [7, 8]}},

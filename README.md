@@ -8,15 +8,15 @@ English · [简体中文](README.zh-CN.md)
 
 Odoo Workbench lets an agent draft Odoo business actions, ask for approval before writes, and check the resulting records. The repository contains the Windows desktop workbench, its native Odoo 19 runtime, and the ERP-Bench research harness behind it.
 
-**Windows preview · v0.5.3 · Odoo 19**
+**Windows preview · v0.5.4 · Odoo 19**
 
 ![Odoo Workbench](docs/media/hero.svg)
 
-## Windows preview (0.5.3)
+## Windows preview (0.5.4)
 
-[Download the unsigned Windows preview](https://github.com/Sanssssssssssssssss/pi-odoo-harness-lab/releases/download/v0.5.3/Odoo-Workbench-0.5.3-windows-x64.zip) · [Release notes](https://github.com/Sanssssssssssssssss/pi-odoo-harness-lab/releases/tag/v0.5.3)
+[Download the unsigned Windows preview](https://github.com/Sanssssssssssssssss/pi-odoo-harness-lab/releases/download/v0.5.4/Odoo-Workbench-0.5.4-windows-x64.zip) · [Release notes](https://github.com/Sanssssssssssssssss/pi-odoo-harness-lab/releases/tag/v0.5.4)
 
-1. Download and unzip the archive, then run `Odoo-Workbench-0.5.3-portable.exe`.
+1. Download and unzip the archive, then run `Odoo-Workbench-0.5.4-portable.exe`.
 2. Open connection settings and provide your Odoo 19 and model configuration.
 3. Create a session, describe the business, and optionally attach a CSV/TXT file.
 
@@ -52,7 +52,7 @@ The workflow graphic is schematic; the screenshots show the actual renderer UI.
 
 - Runs a Python Pi style session loop against native Odoo helpers in `odoo_runtime`.
 - Provides a Windows Electron workbench for sales, purchasing, invoicing, approvals, readback, and run traces.
-- Accepts UTF-8 CSV/TXT materials within the workbench limits and exports observed Odoo documents as PDF or UTF-8 BOM CSV.
+- Accepts UTF-8 CSV/TXT materials within the workbench limits, exports observed document lines as UTF-8 BOM CSV, and downloads an already-generated customer-invoice PDF when its Odoo attachment is available.
 - Keeps ERP write actions behind per-action approval and records the pre-state, result, and independent readback.
 - Carries the pinned ERP-Bench dataset and Harbor integration used by the research stages.
 
