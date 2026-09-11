@@ -1,0 +1,113 @@
+# 续跑工具连续性与成本检查
+
+冻结业务基线：`a313c63` / 桌面 0.3.0。日期：2026-09-09。
+本轮先用已有真实轨迹定位开销，再用本地假提供商验证续跑机制；不把离线结果计为真实业务成绩。
+
+## 已有真实运行的开销
+
+| 指标 | 首次失败 | 人工纠正后续跑 | 合计 |
+| --- | ---: | ---: | ---: |
+| 模型轮次 | 18 | 16 | 34 |
+| 工具调用 | 37 | 20 | 57 |
+| 未缓存输入 token | 28,349 | 44,787 | 73,136 |
+| 缓存读取 token | 539,392 | 778,368 | 1,317,760 |
+| 输出 token（含推理） | 24,843 | 9,114 | 33,957 |
+| 推理 token（输出子集） | 20,022 | 5,803 | 25,825 |
+| 总 token | 592,584 | 832,269 | 1,424,853 |
+
+缓存读取占总 token 约 92.5%。没有可靠单价记录，不能由此估算账单或声称缓存免费。
+首次第 1–5 轮用了 21 次工具调用、79,392 token、15,715 推理 token，轮次耗时合计 147.605 秒；
+其中推理占两次运行全部推理的约 60.9%。这些轮次涉及环境、SOP、字段与载荷探索，不能把全部耗时归因于某一个工具。
+续跑最后一轮没有工具调用，但仍有 56,576 缓存输入 token，输出 598 token，说明收尾仍携带较长历史。
+
+## 先修复续跑中的工具丢失
+
+`workbench/host.py` 为同一业务复用 Pi 会话；`workbench/worker.py` 为每次运行设置独立回执目录。
+原 runner 只从当前运行的 `dynamic-tools.jsonl` 恢复工具集。新运行的目录为空，历史消息却仍然保留已启用工具的记录。
+
+真实续跑第 2 轮调用 `mcp_odoo_preview_write` 时返回 `Tool mcp_odoo_preview_write not found`；
+第 3 轮重新列出能力，第 4 轮激活 `actions/accounting/diagnostics`，第 5 轮才再次预览成功。
+这证明工具可见状态与会话历史不一致；它不证明这些整轮 token 都能完全省掉。
+
+本轮修正范围：当前运行回执优先；没有当前配置时，从已加载会话中的真实工具结果恢复最后成功的能力集。
+空数组明确关闭全部可选组；失败配置不替换已成功配置；用户文字不能充当工具配置回执。
+只恢复工具可见性，动作账本、审批 ID、审批授权和运行回执按运行隔离。
+没有可验证历史配置时使用基础工具集；不按业务标题猜测或统一启用写工具。
+
+## 后续候选与验收条件
+
+| 优先项 | 当前证据 | 下次检查方式 |
+| --- | --- | --- |
+| 续跑工具连续性 | 一次真实工具不存在错误及后续重新配置 | 同一会话、新回执目录，检查第一个模型请求中的工具；验证空配置、错误配置及作用域 |
+| 减少载荷和字段错误 | 首次有 5 条工具错误，续跑有 1 条；包含关系命令形状、字段名和调用参数问题 | 用已冻结的实际错误输入单测，不取消写前校验、审批或写后回读 |
+| 缩小元数据范围 | 原始观察中的 profile 约 6,865 UTF-8 字节，较大的字段结果约 3,058 字节 | 按实际需要请求字段，比较语义内容和覆盖；字节数不能当 token |
+| 收尾历史体积 | 最后一轮零工具仍携带 56,576 缓存输入 token | 独立研究可保留的事实、失败与动作证据；有对照后再改变默认上下文策略 |
+
+审批申请与批准后的执行是两个必要步骤；写后回读、验证订单发票关联以及不确定写入核对均不计作可删除的重复调用。
+当前提供商兼容层会重放历史 assistant 的 reasoning 字段；字段字节统计不证明可以安全删掉这些字段。
+
+## 可复用的离线分析
+
+`analyze_token_cost.py` 仅依赖 Python 标准库，输入历史 trace 和可选 Pi session，输出计数、响应大小和会话字段体积。
+不导出原始业务指令、工具参数或推理正文。缺失计数保留为 `null`；推理不会再次加进总 token。
+紧凑 JSON 比较是对 trace 结果对象的等价重编码，不能充当实际模型请求或 token 节省测量。
+
+```powershell
+$receipt = '.runtime/workbench-production-20260909'
+python experiments/desktop_workbench/analyze_token_cost.py --self-check
+python experiments/desktop_workbench/analyze_token_cost.py `
+  --trace "$receipt/first-run-trace.json" `
+  --trace "$receipt/second-run-trace.json" `
+  --session "$receipt/profile/data/sessions/b_86b2c8655d7041698919c29e02c54332/pi-agent-session.jsonl" `
+  --output "$receipt/token-cost-analysis.json"
+```
+
+输入始终只读，输出必须是新文件。原始运行记录及 0.3.0 的真实业务核验保留在原目录。
+
+## 本轮验收
+
+| 检查 | 结果 |
+| --- | --- |
+| 真实 Pi 会话加载与请求构造，HTTP 使用本地 MockTransport | 新会话首请求 14 项；配置 actions 后 19 项；同一会话换新运行目录后首请求包含 preview_write；当前运行明确停用后 14 项 |
+| 历史配置边界 | 失败配置保留此前成功值；非法配置、重复组、普通文字和损坏回执均不能恢复可选组 |
+| 已冻结真实会话的离线解析 | 从 98 条有效消息恢复 actions/accounting/diagnostics；文件 SHA-256 未变 |
+| 原生相关 Python 回归 | 139 项通过；排除需要历史 MCP SDK 的 test_baseline_fixes / test_native_reads |
+| 桌面类型检查、构建、自检 | 通过；自检覆盖设置、密钥隐藏、忙碌保护和 IPC 白名单 |
+| 0.3.1 EXE 实际启动 | 在原隔离 profile 恢复 2 次运行、13 条记录、7 项历史核验；4 个子页面可切换，发票详情可打开，1440×900 无横向溢出，未捕获页面脚本错误 |
+| 独立 Luna 只读复核 | 指定 runner 与测试 diff 内未发现阻断问题；审批账本仍按 run 隔离 |
+| 离线分析器 | 自检通过；缺失计数保留未知，非法计数拒绝，禁止输出覆盖输入 |
+| 新增真实业务模型 API / Odoo 写操作 | 0 / 0 |
+
+请求回归使用完整的离线工具目录替身，不连接 MCP、Odoo 或模型服务；它证明工具发布连续性，
+不证明业务完成率或净 token 节省。真实运行时恢复较大工具集也会增加首请求的 schema 体积。
+若后续压缩移除了历史配置回执，则使用基础工具集；本轮未增加额外持久化状态。
+
+分析器测得两次 trace 结果对象等价紧凑重编码可减少 16,550 / 5,892 UTF-8 字节，
+这只是格式比较。原始 Pi JSONL 为 326,787 字节；各字段重编码体积不构成原始文件的精确分区。
+Python 回归退出码为 0，已有 SQLite 临时文件清理仍产生 Windows 文件占用警告；
+桌面自检进程出现 GPU 子进程退出告警，随后实际 EXE 可视启动及页面检查通过。
+
+0.3.1 便携包：`desktop/dist/Odoo-Workbench-0.3.1-portable.exe`，106,559,745 字节，未签名。
+SHA-256：`b217eeb5f4f272c54a26da90fb0a67476d94d98c654d44aead61e993d45d0097`。
+包内 runner、host、worker、dynamic_tools 与工作区源码哈希一致；内置 Python 导入原生入口后
+确认 MCP SDK、odoo_mcp 不存在，pi_agent.mcp 未导入。0.3.0 冻结包哈希保持不变。
+
+原生验收回执及截图：`.runtime/workbench-production-20260909/portable-031-acceptance.json`
+与同目录 `portable-031-*.png`，仅保留本地。此次启动时隔离 Odoo `127.0.0.1:18069` 不可达，
+界面明确显示“Odoo 不可用”。页面中的通过状态与观测时间属于此前保存的核验快照；
+本轮不计为新的在线回读或真实业务完成，也没有启动新的模型运行。
+
+## 2026-09-10 企业检索与工具改造待办（低优先级，暂缓）
+
+当前运行保持 native；MCP 仅保留历史来源与对照。公司级模拟与检索验收尚待建立，
+先冻结检索与工具方案，再考虑生成数据和实验。
+
+| 待办 | 规则/边界 | 真实源码参考 |
+| --- | --- | --- |
+| 规划前规则装配 | 规划前自动加载适用的必需规则并召回相关操作说明；规则按公司/业务/版本选取，不依赖 TopK；入口为 `host._conversation_prompt`/`_instruction` + SOP | [`workbench/host.py`](../../workbench/host.py) |
+| Odoo 19 操作文档检索 | 复用 `odoo-semantic-retrieval-lab`；独立只读 doc 工具，接入 capabilities/dynamic_tools；不接入实验评测流程 | [`odoo_runtime/capabilities.py`](../../odoo_runtime/capabilities.py)、[`odoo_runtime/dynamic_tools.py`](../../odoo_runtime/dynamic_tools.py) |
+| 企业业务文字索引 | 现状为进程内 BM25（默认 5000/单次 2000）；待升级持久化关键词/向量索引、增量删除、版本与权限 | [`odoo_runtime/knowledge.py`](../../odoo_runtime/knowledge.py) |
+| 精确查询与混合检索 | 保留 `search_records`/`aggregate_records` 实时精确查询；业务语义查询先混合检索，再回读权威记录 | [`odoo_runtime/reads.py`](../../odoo_runtime/reads.py)、[`odoo_runtime/knowledge.py`](../../odoo_runtime/knowledge.py) |
+| Top3 结果扩展 | 先 Top3，按缺证据/冲突/版本扩展同一候选 Top20；查询改写锁定公司/权限/日期/实体，保留停止条件 | [`odoo_runtime/knowledge.py`](../../odoo_runtime/knowledge.py) |
+| 动作与前端证据 | 补 actions 业务模型/字段/前后状态规则；前端显示引用、版本、更新时间与覆盖状态 | [`odoo_runtime/actions.py`](../../odoo_runtime/actions.py)、[`desktop/src/renderer/App.tsx`](../../desktop/src/renderer/App.tsx) |
+| 模拟企业数据 | 待检索与工具方案冻结后再生成公司关联数据、附件、规则、异常与预期答案；先小后扩，隔离 Odoo | [`experiments/desktop_workbench/fixtures`](fixtures) |

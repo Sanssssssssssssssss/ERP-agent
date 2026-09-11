@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import io
 import json
 import os
@@ -9,21 +10,115 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 from odoo_mcp import server, tools_read
 from pi_agent.tools import AgentTool, AgentToolResult
 from pi_ai.openai_compatible import OpenAICompatibleProvider
 
-from integration import pi_odoo_runner
+from integration import harbor_agent, pi_odoo_runner
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class BaselineFixTest(unittest.TestCase):
+    def test_native_install_excludes_mcp_and_system_site_packages(self):
+        async def check():
+            agent = SimpleNamespace(
+                exec_as_agent=AsyncMock(),
+                exec_as_root=AsyncMock(),
+            )
+            environment = SimpleNamespace(
+                upload_dir=AsyncMock(),
+                upload_file=AsyncMock(),
+            )
+            await harbor_agent._install_task_runtime(
+                agent, environment, native_only=True
+            )
+            commands = " ".join(
+                call.kwargs["command"] for call in agent.exec_as_root.await_args_list
+            )
+            uploads = " ".join(
+                str(call.args) for call in environment.upload_dir.await_args_list
+            )
+            self.assertNotIn("--system-site-packages", commands)
+            self.assertNotIn("odoo-mcp==", commands)
+            self.assertNotIn("mcp==", commands)
+            self.assertNotIn("pi-odoo-mcp-source", uploads)
+            self.assertIn("wheelhouse-native-py312", uploads)
+            self.assertIn("httpx[socks]==0.28.1", commands)
+
+        asyncio.run(check())
+
+    def test_current_time_is_a_tool_not_system_prompt_data(self):
+        result = asyncio.run(pi_odoo_runner.CURRENT_TIME_TOOL.execute("clock", {}))
+        payload = json.loads(result.text)
+        self.assertEqual(
+            payload["local_date"],
+            datetime.fromisoformat(payload["local_datetime"]).date().isoformat(),
+        )
+        self.assertIsNotNone(datetime.fromisoformat(payload["utc_datetime"]).tzinfo)
+
+    def test_disposable_bench_native_action_policy_is_explicit_and_closed(self):
+        env = harbor_agent.bench_action_env()
+        self.assertEqual(env["ODOO_MCP_ENABLE_WRITES"], "1")
+        self.assertEqual(
+            env["ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS"].split(","),
+            list(harbor_agent.BENCH_SIDE_EFFECT_METHODS),
+        )
+        self.assertEqual(env["ODOO_MCP_AUDIT_LOG"], "/logs/agent/native-write-audit.jsonl")
+        self.assertEqual(env["ODOO_MCP_ELICIT_WRITES"], "0")
+        self.assertEqual(env["MCP_CHATTER_DIRECT"], "0")
+        self.assertEqual(env["ODOO_MCP_ALLOW_UNKNOWN_METHODS"], "0")
+        self.assertEqual(env["ODOO_ACTION_APPROVAL_MODE"], "bench-auto")
+
+    def test_cancellation_waits_for_service_stop_even_after_a_second_cancel(self):
+        async def check():
+            started, stopping, release, stopped = (asyncio.Event() for _ in range(4))
+            async def run_body(*_args):
+                started.set()
+                await asyncio.Event().wait()
+            async def stop_service(service):
+                self.assertEqual(service, "main")
+                stopping.set()
+                await release.wait()
+                stopped.set()
+            agent = SimpleNamespace(_run=run_body)
+            environment = SimpleNamespace(stop_service=stop_service)
+            run = inspect.unwrap(harbor_agent.PiAgentMcpBaseline.run)
+            task = asyncio.create_task(run(agent, "test", environment, None))
+            await started.wait()
+            task.cancel()
+            await stopping.wait()
+            task.cancel()
+            await asyncio.sleep(0)
+            self.assertFalse(task.done())
+            release.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            self.assertTrue(stopped.is_set())
+            agent._run = AsyncMock()
+            environment.stop_service = AsyncMock()
+            await run(agent, "test", environment, None)
+            environment.stop_service.assert_not_awaited()
+            agent._run.side_effect = RuntimeError("nonzero child")
+            with self.assertRaisesRegex(RuntimeError, "nonzero child"):
+                await run(agent, "test", environment, None)
+            environment.stop_service.assert_awaited_once_with("main")
+        asyncio.run(check())
+
+    def test_deadline_wraps_the_entire_pipeline_and_rejects_exhausted_budget(self):
+        command = "printf '%s' 'quoted value' | tee /tmp/unused"
+        import shlex
+        argv = shlex.split(harbor_agent.deadline_command(command, 2))
+        self.assertEqual(argv, ["timeout", "--signal=TERM", "--kill-after=5s", "2s", "bash", "-c", command])
+        with self.assertRaises(TimeoutError):
+            harbor_agent.deadline_command(command, 0)
+
     def test_mcp_default_honors_max_fields_and_exact_queries_keep_technical_fields(
         self,
     ):
@@ -43,6 +138,12 @@ class BaselineFixTest(unittest.TestCase):
             bounded = server.get_model_fields(None, "res.company", max_fields=2)
             self.assertEqual(list(bounded["result"]), ["name", "email"])
             self.assertEqual(bounded["count"], 2)
+            rejected = server.get_model_fields(None, "res.company", max_fields=100)
+            self.assertFalse(rejected["success"])
+            self.assertIn("between 1 and 30", rejected["error"])
+            rejected = server.get_model_fields(None, "res.company", max_fields=0)
+            self.assertFalse(rejected["success"])
+            self.assertIn("between 1 and 30", rejected["error"])
             exact = server.get_model_fields(
                 None, "res.company", field_names=["id", "chart_template"], max_fields=1
             )
@@ -58,6 +159,12 @@ class BaselineFixTest(unittest.TestCase):
         self.assertEqual(
             advertised.input_schema["properties"]["relevance"]["default"], "top"
         )
+        self.assertEqual(
+            advertised.input_schema["properties"]["max_fields"]["maximum"], 30
+        )
+        self.assertEqual(
+            advertised.input_schema["properties"]["max_fields"]["minimum"], 1
+        )
         self.assertIn("max_fields", advertised.description)
 
     def test_python_runner_preserves_instrumented_provider_and_sends_no_output_cap(
@@ -67,12 +174,14 @@ class BaselineFixTest(unittest.TestCase):
             requests = []
 
             async def execute(*args, **kwargs):
-                return AgentToolResult(content='{"success":true}')
+                return AgentToolResult(content=json.dumps({
+                    "success": True, "result": {"id": 1, "name": "x" * 400},
+                }))
 
             tool = AgentTool(
-                name="mcp_odoo_health_check",
-                label="Health",
-                description="Health",
+                name="mcp_odoo_read_record",
+                label="Read",
+                description="Read",
                 parameters={"type": "object", "properties": {}},
                 execute_fn=execute,
             )
@@ -96,8 +205,14 @@ class BaselineFixTest(unittest.TestCase):
                                 "index": 0,
                                 "id": "call1",
                                 "type": "function",
-                                "function": {"name": tool.name, "arguments": "{}"},
-                            }
+                                "function": {"name": tool.name, "arguments": '{"model":"res.partner","record_id":1,"fields":["name"]}'},
+                            },
+                            {
+                                "index": 1,
+                                "id": "call2",
+                                "type": "function",
+                                "function": {"name": tool.name, "arguments": '{"model":"res.partner","record_id":1,"fields":["name"]}'},
+                            },
                         ]
                     }
                     if len(requests) == 1
@@ -136,10 +251,12 @@ class BaselineFixTest(unittest.TestCase):
                 usage_file=root / "usage.json",
                 mcp_url="http://unused.invalid",
                 max_turns=3,
+                world_mode="project",
             )
             async with httpx.AsyncClient(
                 transport=httpx.MockTransport(handler)
             ) as client:
+                stdout = io.StringIO()
                 with (
                     patch.object(pi_odoo_runner, "McpToolSet", ToolSet),
                     patch.object(
@@ -161,11 +278,22 @@ class BaselineFixTest(unittest.TestCase):
                             "LLM_MODEL": "deepseek/test",
                             "LLM_PROVIDER": "openai-compatible",
                             "LLM_THINKING_TYPE": "high",
+                            "PI_ODOO_SOURCE_COMMIT": "fixture-commit",
+                            "ODOO_URL": "http://odoo.invalid",
+                            "ODOO_DB": "bench",
+                            "ODOO_USERNAME": "reader",
+                            "ODOO_PASSWORD": "not-recorded",
                         },
                     ),
-                    contextlib.redirect_stdout(io.StringIO()),
+                    contextlib.redirect_stdout(stdout),
                 ):
                     await pi_odoo_runner.run(args)
+            metadata = next(
+                json.loads(line)
+                for line in stdout.getvalue().splitlines()
+                if line.startswith('{') and '"type": "run_metadata"' in line
+            )
+            self.assertEqual(metadata["commit_sha"], "fixture-commit")
             self.assertEqual(len(requests), 2)
             self.assertEqual(json.loads(args.usage_file.read_text())["modelCalls"], 2)
             for number, payload in enumerate(requests, 1):
@@ -177,8 +305,21 @@ class BaselineFixTest(unittest.TestCase):
                     ),
                     payload,
                 )
+            self.assertIn(
+                "get_current_time",
+                {tool["function"]["name"] for tool in requests[0]["tools"]},
+            )
+            system = next(
+                m for m in requests[0]["messages"] if m["role"] == "system"
+            )
+            self.assertNotIn("Current runtime date:", system["content"])
             prior = next(m for m in requests[1]["messages"] if m["role"] == "assistant")
             self.assertEqual(prior["reasoning_content"], "")
+            tool_results = [m for m in requests[1]["messages"] if m["role"] == "tool"]
+            self.assertEqual(len(tool_results), 2)
+            self.assertIn("world_projection", tool_results[0]["content"])
+            self.assertIn('"name": "' + "x" * 20, tool_results[1]["content"])
+            self.assertEqual(json.loads((root / "world-summary.json").read_text())["projected_messages"], 1)
             self.assertNotIn(
                 "must-not-be-recorded",
                 (root / "requests/0001.response.json").read_text(),

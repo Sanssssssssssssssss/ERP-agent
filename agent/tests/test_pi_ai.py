@@ -437,6 +437,33 @@ async def test_openai_compatible_provider_does_not_retry_after_partial_output() 
 
 
 @pytest.mark.anyio
+async def test_openai_compatible_provider_labels_blank_transport_error() -> None:
+    class FailingStream(httpx.AsyncByteStream):
+        def __aiter__(self) -> AsyncIterator[bytes]:
+            async def fail() -> AsyncIterator[bytes]:
+                raise httpx.ReadTimeout("")
+                yield b""
+            return fail()
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=FailingStream(), headers={"content-type": "text/event-stream"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleProvider(
+            OpenAICompatibleConfig(api_key="test-key", base_url="https://example.test/v1"),
+            client=client,
+        )
+        events = await _collect(provider.stream_response(
+            model="test-model", system="You are Pi.", messages=[UserMessage(content="Say ok")], tools=[]
+        ))
+
+    assert isinstance(events[-1], AssistantErrorEvent)
+    assert events[-1].error.error_message == (
+        "Provider network error (ReadTimeout): 请求模型服务失败，请稍后重试。"
+    )
+
+
+@pytest.mark.anyio
 async def test_openai_chat_completions_sends_prompt_cache_key_without_affinity_headers() -> None:
     requests: list[httpx.Request] = []
 
@@ -1147,7 +1174,7 @@ async def test_openai_compatible_replays_reasoning_text_and_encrypted_tool_detai
 
 
 @pytest.mark.anyio
-async def test_deepseek_compat_replays_empty_reasoning_content_when_required() -> None:
+async def test_deepseek_compat_replays_required_reasoning_content() -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -1178,14 +1205,28 @@ async def test_deepseek_compat_replays_empty_reasoning_content_when_required() -
                     UserMessage(content="first"),
                     AssistantMessage(content="prior answer"),
                     UserMessage(content="next"),
+                    AssistantMessage(
+                        content=[
+                            ThinkingContent(
+                                thinking="persisted plan", thinking_signature="reasoning"
+                            ),
+                            TextContent(text="intermediate answer"),
+                        ],
+                        api="openai-completions",
+                        provider="OpenAI-compatible provider",
+                        model="deepseek-reasoner",
+                    ),
+                    UserMessage(content="continue"),
                 ],
                 tools=[],
             )
         )
 
-    replay = loads(requests[0].content)["messages"][2]
-    assert replay["content"] == "prior answer"
-    assert replay["reasoning_content"] == ""
+    messages = loads(requests[0].content)["messages"]
+    assert messages[2]["content"] == "prior answer"
+    assert messages[2]["reasoning_content"] == ""
+    assert messages[4]["reasoning_content"] == "persisted plan"
+    assert "reasoning" not in messages[4]
 
 
 @pytest.mark.anyio

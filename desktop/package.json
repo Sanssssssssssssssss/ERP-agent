@@ -1,0 +1,76 @@
+{
+  "name": "odoo-workbench-desktop",
+  "version": "0.5.4",
+  "description": "面向真实 Odoo 业务执行与核验的桌面工作台",
+  "private": true,
+  "type": "module",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "self-check": "npm run build && node scripts/self-check.mjs",
+    "prepare:sidecar": "node scripts/prepare-sidecar.mjs",
+    "dist:portable": "npm run build && electron-builder --win portable",
+    "dist:installer": "npm run build && electron-builder --win nsis"
+  },
+  "dependencies": {
+    "@radix-ui/themes": "3.3.0",
+    "lucide-react": "1.43.0",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "@types/react": "19.1.10",
+    "@types/react-dom": "19.1.7",
+    "@vitejs/plugin-react": "5.2.0",
+    "electron": "39.8.10",
+    "electron-builder": "26.0.12",
+    "electron-vite": "4.0.1",
+    "playwright": "1.60.0",
+    "typescript": "5.9.3",
+    "vite": "7.3.5"
+  },
+  "build": {
+    "appId": "lab.pi.odoo.workbench",
+    "productName": "Odoo Workbench",
+    "electronDist": "node_modules/electron/dist",
+    "asar": true,
+    "files": [
+      "out/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/host",
+        "to": "host",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "assets/workbench.png",
+        "to": "workbench.png"
+      }
+    ],
+    "win": {
+      "icon": "assets/workbench.ico",
+      "target": [
+        "portable",
+        "nsis"
+      ],
+      "signAndEditExecutable": false
+    },
+    "portable": {
+      "artifactName": "Odoo-Workbench-${version}-portable.exe"
+    },
+    "nsis": {
+      "artifactName": "Odoo-Workbench-${version}-setup.exe",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

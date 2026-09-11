@@ -16,6 +16,10 @@ Packages:
 
 Keep `pi_agent` independent of Typer, Rich, Textual, application resource locations, and provider-specific assumptions. Prefer typed data models, explicit async boundaries, deterministic fakes, and small abstractions.
 
+The shared agent loop retries a terminal provider response with neither visible text
+nor tool calls once. A second empty terminal response becomes an explicit provider
+error instead of a successful agent completion.
+
 Dynamic provider contracts and composition belong to `pi_coding.extensions`.
 Every staged `ExtensionRuntime` owns a fresh source/generation/layer-aware
 `DynamicProviderRegistry`; durable `ProviderConfig` objects are immutable baseline

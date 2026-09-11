@@ -1,0 +1,83 @@
+name: checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python checks
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13'
+
+      - name: Install agent and host dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ./agent
+          python -m pip install -r ./desktop/requirements-host.txt
+
+      - name: Run workbench unit tests
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }};${{ github.workspace }}\agent\src
+        run: python -m unittest discover -s tests -p 'test_workbench*.py'
+
+      - name: Check read-only document exports
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }};${{ github.workspace }}\agent\src
+        run: python -m unittest discover -s tests -p 'test_document_export.py'
+
+      - name: Check native actions, field policy and usage
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }};${{ github.workspace }}\agent\src
+        run: python -m unittest tests.test_actions tests.test_runner_budget
+
+  desktop:
+    name: Desktop checks
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install desktop dependencies
+        run: npm ci
+        working-directory: desktop
+
+      - name: Typecheck
+        run: npm run typecheck
+        working-directory: desktop
+
+      - name: Self-check
+        run: npm run self-check
+        working-directory: desktop
+
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium
+        working-directory: desktop
+
+      - name: Renderer check
+        run: node scripts/renderer-check.mjs
+        working-directory: desktop

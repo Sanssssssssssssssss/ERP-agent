@@ -15,6 +15,7 @@ from pi_agent import (
     MessageUpdateEvent,
     SimpleCancellationToken,
     TextContent,
+    ThinkingContent,
     ToolCall,
     ToolExecutionEndEvent,
     ToolExecutionUpdateEvent,
@@ -184,6 +185,58 @@ async def test_agent_loop_nests_thinking_events_without_losing_final_message() -
     assert messages[-1] == assistant
     # The final provider message is the canonical persistence boundary.
     assert isinstance(messages[-1], AssistantMessage)
+
+
+@pytest.mark.anyio
+async def test_agent_loop_retries_reasoning_only_stop_once() -> None:
+    empty = AssistantMessage(content=[ThinkingContent(thinking="unfinished")], model="fake")
+    final = AssistantMessage(content="Done", model="fake")
+    provider = FakeProvider(
+        [
+            [assistant_start(), assistant_done(empty)],
+            [assistant_start(), assistant_done(final)],
+        ]
+    )
+    messages: list[AgentMessage] = [UserMessage(content="Do the task")]
+
+    await _collect(
+        run_agent_loop(
+            provider=provider,
+            model="fake",
+            system="You are Pi.",
+            messages=messages,
+            tools=[],
+        )
+    )
+
+    retry = messages[-2]
+    assert isinstance(retry, UserMessage)
+    assert "no visible answer or tool call" in retry.text
+    assert messages[-1] is final
+    assert len(provider.calls) == 2
+
+    failed_provider = FakeProvider(
+        [
+            [assistant_start(), assistant_done(empty)],
+            [assistant_start(), assistant_done(empty)],
+        ]
+    )
+    failed_messages: list[AgentMessage] = [UserMessage(content="Do the task")]
+    await _collect(
+        run_agent_loop(
+            provider=failed_provider,
+            model="fake",
+            system="You are Pi.",
+            messages=failed_messages,
+            tools=[],
+        )
+    )
+
+    failure = failed_messages[-1]
+    assert isinstance(failure, AssistantMessage)
+    assert failure.stop_reason == "error"
+    assert "after one automatic continuation" in (failure.error_message or "")
+    assert len(failed_provider.calls) == 2
 
 
 @pytest.mark.anyio

@@ -1,6 +1,7 @@
 """Portable Pi-compatible agent harness primitives for Pi."""
 
 # ruff: noqa: F401 - this module intentionally defines the public facade
+from typing import Any as _Any
 
 from pi_agent.events import (
     AgentEndEvent,
@@ -32,7 +33,6 @@ from pi_agent.loop import (
     TurnContext,
     run_agent_loop,
 )
-from pi_agent.mcp import McpToolSet
 from pi_agent.messages import (
     AgentMessage,
     AssistantMessage,
@@ -77,3 +77,12 @@ from pi_agent.tools import (
 from pi_agent.types import JSONObject, JSONPrimitive, JSONValue
 
 __all__ = [name for name in globals() if not name.startswith("_")]
+__all__.append("McpToolSet")
+
+
+def __getattr__(name: str) -> _Any:
+    if name == "McpToolSet":
+        from pi_agent.mcp import McpToolSet
+
+        return McpToolSet
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

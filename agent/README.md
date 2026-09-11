@@ -91,7 +91,8 @@ The current verified boundary covers:
 
 - the default coding-tool order `read → bash → edit → write`;
 - provider-neutral messages, streaming, thinking, usage, and tool-call replay;
-- agent-loop lifecycle, steering/follow-up queues, tool execution, and cancellation;
+- agent-loop lifecycle, steering/follow-up queues, tool execution, cancellation, and a
+  single recovery attempt for a provider response with neither visible text nor tool calls;
 - JSONL session replay, retry, compaction, branch summaries, resources, and skills;
 - extension hooks plus print, JSON, RPC, and Textual frontends where explicitly tested.
 

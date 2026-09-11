@@ -1,9 +1,12 @@
-"""Harbor 0.22 entrant for the pinned Python Pi harness and task-local Odoo MCP."""
+"""Harbor 0.22 entrants for the pinned Python Pi and Odoo runtimes."""
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 import shlex
+import time
 from pathlib import Path
 from typing import Any
 
@@ -11,10 +14,44 @@ PI_AGENT_COMMIT = "2ee840c3e31a62c06237b4ac781c7f5863044d07"
 MCP_ODOO_COMMIT = "76ec136e0c89c414811a12629eb2903d2dc27357"
 MCP_ODOO_VERSION = "1.3.2"
 MCP_ODOO_URL = "http://127.0.0.1:8000/mcp"
+BENCH_SIDE_EFFECT_METHODS = (
+    "sale.order.action_confirm",
+    "purchase.order.button_confirm",
+    "sale.advance.payment.inv.create_invoices",
+    "account.move.action_post",
+)
 MCP_ONLY_POLICY = (
     "Use mcp_odoo tools for every Odoo operation. Do not access Odoo through "
     "shell commands, direct HTTP, XML-RPC, JSON-2, PostgreSQL, or Python libraries."
 )
+RUNTIME_PACKAGES = (
+    "anyio==4.14.2",
+    "httpx[socks]==0.28.1",
+    "jsonschema==4.26.0",
+    "packaging==26.2",
+    "pathspec==1.1.1",
+    "pillow==12.2.0",
+    "pydantic==2.13.4",
+    "pygments==2.20.0",
+    "pyyaml==6.0.3",
+    "requests==2.33.1",
+    "rich==15.0.0",
+    "textual==8.2.8",
+    "typer==0.26.7",
+)
+def bench_action_env() -> dict[str, str]:
+    """Explicit action policy for the disposable ERP-Bench database."""
+    return {
+        "ODOO_MCP_ENABLE_WRITES": "1",
+        "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": ",".join(
+            BENCH_SIDE_EFFECT_METHODS
+        ),
+        "ODOO_MCP_AUDIT_LOG": "/logs/agent/native-write-audit.jsonl",
+        "ODOO_MCP_ELICIT_WRITES": "0",
+        "MCP_CHATTER_DIRECT": "0",
+        "ODOO_MCP_ALLOW_UNKNOWN_METHODS": "0",
+        "ODOO_ACTION_APPROVAL_MODE": "bench-auto",
+    }
 
 try:
     from harbor.agents.installed.base import BaseInstalledAgent, with_prompt_template
@@ -50,7 +87,8 @@ async def _install_task_mcp(agent: Any, environment: BaseEnvironment) -> None:
         environment,
         command=(
             "set -euo pipefail; for attempt in $(seq 1 300); do "
-            "test -e /tmp/saas_setup_complete && exit 0; sleep 1; done; "
+            "test -e /tmp/saas_setup_complete && "
+            "curl -sf http://127.0.0.1:8069/web/version >/dev/null && exit 0; sleep 1; done; "
             "echo 'seeded Odoo setup was not ready after 300s' >&2; exit 1"
         ),
     )
@@ -79,13 +117,46 @@ async def _install_task_mcp(agent: Any, environment: BaseEnvironment) -> None:
     await agent.exec_as_root(
         environment,
         command=(
-            "uv pip install --system --no-index --find-links /tmp/pi-odoo-wheelhouse "
+            "uv venv --python /usr/bin/python3 --system-site-packages /tmp/pi-odoo-env && "
+            "uv pip install --python /tmp/pi-odoo-env/bin/python --no-index --find-links /tmp/pi-odoo-wheelhouse "
             f"{packages}"
         ),
     )
 
 
-async def _install_task_runtime(agent: Any, environment: BaseEnvironment) -> None:
+async def _install_task_native(agent: Any, environment: BaseEnvironment) -> None:
+    root = Path(__file__).resolve().parents[1]
+    wheelhouse = root / ".runtime" / "wheelhouse-native-py312"
+    if not wheelhouse.is_dir():
+        raise RuntimeError(
+            "Pinned wheelhouse is missing; restore the snapshot release asset to "
+            ".runtime/wheelhouse-native-py312"
+        )
+    await agent.exec_as_agent(
+        environment,
+        command=(
+            "set -euo pipefail; for attempt in $(seq 1 300); do "
+            "test -e /tmp/saas_setup_complete && "
+            "curl -sf http://127.0.0.1:8069/web/version >/dev/null && exit 0; sleep 1; done; "
+            "echo 'seeded Odoo setup was not ready after 300s' >&2; exit 1"
+        ),
+    )
+    await environment.upload_dir(wheelhouse, "/tmp/pi-odoo-wheelhouse")
+    packages = shlex.join(RUNTIME_PACKAGES)
+    await agent.exec_as_root(
+        environment,
+        command=(
+            "uv venv --python /usr/bin/python3 /tmp/pi-odoo-env && "
+            "uv pip install --python /tmp/pi-odoo-env/bin/python --no-index "
+            "--find-links /tmp/pi-odoo-wheelhouse "
+            f"{packages}"
+        ),
+    )
+
+
+async def _install_task_runtime(
+    agent: Any, environment: BaseEnvironment, *, native_only: bool = False
+) -> None:
     root = Path(__file__).resolve().parents[1]
     runner = root / "integration" / "pi_odoo_runner.py"
     sources = tuple(
@@ -94,7 +165,10 @@ async def _install_task_runtime(agent: Any, environment: BaseEnvironment) -> Non
     for source in (*sources, runner):
         if not source.exists():
             raise RuntimeError(f"Pinned runtime input is missing: {source}")
-    await _install_task_mcp(agent, environment)
+    if native_only:
+        await _install_task_native(agent, environment)
+    else:
+        await _install_task_mcp(agent, environment)
     await agent.exec_as_root(
         environment, command="mkdir -p /tmp/pi-odoo-harness/agent/src"
     )
@@ -103,6 +177,8 @@ async def _install_task_runtime(agent: Any, environment: BaseEnvironment) -> Non
             source, f"/tmp/pi-odoo-harness/agent/src/{source.name}"
         )
     await environment.upload_file(runner, "/tmp/pi-odoo-runner.py")
+    await environment.upload_dir(root / "integration", "/tmp/pi-odoo-harness/integration")
+    await environment.upload_dir(root / "odoo_runtime", "/tmp/pi-odoo-harness/odoo_runtime")
 
 
 async def _start_task_mcp(agent: Any, environment: BaseEnvironment) -> None:
@@ -116,12 +192,12 @@ async def _start_task_mcp(agent: Any, environment: BaseEnvironment) -> None:
             "export PYTHONPATH=/tmp/pi-odoo-mcp-source ODOO_URL=http://127.0.0.1:8069 ODOO_DB=bench ODOO_USERNAME=admin "
             'ODOO_PASSWORD="$odoo_key" ODOO_API_KEY="$odoo_key" ODOO_TRANSPORT=json2 '
             "ODOO_JSON2_DATABASE_HEADER=1 ODOO_MCP_ENABLE_WRITES=1 "
-            "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS=sale.order.action_confirm,"
-            "purchase.order.button_confirm,sale.advance.payment.inv.create_invoices,"
-            "account.move.action_post ODOO_MCP_LOG_JSON=1 "
+            f"ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS={','.join(BENCH_SIDE_EFFECT_METHODS)} "
+            "ODOO_MCP_LOG_JSON=1 "
             "ODOO_MCP_LOG_FILE=/logs/agent/mcp-odoo.jsonl "
             "ODOO_MCP_AUDIT_LOG=/logs/agent/mcp-write-audit.jsonl; "
-            "nohup odoo-mcp --transport streamable-http --host 127.0.0.1 --port 8000 "
+            "export ODOO_REQUEST_LOG=/logs/agent/odoo-mcp-requests.jsonl ODOO_REQUEST_BACKEND=mcp; "
+            "nohup /tmp/pi-odoo-env/bin/odoo-mcp --transport streamable-http --host 127.0.0.1 --port 8000 "
             "--path /mcp >/logs/agent/mcp-odoo-server.log 2>&1 & "
             'echo "$!" >/logs/agent/mcp-odoo.pid; '
             'for attempt in $(seq 1 30); do python3 -c "import socket; '
@@ -132,7 +208,7 @@ async def _start_task_mcp(agent: Any, environment: BaseEnvironment) -> None:
 
 
 class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
-    """Pinned Python Pi CodingSession with only task-local Odoo MCP tools."""
+    """Pinned Python Pi CodingSession with the fixed Odoo tool contract."""
 
     MODEL_CONNECTION = (
         ModelConnectionSpec(passthrough=True)
@@ -144,18 +220,71 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         self,
         *args: Any,
         version: str = PI_AGENT_COMMIT,
-        max_turns: int = 100,
+        max_turns: int | None = None,
         thinking: str = "high",
+        read_backend: str = "mcp",
+        action_backend: str = "mcp",
+        capability_backend: str = "mcp",
+        runtime_mode: str = "mcp",
+        sop_mode: str = "off",
+        tool_mode: str = "static",
+        world_mode: str = "off",
+        max_model_requests: int | None = None,
+        max_output_tokens: int | None = None,
+        snapshot_sha256: str | None = None,
+        runtime_timeout_seconds: int = 1770,
         **kwargs: Any,
     ) -> None:
         if version != PI_AGENT_COMMIT:
             raise ValueError(
                 f"PiAgentMcpBaseline requires Pi Agent commit {PI_AGENT_COMMIT}"
             )
-        if max_turns < 1:
+        if max_turns is not None and max_turns < 1:
             raise ValueError("max_turns must be positive")
+        for name, value in (
+            ("max_model_requests", max_model_requests),
+            ("max_output_tokens", max_output_tokens),
+        ):
+            if value is not None and (type(value) is not int or value < 1):
+                raise ValueError(f"{name} must be a positive integer")
+        if read_backend not in {"mcp", "native"}:
+            raise ValueError("read_backend must be mcp or native")
+        if action_backend not in {"mcp", "native"}:
+            raise ValueError("action_backend must be mcp or native")
+        if capability_backend not in {"mcp", "native"}:
+            raise ValueError("capability_backend must be mcp or native")
+        if runtime_mode not in {"mcp", "native"}:
+            raise ValueError("runtime_mode must be mcp or native")
+        if runtime_mode == "native" and {
+            read_backend,
+            action_backend,
+            capability_backend,
+        } != {"native"}:
+            raise ValueError("native runtime_mode requires every Odoo backend to be native")
+        if sop_mode not in {"off", "controlled"}:
+            raise ValueError("sop_mode must be off or controlled")
+        if tool_mode not in {"static", "dynamic"}:
+            raise ValueError("tool_mode must be static or dynamic")
+        if tool_mode == "dynamic" and sop_mode != "controlled":
+            raise ValueError("dynamic tool_mode requires controlled sop_mode")
+        if world_mode not in {"off", "record", "project"}:
+            raise ValueError("world_mode must be off, record, or project")
+        if type(runtime_timeout_seconds) is not int or runtime_timeout_seconds < 1:
+            raise ValueError("runtime_timeout_seconds must be a positive integer")
         self._max_turns = max_turns
         self._thinking = thinking
+        self._read_backend = read_backend
+        self._action_backend = action_backend
+        self._capability_backend = capability_backend
+        self._runtime_mode = runtime_mode
+        self._native_only = runtime_mode == "native"
+        self._sop_mode = sop_mode
+        self._tool_mode = tool_mode
+        self._world_mode = world_mode
+        self._max_model_requests = max_model_requests
+        self._max_output_tokens = max_output_tokens
+        self._snapshot_sha256 = snapshot_sha256
+        self._runtime_timeout_seconds = runtime_timeout_seconds
         super().__init__(*args, version=version, **kwargs)
 
     @staticmethod
@@ -163,7 +292,9 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         return "pi-agent-odoo-mcp"
 
     async def install(self, environment: BaseEnvironment) -> None:
-        await _install_task_runtime(self, environment)
+        await _install_task_runtime(
+            self, environment, native_only=self._native_only
+        )
 
     @with_prompt_template
     async def run(
@@ -172,7 +303,66 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         environment: BaseEnvironment,
         context: AgentContext,
     ) -> None:
-        await _start_task_mcp(self, environment)
+        try:
+            await self._run(instruction, environment, context)
+        except BaseException:
+            # Docker exec cancellation does not stop its remote processes.
+            # Stop this disposable service before Harbor can enter verification.
+            stopping = asyncio.create_task(environment.stop_service("main"))
+            while not stopping.done():
+                try:
+                    await asyncio.shield(stopping)
+                except asyncio.CancelledError:
+                    continue
+            stopping.result()
+            raise
+
+    async def _run(self, instruction: str, environment: BaseEnvironment,
+                   context: AgentContext) -> None:
+        deadline = time.monotonic() + self._runtime_timeout_seconds
+        if self._snapshot_sha256:
+            result = await self.exec_as_agent(
+                environment, command="cat /logs/agent/snapshot-receipt.json",
+            )
+            receipt = json.loads(result.stdout or "{}")
+            if (receipt.get("status") != "verified"
+                    or receipt.get("snapshot_sha256") != self._snapshot_sha256):
+                raise RuntimeError("Verified matching snapshot is required before any model call")
+        native_only = getattr(self, "_native_only", False)
+        if native_only:
+            await self.exec_as_agent(
+                environment,
+                command=(
+                    "set -euo pipefail; command -v pgrep >/dev/null; "
+                    "! pgrep -f '[o]doo[-_]mcp' >/dev/null"
+                ),
+            )
+            await self.exec_as_agent(
+                environment,
+                command=(
+                    "/tmp/pi-odoo-env/bin/python -c \"import importlib.metadata as metadata;"
+                    "import importlib.util,json,socket;"
+                    "from pathlib import Path;"
+                    "found={name:importlib.util.find_spec(name) is not None "
+                    "for name in ('mcp','mcp_types','odoo_mcp')};"
+                    "installed={dist.metadata['Name'].lower() "
+                    "for dist in metadata.distributions()};"
+                    "banned=installed&{'mcp','mcp-types','odoo-mcp'};"
+                    "sock=socket.socket();sock.settimeout(0.2);"
+                    "port_open=sock.connect_ex(('127.0.0.1',8000))==0;sock.close();"
+                    "pid_file=Path('/logs/agent/mcp-odoo.pid').exists();"
+                    "clean=not any(found.values()) and not banned and not port_open and not pid_file;"
+                    "receipt={'status':'verified' if clean else 'failed','installed_or_importable':found,"
+                    "'installed_mcp_distributions':sorted(banned),"
+                    "'mcp_process':False,'mcp_port_8000_open':port_open,"
+                    "'mcp_pid_file':pid_file};"
+                    "Path('/logs/agent/native-runtime-receipt.json').write_text("
+                    "json.dumps(receipt,sort_keys=True));"
+                    "assert clean\""
+                ),
+            )
+        else:
+            await _start_task_mcp(self, environment)
         if not self.model_name or "/" not in self.model_name:
             raise ValueError("Model name must be in the format provider/model_name")
         model = self.model_name.split("/", 1)[1]
@@ -194,20 +384,42 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             "LLM_BASE_URL": base_url,
             "LLM_MODEL": model,
             "LLM_THINKING_TYPE": self._thinking,
-            "PYTHONPATH": "/tmp/pi-odoo-harness/agent/src",
+            "PYTHONPATH": (
+                "/tmp/pi-odoo-harness/agent/src:/tmp/pi-odoo-harness"
+                + ("" if native_only else ":/tmp/pi-odoo-mcp-source")
+            ),
             "PI_AGENT_SESSION_ID": str(self.context_id or self.session_id or "trial"),
+            "PI_ODOO_SOURCE_COMMIT": os.environ.get("PI_ODOO_SOURCE_COMMIT", ""),
+            **bench_action_env(),
         }
+        command = (
+            "set -o pipefail; export ODOO_URL=http://127.0.0.1:8069 ODOO_DB=bench ODOO_USERNAME=admin; "
+            'export ODOO_API_KEY="$(cat /etc/odoo/api_key)"; '
+            'export ODOO_PASSWORD="$ODOO_API_KEY" ODOO_TRANSPORT=json2; '
+            '/tmp/pi-odoo-env/bin/python /tmp/pi-odoo-runner.py '
+            "--instruction-file /tmp/pi-odoo-instruction.txt "
+            "--usage-file /logs/agent/pi-agent-usage.json "
+            f"--runtime-mode {'native' if native_only else 'mcp'} "
+            f"--read-backend {self._read_backend} "
+            f"--action-backend {self._action_backend} "
+            f"--capability-backend {self._capability_backend} "
+            f"--sop-mode {self._sop_mode} "
+            f"--tool-mode {self._tool_mode} "
+            f"--world-mode {self._world_mode} "
+            + (f"--max-turns {self._max_turns} " if self._max_turns is not None else "")
+            + (f"--max-model-requests {self._max_model_requests} "
+               if self._max_model_requests is not None else "")
+            + (f"--max-output-tokens {self._max_output_tokens} "
+               if self._max_output_tokens is not None else "")
+            + "2>&1 | stdbuf -oL tee /logs/agent/"
+            + ("pi-agent-odoo.jsonl" if native_only else "pi-agent-odoo-mcp.jsonl")
+        )
+        remaining = int(deadline - time.monotonic())
         await self.exec_as_agent(
             environment,
-            command=(
-                "set -o pipefail; python3 /tmp/pi-odoo-runner.py "
-                "--instruction-file /tmp/pi-odoo-instruction.txt "
-                "--usage-file /logs/agent/pi-agent-usage.json "
-                f"--max-turns {self._max_turns} "
-                "2>&1 | stdbuf -oL tee /logs/agent/pi-agent-odoo-mcp.jsonl"
-            ),
+            command=deadline_command(command, remaining),
             env=env,
-            timeout_sec=3600,
+            timeout_sec=max(1, remaining) + 10,
         )
         usage_result = await self.exec_as_agent(
             environment,
@@ -222,4 +434,24 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             "model_calls": usage.get("modelCalls"),
             "pi_agent_commit": PI_AGENT_COMMIT,
             "mcp_odoo_commit": MCP_ODOO_COMMIT,
+            "runtime_mode": self._runtime_mode,
+            "read_backend": self._read_backend,
+            "action_backend": self._action_backend,
+            "capability_backend": self._capability_backend,
+            "sop_mode": self._sop_mode,
+            "tool_mode": self._tool_mode,
+            "world_mode": self._world_mode,
+            "snapshot_sha256": self._snapshot_sha256,
+            "runtime_timeout_seconds": self._runtime_timeout_seconds,
+            "max_model_requests": self._max_model_requests,
+            "max_output_tokens": self._max_output_tokens,
+            "commit_sha": os.environ.get("PI_ODOO_SOURCE_COMMIT") or None,
         }
+
+
+def deadline_command(command: str, seconds: int) -> str:
+    """GNU timeout owns the remote process group even if the host disappears."""
+    if seconds < 1:
+        raise TimeoutError("Agent runtime budget exhausted before model startup")
+    return (f"timeout --signal=TERM --kill-after=5s {seconds}s "
+            f"bash -c {shlex.quote(command)}")

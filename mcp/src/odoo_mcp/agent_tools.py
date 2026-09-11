@@ -17,6 +17,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
+
 from .field_ranking import (
     DEFAULT_MAX_QUERY_FIELDS,  # noqa: F401
     DEFAULT_MAX_RELEVANT_FIELDS,  # noqa: F401
@@ -276,6 +277,36 @@ def verify_write_approval(approval: dict[str, Any]) -> tuple[bool, str]:
     return token == expected, expected
 
 
+def _relational_command_error(value: Any) -> str | None:
+    if not isinstance(value, (list, tuple)):
+        return "must be a list of record ids or Odoo command triples"
+    if all(type(item) is int and item > 0 for item in value):
+        return None
+    for index, command in enumerate(value):
+        if not isinstance(command, (list, tuple)) or len(command) != 3:
+            return f"command {index} must contain exactly three items"
+        opcode, record_id, argument = command
+        if type(opcode) is not int or opcode not in range(7):
+            return f"command {index} must use an integer opcode from 0 to 6"
+        if opcode in {0, 5, 6}:
+            if not (record_id is False or type(record_id) is int and record_id == 0):
+                return f"command {index} must use 0 as its record id"
+        elif type(record_id) is not int or record_id <= 0:
+            return f"command {index} must use a positive integer record id"
+        if opcode in {0, 1} and not isinstance(argument, dict):
+            return f"command {index} must end with an object of field values"
+        if opcode in {2, 3, 4, 5} and not (
+            argument is False or type(argument) is int and argument == 0
+        ):
+            return f"command {index} must end with 0"
+        if opcode == 6 and not (
+            isinstance(argument, (list, tuple))
+            and all(type(item) is int and item > 0 for item in argument)
+        ):
+            return f"command {index} must end with a list of positive integer record ids"
+    return None
+
+
 def _metadata_issues_for_values(
     values: dict[str, Any],
     fields_metadata: dict[str, Any],
@@ -318,12 +349,22 @@ def _metadata_issues_for_values(
                 }
             )
         elif field_type in {"many2many", "one2many"}:
-            hints.append(
-                {
-                    "field": field_name,
-                    "hint": "relational values should use Odoo command lists.",
-                }
-            )
+            command_error = _relational_command_error(values[field_name])
+            if command_error:
+                issues.append(
+                    {
+                        "code": "invalid_relational_command",
+                        "severity": "error",
+                        "message": f"{prefix}{field_name!r} {command_error}.",
+                    }
+                )
+            else:
+                hints.append(
+                    {
+                        "field": field_name,
+                        "hint": "relational values should use Odoo command lists.",
+                    }
+                )
     return issues, hints
 
 

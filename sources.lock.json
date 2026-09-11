@@ -35,7 +35,9 @@
       "version": "1.3.2",
       "license": "MIT",
       "lab_modifications": [
-        "src/odoo_mcp/tools_read.py: default bounded field discovery with explicit exact/full-schema escape hatches; advertised tool description documents max_fields."
+        "src/odoo_mcp/tools_read.py: default bounded field discovery with explicit exact/full-schema escape hatches; advertised tool description documents max_fields.",
+        "src/odoo_mcp/__init__.py: lazily expose the server facade so pure Odoo helpers can be imported without the MCP SDK/server.",
+        "src/odoo_mcp/odoo_client.py: record credential-free completed JSON-2 attempts and call IDs; share configuration parsing with the native read client through an optional client_type, retaining the reference default."
       ],
       "included": [
         "src/odoo_mcp",
@@ -85,12 +87,51 @@
       }
     }
   },
+  "native_runtime": {
+    "destination": "odoo_runtime",
+    "source_checkpoint": "da229bf12475c2aef38a8dc027c0f2ed66a972a6",
+    "stage1_checkpoint": "40d98198a2f3e3ed13717b9000f304bb3a34b121",
+    "stage6_checkpoint": "8d7a4d6ea0715a379f894e095ddc95a5f4d97709",
+    "stage7_checkpoint": "7644f1a03d0e038603f494e246992b1015f6b4b7",
+    "accepted_stage": 7,
+    "source_files": ["integration/native_reads.py", "mcp/src/odoo_mcp/tools_read.py", "mcp/src/odoo_mcp/server_core.py", "odoo_runtime/world.py", "integration/world_context.py"],
+    "license": "MIT",
+    "license_path": "mcp/LICENSE",
+    "note": "Stages 1-7 are accepted. Stage 7 was verified by one same-case B-only run at 100/100 with zero MCP calls and a valid MCP-free runtime receipt. No Compiler is included."
+  },
+  "stage7_extraction": {
+    "status": "accepted",
+    "source_commit": "76ec136e0c89c414811a12629eb2903d2dc27357",
+    "destination": "odoo_runtime/_odoo_core",
+    "source_files": [
+      "access_helpers.py",
+      "accounting_tools.py",
+      "agent_tools.py",
+      "audit.py",
+      "cross_instance.py",
+      "data_quality.py",
+      "diagnostics.py",
+      "field_policy.py",
+      "field_ranking.py",
+      "odoo_client.py",
+      "rate_limit.py",
+      "schema_cache.py",
+      "schemas.py",
+      "tool_helpers.py",
+      "write_policy.py",
+      "data/odoo_renames.json"
+    ],
+    "tool_catalog": "integration/native_tool_catalog.json",
+    "license": "MIT",
+    "license_path": "mcp/LICENSE",
+    "note": "Pure Odoo business helpers only; MCP SDK, server, transport, prompts, and resources are not part of the native runtime. agent_tools.py changes only its package-resource root."
+  },
   "reporting_infra": {
     "source_repository": "erp-agent-odoo",
     "source_path": "src/erp_agent_odoo/bench/trial_summary.py",
     "source_file_sha256": "ee6250ed4c2adfdbea9e974723e197e943dc03dd2197a0ed77781c7bce5cabfc",
     "destination": "integration/trial_summary.py",
-    "note": "Copied from the local working tree on 2026-09-03 without code changes. The new report entry point reuses the pinned agent's session_export/session_usage modules; no compiler, backend service, or second dashboard is included."
+    "note": "The original source file is identified by source_file_sha256. The lab reporter reuses the pinned agent's session_export/session_usage modules and suppresses terminal-failure classification when an agent naturally stops after recovering from an intermediate tool error; no compiler, backend service, or second dashboard is included."
   },
   "native_control": {
     "source_repository": "erp-agent-odoo",
@@ -122,5 +163,14 @@
     "file_count": 51,
     "tracked_in_git": false,
     "note": "Linux CPython 3.12 MCP/task dependency supplement, published with the snapshot release; not a complete standalone agent environment. The task image supplied legacy httpx/httpcore. Host reporting must install agent dependencies from agent/uv.lock; never reuse the old repository's editable virtualenv."
+  },
+  "native_runtime_bundle": {
+    "path": ".runtime/wheelhouse-native-py312.zip",
+    "release_asset": "wheelhouse-native-py312.zip",
+    "release_tag": "baseline-fixes-2026-09-03",
+    "sha256": "d70852fc7232c817347df41f23c74aadbe96613dd49b291caa4f99f6f14bed1e",
+    "file_count": 36,
+    "tracked_in_git": false,
+    "note": "Complete Linux CPython 3.12 dependency wheelhouse for the Stage 7 native Pi plus Odoo runtime. It contains no mcp, mcp-types, or odoo-mcp wheel and is installed without system site packages."
   }
 }

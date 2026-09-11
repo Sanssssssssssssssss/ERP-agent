@@ -71,6 +71,11 @@ from pi_ai.tool_call_ids import (
 _RESPONSES_ONLY_PREFIXES: tuple[str, ...] = ("gpt-5.5", "gpt-5.4")
 
 
+def _safe_transport_error_message(exc: BaseException) -> str:
+    """Keep provider failures diagnosable without exposing raw transport text."""
+    return f"Provider network error ({type(exc).__name__}): 请求模型服务失败，请稍后重试。"
+
+
 def _use_responses_api(model: str) -> bool:
     """Return whether ``model`` must be served over the Responses API."""
     normalized = model.strip().lower()
@@ -389,7 +394,7 @@ class OpenAICompatibleProvider:
                             return
                         continue
                     yield ProviderErrorEvent(
-                        message=str(exc),
+                        message=_safe_transport_error_message(exc),
                         data={"attempts": attempt + 1},
                     )
                     return
@@ -1306,9 +1311,12 @@ def _message_to_openai(
             if isinstance(block, ThinkingContent) and block.thinking.strip()
         ]
         if thinking:
+            thinking_text = "\n".join(block.thinking for block in thinking)
             signature = thinking[0].thinking_signature or "reasoning_content"
-            if signature in {"reasoning_content", "reasoning", "reasoning_text", "thinking"}:
-                item[signature] = "\n".join(block.thinking for block in thinking)
+            if requires_reasoning_content:
+                item["reasoning_content"] = thinking_text
+            elif signature in {"reasoning_content", "reasoning", "reasoning_text", "thinking"}:
+                item[signature] = thinking_text
         if message.tool_calls:
             item["tool_calls"] = [
                 _tool_call_to_openai(tool_call) for tool_call in message.tool_calls
