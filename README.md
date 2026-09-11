@@ -93,6 +93,7 @@ The Windows portable and installer commands are available in `desktop/package.js
 ## Boundaries
 
 - The native runtime does not start or import MCP in its accepted Stage 7 path. The pinned MCP tree is retained for provenance and historical control experiments.
+- The native catalog keeps some `mcp_odoo_*` compatibility names; `integration/odoo_tools.py:52` strips that label before calling the native adapter, with no MCP transport.
 - Odoo writes require explicit approval. An uncertain write moves to readback/reconciliation; it is not silently replayed or marked complete.
 - PDF export is for an observed Odoo document. A down payment invoice or a posted invoice is not evidence that a bank payment occurred.
 - Manufacturing planning/confirmation, banking, reconciliation, payroll, HR, OCR, and company-wide document retrieval are outside the current workbench claim unless a specific source and experiment says otherwise.

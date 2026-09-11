@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { createReadStream, existsSync, statSync } from 'node:fs'
+import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -37,14 +37,23 @@ const messages = [
   { id: 'm4', role: 'assistant', text: '十月发票创建提案已准备。当前仍是 draft，审批前尚未执行 Odoo 写入；批准后才会继续。', created_at: now, business_id: 'approval' }
 ]
 const usage = (input, cacheRead, output, reasoning) => ({ input, cache_read: cacheRead, output, reasoning, total: input + output })
+const nativeCatalog = JSON.parse(readFileSync(resolve(process.cwd(), 'integration/native_tool_catalog.json'), 'utf8')).tools
+const catalogByName = new Map(nativeCatalog.map((tool) => [tool.name, tool]))
+const assertCatalogTool = (tool) => {
+  const spec = catalogByName.get(tool.name)
+  assert.ok(spec, `fixture tool missing from native catalog: ${tool.name}`)
+  for (const key of spec.parameters.required ?? []) assert.ok(Object.hasOwn(tool.arguments, key), `${tool.name} missing required ${key}`)
+  for (const key of Object.keys(tool.arguments)) assert.ok(Object.hasOwn(spec.parameters.properties, key), `${tool.name} has unknown argument ${key}`)
+}
 const traceData = (business) => {
   const awaiting = business.status === 'awaiting_approval'
   const tools = [
-    { id: 'read-order', name: 'mcp_odoo_read_record', round: 1, status: 'completed', arguments: { model: 'sale.order', domain: [['partner_id', '=', 42]] }, result: { source: 'synthetic_demo', count: 1 }, elapsed_seconds: 1.1 },
-    { id: 'read-lines', name: 'mcp_odoo_read', round: 1, status: 'completed', arguments: { model: 'sale.order.line' }, result: { source: 'synthetic_demo', quantity: 1, amount_total: 695.22 }, elapsed_seconds: 1.0 },
-    { id: awaiting ? 'approval-gate' : 'read-invoice', name: awaiting ? 'mcp_odoo_validate_write' : 'mcp_odoo_read_record', round: 2, status: awaiting ? 'awaiting_approval' : 'completed', arguments: awaiting ? { action: 'create', approval_required: true } : { model: 'account.move', record: 'INV/2026/00921' }, result: { source: 'synthetic_demo', state: awaiting ? 'draft' : 'posted' }, elapsed_seconds: 1.4 },
-    { id: awaiting ? 'approval-preview' : 'read-artifact', name: awaiting ? 'mcp_odoo_read_record' : 'mcp_odoo_read', round: 2, status: awaiting ? 'awaiting_approval' : 'completed', arguments: { scope: 'synthetic_demo' }, result: { source: 'synthetic_demo', verified: !awaiting }, elapsed_seconds: 1.2 }
+    { id: 'read-order', name: 'mcp_odoo_search_records', round: 1, status: 'completed', arguments: { model: 'sale.order', domain: [['partner_id', '=', 42]], fields: ['name', 'partner_id', 'amount_total', 'state'] }, result: { source: 'synthetic_demo', count: 1 }, elapsed_seconds: 1.1 },
+    { id: 'read-lines', name: 'mcp_odoo_search_records', round: 1, status: 'completed', arguments: { model: 'sale.order.line', domain: [['order_id', '=', 9021]], fields: ['name', 'product_uom_qty', 'price_subtotal'] }, result: { source: 'synthetic_demo', quantity: 1, amount_total: 695.22 }, elapsed_seconds: 1.0 },
+    { id: awaiting ? 'approval-gate' : 'read-invoice', name: awaiting ? 'mcp_odoo_validate_write' : 'mcp_odoo_read_record', round: 2, status: awaiting ? 'awaiting_approval' : 'completed', arguments: awaiting ? { model: 'account.move', operation: 'create', values: { partner_id: 42, move_type: 'out_invoice' } } : { model: 'account.move', record_id: 9021 }, result: { source: 'synthetic_demo', state: awaiting ? 'draft' : 'posted' }, elapsed_seconds: 1.4 },
+    { id: awaiting ? 'approval-preview' : 'read-artifact', name: awaiting ? 'mcp_odoo_preview_write' : 'mcp_odoo_read_attachment', round: 2, status: awaiting ? 'awaiting_approval' : 'completed', arguments: awaiting ? { model: 'account.move', operation: 'create', values: { partner_id: 42, move_type: 'out_invoice' } } : { attachment_id: 9201, include_data: false }, result: { source: 'synthetic_demo', verified: !awaiting }, elapsed_seconds: 1.2 }
   ]
+  tools.forEach(assertCatalogTool)
   const rounds = [
     { index: 1, status: 'completed', text: '读取 Nimbus 九月订单并整理服务数量与预算。', elapsed_seconds: 2.1, usage: usage(940, 0, 180, 60), tool_ids: ['read-order', 'read-lines'] },
     { index: 2, status: awaiting ? 'awaiting_approval' : 'completed', text: awaiting ? '等待人工审批，尚未执行写入。' : '回读发票、订单状态与演示文件已完成。', elapsed_seconds: 2.6, usage: usage(900, 0, 230, 60), tool_ids: awaiting ? ['approval-gate', 'approval-preview'] : ['read-invoice', 'read-artifact'] }
@@ -58,7 +67,7 @@ const detail = (business) => {
   const awaiting = business.status === 'awaiting_approval'
   return {
     business, runs: [trace.run],
-    approvals: awaiting ? [{ action_id: 'demo-approval', run_id: trace.run.id, business_id: business.id, status: 'pending_approval', title: '创建客户发票', model: 'account.move', operation: 'create', record_ids: [], values: { partner_id: [42, 'Nimbus Bureau'], move_type: 'out_invoice', invoice_line_ids: [[0, 0, { name: 'October support retainer', quantity: 1, price_unit: 695.22 }]] }, prestate: { records: [] }, result: { status: 'awaiting_approval', detail: '审批前尚未执行写入' }, expires_at: new Date(Date.now() + 3600000).toISOString(), source: 'synthetic_demo' }] : [],
+    approvals: awaiting ? [{ action_id: 'demo-approval', run_id: trace.run.id, business_id: business.id, status: 'pending_approval', title: '创建客户发票', model: 'account.move', operation: 'create', record_ids: [], values: { partner_id: 42, move_type: 'out_invoice', invoice_line_ids: [[0, 0, { name: 'October support retainer', quantity: 1, price_unit: 695.22 }]] }, prestate: { records: [] }, result: { status: 'awaiting_approval', detail: '审批前尚未执行写入' }, expires_at: new Date(Date.now() + 3600000).toISOString(), source: 'synthetic_demo' }] : [],
     documents: completed ? [{ id: 'so-9021', model: 'sale.order', name: 'SO9021', state: 'sale', source: 'synthetic_demo', source_run_id: trace.run.id, source_tool_id: 'read-order', observed_at: now, fields: { partner_name: 'Nimbus Bureau', amount_total: 695.22, currency: 'USD', invoice_status: 'invoiced' } }, { id: 'inv-9021', model: 'account.move', name: 'INV/2026/00921', state: 'posted', source: 'synthetic_demo', source_run_id: trace.run.id, source_tool_id: 'read-invoice', observed_at: now, fields: { partner_name: 'Nimbus Bureau', amount_total: 695.22, currency: 'USD', payment_state: 'not_paid' } }] : [],
     artifacts: completed ? [{ id: 'pdf', name: 'INV-2026-00921.pdf（演示素材）', path: 'synthetic://invoice.pdf', kind: 'odoo_pdf', created_at: now, available: true, source: 'synthetic_demo' }, { id: 'csv', name: 'INV-2026-00921.csv（演示素材）', path: 'synthetic://invoice.csv', kind: 'odoo_csv', created_at: now, available: true, source: 'synthetic_demo' }] : [],
     checks: completed ? [{ name: 'invoice', label: '发票回读', status: 'passed', detail: '已从合成演示回读 INV/2026/00921。', source: 'synthetic_demo' }, { name: 'amount', label: '金额核对', status: 'passed', detail: 'USD 695.22，与订单摘要一致。', source: 'synthetic_demo' }] : [],
@@ -70,6 +79,7 @@ const detail = (business) => {
 }
 const details = Object.fromEntries(businesses.map((item) => [item.id, detail(item)]))
 const traces = Object.fromEntries(businesses.map((item) => [item.id, traceData(item)]))
+assert.equal(details.approval.approvals[0].values.partner_id, 42)
 const bridge = `(() => { const session = ${JSON.stringify(session)}; const businesses = ${JSON.stringify(businesses)}; const messages = ${JSON.stringify(messages)}; const materials = ${JSON.stringify(materials)}; const details = ${JSON.stringify(details)}; const traces = ${JSON.stringify(traces)}; const listeners = new Set(); window.workbench = { subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) }, async call(method, params = {}) { if (method === 'health' || method === 'check_connection') return { host_ready: true, odoo_status: 'connected', model_configured: true, environment: 'demo', odoo: { status: 'connected', endpoint: 'synthetic://odoo', database: 'demo', account: 'demo' } }; if (method === 'list_sessions') return [session]; if (method === 'get_session') return { session, messages, materials, businesses, conversation_runs: [], live_messages: [] }; if (method === 'get_business' || method === 'refresh_business') return details[params.business_id]; if (method === 'get_trace') return traces[params.business_id]; throw new Error('showcase read-only bridge rejected: ' + method) } } })()`
 
 let browser

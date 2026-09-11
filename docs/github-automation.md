@@ -8,4 +8,4 @@ The web project reviews pull requests after the repository and account settings 
 
 A direct push without a pull request has the deterministic checks path only. A pull request push can also enter the configured web Codex review path. A review with no findings may be represented by a thumbs-up rather than a long report.
 
-The current web account and repository settings are user controlled and were not verified in this checkout. Until enabled, the review status is **setup required**. No claim is made that every push receives a Codex review.
+The connected ChatGPT Codex project has been observed reviewing PR #1 manually at commit `58c4b79`. Automatic review on every PR push and delivery of GitHub email notifications have not been verified here; mailbox access was out of scope. Configure [GitHub notification settings](https://github.com/settings/notifications) for Watching/Participating and pull-request-review email preferences, then follow the [Codex Code Review settings](https://chatgpt.com/codex/settings/code-review) page. This repository does not claim control over those account-level email scopes.

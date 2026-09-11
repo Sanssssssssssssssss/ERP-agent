@@ -93,6 +93,7 @@ node scripts/renderer-check.mjs
 ## 边界
 
 - 已验收的 Stage 7 原生运行路径不启动或导入 MCP；固定 MCP 源码仅作为来源和历史对照实验保留。
+- 原生工具清单保留部分 `mcp_odoo_*` 兼容名称；`integration/odoo_tools.py:52` 会在调用原生 adapter 前去掉该标识，不经过 MCP transport。
 - Odoo 写入需要明确审批。不确定写入进入回读/核对状态，不会静默重放或标记完成。
 - PDF 导出针对已观测的 Odoo 单据；预付款发票或已过账发票都不代表银行付款已经发生。
 - 制造计划/确认、银行、对账、工资、HR、OCR 和企业级全文档检索不属于当前工作台的覆盖承诺，除非具体来源和实验另有说明。
