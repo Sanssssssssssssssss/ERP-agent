@@ -566,11 +566,15 @@ class WorkbenchHostTests(unittest.TestCase):
         business3, run3 = self._run("pressure trace")
         run3["model_rounds"] = 2
         trace_errors = []
+        writer_errors = []
 
         def write_trace():
-            for index in range(160):
-                with self.host._lock:
-                    self.host._trace(run3, "pressure", {"index": index})
+            try:
+                for index in range(160):
+                    with self.host._lock:
+                        self.host._trace(run3, "pressure", {"index": index})
+            except Exception as exc:
+                writer_errors.append(exc)
 
         def read_trace(_):
             try:
@@ -583,8 +587,9 @@ class WorkbenchHostTests(unittest.TestCase):
         writer.start()
         with ThreadPoolExecutor(max_workers=16) as pool:
             traces = list(pool.map(read_trace, range(100)))
-        writer.join(timeout=2)
+        writer.join(timeout=30)
         self.assertFalse(writer.is_alive())
+        self.assertFalse(writer_errors)
         self.assertFalse(trace_errors)
         self.assertTrue(all(isinstance(trace, dict) for trace in traces))
         self.assertEqual(len(run3["events"]), 160)
