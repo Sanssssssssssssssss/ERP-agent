@@ -246,8 +246,11 @@ def _collect_related_metadata(
     return related
 
 
-def _strip_html(value: Any) -> str:
-    return html.unescape(re.sub(r"<[^>]*>", "", str(value or ""))).strip()
+def _plain_comment_text(value: Any) -> str | None:
+    raw = str(value or "").strip()
+    if raw.startswith("<p>") and raw.endswith("</p>"):
+        raw = raw[3:-4]
+    return None if "<" in raw else html.unescape(raw)
 
 
 def _chatter_payload(
@@ -686,7 +689,8 @@ class NativeActions:
                 for item in rows
                 if item.get("model") == model
                 and item.get("res_id") == record_id
-                and _strip_html(item.get("body")) == _strip_html(payload["kwargs"]["body"])
+                and item.get("message_type") == payload["kwargs"]["message_type"]
+                and _plain_comment_text(item.get("body")) == payload["kwargs"]["body"]
             ]
             return {
                 "status": "satisfied" if len(matches) == 1 else "unconfirmed",
@@ -815,6 +819,13 @@ class NativeActions:
             }
         claim = self.store.claim(action_id)
         if not claim["claimed"]:
+            if claim["status"] == "resource_busy":
+                return {
+                    "success": False, "action_id": action_id,
+                    "action_status": "resource_busy",
+                    "blocking_action_id": claim["blocking_action_id"],
+                    "error": "another unresolved action holds this resource; reconcile blocking_action_id before retrying",
+                }
             return {
                 "success": False,
                 "action_id": action_id,
