@@ -1,20 +1,20 @@
-# Odoo Agent
+# ERP-agent
 
 Native ERP Agent Harness
 
 English · [简体中文](README.zh-CN.md)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) [![Checks](https://github.com/Sanssssssssssssssss/odoo-agent/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/Sanssssssssssssssss/odoo-agent/actions/workflows/checks.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) [![Checks](https://github.com/Sanssssssssssssssss/ERP-agent/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/Sanssssssssssssssss/ERP-agent/actions/workflows/checks.yml)
 
-Odoo Agent drafts proposed Odoo business actions, requests approval before writes, and checks the resulting records. The repository contains the Windows desktop workbench, its native Odoo 19 runtime, and the ERP-Bench research harness behind it.
+ERP-agent drafts proposed Odoo business actions, requests approval before writes, and checks the resulting records. The repository contains the Windows desktop workbench, its native Odoo 19 runtime, and the ERP-Bench research harness behind it.
 
 **Windows preview · v0.5.4 · Odoo 19**
 
-![Odoo Agent](docs/media/hero.svg)
+![ERP-agent](docs/media/hero.svg)
 
 ## Windows preview (0.5.4)
 
-[Download the unsigned Windows preview](https://github.com/Sanssssssssssssssss/odoo-agent/releases/download/v0.5.4/Odoo-Workbench-0.5.4-windows-x64.zip) · [Release notes](https://github.com/Sanssssssssssssssss/odoo-agent/releases/tag/v0.5.4)
+[Download the unsigned Windows preview](https://github.com/Sanssssssssssssssss/ERP-agent/releases/download/v0.5.4/Odoo-Workbench-0.5.4-windows-x64.zip) · [Release notes](https://github.com/Sanssssssssssssssss/ERP-agent/releases/tag/v0.5.4)
 
 1. Download and unzip the archive, then run `Odoo-Workbench-0.5.4-portable.exe`.
 2. Open connection settings and provide your Odoo 19 and model configuration.
@@ -63,8 +63,8 @@ The current workbench business projections cover `sale_invoice`, `sale_purchase_
 Requirements: Windows, Node.js 22 or newer, and Python 3.13.
 
 ```powershell
-git clone https://github.com/Sanssssssssssssssss/odoo-agent.git
-cd odoo-agent
+git clone https://github.com/Sanssssssssssssssss/ERP-agent.git
+cd ERP-agent
 
 py -3.13 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .\agent
