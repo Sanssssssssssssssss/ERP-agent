@@ -294,6 +294,7 @@ export type WorkbenchMethod =
   | "cancel_conversation"
   | "confirm_business"
   | "get_business"
+  | "check_business_connection"
   | "start_run"
   | "decide_approval"
   | "cancel_run"

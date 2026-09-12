@@ -713,7 +713,7 @@ class ReportingTest(unittest.TestCase):
             (trial / "result.json").unlink()
             report_trial(trial, output)
             self.assertIn(
-                "INCOMPLETE / last response:", write_index(root / "reports").read_text()
+                "INCOMPLETE / last response:", write_index(root / "reports").read_text(encoding="utf-8")
             )
             rows.append({"type": "unexpected", "id": "x", "timestamp": stamp})
             source.write_text("\n".join(json.dumps(row) for row in rows))

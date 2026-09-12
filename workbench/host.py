@@ -32,6 +32,12 @@ class MaterialUnavailableError(ValueError):
     code = "MATERIAL_UNAVAILABLE"
 
 
+class BusinessConnectionError(RuntimeError):
+    def __init__(self, code: str, message: str):
+        self.code = code
+        super().__init__(message)
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -110,6 +116,23 @@ def _public_endpoint(value: str | None) -> str | None:
         return f"{parsed.scheme}://{host}{port}"
     except (TypeError, ValueError):
         return None
+
+
+def _connection_identity() -> dict[str, str]:
+    """Return the non-secret Odoo identity used to scope a business."""
+    raw_url = (os.environ.get("ODOO_URL") or "").strip()
+    try:
+        parsed = urllib.parse.urlsplit(raw_url if "://" in raw_url else f"http://{raw_url}")
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            return {"url": "", "database": "", "principal": ""}
+        scheme = parsed.scheme.lower()
+        netloc = parsed.netloc.lower()
+        path = parsed.path.rstrip("/")
+        url = urllib.parse.urlunsplit((scheme, netloc, path, "", "")) if netloc else ""
+    except (TypeError, ValueError):
+        url = ""
+    return {"url": url, "database": (os.environ.get("ODOO_DB") or "").strip(),
+            "principal": (os.environ.get("ODOO_USERNAME") or "").strip()}
 
 
 class Workbench:
@@ -341,6 +364,46 @@ class Workbench:
         if row is None or row.get("session_id") != session_id:
             raise KeyError("business does not belong to session")
         return row
+
+    def _business_has_odoo_history(self, business_id: str) -> bool:
+        """Detect persisted Odoo evidence before accepting a legacy business."""
+        business = self.store.data["businesses"].get(business_id) or {}
+        if business.get("readback") or business.get("documents"):
+            return True
+        if any(row.get("business_id") == business_id for row in self.store.data.get("approvals", {}).values()):
+            return True
+        for run in self.store.data.get("runs", {}).values():
+            if run.get("business_id") != business_id:
+                continue
+            # A legacy run may contain context that is no longer visible in the
+            # projection. Keep it viewable, but never guess its Odoo identity.
+            return True
+        return False
+
+    def _ensure_business_connection(self, business: dict[str, Any], *, bind: bool = True) -> dict[str, str]:
+        current = _connection_identity()
+        if any(not current[key] for key in ("url", "database", "principal")):
+            raise BusinessConnectionError("ODOO_BUSINESS_CONNECTION_MISSING", "当前 Odoo 连接设置不完整，请先配置 URL、数据库和账号。")
+        bound = business.get("odoo_connection")
+        if isinstance(bound, dict):
+            if bound != current:
+                raise BusinessConnectionError("ODOO_BUSINESS_CONNECTION_MISMATCH", "业务已绑定其他 Odoo 实例，请切回原 URL/数据库，或新建业务。")
+            return current
+        if self._business_has_odoo_history(business["id"]):
+            raise BusinessConnectionError("ODOO_BUSINESS_CONNECTION_LEGACY", "该历史业务缺少 Odoo 实例绑定；历史内容仍可查看，请新建业务继续操作。")
+        if bind:
+            business["odoo_connection"] = dict(current)
+            business["updated_at"] = now()
+            self._event("business_changed", {"session_id": business["session_id"],
+                                                "business_id": business["id"], "connection_bound": True})
+        return current
+
+    def check_business_connection(self, session_id: str, business_id: str) -> dict[str, Any]:
+        business = self._business(session_id, business_id)
+        identity = self._ensure_business_connection(business, bind=False)
+        # Return the validated endpoint so the desktop does not re-read settings
+        # after this scope check and accidentally open a record in a new instance.
+        return {"ok": True, "endpoint": identity["url"], "database": identity["database"]}
 
     def _material(self, session_id: str, material_id: str) -> dict[str, Any]:
         row = self.store.data.get("materials", {}).get(material_id)
@@ -689,6 +752,7 @@ class Workbench:
         if self._closing or self._processes or session.get("active_run_id") or any(row.get("status") in {"running", "awaiting_approval", "cancel_requested"} for row in self.store.data["runs"].values()):
             raise RuntimeError("only one active run is allowed on this host")
         self._validate_materials_available(session_id, business.get("material_ids", []))
+        self._ensure_business_connection(business)
         for previous in self.store.data["runs"].values():
             if previous.get("business_id") != business_id:
                 continue
@@ -1363,6 +1427,7 @@ class Workbench:
 
     def refresh_business(self, session_id: str, business_id: str) -> dict[str, Any]:
         business = self._business(session_id, business_id)
+        self._ensure_business_connection(business)
         if business.get("active_run_id"):
             raise RuntimeError("wait for the active run to finish before independent readback")
         try:
@@ -1382,6 +1447,19 @@ class Workbench:
             business = self.store.data["businesses"].get(business_id)
             if (self._closing or not run or run.get("status") != "completed" or not business or
                     business.get("active_run_id") or self._processes):
+                return
+            try:
+                self._ensure_business_connection(business, bind=False)
+            except BusinessConnectionError as exc:
+                business["readback_status"] = "unavailable"
+                business["readback_error"] = exc.code
+                stale = copy.deepcopy(business.get("readback") or {})
+                stale.update({"stale": True, "verification_status": "unknown", "checks": [],
+                              "observed_at": now(), "outcome": {"status": "unknown", "label": "当前状态未知",
+                              "detail": "连接归属无法确认，不能确认完成状态。", "scope": "business_readback"}})
+                business["readback"] = stale
+                self._event("business_refreshed", {"session_id": session_id, "business_id": business_id,
+                                                    "run_id": run_id, "status": "unavailable", "error": exc.code})
                 return
             snapshot = {
                 "businesses": {business_id: copy.deepcopy(business)},
@@ -1480,7 +1558,8 @@ class Workbench:
     def _export_document(self, session_id: str, business_id: str, model: str,
                          record_id: int, fmt: str) -> dict[str, Any]:
         """Export only a document already observed inside this business scope."""
-        self._business(session_id, business_id)
+        business = self._business(session_id, business_id)
+        self._ensure_business_connection(business)
         if not isinstance(model, str) or type(record_id) is not int or record_id < 1:
             raise ValueError("document scope is invalid")
         detail = business_detail(self.store.data, business_id)
@@ -1565,7 +1644,8 @@ class Workbench:
     def decide_approval(self, session_id: str, business_id: str, run_id: str, action_id: str, decision: str) -> dict[str, Any]:
         if decision not in {"approve", "reject"}: raise ValueError("decision must be approve or reject")
         approved = decision == "approve"
-        run = self.store.data["runs"].get(run_id); self._business(session_id, business_id)
+        run = self.store.data["runs"].get(run_id); business = self._business(session_id, business_id)
+        self._ensure_business_connection(business, bind=False)
         approval = self.store.data["approvals"].get(action_id)
         pending_ids = set(run.get("pending_approval_action_ids", [])) if run else set()
         if not run or run.get("session_id") != session_id or run.get("business_id") != business_id or run.get("status") != "awaiting_approval" or run_id in self._processes or action_id not in pending_ids or not approval or approval.get("run_id") != run_id or approval.get("status") != "pending_approval": raise ValueError("approval scope is invalid")
@@ -1659,7 +1739,8 @@ class Workbench:
 
     def reconcile_action(self, session_id: str, business_id: str, run_id: str, action_id: str) -> dict[str, Any]:
         """Read-only reconciliation for one uncertain ledger action."""
-        self._business(session_id, business_id)
+        business = self._business(session_id, business_id)
+        self._ensure_business_connection(business, bind=False)
         run = self.store.data["runs"].get(run_id)
         if not run or run.get("session_id") != session_id or run.get("business_id") != business_id:
             raise ValueError("run scope is invalid")
@@ -1716,10 +1797,13 @@ class Workbench:
         active = next((r["id"] for r in self.store.data["runs"].values() if r.get("status") in {"running", "awaiting_approval", "cancel_requested"}), None)
         if active is None:
             active = next((r["id"] for r in self.store.data.get("conversation_runs", {}).values() if r.get("status") in {"running", "cancel_requested"}), None)
-        return {"host_ready": True, "odoo_status": "configured" if os.environ.get("ODOO_URL") and os.environ.get("ODOO_DB") else "unknown", "model_configured": bool(os.environ.get("LLM_API_KEY") and os.environ.get("LLM_BASE_URL") and os.environ.get("LLM_MODEL")), "environment": "configured" if os.environ.get("LLM_API_KEY") else "demo", "active_run_id": active, "data_dir": str(self.store.root), "odoo": dict(self._odoo_health)}
+        return {"host_ready": True, "odoo_status": "configured" if os.environ.get("ODOO_URL") and os.environ.get("ODOO_DB") else "unknown", "model_configured": bool(os.environ.get("LLM_API_KEY") and os.environ.get("LLM_BASE_URL") and os.environ.get("LLM_MODEL")), "environment": "configured" if os.environ.get("LLM_API_KEY") else "demo", "active_run_id": active, "data_dir": str(self.store.root), "odoo": dict(self._odoo_health),
+                "storage": {"bytes": self.store.last_save_bytes, "last_save_ms": self.store.last_save_ms,
+                            "notification_count": len(self.store.data["events"]),
+                            "notification_limit": self.store.MAX_NOTIFICATIONS}}
 
     def _dispatch(self, method: str, params: dict[str, Any]) -> Any:
-        methods = {"list_sessions": lambda: self.list_sessions(), "create_session": lambda: self.create_session(params.get("title")), "rename_session": lambda: self.rename_session(params["session_id"], params["title"]), "archive_session": lambda: self.archive_session(params["session_id"]), "get_session": lambda: self.get_session(params["session_id"]), "send_message": lambda: self.send_message(params["session_id"], params["text"], params.get("business_id"), params.get("context_business_id"), params.get("material_ids")), "confirm_business": lambda: self.confirm_business(params["session_id"], params["proposal_id"], _must_bool(params["confirmed"], "confirmed")), "start_run": lambda: self.start_run(params["session_id"], params["business_id"]), "decide_approval": lambda: self.decide_approval(params["session_id"], params["business_id"], params["run_id"], params["action_id"], params["decision"]), "cancel_run": lambda: self.cancel_run(params["session_id"], params["business_id"], params["run_id"]), "cancel_conversation": lambda: self.cancel_conversation(params["session_id"], params["run_id"]), "reconcile_action": lambda: self.reconcile_action(params["session_id"], params["business_id"], params["run_id"], params["action_id"]), "get_business": lambda: self.get_business(params["session_id"], params["business_id"]), "refresh_business": lambda: self.refresh_business(params["session_id"], params["business_id"]), "get_trace": lambda: self.get_trace(params["session_id"], params["business_id"], params.get("run_id")), "_import_material": lambda: self._import_material(params["session_id"], params["name"], params["content_base64"]), "_export_document": lambda: self._export_document(params["session_id"], params["business_id"], params["model"], params["record_id"], params["format"]), "_record_artifact": lambda: self._record_artifact(params["session_id"], params["business_id"], params["path"], params["name"], params.get("run_id"), params.get("kind", "business_receipt"), params.get("model"), params.get("record_id")), "health": self.health, "check_connection": self.check_connection}
+        methods = {"list_sessions": lambda: self.list_sessions(), "create_session": lambda: self.create_session(params.get("title")), "rename_session": lambda: self.rename_session(params["session_id"], params["title"]), "archive_session": lambda: self.archive_session(params["session_id"]), "get_session": lambda: self.get_session(params["session_id"]), "send_message": lambda: self.send_message(params["session_id"], params["text"], params.get("business_id"), params.get("context_business_id"), params.get("material_ids")), "confirm_business": lambda: self.confirm_business(params["session_id"], params["proposal_id"], _must_bool(params["confirmed"], "confirmed")), "start_run": lambda: self.start_run(params["session_id"], params["business_id"]), "decide_approval": lambda: self.decide_approval(params["session_id"], params["business_id"], params["run_id"], params["action_id"], params["decision"]), "cancel_run": lambda: self.cancel_run(params["session_id"], params["business_id"], params["run_id"]), "cancel_conversation": lambda: self.cancel_conversation(params["session_id"], params["run_id"]), "reconcile_action": lambda: self.reconcile_action(params["session_id"], params["business_id"], params["run_id"], params["action_id"]), "get_business": lambda: self.get_business(params["session_id"], params["business_id"]), "check_business_connection": lambda: self.check_business_connection(params["session_id"], params["business_id"]), "refresh_business": lambda: self.refresh_business(params["session_id"], params["business_id"]), "get_trace": lambda: self.get_trace(params["session_id"], params["business_id"], params.get("run_id")), "_import_material": lambda: self._import_material(params["session_id"], params["name"], params["content_base64"]), "_export_document": lambda: self._export_document(params["session_id"], params["business_id"], params["model"], params["record_id"], params["format"]), "_record_artifact": lambda: self._record_artifact(params["session_id"], params["business_id"], params["path"], params["name"], params.get("run_id"), params.get("kind", "business_receipt"), params.get("model"), params.get("record_id")), "health": self.health, "check_connection": self.check_connection}
         if method not in methods: raise KeyError("unknown method")
         return methods[method]()
 

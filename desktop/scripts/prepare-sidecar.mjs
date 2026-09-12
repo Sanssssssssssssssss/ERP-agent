@@ -1,24 +1,49 @@
-import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { existsSync, lstatSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const repoRoot = resolve(root, "..");
 const pythonZip = process.env.WORKBENCH_PYTHON_ZIP ||
-  join(repoRoot, ".runtime", "desktop-acceptance", "downloads", "python-3.13.12-embed-amd64.zip");
+  join(repoRoot, ".runtime", "cache", "python-3.13.12-embed-amd64.zip");
 const pythonSha256 = (process.env.WORKBENCH_PYTHON_SHA256 ||
   "76f238f606250c87c6beac75dccd35ee99070a13490555936abb6cb64ecce3d0").toLowerCase();
 const hostRoot = repoRoot;
 const sitePackages = process.env.WORKBENCH_SITE_PACKAGES ||
-  join(repoRoot, ".runtime", "stage7-clean-win-final", "Lib", "site-packages");
+  join(repoRoot, ".venv", "Lib", "site-packages");
 const pythonUrl = process.env.WORKBENCH_PYTHON_URL ||
   "https://www.python.org/ftp/python/3.13.12/python-3.13.12-embed-amd64.zip";
+
+const resourcesRoot = resolve(root, "resources");
+const finalDestination = resolve(resourcesRoot, "host");
+const backupDestination = resolve(resourcesRoot, `.host-backup-${process.pid}`);
+const ownedPath = (value) => {
+  const resolved = resolve(value);
+  if (resolved !== resourcesRoot && !resolved.startsWith(`${resourcesRoot}${sep}`)) {
+    throw new Error(`Refusing path outside desktop/resources: ${resolved}`);
+  }
+  return resolved;
+};
+ownedPath(finalDestination);
+ownedPath(backupDestination);
+for (const candidate of [root, resourcesRoot, finalDestination, backupDestination]) {
+  if (existsSync(candidate) && lstatSync(candidate).isSymbolicLink()) {
+    throw new Error(`Refusing to replace a symlink or junction: ${candidate}`);
+  }
+}
+let stagingDestination;
+// A failed process must never leave a partial staging tree for the next run.
+process.on("exit", () => {
+  try { if (stagingDestination && existsSync(stagingDestination)) rmSync(stagingDestination, { recursive: true, force: true }); } catch { /* best effort during process exit */ }
+});
 
 if (!existsSync(join(hostRoot, "workbench"))) {
   throw new Error("The sidecar inputs must contain workbench and the native site-packages directory.");
@@ -38,6 +63,10 @@ for (const entry of await readdir(sitePackages)) {
 }
 if (installed.size !== pins.size) throw new Error("Missing pinned sidecar dependencies");
 
+await mkdir(resourcesRoot, { recursive: true });
+stagingDestination = await mkdtemp(join(resourcesRoot, ".host-staging-"));
+const destination = stagingDestination;
+
 const execFile = promisify((file, args, options, callback) => {
   const child = spawn(file, args, options);
   let stderr = "";
@@ -47,16 +76,9 @@ const execFile = promisify((file, args, options, callback) => {
 });
 
 async function download(url, destination) {
-  const response = await fetch(url, { redirect: "follow" });
+  const response = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(120_000) });
   if (!response.ok || !response.body) throw new Error(`Python download failed: HTTP ${response.status}`);
-  const file = createWriteStream(destination);
-  const reader = response.body.getReader();
-  while (true) {
-    const chunk = await reader.read();
-    if (chunk.done) break;
-    file.write(Buffer.from(chunk.value));
-  }
-  await new Promise((resolve, reject) => { file.end(resolve); file.on("error", reject); });
+  await pipeline(Readable.fromWeb(response.body), createWriteStream(destination));
 }
 
 async function sha256(file) {
@@ -65,14 +87,21 @@ async function sha256(file) {
   return hash.update(data).digest("hex");
 }
 
-const destination = join(root, "resources", "host");
-await rm(destination, { recursive: true, force: true });
 await mkdir(join(destination, "python"), { recursive: true });
 await mkdir(join(destination, "app", "site-packages"), { recursive: true });
 const archive = resolve(pythonZip);
 if (!existsSync(archive)) {
   await mkdir(dirname(archive), { recursive: true });
-  await download(pythonUrl, archive);
+  const partial = `${archive}.${process.pid}.part`;
+  await rm(partial, { force: true });
+  try {
+    await download(pythonUrl, partial);
+    if (await sha256(partial) !== pythonSha256) throw new Error("Downloaded Python archive SHA-256 mismatch");
+    await rename(partial, archive);
+  } catch (error) {
+    await rm(partial, { force: true });
+    throw error;
+  }
 }
 const actualSha256 = await sha256(archive);
 if (actualSha256 !== pythonSha256) {
@@ -175,4 +204,20 @@ if (process.platform === "win32") {
     "assert 'pi_agent.mcp' not in sys.modules",
   ].join("; ")], { windowsHide: true });
 }
-console.log(`Prepared CPython sidecar in ${destination}`);
+if (existsSync(backupDestination)) {
+  if (existsSync(finalDestination)) throw new Error(`Refusing to overwrite an existing sidecar backup: ${backupDestination}`);
+  await rename(backupDestination, finalDestination);
+}
+if (existsSync(finalDestination)) {
+  await rename(finalDestination, backupDestination);
+}
+try {
+  await rename(destination, finalDestination);
+  if (existsSync(backupDestination)) await rm(backupDestination, { recursive: true, force: true });
+} catch (error) {
+  if (!existsSync(finalDestination) && existsSync(backupDestination)) {
+    await rename(backupDestination, finalDestination);
+  }
+  throw error;
+}
+console.log(`Prepared CPython sidecar in ${finalDestination}`);

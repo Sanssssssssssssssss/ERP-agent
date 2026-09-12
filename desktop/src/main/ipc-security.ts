@@ -6,7 +6,7 @@ const LOCAL_METHODS = new Set(["get_settings", "save_settings", "import_material
 
 export const METHODS = new Set<WorkbenchMethod>([
   "list_sessions", "create_session", "rename_session", "archive_session", "get_session",
-  "send_message", "confirm_business", "get_business", "start_run", "decide_approval",
+  "send_message", "confirm_business", "get_business", "check_business_connection", "start_run", "decide_approval",
   "cancel_run", "cancel_conversation", "get_trace", "refresh_business", "reconcile_action", "health", "check_connection",
 ]);
 
@@ -41,8 +41,9 @@ export function businessScope(params: Record<string, unknown>): { session_id: st
     ...(params.run_id === undefined ? {} : { run_id: params.run_id as string }) };
 }
 
-export function observedRecordUrl(endpoint: string, documents: Document[], model: unknown, recordId: unknown): string {
+export function observedRecordUrl(endpoint: string, database: string, documents: Document[], model: unknown, recordId: unknown): string {
   if (!endpoint) throw new Error("ODOO_NOT_CONFIGURED");
+  if (!database || !/^[\w.-]{1,128}$/.test(database)) throw new Error("ODOO_NOT_CONFIGURED");
   validateEndpoint("odoo_url", endpoint);
   if (typeof model !== "string" || !/^[a-z][a-z0-9_.]*$/.test(model) ||
       typeof recordId !== "number" || !Number.isSafeInteger(recordId) || recordId <= 0 ||
@@ -51,6 +52,7 @@ export function observedRecordUrl(endpoint: string, documents: Document[], model
   }
   const url = new URL(endpoint);
   url.pathname = `${url.pathname.replace(/\/$/, "")}/web`;
+  url.search = new URLSearchParams({ db: database }).toString();
   url.hash = new URLSearchParams({ id: String(recordId), model, view_type: "form" }).toString();
   return url.href;
 }

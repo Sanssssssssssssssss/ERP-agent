@@ -22,6 +22,34 @@ from odoo_runtime.dynamic_tools import BASE_TOOLS, CAPABILITY_GROUPS
 
 
 class RunnerBudgetTest(unittest.TestCase):
+    def test_harbor_usage_receipt_boundaries(self):
+        async def run_case(receipt):
+            with patch.object(harbor_agent.BaseInstalledAgent, "__init__", return_value=None):
+                agent = harbor_agent.PiAgentMcpBaseline(max_model_requests=1, max_output_tokens=64)
+            agent.model_name = "provider/model"
+            agent.model_connection = SimpleNamespace(configured_base_url="https://example.invalid/v1", base_url="https://example.invalid/v1", api_key="test-only")
+            agent.context_id = agent.session_id = "test"
+            agent.exec_as_agent = AsyncMock(side_effect=lambda _environment, *, command, **_kwargs: SimpleNamespace(stdout=json.dumps(receipt) if command == "cat /logs/agent/pi-agent-usage.json" else ""))
+            agent._upload_config_text = AsyncMock()
+            context = SimpleNamespace()
+            with patch.object(harbor_agent, "_start_task_mcp", new=AsyncMock()):
+                await agent._run("do work", object(), context)
+            return context
+
+        unknown = asyncio.run(run_case({}))
+        self.assertIsNone(unknown.n_input_tokens)
+        self.assertIsNone(unknown.n_output_tokens)
+        self.assertIsNone(unknown.metadata["compaction_total_tokens"])
+        zero = asyncio.run(run_case({"input": 0, "cacheRead": 0, "cacheWrite": 0, "output": 0, "compactionCalls": 0}))
+        self.assertEqual((zero.n_input_tokens, zero.n_output_tokens, zero.n_cache_tokens), (0, 0, 0))
+        measured = asyncio.run(run_case({"input": 10, "cacheRead": 3, "cacheWrite": 2, "output": 4,
+                                         "compactionCalls": 1, "compactionInput": 6,
+                                         "compactionCacheRead": 1, "compactionCacheWrite": 2,
+                                         "compactionOutput": 5}))
+        self.assertEqual((measured.n_input_tokens, measured.n_output_tokens, measured.n_cache_tokens), (24, 9, 4))
+        self.assertEqual(measured.metadata["cache_write_tokens"], 2)
+        self.assertEqual(measured.metadata["compaction_output_tokens"], 5)
+
     def test_usage_aggregation_preserves_zero_and_missing_buckets(self):
         zero = SimpleNamespace(input=0, cache_read=0, cache_write=0, output=0, total_tokens=0, reasoning=0)
         partial = SimpleNamespace(input=4, output=2, total_tokens=6, reasoning=1)
@@ -410,8 +438,8 @@ class RunnerBudgetTest(unittest.TestCase):
         agent.exec_as_agent = AsyncMock(
             side_effect=lambda _environment, *, command, **_kwargs: SimpleNamespace(
                 stdout=(
-                    '{"input": 1, "output": 2, "cacheRead": 0, '
-                    '"modelCalls": 1, "reasoning": 0}'
+                    '{"input": 1, "output": 2, "cacheRead": 0, "cacheWrite": 0, '
+                    '"modelCalls": 1, "reasoning": 0, "compactionCalls": 0}'
                     if command == "cat /logs/agent/pi-agent-usage.json"
                     else ""
                 )
@@ -426,6 +454,12 @@ class RunnerBudgetTest(unittest.TestCase):
         self.assertIn("--max-output-tokens 64", command)
         self.assertEqual(context.metadata["max_model_requests"], 2)
         self.assertEqual(context.metadata["max_output_tokens"], 64)
+        self.assertEqual(context.n_input_tokens, 1)
+        self.assertEqual(context.n_cache_tokens, 0)
+        self.assertEqual(context.n_output_tokens, 2)
+        self.assertEqual(context.metadata["fresh_input_tokens"], 1)
+        self.assertEqual(context.metadata["cache_read_tokens"], 0)
+        self.assertEqual(context.metadata["compaction_total_tokens"], 0)
 
     def test_budget_blocks_second_real_provider_request_and_disables_session_recovery(self):
         async def check(root: Path) -> None:

@@ -10,7 +10,7 @@ import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 
 from odoo_runtime.store import ActionStore
@@ -75,6 +75,11 @@ class _EventProcess:
 class WorkbenchHostTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
+        self._odoo_env = patch.dict(os.environ, {
+            "ODOO_URL": "https://odoo.test", "ODOO_DB": "test", "ODOO_USERNAME": "tester",
+            "ODOO_API_KEY": "test-only",
+        }, clear=False)
+        self._odoo_env.start()
         self.host = Workbench(self.tmp.name, repo=Path.cwd())
         self.launches: list[tuple[str, bool]] = []
         self.host._launch = lambda run, continue_run: self.launches.append((run["id"], continue_run))
@@ -84,6 +89,7 @@ class WorkbenchHostTests(unittest.TestCase):
 
     def tearDown(self):
         self.host.close()
+        self._odoo_env.stop()
         self.tmp.cleanup()
 
     def _business(self, goal: str = "create a sale"):
@@ -94,6 +100,61 @@ class WorkbenchHostTests(unittest.TestCase):
     def _run(self, goal: str = "create a sale"):
         business = self._business(goal)
         return business, self.host.start_run(self.sid, business["id"])
+
+    def test_business_connection_binds_new_business_and_accepts_same_identity(self):
+        business = self._business("connection binding")
+        env = {"ODOO_URL": "https://odoo.example/", "ODOO_DB": "demo", "ODOO_USERNAME": "alice", "ODOO_API_KEY": "secret"}
+        with patch.dict(os.environ, env, clear=False):
+            self.host._ensure_business_connection(business)
+            self.assertEqual(business["odoo_connection"], {"url": "https://odoo.example", "database": "demo", "principal": "alice"})
+            self.assertEqual(self.host.check_business_connection(self.sid, business["id"]),
+                             {"ok": True, "endpoint": "https://odoo.example", "database": "demo"})
+
+    def test_business_connection_rejects_switch_for_bound_business(self):
+        business = self._business("connection switch")
+        with patch.dict(os.environ, {"ODOO_URL": "https://odoo.example", "ODOO_DB": "demo", "ODOO_USERNAME": "alice"}, clear=False):
+            self.host._ensure_business_connection(business)
+        with patch.dict(os.environ, {"ODOO_URL": "https://other.example", "ODOO_DB": "other", "ODOO_USERNAME": "alice"}, clear=False):
+            with self.assertRaisesRegex(RuntimeError, "绑定其他 Odoo 实例"):
+                self.host.check_business_connection(self.sid, business["id"])
+
+    def test_legacy_business_with_run_is_not_silently_bound(self):
+        business = self._business("legacy connection")
+        self.host.store.data["runs"]["old-run"] = {"id": "old-run", "business_id": business["id"], "session_id": self.sid, "status": "completed"}
+        with patch.dict(os.environ, {"ODOO_URL": "https://odoo.example", "ODOO_DB": "demo", "ODOO_USERNAME": "alice"}, clear=False):
+            with self.assertRaisesRegex(RuntimeError, "历史内容仍可查看"):
+                self.host.check_business_connection(self.sid, business["id"])
+            self.assertNotIn("odoo_connection", business)
+
+    def test_business_connection_rejects_partial_identity_without_binding(self):
+        business = self._business("partial connection")
+        with patch.dict(os.environ, {"ODOO_URL": "https://odoo.example", "ODOO_DB": "", "ODOO_USERNAME": "alice"}, clear=False):
+            with self.assertRaisesRegex(RuntimeError, "连接设置不完整"):
+                self.host.check_business_connection(self.sid, business["id"])
+        self.assertNotIn("odoo_connection", business)
+
+    def test_connection_guard_blocks_real_readback_export_approval_and_background_refresh(self):
+        business = self._business("guard entry points")
+        business["odoo_connection"] = {"url": "https://old.example", "database": "old", "principal": "tester"}
+        run = {"id": "guard-run", "business_id": business["id"], "session_id": self.sid,
+               "status": "completed", "documents": [], "readback": {"checks": [{"status": "pass"}]}}
+        self.host.store.data["runs"][run["id"]] = run
+        reader = MagicMock()
+        with patch.dict(os.environ, {"ODOO_URL": "https://new.example", "ODOO_DB": "new", "ODOO_USERNAME": "tester"}, clear=False):
+            with patch.object(self.host, "_native_reads", reader):
+                with self.assertRaisesRegex(RuntimeError, "绑定其他 Odoo 实例"):
+                    self.host.refresh_business(self.sid, business["id"])
+                with self.assertRaisesRegex(RuntimeError, "绑定其他 Odoo 实例"):
+                    self.host._export_document(self.sid, business["id"], "sale.order", 7, "csv")
+                run["status"] = "awaiting_approval"
+                with self.assertRaisesRegex(RuntimeError, "绑定其他 Odoo 实例"):
+                    self.host.decide_approval(self.sid, business["id"], run["id"], "missing-action", "approve")
+                run["status"] = "completed"
+                self.host._refresh_after_completed_run(self.sid, business["id"], run["id"])
+        reader.assert_not_called()
+        self.assertEqual(business["readback_status"], "unavailable")
+        self.assertEqual(business["readback"]["verification_status"], "unknown")
+        self.assertEqual(business["readback"]["checks"], [])
 
     def _action(self, run, *, expires_at=9_999_999_999, status_pending=True, key="x"):
         ledger = ActionStore(Path(self.tmp.name) / "runs" / run["id"] / "odoo-actions.sqlite3")

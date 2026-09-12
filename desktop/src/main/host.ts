@@ -217,6 +217,9 @@ const SAFE_ERROR_MESSAGES: Record<string, string> = {
   CONFIG_BUSY: "配置正在使用中，请等待当前操作结束。",
   SECURE_STORAGE_UNAVAILABLE: "系统安全存储不可用，无法读取密钥。",
   ODOO_NOT_CONFIGURED: "Odoo 尚未配置，请先填写连接设置。",
+  ODOO_BUSINESS_CONNECTION_MISSING: "当前 Odoo 连接设置不完整，请先配置 URL、数据库和账号。",
+  ODOO_BUSINESS_CONNECTION_MISMATCH: "当前业务属于其他 Odoo 连接，请切回原连接或新建业务。",
+  ODOO_BUSINESS_CONNECTION_LEGACY: "该历史业务缺少连接归属，历史内容仍可查看；请新建业务继续操作。",
   RECORD_NOT_OBSERVED: "该记录未被当前业务读取，无法打开。",
   MATERIAL_UNAVAILABLE: "业务绑定的材料已缺失或内容已变化，请重新导入后再执行。",
 };

@@ -121,6 +121,14 @@ function registerIpc(): void {
       const scope = businessScope(params);
       const detail = await host.call("get_business", scope) as BusinessDetail;
       if (detail.business.id !== scope.business_id || detail.business.session_id !== scope.session_id) throw new Error("BUSINESS_SCOPE_MISMATCH");
+      let validatedEndpoint: string | undefined;
+      let validatedDatabase: string | undefined;
+      if (request.method === "open_odoo_record") {
+        const connection = await host.call("check_business_connection", scope) as { endpoint?: string; database?: string };
+        if (!connection.endpoint) throw new Error("ODOO_NOT_CONFIGURED");
+        validatedEndpoint = connection.endpoint;
+        validatedDatabase = connection.database;
+      }
       if (request.method === "download_document") {
         const document = documentRequest(params);
         if (!detail.documents.some(item => item.model === document.model && String(item.id) === String(document.record_id))) throw new Error("RECORD_NOT_OBSERVED");
@@ -156,8 +164,7 @@ function registerIpc(): void {
         }
       }
       if (request.method === "open_odoo_record") {
-        const settings = await publicSettings();
-        await shell.openExternal(observedRecordUrl(settings.odoo_url, detail.documents, params.model, params.record_id));
+        await shell.openExternal(observedRecordUrl(validatedEndpoint ?? "", validatedDatabase ?? "", detail.documents, params.model, params.record_id));
         return { opened: true };
       }
       if (request.method === "open_business_artifact" || request.method === "reveal_business_artifact") {

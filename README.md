@@ -89,6 +89,7 @@ node scripts/renderer-check.mjs
 ```
 
 The Windows portable and installer commands are available in `desktop/package.json`. Packaging also requires the pinned sidecar inputs described by `desktop/scripts/prepare-sidecar.mjs` and `desktop/requirements-host.txt`.
+For a clean clone, the sidecar reads `.venv\Lib\site-packages` by default and caches the pinned CPython archive under `.runtime\cache`; run `npm run prepare:sidecar` from `desktop/` before `npm run dist:portable`.
 
 ## Boundaries
 

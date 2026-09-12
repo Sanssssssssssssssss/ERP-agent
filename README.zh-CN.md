@@ -89,6 +89,7 @@ node scripts/renderer-check.mjs
 ```
 
 `desktop/package.json` 提供 Windows portable 和 installer 命令。打包还需要 `desktop/scripts/prepare-sidecar.mjs` 和 `desktop/requirements-host.txt` 所描述的固定 sidecar 输入。
+干净克隆时，sidecar 默认读取 `.venv\Lib\site-packages`，并把固定版本的 CPython 压缩包缓存到 `.runtime\cache`；请在 `desktop/` 先运行 `npm run prepare:sidecar`，再运行 `npm run dist:portable`。
 
 ## 边界
 
