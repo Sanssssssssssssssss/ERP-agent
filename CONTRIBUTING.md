@@ -12,3 +12,5 @@ Before opening a pull request:
 Changes to pinned sources, licenses, ERP-Bench scope, or native/MCP boundaries need evidence in `sources.lock.json` or `experiments/`.
 
 For ordinary development, open a focused pull request and include the relevant checks. The optional Codex review is configured in the ChatGPT web project; see [`docs/github-automation.md`](docs/github-automation.md). Do not treat that review as a replacement for maintainer review or business evidence.
+
+Changes to `main` must go through a pull request with all four required checks passing.

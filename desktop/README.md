@@ -55,20 +55,26 @@ npm run self-check
 node scripts/renderer-check.mjs
 ```
 
-开发启动需要仓库原生 Python 环境：
+开发启动使用仓库根目录的 Python 3.13 虚拟环境：
 
 ```powershell
+py -3.13 -m venv ..\.venv
+$py = (Resolve-Path ..\.venv\Scripts\python.exe).Path
+& $py -m pip install -e ..\agent
+& $py -m pip install -r .\requirements-host.txt
 $env:WORKBENCH_HOST_ROOT = (Resolve-Path ..).Path
-$env:WORKBENCH_PYTHON = (Resolve-Path ../.runtime/stage7-clean-win-final/Scripts/python.exe).Path
+$env:WORKBENCH_PYTHON = $py
 npm run dev
 ```
 
 构建的 Python 依赖以 `requirements-host.txt` 固定；可在新的 Windows Python 3.13
 虚拟环境内安装该文件，并用 `WORKBENCH_SITE_PACKAGES` 指定其 site-packages。
+默认位置是 `..\.venv\Lib\site-packages`；Python 压缩包缓存于 `..\.runtime\cache`。
 准备脚本核对依赖版本和官方 CPython 压缩包 SHA-256，复制当前仓库源码及许可证。
 不会打包 `.env`、历史实验数据、Compiler、MCP SDK 或开发环境的可执行程序。
 
 ```powershell
+$env:WORKBENCH_SITE_PACKAGES = (Resolve-Path ..\.venv\Lib\site-packages).Path
 npm run prepare:sidecar
 npm run dist:portable
 # 或 npm run dist:installer

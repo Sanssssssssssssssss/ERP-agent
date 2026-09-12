@@ -58,11 +58,11 @@ export async function runSelfCheck(): Promise<void> {
   assert.throws(() => businessScope({ session_id: "s_a", business_id: "../b" }), /INVALID_BUSINESS_SCOPE/);
   assert.throws(() => businessScope({ session_id: "s_a", business_id: "b_a", run_id: null }), /INVALID_BUSINESS_SCOPE/);
   const documents = [{ id: "42", model: "sale.order", name: "SO42", state: "sale", fields: {}, source: "native_read_receipt" }];
-  assert.equal(observedRecordUrl("http://127.0.0.1:18069", documents, "sale.order", 42), "http://127.0.0.1:18069/web#id=42&model=sale.order&view_type=form");
-  assert.throws(() => observedRecordUrl("https://odoo.example", documents, "account.move", 42), /RECORD_NOT_OBSERVED/);
-  assert.throws(() => observedRecordUrl("https://odoo.example", documents, "sale.order", 43), /RECORD_NOT_OBSERVED/);
-  assert.throws(() => observedRecordUrl("file:///C:/Windows", documents, "sale.order", 42), /PROTOCOL_INVALID/);
-  assert.throws(() => observedRecordUrl("https://odoo.example/?secret=x", documents, "sale.order", 42), /CREDENTIALS_INVALID/);
+  assert.equal(observedRecordUrl("http://127.0.0.1:18069", "demo", documents, "sale.order", 42), "http://127.0.0.1:18069/web?db=demo#id=42&model=sale.order&view_type=form");
+  assert.throws(() => observedRecordUrl("https://odoo.example", "demo", documents, "account.move", 42), /RECORD_NOT_OBSERVED/);
+  assert.throws(() => observedRecordUrl("https://odoo.example", "demo", documents, "sale.order", 43), /RECORD_NOT_OBSERVED/);
+  assert.throws(() => observedRecordUrl("file:///C:/Windows", "demo", documents, "sale.order", 42), /PROTOCOL_INVALID/);
+  assert.throws(() => observedRecordUrl("https://odoo.example/?secret=x", "demo", documents, "sale.order", 42), /CREDENTIALS_INVALID/);
   const artifactPath = join(isolated, "receipt.json");
   assert.equal(recordedArtifactPath([{ id: "a_receipt", path: artifactPath }], "a_receipt"), artifactPath);
   assert.throws(() => recordedArtifactPath([{ id: "a_receipt", path: artifactPath }], "a_other_business"), /NOT_FOUND/);
@@ -79,6 +79,7 @@ export async function runSelfCheck(): Promise<void> {
   assert.equal(recordedArtifactPath([{ id: "a_pdf", path: join(isolated, "doc.pdf"), kind: "odoo_pdf" }], "a_pdf"), join(isolated, "doc.pdf"));
   assert.throws(() => recordedArtifactPath([{ id: "a_pdf", path: join(isolated, "doc.json"), kind: "odoo_pdf" }], "a_pdf"), /FORMAT_INVALID/);
   assert.equal(safeErrorMessage("ODOO_NOT_CONFIGURED", "internal detail"), "[ODOO_NOT_CONFIGURED] Odoo 尚未配置，请先填写连接设置。");
+  assert.equal(safeErrorMessage("ODOO_BUSINESS_CONNECTION_MISMATCH", "internal detail"), "[ODOO_BUSINESS_CONNECTION_MISMATCH] 当前业务属于其他 Odoo 连接，请切回原连接或新建业务。");
   assert.equal(safeErrorMessage("KeyError", "'unknown proposal'"), "[KEYERROR] 未找到可处理的业务提案，可能已处理或已过期。");
   assert.equal(safeErrorMessage("ValueError", "material exceeds the 2 MiB limit"), "[VALUEERROR] 材料超过 2 MiB 大小限制。");
   assert.equal(safeErrorMessage("ValueError", "DOCUMENT_PDF_UNAVAILABLE"), "[VALUEERROR] 当前单据没有可下载的正式 PDF，请改用 CSV 或先在 Odoo 生成正式报表。");

@@ -53,6 +53,19 @@ def bench_action_env() -> dict[str, str]:
         "ODOO_ACTION_APPROVAL_MODE": "bench-auto",
     }
 
+
+def _usage_bucket(usage: dict[str, Any], *names: str) -> int | None:
+    """Read a nullable runner bucket without turning unknown into zero."""
+    for name in names:
+        if name in usage:
+            value = usage[name]
+            return value if type(value) is int and value >= 0 else None
+    return None
+
+
+def _nullable_add(*values: int | None) -> int | None:
+    return sum(values) if all(value is not None for value in values) else None
+
 try:
     from harbor.agents.installed.base import BaseInstalledAgent, with_prompt_template
     from harbor.agents.model_connection import ModelConnectionSpec
@@ -426,11 +439,47 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             command="cat /logs/agent/pi-agent-usage.json",
         )
         usage = json.loads(usage_result.stdout or "{}")
-        context.n_input_tokens = usage.get("input", 0) + usage.get("cacheRead", 0)
-        context.n_output_tokens = usage.get("output", 0)
-        context.n_cache_tokens = usage.get("cacheRead", 0)
+        fresh_input = _usage_bucket(usage, "input")
+        cache_read = _usage_bucket(usage, "cacheRead", "cache_read")
+        cache_write = _usage_bucket(usage, "cacheWrite", "cache_write")
+        cache_write_1h = _usage_bucket(usage, "cacheWrite1H", "cache_write_1h")
+        output = _usage_bucket(usage, "output")
+        reasoning = _usage_bucket(usage, "reasoning")
+        compaction_calls = _usage_bucket(usage, "compactionCalls", "compaction_calls")
+        compaction_input = _usage_bucket(usage, "compactionInput", "compaction_input")
+        compaction_cache_read = _usage_bucket(usage, "compactionCacheRead", "compaction_cache_read")
+        compaction_cache_write = _usage_bucket(usage, "compactionCacheWrite", "compaction_cache_write")
+        compaction_output = _usage_bucket(usage, "compactionOutput", "compaction_output")
+        compaction_reasoning = _usage_bucket(usage, "compactionReasoning", "compaction_reasoning")
+        compaction_total = _usage_bucket(usage, "compactionTotal", "compaction_total")
+        if compaction_calls == 0:
+            compaction_input = compaction_input if compaction_input is not None else 0
+            compaction_cache_read = compaction_cache_read if compaction_cache_read is not None else 0
+            compaction_cache_write = compaction_cache_write if compaction_cache_write is not None else 0
+            compaction_output = compaction_output if compaction_output is not None else 0
+            compaction_reasoning = compaction_reasoning if compaction_reasoning is not None else 0
+            compaction_total = compaction_total if compaction_total is not None else 0
+        context.n_input_tokens = _nullable_add(
+            fresh_input, cache_read, cache_write,
+            compaction_input, compaction_cache_read, compaction_cache_write,
+        )
+        context.n_output_tokens = _nullable_add(output, compaction_output)
+        context.n_cache_tokens = _nullable_add(cache_read, compaction_cache_read)
         context.metadata = {
-            "reasoning_tokens": usage.get("reasoning"),
+            "fresh_input_tokens": fresh_input,
+            "cache_read_tokens": cache_read,
+            "cache_write_tokens": cache_write,
+            "cache_write_1h_tokens": cache_write_1h,
+            "output_tokens": output,
+            "reasoning_tokens": reasoning,
+            "compaction_total_tokens": compaction_total,
+            "compaction_input_tokens": compaction_input,
+            "compaction_cache_read_tokens": compaction_cache_read,
+            "compaction_cache_write_tokens": compaction_cache_write,
+            "compaction_cache_write_1h_tokens": _usage_bucket(usage, "compactionCacheWrite1H", "compaction_cache_write_1h"),
+            "compaction_output_tokens": compaction_output,
+            "compaction_reasoning_tokens": compaction_reasoning,
+            "compaction_calls": compaction_calls,
             "model_calls": usage.get("modelCalls"),
             "pi_agent_commit": PI_AGENT_COMMIT,
             "mcp_odoo_commit": MCP_ODOO_COMMIT,

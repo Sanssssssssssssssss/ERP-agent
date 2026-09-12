@@ -28,17 +28,17 @@ ROOT = Path(__file__).resolve().parents[1]
 class BaselineFixTest(unittest.TestCase):
     def test_native_install_excludes_mcp_and_system_site_packages(self):
         async def check():
-            agent = SimpleNamespace(
-                exec_as_agent=AsyncMock(),
-                exec_as_root=AsyncMock(),
-            )
-            environment = SimpleNamespace(
-                upload_dir=AsyncMock(),
-                upload_file=AsyncMock(),
-            )
-            await harbor_agent._install_task_runtime(
-                agent, environment, native_only=True
-            )
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / ".runtime" / "wheelhouse-native-py312").mkdir(parents=True)
+                for path in (root / "agent" / "src").joinpath("pi_ai"), (root / "agent" / "src").joinpath("pi_agent"), (root / "agent" / "src").joinpath("pi_coding"):
+                    path.mkdir(parents=True)
+                (root / "integration").mkdir()
+                (root / "integration" / "pi_odoo_runner.py").touch()
+                agent = SimpleNamespace(exec_as_agent=AsyncMock(), exec_as_root=AsyncMock())
+                environment = SimpleNamespace(upload_dir=AsyncMock(), upload_file=AsyncMock())
+                with patch.object(harbor_agent, "__file__", str(root / "integration" / "harbor_agent.py")):
+                    await harbor_agent._install_task_runtime(agent, environment, native_only=True)
             commands = " ".join(
                 call.kwargs["command"] for call in agent.exec_as_root.await_args_list
             )
