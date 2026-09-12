@@ -42,6 +42,7 @@ from odoo_runtime._odoo_core.write_policy import (
 )
 from odoo_runtime.reads import NativeReads
 from odoo_runtime.store import ActionStore
+from odoo_runtime.write_guards import business_write_prestate
 
 ACTION_TOOLS = frozenset(
     {
@@ -438,14 +439,16 @@ class NativeActions:
         if kind == "write":
             operation = payload.get("operation")
             ids = [int(value) for value in payload.get("record_ids") or []]
+            dependencies = business_write_prestate(self.reads.instances[instance], payload)
+            guarded = {"business_dependencies": dependencies} if dependencies else {}
             if operation == "create":
-                return {"records": []}
+                return {"records": [], **guarded}
             fields = sorted(
                 {"id", *[str(key) for key in (payload.get("values") or {}) if key != "datas"]}
             )
             if model == "ir.attachment" and "datas" in (payload.get("values") or {}):
                 fields.extend(name for name in ("checksum", "file_size") if name not in fields)
-            return {"records": self._read_rows(instance, model, ids, fields)}
+            return {"records": self._read_rows(instance, model, ids, fields), **guarded}
         if kind == "chatter":
             target = self._read_rows(
                 instance, model, [int(payload["record_ids"][0])], ["id"]
