@@ -27,6 +27,15 @@ class _PlainTextWriter(_Writer):
 
 
 class ChatterVerificationTest(unittest.TestCase):
+    def test_relation_cardinality_uses_field_type_not_list_length(self):
+        for kind in ('many2many', 'one2many'):
+            for ids in ([1], [1, 8], [1, 8, 9]):
+                self.assertTrue(NativeActions._matches(list(reversed(ids)), [[6, 0, ids]], kind))
+                self.assertFalse(NativeActions._matches(ids + [99], [[6, 0, ids]], kind))
+            self.assertFalse(NativeActions._matches([1, 8], 1, kind))
+        self.assertTrue(NativeActions._matches([8, 'Item'], 8, 'many2one'))
+        self.assertFalse(NativeActions._matches([8, 'Item'], 1, 'many2one'))
+
     def test_plain_html_fields_accept_only_unchanged_text_and_safe_wrapper(self):
         for text in ('Customer allocation unchanged', 'R&D', 'line 1\nline 2'):
             self.assertTrue(NativeActions._matches('<p>' + html.escape(text) + '</p>', text, 'html'))

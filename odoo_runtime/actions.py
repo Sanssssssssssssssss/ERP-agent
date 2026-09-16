@@ -525,7 +525,8 @@ class NativeActions:
         if field_type == "html" and isinstance(expected, str) and "<" not in expected:
             if isinstance(actual, str) and _plain_comment_text(actual) == expected:
                 return True
-        if isinstance(actual, (list, tuple)) and len(actual) == 2 and type(actual[0]) is int:
+        if (isinstance(actual, (list, tuple)) and len(actual) == 2 and type(actual[0]) is int
+                and (field_type == "many2one" or (field_type is None and type(expected) is int))):
             return expected == actual[0]
         if (
             isinstance(expected, list)
