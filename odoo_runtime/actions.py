@@ -290,6 +290,7 @@ class NativeActions:
         clients: dict[str, Any] | None = None,
         approval_mode: str | None = None,
         approval_ttl_seconds: int = WRITE_APPROVAL_TTL_SECONDS,
+        task_evidence: Any = None,
     ) -> None:
         if type(approval_ttl_seconds) is not int or approval_ttl_seconds < 1:
             raise ValueError("approval_ttl_seconds must be a positive integer")
@@ -303,6 +304,7 @@ class NativeActions:
             raise ValueError("Native action clients must match native read instances")
         self.approval_mode = approval_mode
         self.approval_ttl_seconds = approval_ttl_seconds
+        self.task_evidence = task_evidence
 
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if name not in ACTION_TOOLS:
@@ -437,6 +439,12 @@ class NativeActions:
         return client.read_records(model, ids, fields=fields)
 
     def _prestate(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+        state = self._native_prestate(kind, payload)
+        if self.task_evidence is not None:
+            state.update(self.task_evidence.prestate(kind, payload))
+        return state
+
+    def _native_prestate(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         instance = str(payload.get("instance") or self.reads.instance)
         model = str(payload.get("model") or "")
         if kind == "write":
@@ -957,6 +965,10 @@ class NativeActions:
             validate_model_name(model)
             name, runtime = self._runtime(instance)
             policy_digest, _ = self._policy_snapshot(runtime)
+            if self.task_evidence is not None:
+                values, values_list = self.task_evidence.prepare(
+                    model, operation, values, values_list, record_ids, context, name
+                )
             values, values_list, files = _resolve_all_uploads(values, values_list)
             if files and (fields_metadata is not None or not use_live_metadata):
                 return {

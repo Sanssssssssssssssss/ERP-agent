@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import shlex
@@ -238,6 +239,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         max_output_tokens: int | None = None,
         snapshot_sha256: str | None = None,
         runtime_timeout_seconds: int | None = 1770,
+        task_evidence: dict | None = None,
         **kwargs: Any,
     ) -> None:
         if version != PI_AGENT_COMMIT:
@@ -290,6 +292,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
         self._max_output_tokens = max_output_tokens
         self._snapshot_sha256 = snapshot_sha256
         self._runtime_timeout_seconds = runtime_timeout_seconds
+        self._task_evidence = task_evidence
         super().__init__(*args, version=version, **kwargs)
 
     @staticmethod
@@ -423,6 +426,13 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             "PI_ODOO_SOURCE_COMMIT": os.environ.get("PI_ODOO_SOURCE_COMMIT", ""),
             **bench_action_env(),
         }
+        if self._task_evidence is not None:
+            if not native_only:
+                raise ValueError("task evidence requires the native runtime")
+            specification = {**self._task_evidence, "instruction_sha256": hashlib.sha256(f"{instruction}\n\n{MCP_ONLY_POLICY}".encode()).hexdigest()}
+            await self._upload_config_text(environment, content=json.dumps(specification),
+                                           remote_path="/tmp/pi-odoo-task-evidence.json", filename="task-evidence-spec.json")
+            env["ODOO_TASK_EVIDENCE_FILE"] = "/tmp/pi-odoo-task-evidence.json"
         command = (
             "set -o pipefail; export ODOO_URL=http://127.0.0.1:8069 ODOO_DB=bench ODOO_USERNAME=admin; "
             'export ODOO_API_KEY="$(cat /etc/odoo/api_key)"; '

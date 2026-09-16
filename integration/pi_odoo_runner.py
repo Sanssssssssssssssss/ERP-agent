@@ -35,6 +35,7 @@ from odoo_runtime.dynamic_tools import DynamicToolController
 from odoo_runtime.reads import NativeReads
 from odoo_runtime.sops import build_sop_tools
 from odoo_runtime.store import ActionStore
+from odoo_runtime.task_evidence import TaskEvidence
 from odoo_runtime.world import WorldStore
 from odoo_runtime.world_tools import build_world_tools
 
@@ -267,6 +268,13 @@ async def run(args: argparse.Namespace) -> None:
             )
             if actions is not None:
                 actions.store.recover_interrupted()
+                evidence_file = os.environ.get("ODOO_TASK_EVIDENCE_FILE")
+                if evidence_file:
+                    specification = json.loads(Path(evidence_file).read_text(encoding="utf-8"))
+                    instruction_sha256 = hashlib.sha256(args.instruction_file.read_bytes()).hexdigest()
+                    if specification.get("instruction_sha256") != instruction_sha256:
+                        raise ValueError("host evidence is bound to a different instruction")
+                    actions.task_evidence = TaskEvidence(native_runtime, specification, args.session_file.parent / "task-evidence.json")
             capabilities = (
                 NativeCapabilities(
                     native_runtime,
