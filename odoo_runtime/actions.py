@@ -522,6 +522,9 @@ class NativeActions:
 
     @staticmethod
     def _matches(actual: Any, expected: Any, field_type: str | None = None) -> bool:
+        if field_type == "html" and isinstance(expected, str) and "<" not in expected:
+            if isinstance(actual, str) and _plain_comment_text(actual) == expected:
+                return True
         if isinstance(actual, (list, tuple)) and len(actual) == 2 and type(actual[0]) is int:
             return expected == actual[0]
         if (

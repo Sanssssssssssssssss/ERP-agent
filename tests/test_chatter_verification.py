@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tests.test_actions import _actions, _Runtime, _Writer
+from odoo_runtime.actions import NativeActions
 
 
 class _PlainTextWriter(_Writer):
@@ -26,6 +27,13 @@ class _PlainTextWriter(_Writer):
 
 
 class ChatterVerificationTest(unittest.TestCase):
+    def test_plain_html_fields_accept_only_unchanged_text_and_safe_wrapper(self):
+        for text in ('Customer allocation unchanged', 'R&D', 'line 1\nline 2'):
+            self.assertTrue(NativeActions._matches('<p>' + html.escape(text) + '</p>', text, 'html'))
+        for actual, expected, kind in [('<p>changed</p>', 'original', 'html'), ('<p>x</p>', 'x', 'char'),
+                ('<p><a href="evil">x</a></p>', 'x', 'html'), ('<p>x</p>', '<b>x</b>', 'html')]:
+            self.assertFalse(NativeActions._matches(actual, expected, kind))
+
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
