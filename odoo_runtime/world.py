@@ -528,7 +528,7 @@ class WorldStore:
 
     @staticmethod
     def _request_summary(request: dict[str, Any]) -> dict[str, Any]:
-        allowed = ("instance", "model", "record_id", "fields", "domain", "limit", "offset", "order")
+        allowed = ("instance", "model", "record_id", "record_ids", "fields", "domain", "limit", "offset", "order")
         return {
             key: WorldStore._request_value(request[key])
             for key in allowed if key in request
@@ -550,7 +550,7 @@ class WorldStore:
         if isinstance(payload, dict):
             for key in (
                 "success", "count", "has_more", "offset", "next_offset", "truncated",
-                "warnings", "redacted_fields", "fields_used", "metadata_used", "acl",
+                "warnings", "redacted_fields", "fields_used", "metadata_used", "acl", "missing_ids",
             ):
                 if key in payload:
                     envelope[key] = WorldStore._bounded_value(payload[key], f"$.{key}")
@@ -821,7 +821,8 @@ class WorldStore:
         model = arguments.get("model")
         records: list[dict[str, Any]] = []
         if tool == "read_record":
-            records = [payload.get("result")] if isinstance(payload, dict) and isinstance(payload.get("result"), dict) else []
+            rows = payload.get("result") if isinstance(payload, dict) else None
+            records = [rows] if isinstance(rows, dict) else [row for row in (rows or []) if isinstance(row, dict)]
         elif tool in {"search_records", "find_records", "search_employee", "search_holidays"}:
             model = {"search_employee": "hr.employee", "search_holidays": "hr.leave.report.calendar"}.get(tool, model)
             rows = payload.get("result") if isinstance(payload, dict) else None

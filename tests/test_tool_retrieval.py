@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 import copy
+import asyncio
+import json
+import tempfile
+import os
+from pathlib import Path
+from unittest.mock import patch
 import unittest
 
 from odoo_runtime._odoo_core.field_policy import FieldPolicy, ModelFieldRule
-from integration.odoo_tools import native_tool_catalog
+from integration.odoo_tools import native_tool_catalog, route_tools
+from odoo_runtime.world import WorldStore
+from tests.test_actions import _Reader
+from tests.test_world import ENV
 from odoo_runtime.reads import NativeReads, _summarize_field_metadata
 
 
@@ -38,6 +47,32 @@ class RerankClient:
 
 
 class ToolRetrievalTest(unittest.TestCase):
+    def test_exact_batch_read_keeps_acl_missing_ids_and_world_records(self):
+        client = _Reader()
+        client.requests = []
+        client.scope_fingerprint = lambda: 'fixture'
+        client.metadata['comment'] = {'type': 'text'}
+        def read(model, ids, fields=None):
+            client.requests.append(('read', model, ids, fields))
+            return [{'id': i, 'name': f'P{i}', 'comment': 'SECRET'} for i in ids if i != 3]
+        client.read_records = read
+        policy = FieldPolicy({'default': {'res.partner': ModelFieldRule('deny', frozenset({'comment'}))}})
+        native = NativeReads(client, policy=policy)
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, ENV):
+            root = Path(directory)
+            world = WorldStore(root / 'world.jsonl')
+            tool = next(t for t in route_tools(native_tool_catalog(), root / 'tools.jsonl', native=native,
+                                               world=world, native_health=True) if t.name == 'mcp_odoo_read_record')
+            result = asyncio.run(tool.execute('batch', {'model': 'res.partner', 'record_ids': [1, 2, 3], 'fields': ['name']}))
+            payload = json.loads(result.text)
+            self.assertEqual(payload['missing_ids'], [3])
+            self.assertEqual([r['id'] for r in payload['result']], [1, 2])
+            self.assertNotIn('SECRET', result.text)
+            self.assertEqual(len([c for c in client.requests if c[0] == 'read']), 1)
+            self.assertEqual(world.telemetry()['records'], 2)
+            for args in ({'record_id': 1, 'record_ids': [2]}, {'record_ids': []}, {'record_ids': [False]}, {'record_ids': list(range(1, 22))}):
+                self.assertFalse(native.call('read_record', {'model': 'res.partner', **args})['success'])
+
     def test_search_records_rerank_window_topk_and_nohit(self):
         reads = NativeReads(RerankClient())
         result = reads.call("search_records", {"model": "res.partner", "limit": 3, "rerank_query": "vendor", "top_k": 2})

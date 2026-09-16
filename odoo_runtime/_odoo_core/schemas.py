@@ -11,7 +11,7 @@ Core module: must not import the MCP surface (enforced by import-linter).
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -149,9 +149,10 @@ class ReadSupplyContextResponse(ToolResponse):
 
 
 class ReadRecordResponse(ToolResponse):
-    result: Optional[Dict[str, Any]] = Field(
+    result: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = Field(
         default=None, description="The record (field-ACL redacted)."
     )
+    missing_ids: Optional[List[int]] = None
     smart_fields_applied: Optional[bool] = None
     fields_used: Optional[List[str]] = None
     redacted_fields: Optional[List[str]] = None

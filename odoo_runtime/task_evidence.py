@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import html
 import json
+import math
 import re
 from pathlib import Path
 
@@ -33,6 +34,13 @@ class TaskEvidence:
         self.identity = reads.identity_context(self.instance)
         self.digest = ActionStore.digest(self.spec)
         self.bindings = copy.deepcopy(self.spec.get("bindings", []))
+        self.purchase_sources = copy.deepcopy(self.spec.get("purchase_sources", []))
+        for scope in self.purchase_sources:
+            products = self._search(scope["product"], ["id"])
+            minimum = scope.get("minimum_per_origin")
+            if len(products) != 1 or (minimum is not None and (type(minimum) not in (int, float) or not math.isfinite(minimum) or minimum <= 0)):
+                raise ValueError("purchase source requires a unique product and positive allocation quantum")
+            scope["product_id"] = products[0]["id"]
         for binding in self.bindings:
             if binding.get("operation") not in {"create", "write"}:
                 raise ValueError("task binding must specify create or write")
@@ -46,7 +54,7 @@ class TaskEvidence:
                     binding["when"][field] = rows[0]["id"]
         if self.path.exists():
             saved = json.loads(self.path.read_text(encoding="utf-8"))
-            if saved["spec_sha256"] != self.digest or saved["identity"] != self.identity or saved["bindings"] != self.bindings:
+            if saved["spec_sha256"] != self.digest or saved["identity"] != self.identity or saved["bindings"] != self.bindings or saved.get("purchase_sources", []) != self.purchase_sources:
                 raise ValueError("task evidence identity or host specification changed; use a new task receipt")
             self.rules = saved["rules"]
         else:
@@ -63,7 +71,7 @@ class TaskEvidence:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("x", encoding="utf-8") as stream:
                 json.dump({"spec_sha256": self.digest, "identity": self.identity,
-                           "bindings": self.bindings, "rules": self.rules}, stream, ensure_ascii=False)
+                           "bindings": self.bindings, "rules": self.rules, "purchase_sources": self.purchase_sources}, stream, ensure_ascii=False)
         self._event("bound", bindings=len(self.bindings), rules=len(self.rules))
 
     def _event(self, event, **data):
@@ -140,8 +148,48 @@ class TaskEvidence:
         self.bind(payload, inject=True)
         return payload["values"] if values is not None or payload["values"] else None, payload["values_list"]
 
+    def purchase_check(self, payload):
+        """Check assembled documents before release, including separately created lines."""
+        if not self.purchase_sources or payload.get("model") != "purchase.order" or payload.get("method") not in {"button_confirm", "button_approve"}:
+            return []
+        self._identity_check(payload["instance"], payload.get("kwargs", {}).get("context"))
+        ids = payload.get("kwargs", {}).get("ids") or []
+        orders = self._search({"model": "purchase.order", "domain": [["id", "in", ids]]}, ["id", "origin"])
+        if len(orders) != len(set(ids)):
+            raise ValueError("purchase source target is unavailable")
+        lines = self._search({"model": "purchase.order.line", "domain": [["order_id", "in", ids]]}, ["id", "order_id", "product_id", "product_uom_qty"])
+        evidence = []
+        for scope in self.purchase_sources:
+            source = scope["source"]
+            allowed = self._search(source, ["id", source["field"]])
+            by_name = {row[source["field"]]: row for row in allowed}
+            if len(by_name) != len(allowed):
+                raise ValueError("purchase sources are ambiguous")
+            for order in orders:
+                selected = [line for line in lines if line["order_id"][0] == order["id"] and line["product_id"] and line["product_id"][0] == scope["product_id"]]
+                if not selected:
+                    continue
+                refs = [part.strip() for part in str(order["origin"] or "").split(",")]
+                if len(set(refs)) != len(refs) or any(ref not in by_name for ref in refs):
+                    self._event("rejected", model="purchase.order", record_id=order["id"], reason="unbound_purchase_source")
+                    raise ValueError(f"purchase.order {order['id']} origin must contain distinct host-selected sources; correct the origin before confirmation")
+                amounts = [line["product_uom_qty"] for line in selected]
+                if any(type(q) not in (int, float) or not math.isfinite(q) or q < 0 for q in amounts):
+                    raise ValueError("purchase allocation quantity is unavailable")
+                quantity = sum(amounts)
+                minimum = scope.get("minimum_per_origin")
+                # ponytail: a necessary per-document bound, not a global allocation solver.
+                if minimum is not None and quantity + 1e-9 < minimum * len(refs):
+                    self._event("rejected", model="purchase.order", record_id=order["id"], reason="purchase_origin_overallocated")
+                    raise ValueError(f"purchase.order {order['id']}: {quantity:g} product units cannot support {len(refs)} origin references at {minimum:g} unit(s) each; correct the actual source allocation before confirmation")
+                evidence.append(["purchase.order", order["id"], selected, [by_name[ref] for ref in refs]])
+                self._event("purchase_sources_checked", record_id=order["id"], product_id=scope["product_id"], quantity=quantity, origins=refs)
+        return evidence
+
     def prestate(self, kind, payload):
         sources = self.bind(payload) if kind == "write" else []
+        if kind == "method":
+            sources.extend(self.purchase_check(payload))
         rules = []
         if self.rules:
             self._identity_check(payload["instance"], payload.get("context"))

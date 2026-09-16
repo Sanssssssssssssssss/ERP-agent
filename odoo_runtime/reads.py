@@ -19,7 +19,7 @@ from functools import cache
 from pathlib import Path
 from typing import Any, get_type_hints
 
-from pydantic import create_model
+from pydantic import StrictInt, create_model
 
 from odoo_runtime._odoo_core.audit import audit_posture
 from odoo_runtime._odoo_core.field_policy import (
@@ -1410,10 +1410,24 @@ class NativeReads:
         return {"success": True, "result": rows}
 
     def read_record(
-        self, model: str, record_id: int, fields: list[str] | None = None,
+        self, model: str, record_id: int | None = None, fields: list[str] | None = None,
+        record_ids: list[StrictInt] | None = None,
     ) -> dict[str, Any]:
         validate_model_name(model)
-        if record_id < 1:
+        if (record_id is None) == (record_ids is None):
+            raise ValueError("provide exactly one of record_id or record_ids")
+        if record_ids is not None:
+            if not 1 <= len(record_ids) <= 20 or any(type(i) is not int or i < 1 for i in record_ids):
+                raise ValueError("record_ids must contain 1 to 20 positive integer IDs")
+            ids = list(dict.fromkeys(record_ids))
+            resolved = self._fields(model, fields)
+            records = self.client.read_records(model, ids, fields=resolved)
+            records, redacted = self.policy.redact_records(self.instance, model, records)
+            found = {row["id"] for row in records}
+            return {"success": True, "result": records, "fields_used": resolved,
+                    "smart_fields_applied": fields is None, "redacted_fields": redacted,
+                    "missing_ids": [i for i in ids if i not in found]}
+        if type(record_id) is not int or record_id < 1:
             raise ValueError("record_id must be greater than 0")
         resolved = self._fields(model, fields)
         self._single_reads.record(self.instance, model)

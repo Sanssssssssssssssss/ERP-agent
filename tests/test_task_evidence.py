@@ -114,6 +114,26 @@ class TaskEvidenceTests(unittest.TestCase):
             self.assertFalse(result["success"], result)
             self.assertEqual(w.calls, [])
 
+    def test_purchase_release_checks_sources_and_quantity_without_rewriting(self):
+        for origin, quantity, quantum, expected in [('SO7, SO8', 2, 1, True), ('SO7, SO8', 1, 1, False),
+                ('SO7, SO8', .2, .1, True), ('SO_BAD', 2, 1, False), ('SO7, SO7', 2, 1, False)]:
+            with self.subTest(origin=origin, quantity=quantity), patch.dict(os.environ, {
+                    'ODOO_MCP_ENABLE_WRITES': '1', 'ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS': 'purchase.order.button_confirm'}):
+                a, w, rt, spec = self.setup_action(multiple=True)
+                rt.client.records['purchase.order'][8].update(origin=origin)
+                line = {'id': 1, 'order_id': [8, 'PO8'], 'product_id': [1, 'Root'], 'product_uom_qty': quantity}
+                original = rt.client.search_read
+                rt.client.search_read = lambda model, domain, fields=None, limit=None, order=None: ([copy.deepcopy(line)]
+                    if model == 'purchase.order.line' else original(model, domain, fields, limit, order))
+                spec['purchase_sources'] = [{'product': {'model': 'product.product', 'domain': [['id', '=', 1]]},
+                    'source': spec['bindings'][0]['source'], 'minimum_per_origin': quantum}]
+                a.task_evidence = TaskEvidence(a.reads, spec, a.store.path.parent / 'purchase-evidence.json')
+                result = a.execute_method('purchase.order', 'button_confirm', kwargs={'ids': [8]})
+                self.assertEqual(result['success'], expected, result)
+                self.assertEqual(len(w.calls), int(expected))
+                self.assertEqual(rt.client.records['purchase.order'][8]['origin'], origin)
+                self.assertEqual(rt.client.records['purchase.order'][8]['state'], 'purchase' if expected else 'draft')
+
 
 if __name__ == "__main__":
     unittest.main()
