@@ -650,7 +650,8 @@ class NativeCapabilities:
             raise ValueError("group_by must include at least one field")
         domain = normalize_domain_input(domain)
         parsed = [parse_measure_spec(spec) for spec in measures or []]
-        normalized = [f"{field}:{agg}" for field, agg in parsed]
+        # read_group already returns __count; never send it as a field aggregate.
+        normalized = [f"{field}:{agg}" for field, agg in parsed if agg]
         selection = self._selection(instances)
         results, errors = self._fan_out(
             selection.selected,

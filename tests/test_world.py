@@ -8,12 +8,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from pi_agent.messages import TextContent, ToolResultMessage
+from pi_agent.messages import AssistantMessage, TextContent, ToolResultMessage
 from pi_agent.tools import AgentTool, AgentToolResult
 
 from integration.odoo_tools import route_tools
-from integration.world_context import project_messages
-from odoo_runtime.world import WorldStore
+from integration.world_context import expand_lossless_tables, project_messages, project_read_history
+from odoo_runtime.dynamic_tools import OPTIONAL_NATIVE_BASE_TOOLS
+from odoo_runtime.world import READ_TOOLS, WorldStore
+from odoo_runtime.world_tools import build_world_tools
 
 
 ENV = {
@@ -166,6 +168,284 @@ class WorldStoreTest(unittest.TestCase):
             recovered = self.store(path)
             self.assertEqual([message.text for message in project_messages(recovered, messages)], [text, text])
             self.assertEqual(recovered.telemetry()["projection_calls"], 2)
+
+    def test_consumed_read_table_projection_is_lossless_and_preserves_envelope(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, ENV):
+            root = Path(directory)
+            world = self.store(root)
+            payload = {
+                "success": True, "count": 2, "has_more": False, "offset": 0,
+                "redacted_fields": [], "result": [
+                    {"id": 1, "name": "A" * 160, "qty": 0, "enabled": False,
+                     "empty": [], "note": {"body": "first"}, "missing": None,
+                     "quotes": [{"vendor": "V" * 70, "price": 1}, {"vendor": "W" * 70, "price": 2}]},
+                    {"id": 2, "name": "B" * 160, "qty": 3, "enabled": True,
+                     "empty": [], "note": {"body": "second"}, "missing": None,
+                     "quotes": [{"vendor": "V" * 70, "price": 3}, {"vendor": "W" * 70, "price": 4}]},
+                ],
+            }
+            payload["result"] = [
+                {**payload["result"][index % 2], "id": index + 1,
+                 "name": chr(65 + index) * 160}
+                for index in range(8)
+            ]
+            payload["count"] = len(payload["result"])
+            text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+            receipt = world.finish(world.begin("rows", "find_records", {"model": "x.model"}, "native"), text)
+            message = ToolResultMessage(
+                tool_call_id="rows", tool_name="mcp_odoo_find_records",
+                content=[TextContent(text=text)],
+            )
+            self.assertEqual(project_read_history(world, [message])[0].text, text)
+            for stop_reason in ("error", "aborted"):
+                failed_followup = AssistantMessage(content="failed", stop_reason=stop_reason)
+                self.assertEqual(project_read_history(world, [message, failed_followup])[0].text, text)
+            projected = project_read_history(world, [message, AssistantMessage(content="used")])
+            projected_payload = json.loads(projected[0].text)
+            self.assertEqual(projected_payload["world_projection"]["kind"], "lossless_table")
+            self.assertLess(len(projected[0].text.encode()), len(text.encode()))
+            self.assertEqual(projected_payload["count"], payload["count"])
+            self.assertEqual(projected_payload["has_more"], payload["has_more"])
+            self.assertEqual(projected_payload["redacted_fields"], payload["redacted_fields"])
+            self.assertEqual(
+                expand_lossless_tables(projected_payload)["result"], payload["result"]
+            )
+            self.assertEqual(message.text, text)
+            self.assertEqual(world.lookup(receipt["receipt_id"])["raw_result"], payload)
+            tool_use = project_read_history(
+                world, [message, AssistantMessage(content="calling", stop_reason="toolUse")]
+            )
+            self.assertEqual(json.loads(tool_use[0].text)["world_projection"]["kind"], "lossless_table")
+            world.invalidate(instance="default", reason="write boundary", call_id="write")
+            after_generation = project_read_history(world, [message, AssistantMessage(content="used")])
+            self.assertEqual(json.loads(after_generation[0].text)["world_projection"]["kind"], "lossless_table")
+
+    def test_old_large_read_externalizes_and_tools_recall_bounded_payload_paths(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, ENV):
+            world = self.store(Path(directory))
+            rows = [
+                {
+                    "id": index,
+                    "vendor_comment": (
+                        f"routine vendor note {index}; " * 20
+                        if index != 99 else "VENDOR-UNIQUE-99 approved for SUBA; " * 30
+                    ),
+                    "bom_id": [700 + index, f"BOM-{index}"],
+                    "components": [f"COMP-{index}-{part}" for part in range(100)],
+                }
+                for index in range(100)
+            ]
+            payload = {
+                "success": True, "count": 100, "has_more": True, "offset": 0,
+                "next_offset": 100, "warnings": ["results are paged"],
+                "acl": {"read": True}, "result": rows,
+            }
+            text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+            receipt = world.finish(
+                world.begin("large", "find_records", {"model": "x.model", "fields": ["id", "vendor_comment", "bom_id", "components"]}, "native"),
+                text,
+                raw_result={"server_only": "different-shape", "result": "must not be read"},
+            )
+            message = ToolResultMessage(
+                tool_call_id="large", tool_name="mcp_odoo_find_records",
+                content=[TextContent(text=text)],
+            )
+            recent = project_read_history(world, [
+                message, AssistantMessage(content="one"), AssistantMessage(content="two"),
+            ])
+            self.assertNotIn("world_observation", recent[0].text)
+            projected = project_read_history(world, [
+                message, AssistantMessage(content="one"), AssistantMessage(content="two"),
+                AssistantMessage(content="three"),
+            ])
+            external = json.loads(projected[0].text)["world_observation"]
+            self.assertEqual(external["kind"], "externalized_read")
+            self.assertEqual(external["observation_ref"], receipt["receipt_id"])
+            self.assertEqual(external["response"]["count"], 100)
+            self.assertTrue(external["response"]["has_more"])
+            self.assertEqual(external["response"]["next_offset"], 100)
+            self.assertEqual(external["response"]["warnings"], {"kind": "array", "items": 1, "path": "$.warnings"})
+            self.assertEqual(external["response"]["acl"], {"read": True})
+            self.assertNotIn("VENDOR-UNIQUE-99", projected[0].text)
+            self.assertLess(len(projected[0].text.encode()), len(text.encode()))
+
+            identity = receipt["identity"]
+            root_page = world.read_observation(identity, receipt["receipt_id"], path="$", limit=100)
+            root_items = root_page["result"]["items"]
+            result_directory = next(item for item in root_items if item["key"] == "result")
+            self.assertEqual(result_directory["value"], {"kind": "array", "items": 100, "path": "$.result"})
+            self.assertNotIn("VENDOR-UNIQUE-99", json.dumps(root_page))
+
+            recalled = world.read_observation(
+                identity, receipt["receipt_id"], path="$.result", query="VENDOR-UNIQUE-99",
+                fields=["id", "vendor_comment", "bom_id", "components"], limit=1,
+            )
+            recalled_item = recalled["result"]["items"][0]
+            self.assertEqual(recalled_item["path"], "$.result.99")
+            recalled_row = recalled_item["value"]
+            self.assertEqual(recalled_row["id"], 99)
+            self.assertIn("VENDOR-UNIQUE-99", recalled_row["vendor_comment"]["preview"])
+            self.assertEqual(recalled_row["components"], {"kind": "array", "items": 100, "path": "$.result.99.components"})
+            string_chunk = world.read_observation(
+                identity, receipt["receipt_id"], path="$.result.99.vendor_comment", cursor=0, limit=20,
+            )
+            self.assertEqual(string_chunk["result"]["kind"], "string_chunk")
+            self.assertEqual(string_chunk["result"]["text"], "VENDOR-UNIQUE-99 app")
+            self.assertEqual(string_chunk["result"]["next_cursor"], 20)
+
+            dotted = world.finish(world.begin("dotted", "get_model_fields", {"model": "mrp.bom"}, "native"), json.dumps({
+                "success": True, "result": {
+                    "mrp.bom.line": {"type": "one2many", "string": "BOM lines"},
+                    "mrp.routing.workcenter": {"type": "one2many", "string": "Routing workcenters"},
+                },
+            }))
+            dotted_identity = dotted["identity"]
+            dotted_search = world.search_observations(dotted_identity, query="Routing workcenters")
+            dotted_path = dotted_search["items"][0]["matches"][0]["path"]
+            self.assertEqual(dotted_path, '$.result["mrp.routing.workcenter"].string')
+            self.assertEqual(world.read_observation(dotted_identity, dotted["receipt_id"], path=dotted_path)["result"]["text"], "Routing workcenters")
+            with self.assertRaises(ValueError):
+                world.read_observation(dotted_identity, dotted["receipt_id"], path="$.result.mrp.bom.line")
+
+            legacy = world.finish(world.begin("legacy", "read_record", {"model": "x.model", "record_id": 777}, "native"), json.dumps({
+                "success": True, "result": {"id": 777, "name": "visible"},
+            }), raw_result={"result": {"id": 777, "private": "RAW-ONLY-LEGACY"}})
+            legacy_stored = world.receipt_for_call("legacy")
+            legacy_stored.pop("visible_payload_sha256")
+            world._by_call["legacy"] = legacy_stored
+            world._receipts[legacy["receipt_id"]] = legacy_stored
+            self.assertEqual(world.search_observations(legacy["identity"], query="RAW-ONLY-LEGACY")["items"], [])
+            with self.assertRaisesRegex(ValueError, "legacy/unverified"):
+                world.read_observation(legacy["identity"], legacy["receipt_id"])
+
+            tools = {tool.name: tool for tool in build_world_tools(world)}
+            self.assertNotIn("read_observation", READ_TOOLS)
+            self.assertIn("read_observation", OPTIONAL_NATIVE_BASE_TOOLS)
+            searched = asyncio.run(tools["search_observations"].execute("search", {
+                "query": "VENDOR-UNIQUE-99", "model": "x.model",
+            }))
+            search_payload = json.loads(searched.text)
+            self.assertEqual(search_payload["items"][0]["observation_ref"], receipt["receipt_id"])
+            self.assertEqual(search_payload["items"][0]["matches"][0]["path"], "$.result.99.vendor_comment")
+            reread = asyncio.run(tools["read_observation"].execute("reread", {
+                "observation_ref": receipt["receipt_id"], "path": "$.result",
+                "query": "VENDOR-UNIQUE-99", "fields": ["id", "vendor_comment"], "limit": 1,
+            }))
+            reread_item = json.loads(reread.text)["result"]["items"][0]
+            self.assertEqual(reread_item["path"], "$.result.99")
+            self.assertEqual(reread_item["value"]["id"], 99)
+            missing = asyncio.run(tools["read_observation"].execute("missing", {
+                "observation_ref": "obs-nope",
+            }))
+            self.assertEqual(json.loads(missing.text)["error_class"], "unknown_reference")
+            with self.assertRaises(PermissionError):
+                world.read_observation({**identity, "identity_id": "other"}, receipt["receipt_id"])
+
+            native_identity = {**identity, "identity_id": "native-scope-not-world-config"}
+            native_receipt = world.finish(
+                world.begin("native-scope", "read_record", {"model": "x.model", "record_id": 501}, "native", identity=native_identity),
+                json.dumps({"success": True, "result": {"id": 501, "name": "native scope"}}),
+            )
+            native_tools = {tool.name: tool for tool in build_world_tools(
+                world, identity_context=lambda _instance: native_identity,
+            )}
+            native_search = asyncio.run(native_tools["search_observations"].execute("native-search", {}))
+            self.assertEqual(json.loads(native_search.text)["items"][0]["observation_ref"], native_receipt["receipt_id"])
+            wrong_tools = {tool.name: tool for tool in build_world_tools(
+                world, identity_context=lambda _instance: {**native_identity, "identity_id": "other-native-scope"},
+            )}
+            denied = asyncio.run(wrong_tools["read_observation"].execute("wrong-scope", {
+                "observation_ref": native_receipt["receipt_id"],
+            }))
+            self.assertEqual(json.loads(denied.text)["error_class"], "access")
+
+            world.invalidate(instance="default", reason="write", call_id="write")
+            stale = world.read_observation(identity, receipt["receipt_id"])
+            self.assertTrue(stale["observation"]["freshness"]["stale_after_write"])
+            self.assertEqual(stale["payload_source"], "visible_payload")
+
+            tampered = world.receipt_for_call("large")
+            tampered["visible_payload"]["result"][0]["id"] = -1
+            world._by_call["large"] = tampered
+            world._receipts[tampered["receipt_id"]] = tampered
+            self.assertEqual(project_read_history(world, [
+                message, AssistantMessage(content="one"), AssistantMessage(content="two"),
+                AssistantMessage(content="three"),
+            ])[0].text, text)
+            corrupted = asyncio.run(tools["read_observation"].execute("corrupt", {
+                "observation_ref": receipt["receipt_id"],
+            }))
+            self.assertEqual(json.loads(corrupted.text)["error_class"], "invalid_request")
+
+    def test_schema_table_projection_and_heterogeneous_rows_are_safe(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, ENV):
+            world = self.store(Path(directory))
+            schema = {
+                f"field_{i}": {
+                    "type": "char", "string": f"Field {i}", "readonly": False,
+                    "required": False, "searchable": True, "store": True, **extra,
+                }
+                for i, extra in enumerate((
+                    {"help": "H" * 180, "relation": "res.partner"},
+                    {"help": "K" * 180, "selection": [["a", "A"], ["b", "B"]]},
+                    {"help": "L" * 180, "relation": None},
+                    {"help": "M" * 180, "selection": [["x", "X"]]},
+                    {"help": "N" * 180, "relation": "res.company"},
+                    {"help": "P" * 180, "selection": []},
+                    {"help": "Q" * 180, "relation": None},
+                    {"help": "R" * 180, "selection": [["z", "Z"]]},
+                ))
+            }
+            payload = {"success": True, "count": 2, "result": schema}
+            text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+            world.finish(world.begin("schema", "get_model_fields", {"model": "x.model"}, "native"), text)
+            message = ToolResultMessage(
+                tool_call_id="schema", tool_name="mcp_odoo_get_model_fields",
+                content=[TextContent(text=text)],
+            )
+            projected = project_read_history(world, [message, AssistantMessage(content="used")])
+            projected_payload = json.loads(projected[0].text)
+            self.assertEqual(projected_payload["world_projection"]["kind"], "lossless_table")
+            self.assertLess(len(projected[0].text.encode()), len(text.encode()))
+            expanded = expand_lossless_tables(projected_payload)
+            expanded.pop("world_projection", None)
+            self.assertEqual(expanded, payload)
+            heterogeneous = json.dumps({"success": True, "result": [{"id": 1}, {"id": 2, "x": 3}]})
+            world.finish(world.begin("hetero", "find_records", {"model": "x.model"}, "native"), heterogeneous)
+            hetero = ToolResultMessage(
+                tool_call_id="hetero", tool_name="mcp_odoo_find_records",
+                content=[TextContent(text=heterogeneous)],
+            )
+            self.assertEqual(project_read_history(world, [hetero, AssistantMessage(content="used")])[0].text, heterogeneous)
+
+            marker_payload = {"success": True, "result": [
+                {"id": 1, "value": "x" * 200, "nested": {"__world_table__": True}},
+                {"id": 2, "value": "y" * 200, "nested": {"ok": True}},
+            ]}
+            marker_text = json.dumps(marker_payload, separators=(",", ":"))
+            world.finish(world.begin("marker", "find_records", {"model": "x.model"}, "native"), marker_text)
+            marker_message = ToolResultMessage(
+                tool_call_id="marker", tool_name="mcp_odoo_find_records",
+                content=[TextContent(text=marker_text)],
+            )
+            self.assertEqual(
+                project_read_history(world, [marker_message, AssistantMessage(content="used")])[0].text,
+                marker_text,
+            )
+            failed_text = json.dumps({"success": False, "error": "denied", "result": schema})
+            world.finish(world.begin("failed", "find_records", {"model": "x.model"}, "native"), failed_text)
+            failed = ToolResultMessage(
+                tool_call_id="failed", tool_name="mcp_odoo_find_records",
+                content=[TextContent(text=failed_text)], is_error=True,
+            )
+            self.assertEqual(project_read_history(world, [failed, AssistantMessage(content="used")])[0].text, failed_text)
+            write_text = json.dumps({"success": True, "result": [{"id": 1, "value": "x" * 200}, {"id": 2, "value": "y" * 200}]})
+            world.finish(world.begin("write", "execute_method", {"model": "x.model"}, "native"), write_text)
+            write = ToolResultMessage(
+                tool_call_id="write", tool_name="mcp_odoo_execute_method",
+                content=[TextContent(text=write_text)],
+            )
+            self.assertEqual(project_read_history(world, [write, AssistantMessage(content="used")])[0].text, write_text)
 
     def test_route_records_without_changing_tool_result(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, ENV):

@@ -51,7 +51,7 @@ def collect_documents(
         return []
     if tool.startswith("mcp_odoo_"):
         tool = tool[len("mcp_odoo_"):]
-    if tool not in {"read_record", "search_records"} or not isinstance(payload, dict):
+    if tool not in {"read_record", "search_records", "find_records"} or not isinstance(payload, dict):
         return []
     if payload.get("success") is False or payload.get("error"):
         return []
@@ -506,9 +506,9 @@ def _tool_stage(tool: dict[str, Any]) -> str | None:
     model = next((candidate.get("model") for candidate in candidates if candidate.get("model")), None)
     operation = next((candidate.get("operation") or candidate.get("method") for candidate in candidates if candidate.get("operation") or candidate.get("method")), None)
     tool_name = str(tool.get("name") or "").lower().removeprefix("mcp_odoo_")
-    if tool_name in {"read_record", "search_records"} and isinstance(model, str) and model:
+    if tool_name in {"read_record", "search_records", "find_records"} and isinstance(model, str) and model:
         return "read"
-    return "read" if model in {"sale.order", "purchase.order", "account.move"} and operation in {None, "read_record", "search_records"} else None
+    return "read" if model in {"sale.order", "purchase.order", "account.move"} and operation in {None, "read_record", "search_records", "find_records"} else None
 
 
 def _tool_action_fields(tool: dict[str, Any]) -> tuple[Any, Any]:

@@ -900,11 +900,12 @@ def render_provider_settings(
     for provider in settings.providers:
         marker = "*" if provider.name == settings.default_provider else " "
         models = ",".join(provider.models)
+        timeout = "none" if provider.timeout_seconds is None else f"{provider.timeout_seconds:g}s"
         typer.echo(
             f"{marker}\t{provider.name}\t{provider_kind(provider)}\t"
             f"{provider.default_model}\t{models}\t{provider.api_key_env}\t"
             f"{_provider_credential_status(provider, credential_reader=credential_reader)}\t"
-            f"{provider.base_url}\t{provider.timeout_seconds:g}s\t"
+            f"{provider.base_url}\t{timeout}\t"
             f"retries={provider.max_retries}\t"
             f"retry_delay={provider.max_retry_delay_seconds:g}s"
         )

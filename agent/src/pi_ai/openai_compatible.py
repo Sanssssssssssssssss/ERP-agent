@@ -395,7 +395,7 @@ class OpenAICompatibleProvider:
                         continue
                     yield ProviderErrorEvent(
                         message=_safe_transport_error_message(exc),
-                        data={"attempts": attempt + 1},
+                        data={"attempts": attempt + 1, "error_type": type(exc).__name__},
                     )
                     return
 

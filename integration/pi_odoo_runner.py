@@ -31,14 +31,16 @@ from pi_coding.session import CodingSession, CodingSessionConfig
 
 from integration.odoo_tools import native_tool_catalog, route_tools
 from integration.stream_events import public_events
-from integration.world_context import project_messages
+from integration.world_context import project_messages, project_read_history
 from odoo_runtime.actions import NativeActions
 from odoo_runtime.capabilities import NativeCapabilities
 from odoo_runtime.dynamic_tools import CAPABILITY_GROUPS, DynamicToolController
 from odoo_runtime.reads import NativeReads
 from odoo_runtime.sops import build_sop_tools
 from odoo_runtime.store import ActionStore
+from odoo_runtime.task_evidence import TaskEvidence
 from odoo_runtime.world import WorldStore
+from odoo_runtime.world_tools import build_world_tools
 
 CONTEXT_WINDOW = 128_000
 MODEL_COMPAT = {
@@ -60,6 +62,13 @@ DYNAMIC_TOOL_POLICY = (
     "Select the complete optional capability set needed for the task. A configured "
     "tool set appears on the next model turn; a same-response call to a newly "
     "selected tool is rejected."
+)
+BUSINESS_EXECUTION_POLICY = (
+    " Determine the user-required scope and constraints before acting; for fulfillment, "
+    "procurement, or manufacturing work, determine the supply-and-demand gap. Do not "
+    "reinterpret established facts merely because adjacent records or another tool reveal "
+    "more data. Reuse facts already read and their observation receipts when there is no "
+    "new evidence; refresh Odoo only when current state is needed."
 )
 McpToolSet = None
 
@@ -403,7 +412,7 @@ async def run(args: argparse.Namespace) -> None:
             thinking_format="openai",
             compat=MODEL_COMPAT,
             provider_name=provider_name,
-            timeout_seconds=180,
+            timeout_seconds=None,
             max_retries=0,
             max_tokens=max_output_tokens,
             infer_api_from_model=False,
@@ -438,6 +447,13 @@ async def run(args: argparse.Namespace) -> None:
             )
             if actions is not None:
                 actions.store.recover_interrupted()
+                evidence_file = os.environ.get("ODOO_TASK_EVIDENCE_FILE")
+                if evidence_file:
+                    specification = json.loads(Path(evidence_file).read_text(encoding="utf-8"))
+                    instruction_sha256 = hashlib.sha256(args.instruction_file.read_bytes()).hexdigest()
+                    if specification.get("instruction_sha256") != instruction_sha256:
+                        raise ValueError("host evidence is bound to a different instruction")
+                    actions.task_evidence = TaskEvidence(native_runtime, specification, receipt_dir / "task-evidence.json")
             capabilities = (
                 NativeCapabilities(
                     native_runtime,
@@ -465,10 +481,15 @@ async def run(args: argparse.Namespace) -> None:
                     build_sop_tools(
                         receipt_dir / "sop-events.jsonl",
                         next_tool_sequence,
+                        read_locator="find_records" if runtime_mode == "native" else "search_records",
                     )
                     if sop_mode == "controlled"
                     else ()
                 ),
+                *(build_world_tools(
+                    world,
+                    identity_context=(native_runtime.identity_context if native_runtime is not None else None),
+                ) if world is not None else ()),
             ]
             if tool_mode == "dynamic":
                 dynamic_tools = DynamicToolController(
@@ -494,7 +515,7 @@ async def run(args: argparse.Namespace) -> None:
                         context_window=CONTEXT_WINDOW,
                     )
                 },
-                timeout_seconds=180,
+                timeout_seconds=None,
                 max_retries=0,
                 thinking_levels=(thinking,),
                 thinking_models=(model,),
@@ -529,10 +550,15 @@ async def run(args: argparse.Namespace) -> None:
                     extensions_enabled=False,
                     append_system_prompt=(
                         MCP_ONLY_POLICY
+                        + BUSINESS_EXECUTION_POLICY
                         + (SOP_POLICY if sop_mode == "controlled" else "")
                         + (DYNAMIC_TOOL_POLICY if tool_mode == "dynamic" else "")
                     ),
                     auto_compact_enabled=not budget_enabled,
+                    # Bench turns end at the final agent stop; avoid paying a
+                    # post-stop summarizer call while retaining pre-prompt and
+                    # provider-overflow compaction paths.
+                    auto_compact_after_prompt_enabled=False,
                     retry_enabled=not budget_enabled,
                     thinking_level=thinking,
                 )
@@ -552,11 +578,16 @@ async def run(args: argparse.Namespace) -> None:
                 # before the next model request.  It therefore pauses at the
                 # safe boundary without an extra paid request.
                 session._harness.config.should_stop_after_turn = stop_after_approval
-            if world is not None and world_mode == "project":
+            if world is not None and (world_mode == "project" or runtime_mode == "native"):
                 existing_transform = session._harness.config.transform_context
 
                 async def project_context(messages, signal):
-                    projected = project_messages(world, messages)
+                    projected = (
+                        project_messages(world, messages)
+                        if world_mode == "project" else list(messages)
+                    )
+                    if runtime_mode == "native":
+                        projected = project_read_history(world, projected)
                     transformed = existing_transform(projected, signal) if existing_transform else projected
                     return await transformed if inspect.isawaitable(transformed) else transformed
 
@@ -661,6 +692,14 @@ async def run(args: argparse.Namespace) -> None:
                     "maxOutputTokens": max_output_tokens,
                     "maxModelRequests": max_model_requests,
                     "assistantEntries": len(assistant),
+                    "lastStopReason": assistant[-1].stop_reason if assistant else None,
+                    "errorMessage": assistant[-1].error_message if assistant else None,
+                    "unreportedUsageRequests": max(
+                        0, receipts.number - receipt_start_number
+                        - sum(_usage_message_value(message, "total_tokens") is not None
+                              for message in assistant)
+                        - sum(entry.usage is not None for entry in compactions)
+                    ),
                     "worldMode": world_mode,
                     "actionBackend": getattr(args, "action_backend", "mcp"),
                     "capabilityBackend": getattr(args, "capability_backend", "mcp"),
@@ -670,6 +709,11 @@ async def run(args: argparse.Namespace) -> None:
                     "commitSha": os.environ.get("PI_ODOO_SOURCE_COMMIT"),
                 }
                 args.usage_file.write_text(json.dumps(usage), encoding="utf-8")
+                if assistant and assistant[-1].stop_reason == "error":
+                    raise RuntimeError(
+                        "Provider run did not complete: "
+                        + (assistant[-1].error_message or "unspecified provider error")
+                    )
             finally:
                 await session.aclose()
     finally:

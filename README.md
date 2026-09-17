@@ -58,6 +58,8 @@ The workflow graphic is schematic; the screenshots show the actual renderer UI.
 
 The current workbench business projections cover `sale_invoice`, `sale_purchase_invoice`, and `purchase`. The native runtime includes controlled SOP tools and native knowledge index/search/stats. The separate `experiments/company_records_rag` vector experiment is not connected to the Agent or workbench. ERP-Bench remains the independent scorer; a workbench readback is not an ERP-Bench score.
 
+The desktop worker uses `native` execution with `dynamic` tools, `controlled` SOPs, and `record` world state. This source tree combines the desktop baseline with newer benchmark backend changes; the v0.5.4 download above is the earlier published preview. See [backend integration and validation boundaries](docs/backend-release.md) for the pinned inputs and offline checks. Benchmark `TaskEvidence` requires explicit host configuration and is not enabled by the desktop worker.
+
 ## Quick start: Windows development
 
 Requirements: Windows, Node.js 22 or newer, and Python 3.13.
@@ -94,7 +96,7 @@ For a clean clone, the sidecar reads `.venv\Lib\site-packages` by default and ca
 ## Boundaries
 
 - The native runtime does not start or import MCP in its accepted Stage 7 path. The pinned MCP tree is retained for provenance and historical control experiments.
-- The native catalog keeps some `mcp_odoo_*` compatibility names; `integration/odoo_tools.py:52` strips that label before calling the native adapter, with no MCP transport.
+- The native catalog keeps some `mcp_odoo_*` compatibility names; `integration/odoo_tools.py` strips that label before calling the native adapter, with no MCP transport.
 - Odoo writes require explicit approval. An uncertain write moves to readback/reconciliation; it is not silently replayed or marked complete.
 - PDF export is for an observed Odoo document. A down payment invoice or a posted invoice is not evidence that a bank payment occurred.
 - Manufacturing planning/confirmation, banking, reconciliation, payroll, HR, OCR, and company-wide document retrieval are outside the current workbench claim unless a specific source and experiment says otherwise.

@@ -31,8 +31,8 @@ from pi_agent.messages import (
     TextContent,
     ToolCall,
     ToolResultMessage,
-    UserMessage,
     Usage,
+    UserMessage,
 )
 from pi_agent.provider import CancellationToken, ModelProvider
 from pi_agent.provider_events import (

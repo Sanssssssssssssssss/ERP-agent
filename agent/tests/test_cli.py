@@ -1858,6 +1858,15 @@ def test_providers_command_lists_default_provider(
     assert " \thuggingface\topenai-compatible\tmoonshotai/Kimi-K2.6" in result.stdout
 
 
+def test_render_provider_settings_accepts_no_timeout(capsys: pytest.CaptureFixture[str]) -> None:
+    cli.render_provider_settings(
+        ProviderSettings(
+            providers=(OpenAICompatibleProviderConfig(name="unbounded", timeout_seconds=None),)
+        )
+    )
+    assert "\tnone\tretries=" in capsys.readouterr().out
+
+
 def test_render_provider_settings_shows_credential_source(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

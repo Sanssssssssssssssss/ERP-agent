@@ -178,12 +178,15 @@ _AGGREGATION_FUNCTIONS = {
 def parse_measure_spec(spec: str) -> tuple[str, str]:
     """Split a 'field:agg' measure into (field, agg).
 
-    Defaults to 'sum' when no aggregator is supplied.
+    Defaults to 'sum' when no aggregator is supplied. Odoo's reserved
+    '__count' measure has no field aggregator and returns ('__count', '').
     Raises ValueError on invalid shapes.
     """
     cleaned = str(spec).strip()
     if not cleaned:
         raise ValueError("measure entries must be non-empty strings")
+    if cleaned == "__count":
+        return cleaned, ""
     if ":" not in cleaned:
         return cleaned, "sum"
     field, agg = cleaned.split(":", 1)

@@ -977,6 +977,12 @@ class Workbench:
             source_run_id=run.get("id"),
             source_tool_id=tool.get("id"),
         ):
+            # A locator does not refresh fields from an earlier document read.
+            if tool_name.removeprefix("mcp_odoo_") == "find_records" and any(
+                (old.get("model"), old.get("id")) == (doc.get("model"), doc.get("id"))
+                for old in run["documents"]
+            ):
+                continue
             doc["observed_at"] = now()
             doc["source_observed_at"] = doc["observed_at"]
             run["documents"] = [old for old in run["documents"] if (old.get("model"), old.get("id")) != (doc.get("model"), doc.get("id"))]

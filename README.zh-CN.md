@@ -58,6 +58,8 @@ Trace 展示运行、工具和用量记录；截图使用合成演示数据。
 
 当前工作台业务投影包括 `sale_invoice`、`sale_purchase_invoice` 和 `purchase`。原生运行时已有受控 SOP 工具及 knowledge index/search/stats。独立的 `experiments/company_records_rag` 向量实验没有接入 Agent 或工作台。ERP-Bench 独立负责评分；工作台回读不等于 ERP-Bench 得分。
 
+桌面 worker 使用 `native` 执行、`dynamic` 工具、`controlled` SOP 和 `record` 业务状态记录。当前源码整合了桌面底座与后续 benchmark 后端改动；上方 v0.5.4 下载仍是此前发布的预览版。固定来源与离线检查见[后端整合及验证边界](docs/backend-release.md)。Benchmark 的 `TaskEvidence` 需要宿主显式配置，桌面 worker 尚未启用。
+
 ## Windows 开发快速开始
 
 需要 Windows、Node.js 22 或更新版本，以及 Python 3.13。
@@ -94,7 +96,7 @@ node scripts/renderer-check.mjs
 ## 边界
 
 - 已验收的 Stage 7 原生运行路径不启动或导入 MCP；固定 MCP 源码仅作为来源和历史对照实验保留。
-- 原生工具清单保留部分 `mcp_odoo_*` 兼容名称；`integration/odoo_tools.py:52` 会在调用原生 adapter 前去掉该标识，不经过 MCP transport。
+- 原生工具清单保留部分 `mcp_odoo_*` 兼容名称；`integration/odoo_tools.py` 会在调用原生 adapter 前去掉该标识，不经过 MCP transport。
 - Odoo 写入需要明确审批。不确定写入进入回读/核对状态，不会静默重放或标记完成。
 - PDF 导出针对已观测的 Odoo 单据；预付款发票或已过账发票都不代表银行付款已经发生。
 - 制造计划/确认、银行、对账、工资、HR、OCR 和企业级全文档检索不属于当前工作台的覆盖承诺，除非具体来源和实验另有说明。

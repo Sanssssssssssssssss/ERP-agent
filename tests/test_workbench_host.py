@@ -14,6 +14,8 @@ from unittest.mock import MagicMock, patch
 from pathlib import Path
 
 from odoo_runtime.store import ActionStore
+from odoo_runtime._odoo_core.field_policy import FieldPolicy
+from odoo_runtime.reads import NativeReads
 from workbench.host import Workbench, _approval_marker
 from workbench.worker import child_environment, worker_command
 
@@ -327,6 +329,50 @@ class WorkbenchHostTests(unittest.TestCase):
         detail = self.host.get_business(self.sid, business["id"])
         evidence = detail["execution"]["stages"][0]["evidence"]
         self.assertEqual(evidence[0]["run_id"], run["id"])
+
+    def test_native_find_records_keeps_sparse_documents_without_refreshing_prior_reads(self):
+        business, run = self._run("find a sale")
+        record = {"id": 7, "display_name": "SO001", "state": "sale", "amount_total": 10}
+        client = MagicMock()
+        client.scope_fingerprint.return_value = "find-records-fixture"
+        client.get_model_fields.return_value = {
+            "id": {"type": "integer"}, "display_name": {"type": "char"},
+            "state": {"type": "selection"}, "amount_total": {"type": "float"},
+        }
+        client.search_read.side_effect = lambda **kwargs: [
+            {field: record[field] for field in kwargs["fields"]}
+        ]
+        native = NativeReads(client, policy=FieldPolicy({}))
+        arguments = {"model": "sale.order", "domain": [["id", "=", 7]]}
+        payload = native.call("find_records", arguments)
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["result"], [{"id": 7, "display_name": "SO001"}])
+
+        for call_id, tool_name, args, result in (
+            ("find-1", "mcp_odoo_find_records", arguments, payload),
+            ("read-1", "read_record", {"model": "sale.order", "record_id": 7},
+             {"success": True, "result": record}),
+            ("find-2", "find_records", arguments, payload),
+        ):
+            self.host._tool_start(run, {
+                "tool_call_id": call_id, "tool_name": tool_name, "args": args,
+            })
+            self.host._tool_end(run, {
+                "tool_call_id": call_id, "tool_name": tool_name, "result": result,
+            })
+            self.assertEqual(len(run["documents"]), 1)
+            document = run["documents"][0]
+            if call_id == "find-1":
+                self.assertEqual(document["source_tool_id"], call_id)
+                self.assertIsNone(document["state"])
+                self.assertNotIn("amount_total", document["fields"])
+                detail = self.host.get_business(self.sid, business["id"])
+                self.assertEqual(detail["outcome"]["status"], "unknown")
+                self.assertTrue(all(stage["status"] != "verified" for stage in detail["execution"]["stages"]))
+            elif call_id == "read-1":
+                previous_document = json.loads(json.dumps(document))
+            else:
+                self.assertEqual(document, previous_document)
 
     def test_unknown_write_result_does_not_create_business_evidence(self):
         business, run = self._run("post an invoice")

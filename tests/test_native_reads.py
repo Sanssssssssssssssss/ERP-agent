@@ -119,21 +119,29 @@ class FakeOdoo:
 
 class NativeReadsTest(unittest.TestCase):
     @staticmethod
-    def _canonical_result_dump(value):
-        """Ignore only JSON whitespace in text content; keep details and metadata exact."""
+    def _canonical_result_dump(value, *, schema_extensions=False):
+        """Normalize wire formatting and opt in to native schema annotations only."""
         value = copy.deepcopy(value)
         content = value.get("content") if isinstance(value, dict) else None
         if isinstance(content, list):
             for item in content:
                 if isinstance(item, dict) and item.get("type") == "text" and isinstance(item.get("text"), str):
                     try:
+                        payload = json.loads(item["text"])
+                        if schema_extensions and isinstance(payload, dict):
+                            for key in ("summary", "query_matched", "query", "supplemental_fields"):
+                                payload.pop(key, None)
                         item["text"] = json.dumps(
-                            json.loads(item["text"]),
-                            ensure_ascii=False,
-                            separators=(",", ":"),
+                            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
                         )
                     except (TypeError, ValueError):
                         pass
+
+        if schema_extensions:
+            structured = (value.get("details") or {}).get("structuredContent")
+            if isinstance(structured, dict):
+                for key in ("summary", "query_matched", "query", "supplemental_fields"):
+                    structured.pop(key, None)
 
         def normalize_cache_hit(item):
             if isinstance(item, dict):
@@ -165,7 +173,8 @@ class NativeReadsTest(unittest.TestCase):
                 world = WorldStore(directory / "world.jsonl")
             routed = next(
                 tool for tool in route_tools(
-                    list(tools.values()), directory / "backends.jsonl", native, world=world
+                    list(tools.values()), directory / "backends.jsonl", native, world=world,
+                    native_health=True,
                 )
                 if tool.name == "mcp_odoo_read_record"
             )
@@ -193,6 +202,117 @@ class NativeReadsTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(check(Path(directory)))
+
+    def test_find_records_returns_only_bounded_identities_and_pages(self):
+        class FinderClient(FakeOdoo):
+            def __init__(self):
+                super().__init__()
+                self.metadata.update({
+                    "display_name": {"type": "char"},
+                    "default_code": {"type": "char"},
+                    "ref": {"type": "char"},
+                })
+
+            def _records(self, fields):
+                rows = [
+                    {"id": index, "display_name": f"Record {index}",
+                     "default_code": f"SKU-{index}", "ref": f"REF-{index}",
+                     "comment": "must not leak"}
+                    for index in range(1, 22)
+                ]
+                return [{key: value for key, value in row.items()
+                         if key == "id" or fields is None or key in fields}
+                        for row in rows]
+
+            def search_read(self, **kwargs):
+                self.requests.append(("search_read", kwargs))
+                return self._records(kwargs["fields"])[
+                    kwargs["offset"]:kwargs["offset"] + kwargs["limit"]
+                ]
+
+        reads = NativeReads(FinderClient())
+        first = reads.call("find_records", {
+            "model": "res.partner", "domain": [["name", "ilike", "Record"]], "limit": 20,
+        })
+        self.assertTrue(first["success"])
+        self.assertEqual(first["count"], 20)
+        self.assertTrue(first["has_more"])
+        self.assertEqual(first["next_offset"], 20)
+        self.assertEqual(set(first["result"][0]), {"id", "display_name", "default_code", "ref"})
+        self.assertNotIn("comment", json.dumps(first))
+        second = reads.call("find_records", {
+            "model": "res.partner", "domain": [["name", "ilike", "Record"]], "offset": 20,
+        })
+        self.assertEqual([row["id"] for row in second["result"]], [21])
+        self.assertFalse(second["has_more"])
+        invalid = reads.call("find_records", {"model": "res.partner", "domain": []})
+        self.assertFalse(invalid["success"])
+        self.assertIn("non-empty domain", invalid["error"])
+
+    def test_find_records_native_route_records_an_identity_receipt(self):
+        async def run(root: Path):
+            client = FakeOdoo()
+            client.lang, client.context = "en_US", {}
+            client.scope_fingerprint = lambda: "fixture-scope"
+            native = NativeReads(client)
+            world = WorldStore(root / "world.jsonl")
+            routed = next(tool for tool in route_tools(
+                native_tool_catalog(), root / "routes.jsonl", native, world, native_health=True,
+            ) if tool.name == "mcp_odoo_find_records")
+            result = await routed.execute("find-1", {
+                "model": "res.partner", "domain": [["name", "=", "Test 中文"]],
+            })
+            return result, world.receipt_for_call("find-1")
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "ODOO_URL": "http://fixture", "ODOO_DB": "bench", "ODOO_USERNAME": "admin",
+            "ODOO_PASSWORD": "test-only", "ODOO_TRANSPORT": "json2",
+        }, clear=True):
+            result, receipt = asyncio.run(run(Path(directory)))
+        payload = json.loads(result.text)
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["fields_used"], ["id"])
+        self.assertEqual(receipt["tool"], "find_records")
+        self.assertEqual(receipt["targets"][0]["records"][0]["id"], 1)
+
+    def test_count_measure_preserves_native_and_legacy_counts_and_field_policy(self):
+        from odoo_runtime.capabilities import NativeCapabilities
+
+        for version, method, key, expected in (
+            ("19", "formatted_read_group", "aggregates", ["__count"]),
+            ("18", "read_group", "fields", []),
+        ):
+            client = FakeOdoo()
+            client.get_server_version = lambda: {"server_version": version}
+            policy = FieldPolicy({"default": {"res.partner": ModelFieldRule("deny", frozenset({"email"}))}})
+            reads = NativeReads(client, policy=policy)
+            result = reads.aggregate_records("res.partner", ["company_id"], [" __count "])
+            self.assertEqual(result["rows"][0]["__count"], 2)
+            self.assertEqual(result["measures"], ["__count"])
+            request = next(row for row in client.requests if len(row) == 4 and row[1] == method)
+            self.assertEqual(request[3][key], expected)
+
+        client = FakeOdoo()
+        denied = FieldPolicy({"default": {"res.partner": ModelFieldRule("deny", frozenset({"company_id"}))}})
+        result = NativeReads(client, policy=denied).call(
+            "aggregate_records", {"model": "res.partner", "group_by": ["company_id"], "measures": ["__count"]})
+        self.assertFalse(result["success"])
+        self.assertFalse(client.requests)
+
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "odoo_runtime.capabilities.list_configured_instances",
+            return_value={"default": {"tags": [], "cross_instance": True}},
+        ):
+            client = FakeOdoo()
+            capabilities = NativeCapabilities(NativeReads(client), task_path=Path(directory) / "tasks.sqlite3")
+            try:
+                result = capabilities.aggregate_across_instances("res.partner", ["company_id"], ["__count"])
+                self.assertEqual(result["combined_count"], 2)
+                self.assertEqual(result["combined_measures"]["__count"], 2)
+                request = next(row for row in client.requests if len(row) == 4 and row[1] == "read_group")
+                self.assertEqual(request[2][1], [])
+            finally:
+                capabilities.close()
 
     def test_native_health_has_no_mcp_fallback(self):
         async def check(directory: Path):
@@ -350,8 +470,14 @@ print('MCP_FREE_CORE_IMPORT_OK')
                     with patch.object(tools_read, "_resolve_odoo", return_value=("default", expected_client)), patch.object(tools_read, "_app_context", return_value=app):
                         expected = getattr(tools_read, name)(None, **arguments)
                     actual = NativeReads(actual_client, policy=policy).call(name, arguments)
-                    self.assertEqual(actual, expected)
-                    self.assertEqual(actual_client.requests, expected_client.requests)
+                    comparable_actual = copy.deepcopy(actual)
+                    if name == "get_model_fields" and not arguments.get("field_names") and arguments.get("relevance", "top") is not None:
+                        comparable_actual.pop("summary", None)
+                    self.assertEqual(comparable_actual, expected)
+                    comparable_requests = actual_client.requests
+                    if name in {"search_records", "read_record"} and "fields" in arguments and arguments["fields"] != ["*"]:
+                        comparable_requests = [row for row in comparable_requests if row[0] != "fields_get"]
+                    self.assertEqual(comparable_requests, expected_client.requests)
                     if name == "get_model_fields" and arguments.get("max_fields") == 2:
                         self.assertEqual(actual["count"], 2)
                         self.assertNotIn("chart_template", actual["result"])
@@ -533,8 +659,8 @@ print('MCP_FREE_CORE_IMPORT_OK')
                 )
                 name = old.name.removeprefix("mcp_odoo_")
                 if name in READ_RESPONSES:
-                    left = self._canonical_result_dump((await old.execute(name, args[name])).model_dump())
-                    right = self._canonical_result_dump((await new.execute(name, args[name])).model_dump())
+                    left = self._canonical_result_dump((await old.execute(name, args[name])).model_dump(), schema_extensions=name == "get_model_fields")
+                    right = self._canonical_result_dump((await new.execute(name, args[name])).model_dump(), schema_extensions=name == "get_model_fields")
                     self.assertEqual(left, right)
             a_by_name, b_by_name = {t.name: t for t in a}, {t.name: t for t in b}
             for name, arguments in (

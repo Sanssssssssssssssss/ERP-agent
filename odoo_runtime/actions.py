@@ -6,7 +6,6 @@ import base64
 import hashlib
 import html
 import os
-import re
 import stat
 import time
 import xmlrpc.client
@@ -18,8 +17,8 @@ from urllib.parse import urlparse
 from odoo_runtime._odoo_core.agent_tools import (
     build_approval_token,
     build_write_preview_report,
+    canonical_json,
     validate_write_report,
-    verify_write_approval,
 )
 from odoo_runtime._odoo_core.audit import record_write_event
 from odoo_runtime._odoo_core.diagnostics import (
@@ -40,6 +39,7 @@ from odoo_runtime._odoo_core.write_policy import (
 )
 from odoo_runtime.reads import NativeReads
 from odoo_runtime.store import ActionStore
+from odoo_runtime.write_guards import business_write_prestate
 
 ACTION_TOOLS = frozenset(
     {
@@ -61,6 +61,10 @@ _KNOWN_METHOD_STATES = {
     ("purchase.order", "button_confirm"): ("state", {"purchase", "done", "to approve"}),
     ("purchase.order", "button_approve"): ("state", {"purchase", "done"}),
     ("account.move", "action_post"): ("state", {"posted"}),
+    ("sale.order", "action_cancel"): ("state", {"cancel"}),
+    ("purchase.order", "button_cancel"): ("state", {"cancel"}),
+    ("mrp.production", "action_confirm"): ("state", {"confirmed", "progress", "to_close", "done"}),
+    ("mrp.production", "action_cancel"): ("state", {"cancel"}),
 }
 _OFFICIAL_INVOICE_PDF_METHOD = (
     "account.move.send.wizard",
@@ -318,8 +322,11 @@ def _policy_denials_for_values(
     return sorted(denied)
 
 
-def _strip_html(value: Any) -> str:
-    return html.unescape(re.sub(r"<[^>]*>", "", str(value or ""))).strip()
+def _plain_comment_text(value: Any) -> str | None:
+    raw = str(value or "").strip()
+    if raw.startswith("<p>") and raw.endswith("</p>"):
+        raw = raw[3:-4]
+    return None if "<" in raw else html.unescape(raw)
 
 
 def _chatter_payload(
@@ -359,6 +366,7 @@ class NativeActions:
         clients: dict[str, Any] | None = None,
         approval_mode: str | None = None,
         approval_ttl_seconds: int = WRITE_APPROVAL_TTL_SECONDS,
+        task_evidence: Any = None,
     ) -> None:
         if type(approval_ttl_seconds) is not int or approval_ttl_seconds < 1:
             raise ValueError("approval_ttl_seconds must be a positive integer")
@@ -372,6 +380,7 @@ class NativeActions:
             raise ValueError("Native action clients must match native read instances")
         self.approval_mode = approval_mode
         self.approval_ttl_seconds = approval_ttl_seconds
+        self.task_evidence = task_evidence
 
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if name not in ACTION_TOOLS:
@@ -506,19 +515,27 @@ class NativeActions:
         return client.read_records(model, ids, fields=fields)
 
     def _prestate(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+        state = self._native_prestate(kind, payload)
+        if self.task_evidence is not None:
+            state.update(self.task_evidence.prestate(kind, payload))
+        return state
+
+    def _native_prestate(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         instance = str(payload.get("instance") or self.reads.instance)
         model = str(payload.get("model") or "")
         if kind == "write":
             operation = payload.get("operation")
             ids = [int(value) for value in payload.get("record_ids") or []]
+            dependencies = business_write_prestate(self.reads.instances[instance], payload)
+            guarded = {"business_dependencies": dependencies} if dependencies else {}
             if operation == "create":
-                return {"records": []}
+                return {"records": [], **guarded}
             fields = sorted(
                 {"id", *[str(key) for key in (payload.get("values") or {}) if key != "datas"]}
             )
             if model == "ir.attachment" and "datas" in (payload.get("values") or {}):
                 fields.extend(name for name in ("checksum", "file_size") if name not in fields)
-            return {"records": self._read_rows(instance, model, ids, fields)}
+            return {"records": self._read_rows(instance, model, ids, fields), **guarded}
         if kind == "chatter":
             target = self._read_rows(
                 instance, model, [int(payload["record_ids"][0])], ["id"]
@@ -663,7 +680,11 @@ class NativeActions:
 
     @staticmethod
     def _matches(actual: Any, expected: Any, field_type: str | None = None) -> bool:
-        if isinstance(actual, (list, tuple)) and len(actual) == 2 and type(actual[0]) is int:
+        if field_type == "html" and isinstance(expected, str) and "<" not in expected:
+            if isinstance(actual, str) and _plain_comment_text(actual) == expected:
+                return True
+        if (isinstance(actual, (list, tuple)) and len(actual) == 2 and type(actual[0]) is int
+                and (field_type == "many2one" or (field_type is None and type(expected) is int))):
             return expected == actual[0]
         if (
             isinstance(expected, list)
@@ -840,7 +861,8 @@ class NativeActions:
                 for item in rows
                 if item.get("model") == model
                 and item.get("res_id") == record_id
-                and _strip_html(item.get("body")) == _strip_html(payload["kwargs"]["body"])
+                and item.get("message_type") == payload["kwargs"]["message_type"]
+                and _plain_comment_text(item.get("body")) == payload["kwargs"]["body"]
             ]
             return {
                 "status": "satisfied" if len(matches) == 1 else "unconfirmed",
@@ -1012,7 +1034,7 @@ class NativeActions:
                 "success": False,
                 "action_id": action_id,
                 "action_status": row["status"],
-                "error": "Odoo state changed after validation; validate again",
+                "error": "Odoo state changed after validation or required evidence is unavailable; validate again",
             }
         already = self._verify(row, None)
         if already["status"] == "satisfied":
@@ -1032,6 +1054,13 @@ class NativeActions:
             }
         claim = self.store.claim(action_id)
         if not claim["claimed"]:
+            if claim["status"] == "resource_busy":
+                return {
+                    "success": False, "action_id": action_id,
+                    "action_status": "resource_busy",
+                    "blocking_action_id": claim["blocking_action_id"],
+                    "error": "another unresolved action holds this resource; reconcile blocking_action_id before retrying",
+                }
             return {
                 "success": False,
                 "action_id": action_id,
@@ -1181,6 +1210,10 @@ class NativeActions:
             validate_model_name(model)
             name, runtime = self._runtime(instance)
             policy_digest, _ = self._policy_snapshot(runtime)
+            if self.task_evidence is not None:
+                values, values_list = self.task_evidence.prepare(
+                    model, operation, values, values_list, record_ids, context, name
+                )
             values, values_list, files = _resolve_all_uploads(values, values_list)
             if files and (fields_metadata is not None or not use_live_metadata):
                 return {
@@ -1302,6 +1335,14 @@ class NativeActions:
                     ),
                 }
             )
+            if action is not None and report.get("success"):
+                report["execution_request"] = {
+                    "approval": {
+                        "action_id": action["action_id"],
+                        "token": approval["token"],
+                    },
+                    "confirm": True,
+                }
             record_write_event(
                 "validate",
                 outcome=(action["status"] if action else "rejected"),
@@ -1320,17 +1361,27 @@ class NativeActions:
         self, approval: dict[str, Any], confirm: bool = False
     ) -> dict[str, Any]:
         report = self._execute_approved_write_gated(approval, confirm)
+        audit_payload = approval
+        action_id = str(approval.get("action_id") or "").strip()
+        record = None
+        if report.get("success") and action_id:
+            try:
+                record = self.store.get(action_id)
+            except Exception:  # noqa: BLE001 - audit enrichment must not alter the result
+                record = None
+        if isinstance(record, dict) and record.get("kind") == "write":
+            audit_payload = record.get("payload") or approval
         record_write_event(
             "execute",
             outcome="success" if report.get("success") else "denied",
-            model=str(approval.get("model") or "") or None,
-            operation=str(approval.get("operation") or "") or None,
+            model=str(audit_payload.get("model") or "") or None,
+            operation=str(audit_payload.get("operation") or "") or None,
             record_ids=[
                 int(value)
-                for value in approval.get("record_ids") or []
+                for value in audit_payload.get("record_ids") or []
                 if isinstance(value, (int, str)) and str(value).isdigit()
             ],
-            instance=str(approval.get("instance") or "") or None,
+            instance=str(audit_payload.get("instance") or "") or None,
             token=str(approval.get("token") or "") or None,
             detail=report.get("error"),
         )
@@ -1340,8 +1391,48 @@ class NativeActions:
         self, approval: dict[str, Any], confirm: bool
     ) -> dict[str, Any]:
         try:
-            valid, _ = verify_write_approval(approval)
-            if not valid:
+            action_id = str(approval.get("action_id") or "").strip()
+            if not action_id:
+                return {
+                    "success": False,
+                    "tool": "execute_approved_write",
+                    "error": "durable action_id is missing or unknown; call validate_write first",
+                }
+            record = self.store.get(action_id) if action_id else None
+            if record is None or record["kind"] != "write":
+                return {
+                    "success": False,
+                    "tool": "execute_approved_write",
+                    "error": "durable action_id is missing or unknown; call validate_write first",
+                }
+
+            payload_fields = {
+                "model",
+                "operation",
+                "record_ids",
+                "values",
+                "values_list",
+                "context",
+                "instance",
+            }
+            supplied = {
+                field: approval[field]
+                for field in payload_fields
+                if field in approval
+            }
+            expected = record["payload"]
+            if any(
+                canonical_json(supplied[field])
+                != canonical_json(expected.get(field))
+                for field in supplied
+            ):
+                return {
+                    "success": False,
+                    "tool": "execute_approved_write",
+                    "error": "approval payload does not match the durable validation record",
+                }
+            token = str(approval.get("token") or "")
+            if not token or token != build_approval_token(expected):
                 return {
                     "success": False,
                     "tool": "execute_approved_write",
@@ -1350,20 +1441,11 @@ class NativeActions:
                         "re-run preview_write and validate_write"
                     ),
                 }
-            action_id = str(approval.get("action_id") or "")
-            record = self.store.get(action_id) if action_id else None
-            if record is None or record["kind"] != "write":
-                return {
-                    "success": False,
-                    "tool": "execute_approved_write",
-                    "error": "durable action_id is missing or unknown; call validate_write first",
-                }
-            if _approval_payload(approval) != record["payload"]:
-                return {
-                    "success": False,
-                    "tool": "execute_approved_write",
-                    "error": "approval payload does not match the durable validation record",
-                }
+            approval = {
+                **expected,
+                "action_id": action_id,
+                "token": token,
+            }
             if not confirm:
                 return {
                     "success": False,
@@ -1631,15 +1713,6 @@ class NativeActions:
                     "error": "write execution disabled; set ODOO_MCP_ENABLE_WRITES=1 to enable",
                     "classification": safety,
                 }
-            if args:
-                return {
-                    "success": False,
-                    "error": (
-                        "Native side-effect methods require named JSON-2 kwargs; "
-                        "pass kwargs.ids instead of positional args."
-                    ),
-                    "classification": safety,
-                }
             required_ids = (model, method) in _KNOWN_METHOD_STATES or (
                 model,
                 method,
@@ -1647,6 +1720,18 @@ class NativeActions:
                 ("sale.advance.payment.inv", "create_invoices"),
                 _OFFICIAL_INVOICE_PDF_METHOD,
             }
+            if args and (not required_ids or len(args) != 1 or "ids" in kwargs):
+                return {
+                    "success": False,
+                    "error": (
+                        "Use named JSON-2 kwargs. Verified native business methods "
+                        "also accept args=[[1,2]], with no extra positional arguments "
+                        "and no duplicate kwargs.ids."
+                    ),
+                    "classification": safety,
+                }
+            if args:
+                kwargs["ids"] = args[0]
             ids = kwargs.get("ids")
             if required_ids and (
                 not isinstance(ids, list)

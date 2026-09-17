@@ -540,6 +540,7 @@ class SaleViewReadbackTests(unittest.TestCase):
     def test_explicit_native_read_tools_and_purchase_writes_map_to_stages(self):
         self.assertEqual(_tool_stage({"name": "mcp_odoo_read_record", "arguments": {"model": "res.partner", "record_id": 9}}), "read")
         self.assertEqual(_tool_stage({"name": "mcp_odoo_search_records", "arguments": {"model": "purchase.order.line", "domain": []}}), "read")
+        self.assertEqual(_tool_stage({"name": "mcp_odoo_find_records", "arguments": {"model": "purchase.order.line", "domain": [["id", "=", 9]]}}), "read")
         self.assertEqual(_tool_stage({"name": "execute_method", "arguments": {"model": "purchase.order", "operation": "create"}}), "purchase")
         self.assertEqual(_tool_stage({"name": "execute_method", "arguments": {"model": "purchase.order.line", "operation": "write"}}), "purchase")
 

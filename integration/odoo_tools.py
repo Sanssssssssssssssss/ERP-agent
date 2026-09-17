@@ -17,11 +17,13 @@ from pydantic_core import to_json
 
 from odoo_runtime._odoo_core.odoo_client import READ_CALL_ID
 from odoo_runtime.actions import ACTION_TOOLS, NativeActions
+from odoo_runtime.business_facts import BusinessFacts, attach_business_facts
 from odoo_runtime.capabilities import CAPABILITY_TOOLS, NativeCapabilities
 from odoo_runtime.reads import (
     NATIVE_READ_RESPONSES,
     READ_RESPONSES,
     NativeReads,
+    _summarize_field_metadata,
     normalize_read_arguments,
 )
 from odoo_runtime.world import SIDE_EFFECT_TOOLS, WorldStore
@@ -64,6 +66,63 @@ def _world_failed(world: WorldStore, operation: str, error: BaseException) -> No
     print(f"World {operation} failed open: {type(error).__name__}", file=sys.stderr)
 
 
+def _model_visible_native_read(name: str, arguments: dict, raw: object) -> object:
+    """Keep schema exploration compact while preserving exact explicit reads."""
+    if name != "get_model_fields" or not isinstance(raw, dict):
+        return raw
+    if arguments.get("field_names"):
+        return raw
+    result = raw.get("result")
+    if not isinstance(result, dict):
+        return raw
+    visible = dict(raw)
+    visible["result"] = {
+        field: (
+            metadata
+            if isinstance(metadata, dict)
+            and "selection_count" in metadata
+            and "selection" not in metadata
+            else _summarize_field_metadata(metadata)
+            if isinstance(metadata, dict)
+            else metadata
+        )
+        for field, metadata in result.items()
+    }
+    if visible["result"] != result:
+        visible["summary"] = True
+    return visible
+
+
+def _receipt_unavailable_result(
+    result: AgentToolResult, *, fallback_payload: dict | None = None,
+) -> AgentToolResult:
+    """Tell the model when the World receipt could not be persisted."""
+    visible = fallback_payload
+    if visible is None:
+        try:
+            visible = json.loads(result.text)
+        except (TypeError, json.JSONDecodeError):
+            visible = {"success": False, "error": "World receipt unavailable"}
+    visible = dict(visible) if isinstance(visible, dict) else {
+        "result": visible,
+    }
+    visible["receipt_status"] = "unavailable"
+    updated = result.model_copy(deep=True)
+    updated.content = [TextContent(text=to_json(visible, fallback=str).decode())]
+    details = dict(updated.details or {})
+    structured = details.get("structuredContent")
+    if fallback_payload is not None:
+        structured = visible
+    elif isinstance(structured, dict):
+        structured = dict(structured)
+        structured["receipt_status"] = "unavailable"
+    else:
+        structured = visible
+    details["structuredContent"] = structured
+    updated.details = details
+    return updated
+
+
 def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                 world: WorldStore | None = None,
                 actions: NativeActions | None = None,
@@ -72,6 +131,7 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                 native_health: bool = False):
     """No MCP fallback on a native failure; business errors retain their envelope."""
     routed = []
+    business_facts = BusinessFacts(actions) if actions is not None else None
     native_reads = NATIVE_READ_RESPONSES if native_health else READ_RESPONSES
     for tool in tools:
         name = tool.name.removeprefix("mcp_odoo_")
@@ -95,9 +155,14 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                 stream.write(json.dumps(event) + "\n")
             token = READ_CALL_ID.set(call_id)
             observation = None
+            source_raw = None
+            runtime_evidence = None
+            world_receipt_unavailable = False
             side_effect_attempted = name in SIDE_EFFECT_TOOLS
             try:
-                if world is not None and name in READ_RESPONSES:
+                if world is not None and (
+                    name in READ_RESPONSES or (direct_read and name != "health_check")
+                ):
                     requested_instance = arguments.get("instance")
                     identity = None
                     identity_available = True
@@ -106,24 +171,55 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                             identity = native.identity_context(requested_instance)
                         except Exception as exc:
                             identity_available = False
+                            world_receipt_unavailable = True
                             _world_failed(world, "identity", exc)
                     if identity_available:
                         try:
                             observation = world.begin(call_id, name, dict(arguments), event["backend"], identity=identity)
                         except Exception as exc:
+                            world_receipt_unavailable = True
                             _world_failed(world, "begin", exc)
                 if direct_read:
                     normalized = normalize_read_arguments(name, dict(arguments))
                     raw = await asyncio.to_thread(native.call, name, normalized)
-                    structured = native_reads[name].model_validate(raw).model_dump(
+                    source_raw = dict(raw) if isinstance(raw, dict) else raw
+                    if isinstance(source_raw, dict):
+                        runtime_evidence = source_raw.pop("_runtime_evidence", None)
+                    visible_raw = _model_visible_native_read(name, normalized, source_raw)
+                    structured = native_reads[name].model_validate(visible_raw).model_dump(
                         mode="json", by_alias=True
                     )
+                    if name == "read_record" and "missing_ids" not in visible_raw:
+                        structured.pop("missing_ids", None)
                     result = AgentToolResult(
-                        content=to_json(raw, fallback=str).decode(),
+                        content=to_json(visible_raw, fallback=str).decode(),
                         details={"structuredContent": structured, "meta": None},
                     )
                 elif direct_action:
                     raw = await asyncio.to_thread(actions.call, name, dict(arguments))
+                    if business_facts is not None and name in {
+                        "preview_write", "validate_write"
+                    } and raw.get("success"):
+                        payload = raw.get("approval")
+                        if isinstance(payload, dict):
+                            report = await asyncio.to_thread(business_facts.inspect, payload)
+                            raw = attach_business_facts(raw, report)
+                    if name == "validate_write" and raw.get("success"):
+                        status = raw.get("approval_status")
+                        request = raw.get("execution_request")
+                        reference = request.get("approval") if isinstance(request, dict) else None
+                        if (
+                            isinstance(status, dict)
+                            and status.get("stored")
+                            and status.get("durable")
+                            and isinstance(reference, dict)
+                            and isinstance(reference.get("action_id"), str)
+                            and isinstance(reference.get("token"), str)
+                            and reference["action_id"]
+                            and reference["token"]
+                        ):
+                            raw = dict(raw)
+                            raw["approval"] = dict(reference)
                     result = AgentToolResult(
                         content=to_json(raw, fallback=str).decode(),
                         details={"structuredContent": raw, "meta": None},
@@ -138,6 +234,14 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                     )
                 else:
                     result = await tool.execute(call_id, arguments, signal, on_update)
+                if world_receipt_unavailable:
+                    result = _receipt_unavailable_result(
+                        result,
+                        fallback_payload=(
+                            source_raw if name == "get_model_fields" and isinstance(source_raw, dict)
+                            else None
+                        ),
+                    )
                 if name == "health_check":
                     # A0: keep process-local counters in receipts, not model context.
                     # Policy/permission fields remain visible and unchanged in both arms.
@@ -168,13 +272,25 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                     observation = None
                     try:
                         metadata = native.world_metadata(name, normalized) if direct else {}
-                        evidence = native.world_rpc_evidence(call_id) if direct else None
+                        rpc_evidence = native.world_rpc_evidence(call_id) if direct else None
                         world.finish(
                             completed, result.text, field_metadata=metadata,
-                            rpc_evidence=evidence,
+                            rpc_evidence=rpc_evidence,
+                            raw_result=source_raw,
+                            evidence=runtime_evidence,
                         )
                     except Exception as exc:
+                        event["world_receipt_error"] = type(exc).__name__
+                        world_receipt_unavailable = True
+                        result = _receipt_unavailable_result(
+                            result,
+                            fallback_payload=(
+                                source_raw if name == "get_model_fields" and isinstance(source_raw, dict)
+                                else None
+                            ),
+                        )
                         _world_failed(world, "finish", exc)
+                event["result_sha256"] = hashlib.sha256(result.text.encode()).hexdigest()
                 if direct_read:
                     try:
                         event["native_telemetry"] = native.telemetry()
@@ -222,9 +338,22 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                 except OSError:
                     print("Tool completion receipt could not be saved", file=sys.stderr)
 
+        description = tool.description
+        if direct_action and name == "validate_write":
+            description += (
+                " A successful persisted validation returns execution_request with "
+                "action_id and token; pass it unchanged to execute_approved_write."
+            )
+        elif direct_action and name == "execute_approved_write":
+            description += (
+                " Use execution_request with action_id and token from a successful "
+                "persisted validation unchanged; the runtime holds the canonical payload, "
+                "so do not reconstruct values or token."
+            )
         routed.append(replace(
             tool,
             execute_fn=execute,
+            description=description,
             execution_mode="sequential" if name in ACTION_TOOLS else tool.execution_mode,
         ))
     if native is not None:

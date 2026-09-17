@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import inspect
 import io
 import json
@@ -21,6 +22,9 @@ from pi_agent.tools import AgentTool, AgentToolResult
 from pi_ai.openai_compatible import OpenAICompatibleProvider
 
 from integration import harbor_agent, pi_odoo_runner
+from integration.world_context import expand_lossless_tables
+from odoo_runtime.world import WorldStore
+from odoo_runtime.world_tools import build_world_tools
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -87,7 +91,7 @@ class BaselineFixTest(unittest.TestCase):
                 stopping.set()
                 await release.wait()
                 stopped.set()
-            agent = SimpleNamespace(_run=run_body)
+            agent = SimpleNamespace(_run=run_body, _capture_bench_state=AsyncMock())
             environment = SimpleNamespace(stop_service=stop_service)
             run = inspect.unwrap(harbor_agent.PiAgentMcpBaseline.run)
             task = asyncio.create_task(run(agent, "test", environment, None))
@@ -270,6 +274,10 @@ class BaselineFixTest(unittest.TestCase):
                         "pi_coding.session._create_runtime_provider",
                         side_effect=AssertionError("Configured provider was replaced"),
                     ),
+                    patch.object(
+                        pi_odoo_runner.CodingSession, "_maybe_auto_compact",
+                        new_callable=AsyncMock, return_value=False,
+                    ) as compact,
                     patch.dict(
                         os.environ,
                         {
@@ -288,6 +296,9 @@ class BaselineFixTest(unittest.TestCase):
                     contextlib.redirect_stdout(stdout),
                 ):
                     await pi_odoo_runner.run(args)
+                    # Keep pre-prompt compaction available without calling a
+                    # summarizer after the final business response.
+                    compact.assert_awaited_once()
             metadata = next(
                 json.loads(line)
                 for line in stdout.getvalue().splitlines()
@@ -327,6 +338,183 @@ class BaselineFixTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(check(Path(directory)))
+
+    def test_native_runner_projects_only_consumed_read_rows_in_record_and_project_modes(self):
+        async def check(root, world_mode):
+            requests = []
+            rows = [
+                {"id": index, "display_name": (
+                    "VENDOR-UNIQUE-99 " * 20 if index == 99 else f"Partner {index} " + "x" * 90),
+                 "default_code": f"P{index:03d}"}
+                for index in range(1, 101)
+            ]
+            raw = {
+                "success": True, "tool": "find_records", "count": len(rows),
+                "result": rows, "fields_used": ["id", "display_name", "default_code"],
+                "unavailable_fields": [], "has_more": False, "next_offset": None,
+            }
+
+            class NativeStub:
+                instance = "default"
+
+                def __init__(self):
+                    self.calls = []
+
+                def identity_context(self, instance=None):
+                    identity = {
+                        "instance": instance or self.instance, "url": "http://odoo.invalid",
+                        "database": "bench", "username": "reader", "lang": "en_US",
+                        "context": {}, "transport": "json2", "credential_scope_sha256": "fixture",
+                    }
+                    identity["identity_id"] = hashlib.sha256(json.dumps([
+                        identity["instance"], identity["credential_scope_sha256"],
+                    ], sort_keys=True).encode()).hexdigest()[:20]
+                    return identity
+
+                def call(self, name, arguments):
+                    self.calls.append((name, arguments))
+                    self_test.assertEqual(name, "find_records")
+                    return raw
+
+                def world_metadata(self, _name, _arguments):
+                    return {}
+
+                def world_rpc_evidence(self, _call_id):
+                    return {"status": "fixture", "refs": []}
+
+                def telemetry(self):
+                    return {}
+
+            class Store:
+                def recover_interrupted(self):
+                    pass
+
+                def summary(self):
+                    return {}
+
+                def close(self):
+                    pass
+
+            native = NativeStub()
+            self_test = self
+
+            def native_actions(*_args, **_kwargs):
+                return SimpleNamespace(store=Store())
+
+            def native_capabilities(*_args, **_kwargs):
+                return SimpleNamespace(close=lambda: None)
+
+            def handler(request):
+                requests.append(json.loads(request.content))
+                if len(requests) == 1:
+                    delta = {"tool_calls": [{
+                        "index": 0, "id": "find-call", "type": "function",
+                        "function": {
+                            "name": "mcp_odoo_find_records",
+                            "arguments": '{"model":"res.partner","domain":[["id",">",0]],"limit":20}',
+                        },
+                    }]}
+                    finish_reason = "tool_calls"
+                elif len(requests) < 5:
+                    delta = {"tool_calls": [{
+                        "index": 0, "id": f"time-call-{len(requests)}", "type": "function",
+                        "function": {"name": "get_current_time", "arguments": "{}"},
+                    }]}
+                    finish_reason = "tool_calls"
+                elif len(requests) == 5:
+                    ref = "obs-000001-" + hashlib.sha256(b"find-call").hexdigest()[:10]
+                    delta = {"tool_calls": [{"index": 0, "id": "search-call", "type": "function", "function": {"name": "search_observations", "arguments": '{"query":"VENDOR-UNIQUE-99"}'}}]}
+                    finish_reason = "tool_calls"
+                elif len(requests) == 6:
+                    ref = "obs-000001-" + hashlib.sha256(b"find-call").hexdigest()[:10]
+                    delta = {"tool_calls": [{"index": 0, "id": "read-call", "type": "function", "function": {"name": "read_observation", "arguments": json.dumps({"observation_ref": ref, "path": "$.result", "query": "VENDOR-UNIQUE-99", "fields": ["id", "display_name"], "limit": 1})}}]}
+                    finish_reason = "tool_calls"
+                else:
+                    delta, finish_reason = {"content": "done"}, "stop"
+                body = {
+                    "choices": [{"delta": delta, "finish_reason": finish_reason}],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+                }
+                return httpx.Response(
+                    200, text="data: " + json.dumps(body) + "\n\ndata: [DONE]\n\n",
+                    headers={"content-type": "text/event-stream", "x-request-id": "fixture"},
+                )
+
+            instruction = root / "instruction.txt"
+            instruction.write_text("Find partners.")
+            args = SimpleNamespace(
+                instruction_file=instruction, session_file=root / "session.jsonl",
+                usage_file=root / "usage.json", mcp_url="http://unused.invalid", max_turns=7,
+                world_mode=world_mode, runtime_mode="native", read_backend="native",
+                action_backend="native", capability_backend="native",
+                tool_mode="dynamic", sop_mode="controlled",
+            )
+            original_hook = pi_odoo_runner.project_read_history
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                stdout = io.StringIO()
+                with (
+                    patch.object(pi_odoo_runner.NativeReads, "from_environment", return_value=native),
+                    patch.object(pi_odoo_runner, "ActionStore", side_effect=lambda *_args, **_kwargs: Store()),
+                    patch.object(pi_odoo_runner, "NativeActions", side_effect=native_actions),
+                    patch.object(pi_odoo_runner, "NativeCapabilities", side_effect=native_capabilities),
+                    patch.object(pi_odoo_runner, "project_read_history", wraps=original_hook) as history_hook,
+                    patch.object(pi_odoo_runner, "OpenAICompatibleProvider", side_effect=lambda config: OpenAICompatibleProvider(config, client=client)),
+                    patch("pi_coding.session._create_runtime_provider", side_effect=AssertionError("Configured provider was replaced")),
+                    patch.dict(os.environ, {
+                        "LLM_API_KEY": "test-only", "LLM_BASE_URL": "https://unused.invalid/v1",
+                        "LLM_MODEL": "deepseek/test", "LLM_PROVIDER": "openai-compatible",
+                        "LLM_THINKING_TYPE": "high", "ODOO_URL": "http://odoo.invalid",
+                        "ODOO_DB": "bench", "ODOO_USERNAME": "reader", "ODOO_PASSWORD": "not-recorded",
+                    }),
+                    contextlib.redirect_stdout(stdout),
+                ):
+                    await pi_odoo_runner.run(args)
+
+            self.assertEqual([name for name, _arguments in native.calls], ["find_records"])
+            self.assertGreaterEqual(history_hook.call_count, 7)
+            self.assertEqual(len(requests), 7)
+            self.assertEqual(json.loads((root / "requests" / "0001.request.json").read_text(encoding="utf-8")), requests[0])
+            self.assertEqual(json.loads((root / "requests" / "0002.request.json").read_text(encoding="utf-8")), requests[1])
+            self.assertEqual(json.loads((root / "requests" / "0003.request.json").read_text(encoding="utf-8")), requests[2])
+            second = next(message for message in requests[1]["messages"] if message.get("role") == "tool")
+            self.assertEqual(json.loads(second["content"]), raw)
+            third = next(message for message in requests[4]["messages"] if message.get("tool_call_id") == "find-call")
+            second_call = next(
+                message for message in requests[1]["messages"]
+                if message.get("role") == "assistant" and any(
+                    call.get("id") == "find-call" for call in message.get("tool_calls", [])
+                )
+            )
+            third_call = next(
+                message for message in requests[2]["messages"]
+                if message.get("role") == "assistant" and any(
+                    call.get("id") == "find-call" for call in message.get("tool_calls", [])
+                )
+            )
+            self.assertEqual(third_call, second_call)
+            projected = json.loads(third["content"])
+            self.assertEqual(third["tool_call_id"], "find-call")
+            self.assertEqual(projected["world_observation"]["kind"], "externalized_read")
+            self.assertNotIn("VENDOR-UNIQUE-99", third["content"])
+            session_rows = [
+                json.loads(line)["message"]
+                for line in args.session_file.read_text(encoding="utf-8").splitlines()
+                if json.loads(line).get("type") == "message"
+            ]
+            session_result = next(
+                message for message in session_rows
+                if message.get("role") == "toolResult" and message.get("toolCallId") == "find-call"
+            )
+            self.assertEqual(session_result["content"][0]["text"], json.dumps(raw, separators=(",", ":")))
+            self.assertLess(len(third["content"].encode()), len(second["content"].encode()))
+            search_result = next(message for message in requests[5]["messages"] if message.get("tool_call_id") == "search-call")
+            self.assertEqual(json.loads(search_result["content"])["items"][0]["matches"][0]["path"], "$.result.98.display_name")
+            read_result = next(message for message in requests[6]["messages"] if message.get("tool_call_id") == "read-call")
+            self.assertEqual(json.loads(read_result["content"])["result"]["items"][0]["value"]["id"], 99)
+
+        for world_mode in ("record", "project"):
+            with self.subTest(world_mode=world_mode), tempfile.TemporaryDirectory() as directory:
+                asyncio.run(check(Path(directory), world_mode))
 
     @unittest.skipUnless(
         shutil.which("node"), "Node required for native extension check"

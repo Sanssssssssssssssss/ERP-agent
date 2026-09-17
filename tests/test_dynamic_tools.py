@@ -18,9 +18,9 @@ from odoo_runtime.dynamic_tools import (
 
 
 def fake_tools(
-    installed_models: set[str], calls: list[str] | None = None
+    installed_models: set[str], calls: list[str] | None = None, *, native: bool = True,
 ) -> list[AgentTool]:
-    names = BASE_TOOLS | {
+    names = (BASE_TOOLS - {"search_records"} | {"find_records"} if native else BASE_TOOLS) | {
         name for group in CAPABILITY_GROUPS.values() for name in group["tools"]
     }
 
@@ -29,7 +29,7 @@ def fake_tools(
             if calls is not None:
                 calls.append(name)
             payload = {"success": True}
-            if name == "search_records":
+            if name in {"find_records", "search_records"}:
                 payload["result"] = [
                     {"model": model} for model in sorted(installed_models)
                 ]
@@ -76,6 +76,27 @@ class DynamicToolsTest(unittest.TestCase):
                 count(1).__next__,
             )
 
+    def test_optional_native_supply_tool_is_published_when_present(self) -> None:
+        tools = fake_tools(set())
+        tools.append(AgentTool(
+            name="mcp_odoo_read_supply_context", label="read_supply_context",
+            description="supply facts", parameters={"type": "object"}, execute_fn=tools[0].execute_fn,
+        ))
+        with tempfile.TemporaryDirectory() as directory:
+            controller = DynamicToolController(
+                tools, Path(directory) / "dynamic-tools.jsonl", count(1).__next__,
+            )
+            self.assertIn("mcp_odoo_read_supply_context", {tool.name for tool in controller.tools})
+
+    def test_legacy_inventory_keeps_search_records_when_find_records_is_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            controller = DynamicToolController(
+                fake_tools(set(), native=False), Path(directory) / "dynamic-tools.jsonl", count(1).__next__,
+            )
+            names = {tool.name for tool in controller.tools}
+        self.assertIn("mcp_odoo_search_records", names)
+        self.assertNotIn("mcp_odoo_find_records", names)
+
     def test_discovery_and_next_turn_publication_keep_every_group_reachable(
         self,
     ) -> None:
@@ -89,6 +110,8 @@ class DynamicToolsTest(unittest.TestCase):
             controller.bind(lambda tools: published.append(tuple(tools)))
             initial = {tool.name for tool in controller.tools}
             self.assertEqual(len(initial), len(BASE_TOOLS) + 2)
+            self.assertIn("mcp_odoo_find_records", initial)
+            self.assertNotIn("mcp_odoo_search_records", initial)
             self.assertNotIn("mcp_odoo_execute_approved_write", initial)
 
             listed = asyncio.run(controller.tools[-2].execute("list", {})).details
@@ -115,6 +138,8 @@ class DynamicToolsTest(unittest.TestCase):
                 {tool.name for tool in published[-1]},
                 set(configured["published_tools"]),
             )
+            self.assertIn("mcp_odoo_find_records", configured["published_tools"])
+            self.assertNotIn("mcp_odoo_search_records", configured["published_tools"])
             self.assertEqual(
                 configured["tool_contract_sha256"],
                 tool_contract_sha256(
@@ -158,7 +183,7 @@ class DynamicToolsTest(unittest.TestCase):
             ).details
 
             self.assertTrue(configured["success"])
-            self.assertEqual(calls, ["search_records"])
+            self.assertEqual(calls, ["find_records"])
             self.assertEqual(len(published), 1)
             description = controls["configure_odoo_tools"].parameters["properties"][
                 "capabilities"
@@ -209,7 +234,7 @@ class DynamicToolsTest(unittest.TestCase):
 
             self.assertFalse(rejected["success"])
             self.assertEqual(rejected["module_missing"], ["accounting"])
-            self.assertEqual(calls, ["search_records"])
+            self.assertEqual(calls, ["find_records"])
             self.assertEqual(published, [])
 
     def test_invalid_configure_rejects_before_availability_probe(self) -> None:

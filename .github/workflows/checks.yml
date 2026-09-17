@@ -28,6 +28,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ./agent
           python -m pip install -r ./desktop/requirements-host.txt
+          python -m pip install pytest==9.1.0
 
       - name: Run workbench unit tests
         shell: pwsh
@@ -61,6 +62,21 @@ jobs:
           python -m unittest tests.test_business_mvp_verifier tests.test_dynamic_tools
           tests.test_layout tests.test_reporting tests.test_snapshot tests.test_sops
           tests.test_stream_events tests.test_world
+
+      - name: Check business evidence, write guards and native reads
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }};${{ github.workspace }}\agent\src
+        run: >-
+          python -m unittest tests.test_business_facts tests.test_chatter_verification
+          tests.test_minimal_write_guards tests.test_relation_receipts tests.test_supply_context
+          tests.test_task_evidence tests.test_tool_retrieval
+
+      - name: Check provider recovery and timeout configuration offline
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }};${{ github.workspace }}\agent\src
+        run: python -m pytest -q tests/test_transport_recovery.py tests/test_unbounded_execution.py
 
       - name: Check native offline module boundary
         shell: pwsh

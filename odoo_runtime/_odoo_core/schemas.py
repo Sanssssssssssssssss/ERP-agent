@@ -11,7 +11,7 @@ Core module: must not import the MCP surface (enforced by import-linter).
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -90,6 +90,18 @@ class GetModelFieldsResponse(ToolResponse):
     ranking: Optional[List[Dict[str, Any]]] = Field(
         default=None, description='Relevance scores when relevance="top".'
     )
+    query: Optional[str] = Field(
+        default=None, description="Optional schema intent used for BM25 field ranking."
+    )
+    query_matched: Optional[bool] = Field(
+        default=None, description="Whether the schema query matched any fields."
+    )
+    supplemental_fields: Optional[List[str]] = Field(
+        default=None, description="Business note fields retained alongside BM25 matches."
+    )
+    summary: Optional[bool] = Field(
+        default=None, description="Whether default exploration metadata was summarized."
+    )
     restricted_fields: Optional[List[str]] = Field(
         default=None, description="Fields marked restricted by the field ACL."
     )
@@ -106,12 +118,41 @@ class SearchRecordsResponse(ToolResponse):
         default=None, description="Fields matched by the free-text query shortcut."
     )
     redacted_fields: Optional[List[str]] = None
+    rerank: Optional[Dict[str, Any]] = Field(default=None, exclude_if=lambda value: value is None)
+
+
+class FindRecordsResponse(ToolResponse):
+    """Bounded record identities returned from a required Odoo domain."""
+
+    count: Optional[int] = None
+    result: Optional[List[Dict[str, Any]]] = Field(
+        default=None, description="Identity fields for the current result page."
+    )
+    fields_used: Optional[List[str]] = None
+    unavailable_fields: Optional[List[str]] = None
+    has_more: Optional[bool] = None
+    next_offset: Optional[int] = None
+
+
+class ReadSupplyContextResponse(ToolResponse):
+    """Identity-scoped product, supply, stock, and optional manufacturing facts."""
+
+    product_ids: Optional[List[int]] = None
+    result: Optional[Dict[str, Any]] = None
+    completeness: Optional[Dict[str, Any]] = None
+    missing_product_ids: Optional[List[int]] = None
+    missing_fields: Optional[Dict[str, List[str]]] = None
+    restricted_fields: Optional[Dict[str, List[str]]] = None
+    read_failures: Optional[List[str]] = None
+    warnings: Optional[List[str]] = None
+    visibility_scope: Optional[str] = None
 
 
 class ReadRecordResponse(ToolResponse):
-    result: Optional[Dict[str, Any]] = Field(
+    result: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = Field(
         default=None, description="The record (field-ACL redacted)."
     )
+    missing_ids: Optional[List[int]] = None
     smart_fields_applied: Optional[bool] = None
     fields_used: Optional[List[str]] = None
     redacted_fields: Optional[List[str]] = None

@@ -75,7 +75,7 @@ class RunnerBudgetTest(unittest.TestCase):
             [compact, SimpleNamespace(usage=None)], "total_tokens"
         ))
 
-    def test_pause_on_approval_stops_after_needs_reconciliation_before_next_model_request(self):
+    def test_pause_on_approval_and_resume_keep_requests_and_usage_scoped(self):
         async def check(root: Path):
             requests = []
 
@@ -100,15 +100,19 @@ class RunnerBudgetTest(unittest.TestCase):
 
             def handler(request):
                 requests.append(json.loads(request.content))
-                if len(requests) > 1:
-                    raise AssertionError("pause_on_approval requested a second model turn")
-                body = {
-                    "choices": [{"delta": {"tool_calls": [{
-                        "index": 0, "id": "write-1", "type": "function",
-                        "function": {"name": "execute_method", "arguments": "{}"},
-                    }]}, "finish_reason": "tool_calls"}],
-                    "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
-                }
+                if len(requests) == 1:
+                    body = {
+                        "choices": [{"delta": {"tool_calls": [{
+                            "index": 0, "id": "write-1", "type": "function",
+                            "function": {"name": "execute_method", "arguments": "{}"},
+                        }]}, "finish_reason": "tool_calls"}],
+                        "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+                    }
+                else:
+                    body = {
+                        "choices": [{"delta": {"content": "done"}, "finish_reason": "stop"}],
+                        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                    }
                 return httpx.Response(
                     200, text="data: " + json.dumps(body) + "\n\ndata: [DONE]\n\n",
                     headers={"content-type": "text/event-stream"},
@@ -139,8 +143,25 @@ class RunnerBudgetTest(unittest.TestCase):
                     }),
                 ):
                     await pi_odoo_runner.run(args)
+                    self.assertEqual(len(requests), 1)
+                    initial_usage = json.loads(args.usage_file.read_text())
+                    self.assertEqual(initial_usage["modelCalls"], 1)
+                    self.assertEqual(initial_usage["input"], 10)
+                    self.assertEqual(initial_usage["output"], 2)
+                    args.continue_run = True
+                    args.usage_file = root / "resumed-usage.json"
+                    await pi_odoo_runner.run(args)
 
-            self.assertEqual(len(requests), 1)
+            self.assertEqual(len(requests), 2)
+            resumed_usage = json.loads(args.usage_file.read_text())
+            self.assertEqual(resumed_usage["modelCalls"], 1)
+            self.assertEqual(resumed_usage["assistantEntries"], 1)
+            self.assertEqual(resumed_usage["input"], 0)
+            self.assertEqual(resumed_usage["output"], 0)
+            self.assertEqual(resumed_usage["compactionCalls"], 0)
+            self.assertEqual(resumed_usage["unreportedUsageRequests"], 0)
+            self.assertEqual(json.loads((args.receipt_dir / "requests" / "0001.request.json").read_text()), requests[0])
+            self.assertTrue((args.receipt_dir / "requests" / "0002.request.json").is_file())
             rows = [json.loads(line) for line in args.session_file.read_text().splitlines()]
             self.assertTrue(any(
                 row.get("type") == "message"
@@ -449,7 +470,8 @@ class RunnerBudgetTest(unittest.TestCase):
         context = SimpleNamespace()
         with patch.object(harbor_agent, "_start_task_mcp", new=AsyncMock()):
             asyncio.run(agent._run("do work", object(), context))
-        command = agent.exec_as_agent.await_args_list[0].kwargs["command"]
+        command = next(call.kwargs["command"] for call in agent.exec_as_agent.await_args_list
+                       if "--max-model-requests" in call.kwargs["command"])
         self.assertIn("--max-model-requests 2", command)
         self.assertIn("--max-output-tokens 64", command)
         self.assertEqual(context.metadata["max_model_requests"], 2)

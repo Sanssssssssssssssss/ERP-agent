@@ -30,6 +30,7 @@ _TECHNICAL_FIELD_PREFIXES = (
     "activity_",
     "website_message_",
     "website_meta_",
+    "account_audit_log_",
 )
 _PRIORITY_FIELD_NAMES: tuple[tuple[str, int], ...] = (
     ("name", 100),
@@ -169,6 +170,8 @@ def select_smart_fields(
     forced: list[str] = ["id"]
     if always_include:
         for name in always_include:
+            if len(forced) >= max_fields:
+                break
             if name not in forced and name in fields_metadata:
                 forced.append(name)
 

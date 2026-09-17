@@ -199,6 +199,10 @@ if (process.platform === "win32") {
   await execFile(join(pythonDir, "python.exe"), ["-B", "-c", [
     "import importlib.util, sys",
     "import workbench.host, integration.pi_odoo_runner, odoo_runtime",
+    "from integration.odoo_tools import native_tool_catalog",
+    "from odoo_runtime._odoo_core.agent_tools import load_model_rename_catalog",
+    "assert native_tool_catalog()",
+    "assert load_model_rename_catalog().get('entries')",
     "assert importlib.util.find_spec('mcp') is None",
     "assert importlib.util.find_spec('odoo_mcp') is None",
     "assert 'pi_agent.mcp' not in sys.modules",

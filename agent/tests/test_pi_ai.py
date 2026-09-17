@@ -443,19 +443,27 @@ async def test_openai_compatible_provider_labels_blank_transport_error() -> None
             async def fail() -> AsyncIterator[bytes]:
                 raise httpx.ReadTimeout("")
                 yield b""
+
             return fail()
 
     def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, stream=FailingStream(), headers={"content-type": "text/event-stream"})
+        return httpx.Response(
+            200, stream=FailingStream(), headers={"content-type": "text/event-stream"}
+        )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         provider = OpenAICompatibleProvider(
             OpenAICompatibleConfig(api_key="test-key", base_url="https://example.test/v1"),
             client=client,
         )
-        events = await _collect(provider.stream_response(
-            model="test-model", system="You are Pi.", messages=[UserMessage(content="Say ok")], tools=[]
-        ))
+        events = await _collect(
+            provider.stream_response(
+                model="test-model",
+                system="You are Pi.",
+                messages=[UserMessage(content="Say ok")],
+                tools=[],
+            )
+        )
 
     assert isinstance(events[-1], AssistantErrorEvent)
     assert events[-1].error.error_message == (
