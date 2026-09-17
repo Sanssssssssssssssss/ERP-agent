@@ -18,6 +18,8 @@ Connection settings are entered in the workbench; dependencies and startup comma
 
 `TaskEvidence` is optional host-supplied benchmark evidence. The desktop does not supply it. The separate [company-record RAG experiment](../experiments/company_records_rag/README.md) remains outside the workbench runtime.
 
+After an administrator tightens field ACLs, start a new business session. Re-running the same business or resuming after approval preserves its existing session and historical read results; a policy reload does not remove data already present in that context.
+
 ## Validation
 
 [CI](../.github/workflows/checks.yml) runs existing desktop, approval, native-read, write-guard, evidence, and provider-recovery checks offline. Historical MCP comparisons run in their own environment. Sidecar preparation imports the packaged runtime and reads its native tool catalog and model-rename resource before replacing the prior bundle.
