@@ -65,6 +65,10 @@ class _Guard:
             raise ValueError(f"manufacturing deadline must be at least {minimum} for BOM {bom_id}; correct the dates and validate again")
 
     def qualify(self, row: dict, parent: dict | None = None, previous: dict | None = None) -> None:
+        if previous and "duration_expected" in row and _id(row.get("workcenter_id")) != _id(previous.get("workcenter_id")):
+            state = self.read("mrp.workorder", previous["id"], ("state",))["state"]
+            if state not in {"progress", "done", "cancel"}:
+                raise ValueError("Odoo recomputes duration_expected after changing workcenter_id. Write the workcenter first, read it back, then separately validate the requested duration_expected if still needed.")
         production_id = _id(row.get("production_id"))
         if parent is None:
             scope_id = production_id or _id((previous or {}).get("production_id"))
@@ -131,7 +135,7 @@ class _Guard:
                     raise ValueError("nested workorder is not owned by the production; validate again")
                 if "production_id" in values and _id(values["production_id"]) != _id(parent.get("id")):
                     raise ValueError("nested workorder production is inconsistent; validate again")
-                self.qualify({**previous, **values}, parent)
+                self.qualify({**previous, **values}, parent, previous=previous)
             elif code in (4, 6):
                 for linked_id in ([record_id] if code == 4 else command[2]):
                     self.qualify(self.read("mrp.workorder", linked_id, _WO_FIELDS), parent)

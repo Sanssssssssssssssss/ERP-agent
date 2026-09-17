@@ -113,6 +113,26 @@ class MinimalWriteGuardTests(unittest.TestCase):
         self.assertIn("evidence", denied["error"])
         self.assertEqual(self.writer.calls, [])
 
+    def test_workcenter_duration_overwrite_is_rejected_before_direct_or_nested_send(self):
+        self.reader.metadata['duration_expected'] = {'type': 'float'}
+        self.reader.records['mrp.workorder'][31].update(state='ready', duration_expected=100)
+        self.reader.records['product.product'][4]['description'] = False
+        values = {'workcenter_id': 8, 'duration_expected': 1484}
+        direct = self.validate(values=values, ids=(31,))
+        nested = self.validate('mrp.production', {'workorder_ids': [[1, 31, values]]}, ids=(2,))
+        for result in (direct, nested):
+            self.assertFalse(result['success'], result)
+            self.assertIn('recomputes duration_expected', str(result))
+        self.assertEqual(self.writer.calls, [])
+        for fields in ({'workcenter_id': 8}, {'duration_expected': 1484}):
+            valid = self.validate(values=fields, ids=(31,))
+            self.assertTrue(valid['success'], valid)
+            self.assertTrue(self.actions.execute_approved_write(valid['approval'], confirm=True)['success'])
+        self.assertEqual(self.reader.records['mrp.workorder'][31]['duration_expected'], 1484)
+        self.assertTrue(self.validate(values=values, ids=(31,))['success'])
+        self.reader.records['mrp.workorder'][31].update(workcenter_id=7, state='progress')
+        self.assertTrue(self.validate(values=values, ids=(31,))['success'])
+
     def test_mo_identity_changes_check_remaining_workorders(self):
         self.assertFalse(self.validate("mrp.production", {"product_id": 4, "bom_id": 11}, ids=(1,))["success"])
         self.assertFalse(self.validate("mrp.production", {"product_id": 4, "bom_id": 11, "workorder_ids": [[1, 30, {"name": "ordinary edit"}]]}, ids=(1,))["success"])
