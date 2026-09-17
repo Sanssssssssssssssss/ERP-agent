@@ -114,6 +114,33 @@ class TaskEvidenceTests(unittest.TestCase):
             self.assertFalse(result["success"], result)
             self.assertEqual(w.calls, [])
 
+    def test_release_fields_block_only_configured_release_without_writing(self):
+        for required, value, allowed in [(True, False, False), (True, '2026-09-25 08:00:00', True), (False, False, True)]:
+            with self.subTest(required=required, value=value), patch.dict(os.environ, {
+                    'ODOO_MCP_ENABLE_WRITES': '1', 'ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS': 'purchase.order.button_confirm'}):
+                a, w, rt, spec = self.setup_action()
+                rt.client.metadata['date_planned'] = {'type': 'datetime'}
+                rt.client.records['purchase.order'][8]['date_planned'] = value
+                if required:
+                    spec['release_fields'] = [{'model': 'purchase.order', 'method': 'button_confirm', 'fields': ['date_planned']}]
+                a.task_evidence = TaskEvidence(a.reads, spec, a.store.path.parent / 'release-evidence.json')
+                before = copy.deepcopy(rt.client.records['purchase.order'][8])
+                result = a.execute_method('purchase.order', 'button_confirm', kwargs={'ids': [8]})
+                self.assertEqual(result['success'], allowed, result)
+                self.assertEqual(len(w.calls), int(allowed))
+                if not allowed:
+                    self.assertIn('date_planned', result['error'])
+                    self.assertEqual(rt.client.records['purchase.order'][8], before)
+                self.assertEqual(a.task_evidence.release_check({'model': 'purchase.order', 'method': 'unrelated'}), [])
+
+    def test_release_presence_accepts_boolean_false_and_numeric_zero(self):
+        a, _, rt, spec = self.setup_action()
+        rt.client.metadata.update(active={'type': 'boolean'}, quantity={'type': 'float'})
+        rt.client.records['purchase.order'][8].update(active=False, quantity=0)
+        spec['release_fields'] = [{'model': 'purchase.order', 'method': 'button_confirm', 'fields': ['active', 'quantity']}]
+        evidence = TaskEvidence(a.reads, spec, a.store.path.parent / 'presence-evidence.json')
+        self.assertTrue(evidence.release_check({'model': 'purchase.order', 'method': 'button_confirm', 'instance': 'default', 'kwargs': {'ids': [8]}}))
+
     def test_purchase_release_checks_sources_and_quantity_without_rewriting(self):
         for origin, quantity, quantum, expected in [('SO7, SO8', 2, 1, True), ('SO7, SO8', 1, 1, False),
                 ('SO7, SO8', .2, .1, True), ('SO_BAD', 2, 1, False), ('SO7, SO7', 2, 1, False)]:

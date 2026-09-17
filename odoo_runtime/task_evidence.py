@@ -34,6 +34,12 @@ class TaskEvidence:
         self.identity = reads.identity_context(self.instance)
         self.digest = ActionStore.digest(self.spec)
         self.bindings = copy.deepcopy(self.spec.get("bindings", []))
+        self.release_fields = copy.deepcopy(self.spec.get("release_fields", []))
+        for rule in self.release_fields:
+            if (not isinstance(rule, dict) or not all(isinstance(rule.get(k), str) and rule[k] for k in ("model", "method"))
+                    or not isinstance(rule.get("fields"), list) or not rule["fields"]
+                    or any(not isinstance(f, str) or not f for f in rule["fields"])):
+                raise ValueError("release fields require a host-selected model, method and nonempty field list")
         self.purchase_sources = copy.deepcopy(self.spec.get("purchase_sources", []))
         for scope in self.purchase_sources:
             products = self._search(scope["product"], ["id"])
@@ -186,9 +192,31 @@ class TaskEvidence:
                 self._event("purchase_sources_checked", record_id=order["id"], product_id=scope["product_id"], quantity=quantity, origins=refs)
         return evidence
 
+    def release_check(self, payload):
+        relevant = [r for r in self.release_fields if (r["model"], r["method"]) == (payload.get("model"), payload.get("method"))]
+        if not relevant:
+            return []
+        self._identity_check(payload["instance"], payload.get("kwargs", {}).get("context"))
+        ids = payload.get("kwargs", {}).get("ids") or []
+        fields = sorted({f for r in relevant for f in r["fields"]})
+        model = payload["model"]
+        rows = self._search({"model": model, "domain": [["id", "in", ids]]}, ["id", *fields])
+        if not ids or len(rows) != len(set(ids)) or {row["id"] for row in rows} != set(ids):
+            raise ValueError("release field targets are unavailable")
+        metadata = self.reads.instances[self.instance]._metadata(model)
+        missing = {row["id"]: [f for f in fields if row[f] is None or row[f] == "" or row[f] == []
+                   or (row[f] is False and metadata.get(f, {}).get("type") != "boolean")] for row in rows}
+        missing = {record_id: names for record_id, names in missing.items() if names}
+        if missing:
+            self._event("rejected", model=model, reason="missing_release_fields", missing=missing)
+            raise ValueError(f"{model}.{payload['method']} requires the host-requested fields before release; missing by record: {missing}. Set these fields explicitly; a different computed field does not satisfy this requirement.")
+        self._event("release_fields_checked", model=model, fields=fields, record_ids=ids)
+        return [["release_fields", model, rows]]
+
     def prestate(self, kind, payload):
         sources = self.bind(payload) if kind == "write" else []
         if kind == "method":
+            sources.extend(self.release_check(payload))
             sources.extend(self.purchase_check(payload))
         rules = []
         if self.rules:
