@@ -346,7 +346,7 @@ def resource_paths_with_project_trust(
         cwd=paths.cwd,
         agents_root=paths.agents_root,
         paths=paths.paths,
-        project_resources_enabled=trusted,
+        project_resources_enabled=paths.project_resources_enabled and trusted,
         extra_skills_dirs=paths.extra_skills_dirs,
         extra_prompts_dirs=paths.extra_prompts_dirs,
         extra_themes_dirs=paths.extra_themes_dirs,

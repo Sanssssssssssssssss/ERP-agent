@@ -3,12 +3,35 @@ from pathlib import Path
 import pytest
 
 from pi_coding import PiPaths, PiResourcePaths
+from pi_coding.context import discover_project_context
 from pi_coding.resources import (
     ResourceError,
     derive_description,
     discover_system_prompt_resources,
     parse_markdown_resource,
+    resource_paths_with_project_trust,
 )
+
+
+@pytest.mark.parametrize("filename", ["AGENTS.md", "AGENTS.override.md", "CLAUDE.md"])
+def test_project_trust_preserves_explicit_resource_opt_out(tmp_path: Path, filename: str) -> None:
+    cwd = tmp_path / "project"
+    cwd.mkdir()
+    (cwd / filename).write_text("Project-only instruction", encoding="utf-8")
+    paths = PiResourcePaths(root=tmp_path / "home", cwd=cwd, project_resources_enabled=False)
+    effective = resource_paths_with_project_trust(paths, trusted=True)
+    assert discover_project_context(effective) == ()
+    assert not effective.project_resources_enabled
+
+
+@pytest.mark.parametrize("trusted", [False, True])
+def test_project_resource_opt_in_still_requires_trust(tmp_path: Path, trusted: bool) -> None:
+    cwd = tmp_path / "project"
+    cwd.mkdir()
+    (cwd / "AGENTS.md").write_text("Project instruction", encoding="utf-8")
+    paths = PiResourcePaths(root=tmp_path / "home", cwd=cwd)
+    effective = resource_paths_with_project_trust(paths, trusted=trusted)
+    assert bool(discover_project_context(effective)) is trusted
 
 
 def test_resource_paths_use_pi_subdirectories(tmp_path: Path) -> None:

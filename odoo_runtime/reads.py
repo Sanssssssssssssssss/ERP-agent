@@ -1239,6 +1239,7 @@ class NativeReads:
                 "stock_quants": stock_quants,
                 "quote_scope": {
                     "product_relation_field": "applicable_product_ids",
+                    "derived_fields": {"applicable_product_ids": "Computed by read_supply_context, not an Odoo ORM field; do not request it with read_record or find_records."},
                     "eligibility": "Product relation only; evaluate each returned row's date_start, date_end, and company_id before choosing it.",
                 },
                 "stock_scope": "Raw internal stock.quant rows are not aggregated across company_id.",

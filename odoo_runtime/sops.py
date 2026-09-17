@@ -84,7 +84,7 @@ SOPS = {
         models=[],
         steps=[
             "Read the current target and prepare the smallest proposed values.",
-            "Call preview_write, then validate_write against live metadata; resolve every issue before execution.",
+            "When the proposed values are ready, call validate_write directly; it includes the live metadata preview. Use preview_write separately only to inspect a proposal before validation. Resolve blocking issues before execution.",
             "Execute only the exact durable approval returned by validate_write with confirm=true. A model-provided confirm flag never grants host authorization.",
             "Read the affected records again and reconcile any uncertain outcome instead of retrying blindly.",
         ],

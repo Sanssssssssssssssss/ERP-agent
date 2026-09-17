@@ -184,3 +184,12 @@ def business_write_prestate(runtime: Any, payload: dict) -> list:
                 for record_id in sorted(remaining):
                     guard.qualify(guard.read("mrp.workorder", record_id, _WO_FIELDS), row)
     return [[model, record_id, list(fields), ActionStore.digest(row)] for (model, record_id, fields), row in sorted(guard.rows.items())]
+
+
+def manufacturing_confirm_prestate(runtime: Any, payload: dict) -> list:
+    if (payload.get("model"), payload.get("method")) != ("mrp.production", "action_confirm"):
+        return []
+    guard = _Guard(runtime, payload)
+    for record_id in payload.get("kwargs", {}).get("ids") or []:
+        guard.window(guard.read("mrp.production", record_id, _WINDOW_FIELDS))
+    return [[model, record_id, list(fields), ActionStore.digest(row)] for (model, record_id, fields), row in sorted(guard.rows.items())]

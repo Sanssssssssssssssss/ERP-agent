@@ -264,7 +264,7 @@ class WorldStoreTest(unittest.TestCase):
             self.assertEqual(external["response"]["count"], 100)
             self.assertTrue(external["response"]["has_more"])
             self.assertEqual(external["response"]["next_offset"], 100)
-            self.assertEqual(external["response"]["warnings"], {"kind": "array", "items": 1, "path": "$.warnings"})
+            self.assertEqual(external["response"]["warnings"], ["results are paged"])
             self.assertEqual(external["response"]["acl"], {"read": True})
             self.assertNotIn("VENDOR-UNIQUE-99", projected[0].text)
             self.assertLess(len(projected[0].text.encode()), len(text.encode()))
@@ -285,7 +285,16 @@ class WorldStoreTest(unittest.TestCase):
             recalled_row = recalled_item["value"]
             self.assertEqual(recalled_row["id"], 99)
             self.assertIn("VENDOR-UNIQUE-99", recalled_row["vendor_comment"]["preview"])
+            self.assertEqual(recalled_row["bom_id"], [799, "BOM-99"])
             self.assertEqual(recalled_row["components"], {"kind": "array", "items": 100, "path": "$.result.99.components"})
+            self.assertNotIn("paths", recalled["observation"])
+            self.assertNotIn("preview", recalled["observation"])
+            self.assertEqual(recalled["observation"]["observation_ref"], receipt["receipt_id"])
+            self.assertEqual(recalled["observation"]["result_sha256"], receipt["result_sha256"])
+            self.assertIn("response", recalled["observation"])
+            self.assertEqual(recalled["observation"]["access_scope"]["identity_id"], identity["identity_id"])
+            self.assertIn("freshness", recalled["observation"])
+            self.assertEqual(recalled["integrity"], "verified")
             string_chunk = world.read_observation(
                 identity, receipt["receipt_id"], path="$.result.99.vendor_comment", cursor=0, limit=20,
             )
@@ -327,6 +336,8 @@ class WorldStoreTest(unittest.TestCase):
             search_payload = json.loads(searched.text)
             self.assertEqual(search_payload["items"][0]["observation_ref"], receipt["receipt_id"])
             self.assertEqual(search_payload["items"][0]["matches"][0]["path"], "$.result.99.vendor_comment")
+            self.assertIn("paths", search_payload["items"][0])
+            self.assertIn("preview", search_payload["items"][0])
             reread = asyncio.run(tools["read_observation"].execute("reread", {
                 "observation_ref": receipt["receipt_id"], "path": "$.result",
                 "query": "VENDOR-UNIQUE-99", "fields": ["id", "vendor_comment"], "limit": 1,
@@ -338,6 +349,7 @@ class WorldStoreTest(unittest.TestCase):
                 "observation_ref": "obs-nope",
             }))
             self.assertEqual(json.loads(missing.text)["error_class"], "unknown_reference")
+
             with self.assertRaises(PermissionError):
                 world.read_observation({**identity, "identity_id": "other"}, receipt["receipt_id"])
 
@@ -376,6 +388,20 @@ class WorldStoreTest(unittest.TestCase):
                 "observation_ref": receipt["receipt_id"],
             }))
             self.assertEqual(json.loads(corrupted.text)["error_class"], "invalid_request")
+
+    def test_bounded_value_keeps_small_scalar_lists_only_within_byte_limit(self):
+        self.assertEqual(WorldStore._bounded_value([42, "BOM-42"], "$.bom_id"), [42, "BOM-42"])
+        self.assertEqual(
+            WorldStore._bounded_value(["x" * 764], "$.near_limit"), ["x" * 764],
+        )
+        self.assertEqual(
+            WorldStore._bounded_value(["x" * 765], "$.over_limit"),
+            {"kind": "array", "items": 1, "path": "$.over_limit"},
+        )
+        self.assertEqual(
+            WorldStore._bounded_value([[42]], "$.nested"),
+            {"kind": "array", "items": 1, "path": "$.nested"},
+        )
 
     def test_schema_table_projection_and_heterogeneous_rows_are_safe(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, ENV):

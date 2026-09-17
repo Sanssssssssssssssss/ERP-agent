@@ -417,7 +417,7 @@ class WorldStore:
                     entries = [(original_index, self._select_fields(item, fields))
                                for original_index, item in entries]
                 return {
-                    "observation": self._observation_summary(receipt),
+                    "observation": self._observation_summary(receipt, include_discovery=path is None),
                     "payload_source": source, "integrity": integrity,
                     "path": resolved_path,
                     "result": self._page_located(entries, cursor, limit, resolved_path),
@@ -428,7 +428,7 @@ class WorldStore:
                 value = self._select_fields(value, fields)
             page = self._page_value(value, cursor, limit, resolved_path)
             return {
-                "observation": self._observation_summary(receipt),
+                "observation": self._observation_summary(receipt, include_discovery=path is None),
                 "payload_source": source,
                 "integrity": integrity,
                 "path": resolved_path,
@@ -494,13 +494,15 @@ class WorldStore:
         visit(value, path)
         return matches
 
-    def _observation_summary(self, receipt: dict[str, Any]) -> dict[str, Any]:
+    def _observation_summary(
+        self, receipt: dict[str, Any], *, include_discovery: bool = True,
+    ) -> dict[str, Any]:
         request = receipt.get("request") if isinstance(receipt.get("request"), dict) else {}
         identity = receipt.get("identity") if isinstance(receipt.get("identity"), dict) else {}
         identity_id = identity.get("identity_id")
         generation = receipt.get("generation")
         payload = receipt.get("visible_payload", receipt.get("raw_result"))
-        return {
+        summary = {
             "observation_ref": receipt["receipt_id"],
             "tool": receipt.get("tool"),
             "success": receipt.get("outcome", {}).get("success") is True,
@@ -510,8 +512,6 @@ class WorldStore:
             "request": self._request_summary(request),
             "result_sha256": receipt.get("result_sha256"),
             "response": self._response_summary(payload, receipt.get("delivery")),
-            "paths": self._payload_paths(payload),
-            "preview": self._payload_preview(payload),
             "access_scope": {
                 "same_identity_required": True,
                 "identity_id": identity_id,
@@ -525,6 +525,10 @@ class WorldStore:
                 "live_refresh_required_for_current_state": generation != self._generation.get(identity_id, 0),
             },
         }
+        if include_discovery:
+            summary["paths"] = self._payload_paths(payload)
+            summary["preview"] = self._payload_preview(payload)
+        return summary
 
     @staticmethod
     def _request_summary(request: dict[str, Any]) -> dict[str, Any]:
@@ -676,6 +680,9 @@ class WorldStore:
                 "preview": value[:160] + ("…" if len(value) > 160 else ""),
             }
         if isinstance(value, list):
+            if (all(isinstance(item, (str, int, float, bool)) or item is None for item in value)
+                    and len(json.dumps(value, ensure_ascii=False, default=str).encode()) <= INLINE_VALUE_BYTES):
+                return _json_copy(value)
             return WorldStore._value_descriptor(value, path)
         if isinstance(value, dict):
             candidate = {

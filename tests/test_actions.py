@@ -312,6 +312,11 @@ class NativeActionCheckpointTests(unittest.TestCase):
             with self.subTest(model=model, method=method):
                 actions, writer, runtime = _actions()
                 runtime.client.records[model] = {7: {"id": 7, "state": before}}
+                if model == "mrp.production":
+                    runtime.client.records["mrp.bom"] = {1: {"id": 1, "produce_delay": 2}}
+                    runtime.client.records[model][7].update(
+                        bom_id=1, date_start="2026-09-12 08:00:00", date_deadline="2026-09-14 08:00:00"
+                    )
                 with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1", "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": ""}):
                     self.assertFalse(actions.execute_method(model, method, kwargs={"ids": [7]})["success"])
                     self.assertEqual(writer.calls, [])
@@ -332,6 +337,23 @@ class NativeActionCheckpointTests(unittest.TestCase):
                         self.assertEqual(result["action_status"], "verified")
                         self.assertTrue(actions2.execute_method(model, method, kwargs={"ids": [7]})["success"])
                         self.assertEqual(send.call_count, 1)
+
+    def test_mo_confirmation_rechecks_resolved_window_after_approval(self):
+        actions, writer, runtime = _actions(approval_mode="host")
+        runtime.client.records["mrp.bom"] = {1: {"id": 1, "produce_delay": 2}}
+        runtime.client.records["mrp.production"] = {7: {
+            "id": 7, "state": "draft", "bom_id": 1,
+            "date_start": "2026-09-12 08:00:00", "date_deadline": "2026-09-14 08:00:00",
+        }}
+        with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1", "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": "mrp.production.action_confirm"}):
+            pending = actions.execute_method("mrp.production", "action_confirm", kwargs={"ids": [7]})
+            self.assertTrue(pending["approval_required"])
+            self.assertTrue(actions.store.approve(pending["action_id"], "desktop-user"))
+            runtime.client.records["mrp.production"][7]["date_deadline"] = "2026-09-13 08:00:00"
+            stale = actions.execute_method("mrp.production", "action_confirm", kwargs={"ids": [7]})
+        self.assertFalse(stale["success"])
+        self.assertIn("manufacturing deadline", stale["error"])
+        self.assertEqual(writer.calls, [])
 
     def test_custom_approval_ttl_is_applied(self):
         actions, _, _ = _actions(approval_ttl_seconds=3600)

@@ -90,6 +90,21 @@ class BusinessFactsTests(unittest.TestCase):
         })
         self.assertEqual(report["issues"], [])
 
+    def test_mo_diagnostic_status_distinguishes_missing_bom_and_window_violations(self):
+        for bom_id, deadline, status in (
+            (None, "2026-09-14 08:00:00", "unavailable"),
+            (None, "2026-09-13 08:00:00", "unavailable"),
+            (1, "2026-09-14 08:00:00", "pass"),
+            (1, "2026-09-13 08:00:00", "violated"),
+        ):
+            with self.subTest(bom_id=bom_id, deadline=deadline):
+                values = {"date_start": "2026-09-12 08:00:00", "date_deadline": deadline}
+                if bom_id is not None:
+                    values["bom_id"] = bom_id
+                report = _facts(self.data).inspect({"model": "mrp.production", "operation": "create", "values": values})
+                self.assertEqual(report["facts"][0]["diagnostic_status"], status)
+                self.assertEqual(bool(report["issues"]), status == "violated")
+
     def test_planned_deadline_after_linked_demand_is_separate_from_lead_estimate(self):
         report = _facts(self.data).inspect({
             "model": "mrp.production", "operation": "create", "values": {
@@ -147,6 +162,18 @@ class BusinessFactsTests(unittest.TestCase):
         })
         self.assertEqual(report["issues"][0]["code"], "business_facts_unavailable")
         self.assertIn("produce_delay", report["issues"][0]["message"])
+        self.assertEqual(report["issues"][0]["status"], "unavailable")
+
+    def test_missing_or_invalid_window_is_not_a_pass(self):
+        for values in ({"bom_id": 1}, {"bom_id": 1, "date_start": "invalid"}):
+            with self.subTest(values=values):
+                report = _facts(self.data).inspect({
+                    "model": "mrp.production", "operation": "create", "values": values,
+                })
+                if report["facts"]:
+                    self.assertEqual(report["facts"][0]["diagnostic_status"], "unavailable")
+                else:
+                    self.assertEqual(report["issues"][0]["status"], "unavailable")
 
     def test_redacted_fact_is_explicitly_unavailable(self):
         actions = _Actions(self.data)

@@ -107,7 +107,7 @@ class BusinessFacts:
             return {
                 "facts": [],
                 "issues": [{
-                    "code": "business_facts_unavailable", "severity": "error",
+                    "code": "business_facts_unavailable", "severity": "warning", "status": "unavailable",
                     "message": str(exc), "sources": [],
                 }],
             }
@@ -142,6 +142,10 @@ class BusinessFacts:
                 fact, row_issues = self._manufacturing(row, boms, parents, demands)
             else:
                 fact, row_issues = self._purchase(row, demands)
+            if row_issues:
+                fact["diagnostic_status"] = "violated"
+                for issue in row_issues:
+                    issue["status"] = "violated"
             facts.append(fact)
             issues.extend(row_issues)
         return {"facts": facts, "issues": issues}
@@ -149,7 +153,18 @@ class BusinessFacts:
     def _manufacturing(self, row: dict, boms: dict[int, dict], parents: dict[str, dict], demands: dict[str, dict]) -> tuple[dict, list[dict]]:
         bom_id = _id(row.get("bom_id"))
         if bom_id is None:
-            raise ValueError("mrp.production.bom_id is required to read manufacturing lead")
+            sources = [{"model": "mrp.production", "id": row.get("id"), "fields": ["bom_id", "date_start", "date_deadline", "origin"]}]
+            fact = {
+                "record_id": row.get("id"), "model": "mrp.production", "bom_id": None,
+                "diagnostic_status": "unavailable", "unavailable_fields": ["bom_id"], "date_start": row.get("date_start"),
+                "date_deadline": row.get("date_deadline"), "sources": sources,
+            }
+            issues: list[dict] = []
+            self._demand_conflicts(
+                row, _when(row.get("date_deadline")), row.get("date_deadline"), demands, sources, issues,
+                code="deadline_after_linked_demand_need", field="planned_deadline",
+            )
+            return fact, issues
         bom = boms.get(bom_id)
         if not bom or not isinstance(bom.get("produce_delay"), (int, float)):
             raise ValueError(f"mrp.bom {bom_id} produce_delay is unavailable")
@@ -167,6 +182,7 @@ class BusinessFacts:
             "date_start": row.get("date_start"), "date_deadline": row.get("date_deadline"),
             "lead_based_earliest_finish": _stamp(earliest) if earliest else None,
             "lead_estimate": "mrp.bom.produce_delay; operation minutes are not substituted",
+            "diagnostic_status": "pass" if start is not None and deadline is not None else "unavailable",
             "sources": sources,
         }
         issues: list[dict] = []

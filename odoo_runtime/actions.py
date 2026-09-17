@@ -39,7 +39,7 @@ from odoo_runtime._odoo_core.write_policy import (
 )
 from odoo_runtime.reads import NativeReads
 from odoo_runtime.store import ActionStore
-from odoo_runtime.write_guards import business_write_prestate
+from odoo_runtime.write_guards import business_write_prestate, manufacturing_confirm_prestate
 
 ACTION_TOOLS = frozenset(
     {
@@ -615,7 +615,8 @@ class NativeActions:
             if returned_ids != requested_ids:
                 missing_ids = sorted(requested_ids - returned_ids)
                 raise ValueError(f"native action target does not exist: {model} {missing_ids}")
-            return {"records": records}
+            dependencies = manufacturing_confirm_prestate(self.reads.instances[instance], payload)
+            return {"records": records, **({"business_dependencies": dependencies} if dependencies else {})}
         if (model, payload.get("method")) == (
             "sale.advance.payment.inv",
             "create_invoices",
