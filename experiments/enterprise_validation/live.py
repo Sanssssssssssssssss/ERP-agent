@@ -98,7 +98,8 @@ def run(number):
     folder = LIVE / number
     assert not folder.exists(), "An existing paid attempt cannot be restarted"
     with (RUN / "manage.log").open("a", encoding="utf-8") as log:
-        snapshot("before-" + number.lower(), False, log)
+        # Every business starts from a restored copy of the same immutable baseline.
+        snapshot("baseline-10000", True, log)
     ready(config, account)
     folder.mkdir(exist_ok=False)  # A previous attempt, including a failure, is never silently rerun.
     save(folder / "input.json", spec)
@@ -106,7 +107,8 @@ def run(number):
     os.environ.update(ODOO_USERNAME=account["login"], ODOO_API_KEY=account["api_key"],
                       LLM_MODEL=frozen["model"], LLM_THINKING_TYPE="high", ERP_MEMORY_MODE="off", PYTHONUTF8="1")
     save(folder / "attempt.json", {"started_at": time.time(), "source_commit": frozen["source_commit"],
-                                   "initial_snapshot_sha256": sha(RUN / ("snapshots/before-" + number.lower()) / "database.dump"),
+                                   "initial_snapshot": "baseline-10000",
+                                   "initial_snapshot_sha256": frozen["snapshot_sha256"],
                                    "account_role": spec["role"], "company_ids": account["company_ids"]})
     started = time.monotonic()
     events = (folder / "host-events.jsonl").open("a", encoding="utf-8")

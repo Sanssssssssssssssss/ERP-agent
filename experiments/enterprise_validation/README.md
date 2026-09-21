@@ -29,3 +29,5 @@ $env:WORKBENCH_HOST_ROOT = "$PWD"
 ```
 
 验收入口：`retrieval_check.py prepare/run/concurrency/lifecycle --output <本机.runtime目录>`；顺序执行。`live.py freeze` 固定六条业务输入、两题回归配置和源码/安装包哈希；配置已授权的 `LLM_BASE_URL/LLM_API_KEY` 后执行 `live.py E01` 至 `E06`，每题只允许一次。ERPBench 使用 `bench_launch.sh 2003/2156`，WSL PATH 需包含现有 Harbor 环境。原始日志、请求、用量、审批及前后快照均在本机实验目录；总状态只看 `docs/enterprise-validation.md`。
+
+六题各自从 `baseline-10000` 恢复后开始，结束保存 `after-e01` 等快照。查看旧题的当前业务单据前先恢复其对应快照；原始 trace 可直接查看，不依赖当前数据库状态。

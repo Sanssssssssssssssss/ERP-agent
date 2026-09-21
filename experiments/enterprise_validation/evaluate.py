@@ -42,6 +42,21 @@ if CASE == "data":
     invoices=moves.filtered(lambda m: m.move_type in ("out_invoice","in_invoice","out_refund","in_refund"))
     check("invoice_residuals",all(near(abs(sum(m.line_ids.filtered(lambda l:l.account_id.account_type in ("asset_receivable","liability_payable")).mapped("amount_residual_currency"))),m.amount_residual) for m in invoices))
     check("source_company_relations",all(s.company_id==s.warehouse_id.company_id and (not s.partner_id.company_id or s.partner_id.company_id==s.company_id) for s in env["sale.order"].search([])) and all(p.company_id==p.picking_type_id.warehouse_id.company_id and (not p.partner_id.company_id or p.partner_id.company_id==p.company_id) for p in env["purchase.order"].search([])))
+    productions=env["mrp.production"].search([])
+    check("production_company_bom",all(p.bom_id and p.bom_id.company_id==p.company_id and p.picking_type_id.warehouse_id.company_id==p.company_id and p.bom_id.product_id==p.product_id for p in productions))
+    complete=productions.filtered(lambda p:p.state=="done")
+    check("production_schedule",bool(complete) and all(p.date_start and p.date_finished and p.date_start<=p.date_finished for p in complete))
+    check("production_operations",all(p.workorder_ids and set(p.workorder_ids.operation_id.ids)==set(p.bom_id.operation_ids.ids) and all(w.state=="done" and w.workcenter_id.company_id==p.company_id and w.workcenter_id in (w.operation_id.workcenter_id|w.operation_id.workcenter_id.alternative_workcenter_ids) for w in p.workorder_ids) for p in complete))
+    material_ok=True
+    for p in complete:
+        expected,actual=defaultdict(float),defaultdict(float)
+        factor=p.product_uom_id._compute_quantity(p.product_qty,p.bom_id.product_uom_id)/p.bom_id.product_qty
+        for line in p.bom_id.bom_line_ids:
+            expected[line.product_id.id]+=line.product_uom_id._compute_quantity(line.product_qty*factor,line.product_id.uom_id)
+        for move in p.move_raw_ids:
+            actual[move.product_id.id]+=move.product_uom._compute_quantity(move.quantity,move.product_id.uom_id)
+        material_ok &= bool(expected) and set(expected)==set(actual) and all(near(expected[k],actual[k]) for k in expected) and near(p.qty_produced,p.product_qty) and all(m.state=="done" for m in p.move_raw_ids|p.move_finished_ids)
+    check("production_materials",material_ok)
     quantities=defaultdict(float)
     for m in env["stock.move"].search([("state","=","done")]):
         qty=m.product_uom._compute_quantity(m.quantity,m.product_id.uom_id)
