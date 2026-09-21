@@ -22,6 +22,8 @@ After an administrator tightens field ACLs, start a new business session. Re-run
 
 ## Validation
 
+Frozen source checkpoint `backend-baseline-20260922-memory-off`: optional Mem0 and the persistent demo are included; both desktop and direct host default to memory off. Existing learning receipts do not establish a business-score or cost improvement. Local validation: 900 passed, 4 skipped, 119 subtests; the subsequent host-default check passed all 8 memory tests. Desktop typecheck, build, self-check and renderer checks passed. Older SQLite test cleanup emits Windows file-lock warnings after the successful test run. Full receipts remain in `.runtime/enterprise-validation-20260922/baseline/` and `.runtime/memory-integration-20260921/`.
+
 [CI](../.github/workflows/checks.yml) runs existing desktop, approval, native-read, write-guard, evidence, and provider-recovery checks offline. Historical MCP comparisons run in their own environment. Sidecar preparation imports the packaged runtime and reads its native tool catalog and model-rename resource before replacing the prior bundle.
 
 Offline checks establish mechanism coverage. Real business regression requires isolated Odoo runs with the source/configuration, logs, `reward.txt`, and `verifier_details.json` retained; two cases establish only those cases. Current run receipts belong with the release validation report, not the historical scores.

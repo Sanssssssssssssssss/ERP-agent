@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+# 动作账本：SQLite 保存授权、规范化载荷、执行前提和回读证据。
+# 正常状态：pending_approval → approved → executing → sending → verified。
+# executing 表示已占用、尚未允许发送；sending 表示请求可能已到达 Odoo。
+# sending 中断后进入 needs_reconciliation。只能核对，不能自动重发。
+# action_key 用于相同动作复用；resource_key 用于拦截同资源的未决动作。
+# BEGIN IMMEDIATE 保护“检查并改变状态”；RLock 只解决同进程连接并发。
+# 账本事务不涵盖 Odoo 网络请求。二者之间的不确定性靠状态与回读处理。
+
 import hashlib
 import json
 import os
@@ -95,6 +103,8 @@ class ActionStore:
 
     def recover_interrupted(self) -> None:
         """A committed sending marker is ambiguous; an execution claim alone is safe."""
+        # executing 可恢复为未过期的 approved；sending 必须进入待核对。
+        # 桌面 host 另有审批失效策略。账本恢复不等于自动恢复整项业务。
         now = time.time()
         with self._lock:
             self._begin()
@@ -192,6 +202,7 @@ class ActionStore:
 
     def approve(self, action_id: str, source: str) -> bool:
         """Trusted host hook. This method is intentionally not exposed as an agent tool."""
+        # source 用于记录授权来源。真正的信任边界是只向宿主开放此入口。
         source = source.strip()
         if not source or source.lower() in {"model", "agent", "confirm"}:
             raise ValueError("approval source must identify a trusted host authority")

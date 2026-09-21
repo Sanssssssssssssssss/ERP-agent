@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+# 桌面状态仓库：会话、业务、运行、审批展示和材料索引。
+# 目录锁拒绝第二个 host；RLock 保护本进程的保存与事件追加。
+# 保存流程：同目录临时文件 → flush/fsync → 原子替换正式文件。
+# 状态文件损坏时拒绝启动。不能用空状态覆盖已有业务记录。
+# events 是有上限的通知队列。完整执行历史另存于各 run 的 trace 和账本。
+
 import json
 import os
 import tempfile

@@ -813,6 +813,7 @@ export function useWorkbench() {
         odoo_url: current.odoo_url,
         odoo_db: current.odoo_db,
         odoo_username: current.odoo_username,
+        long_term_memory: current.long_term_memory ? 'on' : 'off',
         model_key: '',
         odoo_key: ''
       })
@@ -829,7 +830,10 @@ export function useWorkbench() {
   const saveSettings = async () => {
     setSettingsSaving(true)
     try {
-      const updated = await call<Settings>('save_settings', settingsDraft)
+      const updated = await call<Settings>('save_settings', {
+        ...settingsDraft,
+        long_term_memory: settingsDraft.long_term_memory === 'on'
+      })
       setSettings(updated)
       setSettingsDraft((current) => ({ ...current, model_key: '', odoo_key: '' }))
       const currentHealth = await checkConnection(true)

@@ -3,7 +3,7 @@ import { app } from "electron";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { publicSettings, saveSettings } from "./settings";
+import { publicSettings, saveSettings, secretEnvironment } from "./settings";
 import { assertRequest, businessScope, canChangeSettings, observedRecordUrl, recordedArtifactPath, safeMaterialName, strictBase64 } from "./ipc-security";
 import { safeErrorMessage } from "./host";
 
@@ -11,11 +11,25 @@ export async function runSelfCheck(): Promise<void> {
   // Even a manually invoked packaged --self-check must not overwrite settings.
   const previous = app.getPath("userData");
   const isolated = await mkdtemp(join(tmpdir(), "odoo-workbench-self-check-"));
+  const previousMemoryMode = process.env.ERP_MEMORY_MODE;
+  delete process.env.ERP_MEMORY_MODE;
   app.setPath("userData", isolated);
   try {
   const initial = await publicSettings();
   assert.equal("model_key" in initial, false);
   assert.equal("odoo_key" in initial, false);
+  assert.equal(initial.long_term_memory, false);
+  assert.equal((await secretEnvironment()).ERP_MEMORY_MODE, "off");
+  await assert.rejects(() => saveSettings({ long_term_memory: "false" } as never), /CONFIG_INPUT_INVALID/);
+  assert.equal((await saveSettings({ long_term_memory: true })).long_term_memory, true);
+  assert.equal((await publicSettings()).long_term_memory, true);
+  assert.equal((await secretEnvironment()).ERP_MEMORY_MODE, "on");
+  process.env.ERP_MEMORY_MODE = "off";
+  assert.equal((await publicSettings()).long_term_memory, false);
+  assert.equal((await secretEnvironment()).ERP_MEMORY_MODE, "off");
+  delete process.env.ERP_MEMORY_MODE;
+  await saveSettings({ long_term_memory: false });
+  assert.equal((await secretEnvironment()).ERP_MEMORY_MODE, "off");
 
   await assert.rejects(
     () => saveSettings({ base_url: "http://example.com" }),
@@ -90,6 +104,8 @@ export async function runSelfCheck(): Promise<void> {
   assert.doesNotMatch(generic, /sk_actual_123|a=abc|b=xyz/);
   console.log("desktop self-check: PASS (settings, secrets, busy guard, IPC allowlist)");
   } finally {
+    if (previousMemoryMode === undefined) delete process.env.ERP_MEMORY_MODE;
+    else process.env.ERP_MEMORY_MODE = previousMemoryMode;
     app.setPath("userData", previous);
     await rm(isolated, { recursive: true, force: true });
   }

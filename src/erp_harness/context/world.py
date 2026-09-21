@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+# 观察仓库：追加式 JSONL 是证据源；内存中的记录视图可从回执重建。
+# 每次观察关联 call_id、实例身份、读取参数、结果哈希和底层 RPC 引用。
+# raw_result 保存脱敏后的审计原值；visible_payload 保存脱敏后的模型可见值。
+# 两者可能不同。模型回读只开放通过哈希校验的 visible_payload。
+# 副作用尝试会递增 generation 并标记旧字段过期。历史证据仍保留。
+# 跨多次 RPC 的结果不是事务快照；并行读取也没有天然先后因果保证。
+# 本层失败会关闭上下文投影；模型继续看到原消息，避免用不可核验的短引用替换。
+
 import copy
 import hashlib
 import json
@@ -297,6 +305,8 @@ class WorldStore:
             return copy.deepcopy(receipt)
 
     def invalidate(self, *, instance: str | None, reason: str, call_id: str | None = None) -> None:
+        # 失效的是“可当作当前状态”的资格，不是历史回执本身。
+        # 写入是否成功可能未知，因此只要尝试过副作用就保守失效。
         with self._lock:
             identities = [value for value in self._seen_identities.values()
                           if instance is None or value["instance"] == instance]
@@ -403,6 +413,7 @@ class WorldStore:
                     if integrity == "legacy_unverified" else "Stored visible payload hash does not match"
                 )
             source = "visible_payload"
+            # 回读不取 raw_result 或私有 evidence，避免把未下发字段和内部证据混入模型历史。
             resolved_path = path or ("$.result" if isinstance(payload, dict) and "result" in payload else "$")
             value = self._json_path(payload, resolved_path)
             if isinstance(value, list):

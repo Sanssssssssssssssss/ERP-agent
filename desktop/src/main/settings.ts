@@ -12,6 +12,7 @@ interface StoredSettings {
   odoo_username?: string;
   model_key?: string;
   odoo_key?: string;
+  long_term_memory?: boolean;
 }
 
 const SETTINGS_FILE = "settings.json";
@@ -21,6 +22,7 @@ const DEFAULTS: StoredSettings = {
   odoo_url: "",
   odoo_db: "bench",
   odoo_username: "admin",
+  long_term_memory: false,
 };
 
 export function validateEndpoint(name: string, value: string): void {
@@ -88,6 +90,7 @@ export async function publicSettings(): Promise<Settings> {
     odoo_url: stored.odoo_url ?? "",
     odoo_db: stored.odoo_db ?? "",
     odoo_username: stored.odoo_username ?? "",
+    long_term_memory: stored.long_term_memory === true && process.env.ERP_MEMORY_MODE !== "off",
     has_model_key: Boolean(unprotect(stored.model_key)),
     has_odoo_key: Boolean(unprotect(stored.odoo_key)),
     environment: unprotect(stored.model_key) && unprotect(stored.odoo_key) ? "configured" : "demo",
@@ -95,12 +98,15 @@ export async function publicSettings(): Promise<Settings> {
 }
 
 export async function saveSettings(input: SettingsInput): Promise<Settings> {
-  const allowed = new Set(["model", "base_url", "odoo_url", "odoo_db", "odoo_username", "model_key", "odoo_key"]);
-  if (Object.entries(input).some(([key, value]) => !allowed.has(key) || typeof value !== "string" || value.length > 8192)) {
+  const allowed = new Set(["model", "base_url", "odoo_url", "odoo_db", "odoo_username", "model_key", "odoo_key", "long_term_memory"]);
+  if (Object.entries(input).some(([key, value]) => !allowed.has(key) || (key === "long_term_memory"
+    ? typeof value !== "boolean"
+    : typeof value !== "string" || value.length > 8192))) {
     throw new Error("CONFIG_INPUT_INVALID");
   }
   const current = await read();
   const next: StoredSettings = { ...current };
+  if (typeof input.long_term_memory === "boolean") next.long_term_memory = input.long_term_memory;
   for (const field of ["model", "base_url", "odoo_url", "odoo_db", "odoo_username"] as const) {
     const value = input[field];
     if (typeof value === "string") next[field] = value.trim();
@@ -115,7 +121,9 @@ export async function saveSettings(input: SettingsInput): Promise<Settings> {
 
 export async function secretEnvironment(): Promise<Record<string, string>> {
   const stored = await read();
-  const env: Record<string, string> = {};
+  const env: Record<string, string> = {
+    ERP_MEMORY_MODE: stored.long_term_memory === true && process.env.ERP_MEMORY_MODE !== "off" ? "on" : "off",
+  };
   const modelKey = unprotect(stored.model_key);
   const odooKey = unprotect(stored.odoo_key);
   if (modelKey) env.LLM_API_KEY = modelKey;

@@ -6,6 +6,12 @@ Copyright (c) 2025 Lê Anh Tuấn.
 
 from __future__ import annotations
 
+# 最底层只读边界。上层即使误传方法名，也必须经过方法与参数白名单。
+# context 只接收明确支持的键；公司成员关系仍由 Odoo 校验。
+# scope_fingerprint 区分连接、凭据和上下文，防止跨身份复用缓存。
+# 响应体有字节上限。附件另按大小预算计算，避免整包无界读入内存。
+# 写入使用 actions 的专用路径；不能给此客户端开放任意 ORM 方法。
+
 import copy
 import hashlib
 import json

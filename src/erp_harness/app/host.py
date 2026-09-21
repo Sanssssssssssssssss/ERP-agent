@@ -1,6 +1,15 @@
 """Small durable stdio host for the desktop erp_harness.app."""
 from __future__ import annotations
 
+# 桌面后端入口。阅读顺序：send_message → confirm_business → start_run。
+# 普通对话产出提案。确认提案只保存业务目标。start_run 才启动业务 worker。
+# worker 用 stdout 传 JSON 事件；_consume_worker 更新界面状态与 trace。
+# session_id 标识桌面对话；business_id 标识业务；run_id 标识一次执行。
+# 同一业务复用模型会话。每次 run 单独保存请求、用量和动作账本。
+# StateStore 保存桌面状态；ActionStore 决定动作能否执行。两者不能互代。
+# 审批入口是 decide_approval。模型文字和 confirm 参数均不能授予权限。
+# 进程结束后仍需查账本、回读 Odoo。退出码不能证明业务完成。
+
 import argparse
 import base64
 import binascii
@@ -276,6 +285,8 @@ class Workbench:
 
     def _recover_on_start(self) -> None:
         """Never resume a worker or approval after the owning host exits."""
+        # 重启只恢复可审计状态。旧 worker 已失联，不能沿用其待审批状态。
+        # _finalize_run 会检查动作账本；可能已发出的写入保留待核对状态。
         for run in self.store.data["runs"].values():
             if run.get("status") in {"running", "awaiting_approval", "cancel_requested"}:
                 self._finalize_run(run, "interrupted", "host_restarted")
@@ -663,6 +674,7 @@ class Workbench:
         return {"ok": True, "run_id": run_id}
 
     def confirm_business(self, session_id: str, proposal_id: str, confirmed: bool) -> dict[str, Any] | None:
+        # 此处确认“做什么”。逐项写入授权仍由 decide_approval 处理。
         self._session(session_id)
         for message in reversed(self.store.data["messages"].get(session_id, [])):
             proposal = message.get("proposal")
@@ -775,6 +787,8 @@ class Workbench:
         return run
 
     def _launch(self, run: dict[str, Any], *, continue_run: bool) -> None:
+        # 审批续跑复用 run_id、session 文件和动作账本，只创建新的 worker 进程。
+        # 每段 worker 单独写 usage；会话条目基线用于避免重复累计旧用量。
         try:
             if self._closing or self._processes:
                 raise RuntimeError("host is busy or stopping")
@@ -792,7 +806,7 @@ class Workbench:
             runtime_home = self.store.root / "runtime-home"
             runtime_home.mkdir(exist_ok=True)
             proc = subprocess.Popen(worker_command(self.root, instruction, usage, session_file, continue_run=continue_run), cwd=self.root,
-                                    env={**child_environment(run["session_id"], run["id"]), "USERPROFILE": str(runtime_home), "HOME": str(runtime_home)}, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                    env={**child_environment(run["session_id"], run["id"]), "USERPROFILE": str(runtime_home), "HOME": str(runtime_home), "ERP_MEMORY_DIR": str(self.store.root / "memory")}, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", bufsize=1)
         except Exception as exc:
             self._finalize_run(run, "failed", f"worker_launch_{type(exc).__name__}")
@@ -1648,6 +1662,9 @@ class Workbench:
         return NativeActions(self._native_reads(), store=store)._current_prestate_matches(row)
 
     def decide_approval(self, session_id: str, business_id: str, run_id: str, action_id: str, decision: str) -> dict[str, Any]:
+        # 同时核对桌面对话、业务、run 和 action。不能拿别处的审批 ID 放行。
+        # 批准前重读 prestate。过期或状态变化都使本次审批失效。
+        # 批准只更新账本；全部待审批项处理后，worker 续跑并再次校验执行条件。
         if decision not in {"approve", "reject"}: raise ValueError("decision must be approve or reject")
         approved = decision == "approve"
         run = self.store.data["runs"].get(run_id); business = self._business(session_id, business_id)
@@ -1711,6 +1728,7 @@ class Workbench:
         finally: store.close()
 
     def cancel_run(self, session_id: str, business_id: str, run_id: str) -> dict[str, Any]:
+        # 取消停止本地进程，不能撤销已到达 Odoo 的请求。收尾仍以账本为准。
         self._business(session_id, business_id)
         run = self.store.data["runs"].get(run_id)
         if not run or run.get("session_id") != session_id or run.get("business_id") != business_id:
@@ -1809,6 +1827,8 @@ class Workbench:
                             "notification_limit": self.store.MAX_NOTIFICATIONS}}
 
     def _dispatch(self, method: str, params: dict[str, Any]) -> Any:
+        # RPC 方法必须显式列入表。禁止按传入名称直接 getattr 调用宿主对象。
+        # 带下划线的内部入口由桌面主进程使用；renderer 可达范围还受 preload 限制。
         methods = {"list_sessions": lambda: self.list_sessions(), "create_session": lambda: self.create_session(params.get("title")), "rename_session": lambda: self.rename_session(params["session_id"], params["title"]), "archive_session": lambda: self.archive_session(params["session_id"]), "get_session": lambda: self.get_session(params["session_id"]), "send_message": lambda: self.send_message(params["session_id"], params["text"], params.get("business_id"), params.get("context_business_id"), params.get("material_ids")), "confirm_business": lambda: self.confirm_business(params["session_id"], params["proposal_id"], _must_bool(params["confirmed"], "confirmed")), "start_run": lambda: self.start_run(params["session_id"], params["business_id"]), "decide_approval": lambda: self.decide_approval(params["session_id"], params["business_id"], params["run_id"], params["action_id"], params["decision"]), "cancel_run": lambda: self.cancel_run(params["session_id"], params["business_id"], params["run_id"]), "cancel_conversation": lambda: self.cancel_conversation(params["session_id"], params["run_id"]), "reconcile_action": lambda: self.reconcile_action(params["session_id"], params["business_id"], params["run_id"], params["action_id"]), "get_business": lambda: self.get_business(params["session_id"], params["business_id"]), "check_business_connection": lambda: self.check_business_connection(params["session_id"], params["business_id"]), "refresh_business": lambda: self.refresh_business(params["session_id"], params["business_id"]), "get_trace": lambda: self.get_trace(params["session_id"], params["business_id"], params.get("run_id")), "_import_material": lambda: self._import_material(params["session_id"], params["name"], params["content_base64"]), "_export_document": lambda: self._export_document(params["session_id"], params["business_id"], params["model"], params["record_id"], params["format"]), "_record_artifact": lambda: self._record_artifact(params["session_id"], params["business_id"], params["path"], params["name"], params.get("run_id"), params.get("kind", "business_receipt"), params.get("model"), params.get("record_id")), "health": self.health, "check_connection": self.check_connection}
         if method not in methods: raise KeyError("unknown method")
         return methods[method]()

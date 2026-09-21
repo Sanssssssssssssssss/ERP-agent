@@ -1,0 +1,32 @@
+name: erp-harness-demo
+services:
+  db:
+    image: postgres:16@sha256:c1b3783309b6499c795eed7c20135a1a4d25cae1b575c3d52c6f536129a1b109
+    environment:
+      POSTGRES_USER: odoo
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: ${DEMO_DB_PASSWORD:?required}
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U odoo -d postgres]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  odoo:
+    image: odoo:19.0@sha256:f99ffac95cb39a0924622ea4118481c95651d9c84187e5b30a21c2cc4419c7dd
+    environment:
+      HOST: db
+      USER: odoo
+      PASSWORD: ${DEMO_DB_PASSWORD:?required}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - 127.0.0.1:18069:8069
+    volumes:
+      - filestore:/var/lib/odoo
+    command: [odoo, -d, erp_harness_demo, --db-filter=^erp_harness_demo$, --no-database-list]
+volumes:
+  database:
+  filestore:

@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+# 写入主链：preview_write → validate_write → 宿主审批 → execute_approved_write。
+# validate 仅在可信服务端字段校验通过后，登记 payload、身份、策略和 prestate。
+# prestate 是动作依赖的读取证据；执行前重算，拒绝已变化的前提。
+# 模型传 action_id + token。执行值从 ActionStore 恢复，不能让模型重新拼装。
+# token 校验载荷一致性；授权看账本状态。confirm=True 只表达执行意图。
+# _execute_row 统一处理占用、发送、回读及未知结果。方法调用也走该边界。
+# verified 证明本动作的已定义回读条件；完整业务目标由更上层另行核验。
+
 import base64
 import hashlib
 import html
@@ -1056,6 +1064,7 @@ class NativeActions:
                 "result": stored["result"],
                 "verification": already,
             }
+        # 同一资源存在未决动作时拒绝新占用。防止换一个 action_id 绕过核对。
         claim = self.store.claim(action_id)
         if not claim["claimed"]:
             if claim["status"] == "resource_busy":
@@ -1083,6 +1092,7 @@ class NativeActions:
                     "error": str(exc),
                     "retry_safe": True,
                 }
+        # 必须先持久化“可能发送”标记，再调用 Odoo。失败时不能发送。
         if not self.store.mark_sending(action_id):
             return {
                 "success": False,
@@ -1427,6 +1437,8 @@ class NativeActions:
                 if field in approval
             }
             expected = record["payload"]
+            # 兼容携带完整 payload 的旧调用，但每个提供的字段都必须与账本相同。
+            # 省略字段从账本恢复；不同字段不能覆盖已审批值。
             if any(
                 canonical_json(supplied[field])
                 != canonical_json(expected.get(field))
@@ -1453,6 +1465,7 @@ class NativeActions:
                 "token": token,
             }
             if not confirm:
+                # token 和 confirm 均不替代宿主授权。后续 claim 只接受 approved。
                 return {
                     "success": False,
                     "tool": "execute_approved_write",

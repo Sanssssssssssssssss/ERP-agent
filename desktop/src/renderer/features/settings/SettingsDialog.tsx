@@ -67,6 +67,10 @@ export function SettingsDialog({ settings, draft, saving, onChange, onClose, onS
         <header><div><span className="eyebrow">Connection settings</span><h2 id="settings-title">连接设置</h2></div><button ref={closeButtonRef} className="modal-close" onClick={onClose} aria-label="关闭设置">×</button></header>
         <p className="settings-note">配置模型与 Odoo 连接。密钥留空表示保留已有密钥。</p>
         <div className="settings-grid">{field('model', '模型')}{field('base_url', '模型地址')}{field('odoo_url', 'Odoo 地址')}{field('odoo_db', 'Odoo 数据库')}{field('odoo_username', 'Odoo 用户名')}{field('model_key', settings?.has_model_key ? '模型密钥（留空保留）' : '模型密钥', 'password')}{field('odoo_key', settings?.has_odoo_key ? 'Odoo 密钥（留空保留）' : 'Odoo 密钥', 'password')}</div>
+        <div className="settings-note">
+          <label><input type="checkbox" checked={draft.long_term_memory === 'on'} disabled={saving} onChange={(event) => onChange('long_term_memory', event.target.checked ? 'on' : 'off')} aria-describedby="memory-setting-help" /> 启用长期记忆（Mem0）</label>
+          <div id="memory-setting-help">任务开始或遇到已识别错误时召回，结束后自动学习。学习会额外调用模型。关闭后，后续执行跳过召回与学习，已有记忆保留。</div>
+        </div>
         <div className="settings-footer"><span>环境：{environmentLabel(settings?.environment)}</span><div><button className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" disabled={saving} onClick={onSave}>{saving ? '保存中…' : '保存连接设置'}</button></div></div>
       </section>
     </div>

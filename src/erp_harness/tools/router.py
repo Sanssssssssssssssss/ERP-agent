@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+# 工具边界：保留对模型公布的契约，绑定 NativeReads / NativeActions / Capabilities。
+# mcp_odoo_ 是兼容名称。是否走原生实现取决于注入的后端。
+# call_id 同时关联工具日志、Odoo RPC 和 World 观察回执。
+# 读取结果分成模型可见值与审计证据。_runtime_evidence 不直接送入上下文。
+# validate_write 返回持久化动作引用。执行时由账本恢复规范化 payload。
+# 原生调用失败不切换 MCP 重做。可能有副作用的调用结束后使旧读取失效。
+
 import asyncio
 import hashlib
 import json
@@ -206,6 +213,7 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                         payload = raw.get("approval")
                         if isinstance(payload, dict):
                             report = await asyncio.to_thread(business_facts.inspect, payload)
+                            # 事实报告是诊断信息。是否允许执行仍由动作与审批检查决定。
                             raw = attach_business_facts(raw, report)
                     if name == "validate_write" and raw.get("success"):
                         status = raw.get("approval_status")

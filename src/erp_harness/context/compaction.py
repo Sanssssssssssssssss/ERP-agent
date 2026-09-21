@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+# 上下文预算与摘要材料。实际模型调用、摘要落盘由 runtime/session.py 负责。
+# 优先采用最新有效 provider usage，再估算其后的消息和新增工具。
+# 没有可用 usage 时按字符估算。估算用于容量判断，不能用作实际账单。
+# 缓存命中仍占上下文窗口；reasoning 已属于 output，不能重复相加。
+# 默认阈值预留输出空间；最近上下文保留预算与整窗阈值是不同参数。
+# 摘要会改变模型看到的历史；World 投影则保留可回读原值。两者分别记录。
+
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass

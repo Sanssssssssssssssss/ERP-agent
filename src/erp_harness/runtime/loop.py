@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+# 单轮数据流：上下文投影 → 模型流 → assistant 消息 → 工具批次 → 工具结果。
+# 一次模型响应可以包含多个工具调用；工具数量不等于模型请求数量。
+# 本层产生事件，不负责文件存储。HarnessSession 订阅消息结束事件并落盘。
+# 只执行当前轮已公布的工具。参数先归一化、校验，再经过执行前钩子。
+# 工具失败转成结构化结果，供模型修正。Odoo 未知写入由动作账本处理。
+# steering 在轮间插入；follow-up 在当前工作结束后接入。
+
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import suppress
@@ -308,6 +315,8 @@ async def run_agent_loop(
                 has_more_tools = not terminate
 
             yield TurnEndEvent(message=assistant, tool_results=tool_results)
+            # 先结束本轮，再应用新工具/模型/上下文，最后检查是否暂停。
+            # 审批等待走 should_stop_after_turn，不需要额外模型请求来“确认暂停”。
             turn_context = TurnContext(
                 message=assistant,
                 tool_results=tool_results,
@@ -569,6 +578,7 @@ async def _execute_tool_batch(
     truncated: bool,
 ) -> AsyncIterator[AgentEvent | _ToolBatchEnd]:
     if truncated:
+        # 输出截断可能破坏参数。即使部分参数看似完整，也不执行这一批工具。
         finalized: list[_FinalizedToolCall] = []
         for index, call in enumerate(calls):
             yield _tool_start(call)
@@ -596,6 +606,8 @@ async def _execute_tool_batch(
         for call in calls
     )
     if sequential:
+        # 任一工具要求串行，则整批按模型给出的顺序执行。
+        # router 将动作工具标为串行，避免本批读写交错破坏执行前提。
         finalized = []
         for index, call in enumerate(calls):
             yield _tool_start(call)
@@ -710,6 +722,7 @@ async def _execute_tool_batch(
             await asyncio.gather(*tasks, return_exceptions=True)
 
     ordered = [finalized_by_index[index] for index in sorted(finalized_by_index)]
+    # 并行进度按完成时间推送；写回历史的工具结果仍按原调用顺序排列。
     for outcome in ordered:
         for event in _tool_result_events(outcome):
             yield event

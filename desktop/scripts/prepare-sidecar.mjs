@@ -115,10 +115,11 @@ if (process.platform === "win32") {
 }
 const banned = /^(mcp|mcp_types|odoo_mcp|erp_harness|pi_ai|pi_agent|pi_coding)(?:-|_|\.|$)/i;
 const packaging = /^(pip|setuptools|wheel)(?:-|_|\.|$)/i;
-const rejectJunk = (_source, entry) => {
+const rejectJunk = (source, entry) => {
   const name = basename(entry);
+  const topLevel = !source || dirname(resolve(source)) === resolve(sitePackages);
   return !name.endsWith(".pyc") && name !== "__pycache__" && name !== ".agents" && !name.endsWith(".pth") &&
-    !banned.test(name) && !packaging.test(name);
+    !(topLevel && (banned.test(name) || packaging.test(name)));
 };
 const rejectSourceJunk = (_source, entry) => {
   const name = basename(entry);
@@ -127,7 +128,14 @@ const rejectSourceJunk = (_source, entry) => {
 
 await cp(sitePackages, join(destination, "app", "site-packages"), { recursive: true, filter: rejectJunk });
 const pth = join(pythonDir, "python313._pth");
-await writeFile(pth, "python313.zip\n.\n../app\n../app/site-packages\nimport site\n", "utf8");
+await writeFile(pth, "python313.zip\n.\n../app\n../app/site-packages\n../app/site-packages/win32\n../app/site-packages/win32/lib\nimport site\n", "utf8");
+// Qdrant's Windows file lock uses pywin32. Keep the explicit embedded paths;
+// arbitrary dependency .pth startup code remains excluded.
+if (process.platform === "win32") {
+  for (const dll of ["pywintypes313.dll", "pythoncom313.dll"]) {
+    await cp(join(sitePackages, "pywin32_system32", dll), join(pythonDir, dll));
+  }
+}
 
 // Wheels contain the installed product code and package resources.
 if (process.platform === "win32") {
@@ -214,7 +222,12 @@ if (process.platform === "win32") {
     "assert importlib.util.find_spec('mcp') is None",
     "assert importlib.util.find_spec('odoo_mcp') is None",
     "assert not any(name.startswith(('pi_', 'textual', 'typer')) for name in sys.modules)",
-  ].join("; ")], { windowsHide: true });
+    "import os, tempfile",
+    "with tempfile.TemporaryDirectory() as memory_dir:",
+    "    os.environ['MEM0_DIR'] = memory_dir",
+    "    os.environ['MEM0_TELEMETRY'] = 'false'",
+    "    import mem0, fastembed, portalocker",
+  ].join("\n")], { windowsHide: true });
 }
 if (existsSync(backupDestination)) {
   if (existsSync(finalDestination)) throw new Error(`Refusing to overwrite an existing sidecar backup: ${backupDestination}`);

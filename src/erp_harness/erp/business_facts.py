@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+# 只读业务诊断：合并旧记录与拟写值，再检查制造/采购日期及需求关系。
+# facts 保存依据；issues 保存冲突或不可读取的原因。
+# router 将报告附在 preview/validate 结果中。报告本身不授予审批、不改写字段。
+# 诊断不可用返回 warning；硬性阻断规则另见 write_guards 和 TaskEvidence。
+# schema 正确、写入回读正确、业务关系成立，是不同层面的判断。
+
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any

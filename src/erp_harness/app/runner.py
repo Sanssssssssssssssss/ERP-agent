@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+# 业务装配入口：配置 → 原生读写 → 工具路由 → 动态工具 → HarnessSession。
+# 原始会话存 JSONL；请求存 requests/；写入状态存 odoo-actions.sqlite3。
+# WorldStore 保存读取证据，projection 生成本次模型请求的精简视图。
+# TaskEvidence 仅在宿主提供证据文件时启用。先核对任务指令的 SHA256。
+# 审批暂停发生在工具结果落盘之后。续跑沿用账本和已发布的工具集合。
+# 用量按新增会话条目累计。输入指未缓存输入；摘要调用另列。
+
 import argparse
 import asyncio
 import hashlib
@@ -530,8 +537,16 @@ async def run(args: argparse.Namespace) -> None:
                 return any(_approval_required(result) for result in turn.tool_results)
 
             def project_context(messages, signal):
+                # record 也可启用旧读取外置：条件是 native 且 WorldStore 可用。
+                # project 模式额外合并相同的重复读取；两者都不覆写会话原文。
                 projected = project_messages(world, messages) if world_mode == "project" else list(messages)
                 return project_read_history(world, projected) if runtime_mode == "native" else projected
+
+            from erp_harness.memory import attach
+            memory = attach(native_runtime, full_tools, receipt_dir)
+            context_transform = project_context if world is not None and (world_mode == "project" or runtime_mode == "native") else None
+            if memory is not None:
+                context_transform = memory.transform(context_transform)
 
             session = await HarnessSession.load(
                 SessionConfig(
@@ -544,7 +559,7 @@ async def run(args: argparse.Namespace) -> None:
                     max_turns=args.max_turns,
                     # Pause only after the tool result is durably recorded.
                     should_stop_after_turn=stop_after_approval if getattr(args, "pause_on_approval", False) else None,
-                    transform_context=project_context if world is not None and (world_mode == "project" or runtime_mode == "native") else None,
+                    transform_context=context_transform,
                     resource_paths=ResourcePaths(
                         root=receipt_dir / ".pi-agent",
                         paths=RuntimePaths(
@@ -567,6 +582,7 @@ async def run(args: argparse.Namespace) -> None:
                         + (DYNAMIC_TOOL_POLICY if tool_mode == "dynamic" else "")
                     ),
                     auto_compact_enabled=not budget_enabled,
+                    # 关闭的是任务结束后的自动摘要。请求前和溢出恢复由 session 管理。
                     # Bench turns end at the final agent stop; avoid paying a
                     # post-stop summarizer call while retaining pre-prompt and
                     # provider-overflow compaction paths.
@@ -700,6 +716,13 @@ async def run(args: argparse.Namespace) -> None:
                     "commitSha": os.environ.get("PI_ODOO_SOURCE_COMMIT"),
                 }
                 args.usage_file.write_text(json.dumps(usage), encoding="utf-8")
+                if memory is not None and assistant and assistant[-1].stop_reason == "stop" and actions is not None:
+                    try:
+                        from erp_harness.memory.store import save
+                        save(receipt_dir / "action-ledger-summary.json", actions.store.summary())
+                        memory.learn(args.session_file)
+                    except Exception as exc:
+                        print(f"Background memory learning unavailable: {type(exc).__name__}", file=sys.stderr)
                 if assistant and assistant[-1].stop_reason == "error":
                     raise RuntimeError(
                         "Provider run did not complete: "

@@ -6,6 +6,14 @@ Copyright (c) 2025 Lê Anh Tuấn. Distributed under mcp/LICENSE (MIT).
 
 from __future__ import annotations
 
+# 原生查询层：工具参数 → 实例/字段策略 → 只读网关 → 结构化结果。
+# find_records 用精确 domain 找身份；read_record 按 ID 读取所需字段。
+# read_supply_context 沿产品关系收集报价、库存和制造依据；不替模型选择方案。
+# get_model_fields 负责字段发现。显式 field_names 与模糊 query 的用途不同。
+# search_records 可在已读候选页内做 BM25。它不是全库检索或全量召回证明。
+# 数据缺失、字段受限、分页未完成分别报告；都不能按零库存或无报价处理。
+# _runtime_evidence 交给 router 落盘。模型接收业务结果与范围说明。
+
 import base64
 import copy
 import hashlib
@@ -491,6 +499,8 @@ class NativeReads:
         return model, parts[-1]
 
     def _query_policy(self, model: str, domain: list, order: str | None = None) -> None:
+        # 权限也覆盖筛选和排序字段。否则可通过返回数量或顺序间接探测受限值。
+        # 点路径逐级检查关系字段；无法解析的关联表达式拒绝执行。
         if not self.policy.active():
             return
         for leaf in domain:
@@ -729,6 +739,8 @@ class NativeReads:
         if rerank_query is not None:
             from erp_harness.erp.knowledge import bm25_rank_texts, flatten_record_text
 
+            # 先由 domain、limit、offset 决定候选页，再在页内排序。
+            # 只返回正分候选的 top_k；未命中不代表数据库没有相关记录。
             texts = [flatten_record_text(record) for record in records]
             ranking_rows = bm25_rank_texts(rerank_query, texts, len(records))
             positive = [row for row in ranking_rows if row.get("score", 0) > 0]
@@ -784,6 +796,7 @@ class NativeReads:
             return {"success": False, "tool": "find_records", "error": page.get("error", "record lookup failed")}
         records = list(page.get("result") or [])
         has_more = len(records) > limit
+        # 多读一行探测下一页；额外行不返回。稳定 id 排序便于继续读取。
         records = records[:limit]
         return {
             "success": True, "tool": "find_records", "count": len(records),
@@ -1229,6 +1242,7 @@ class NativeReads:
         if not include_manufacturing:
             completeness["manufacturing"] = {"complete": True, "status": "not_requested"}
         complete = all(state.get("complete", False) for state in completeness.values())
+        # complete 仅覆盖当前账号可见范围。跨多次查询，不构成数据库事务快照。
         return {
             "success": True,
             "tool": "read_supply_context",

@@ -10,6 +10,14 @@ the original chat-completions path unchanged.
 
 from __future__ import annotations
 
+# 模型协议适配：统一消息/工具 → Chat Completions 或 Responses → 统一流事件。
+# payload 构建、HTTP 传输、SSE 解析分层；ERP 业务规则不放在这里。
+# 文本、reasoning、工具参数以增量到达，parser 组装完成消息。
+# 请求/响应钩子供 runner 保存回执；鉴权头不属于模型消息。
+# HTTP 重试受 config 控制；业务 runner 当前将本层 max_retries 设为 0。
+# 会话级恢复在 runtime/session.py。排查重复请求需同时检查两层。
+# usage.input 是未缓存输入；cache_read 另列；reasoning 属于 output。
+
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import suppress
 from json import JSONDecodeError, dumps, loads
@@ -374,6 +382,7 @@ class OpenAICompatibleProvider:
                             yield parser_event
                         return
                 except httpx.HTTPError as exc:
+                    # 已输出内容后不在本层重发请求，避免把两次响应拼成同一轮。
                     if not parser.emitted_content and self._should_retry(attempt):
                         delay = retry_delay_seconds(
                             attempt,
@@ -1428,6 +1437,7 @@ def _parse_chunk_usage(raw: Mapping[str, Any]) -> Usage:
         cached_tokens = _int_or_none(raw.get("prompt_cache_hit_tokens"))
     cache_read = cached_tokens or 0
     fresh_input = max(0, prompt_tokens - cache_read - cache_write)
+    # prompt 总量包含缓存。扣除缓存后才是 fresh input；总量仍需把缓存加回。
     output = _int_or_zero(raw.get("completion_tokens"))
     reasoning = None
     completion_details = raw.get("completion_tokens_details")

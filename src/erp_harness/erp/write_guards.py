@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+# 确定性业务约束：制造提前期、工作中心资格及关联工单一致性。
+# 只在相关模型和字段触发。无完整日期窗口的草稿可继续填写。
+# 资格规则来自明确版本的产品契约；没有契约时保留原 ORM 校验行为。
+# 读取依据沿用当前身份、context 和字段策略。必要证据不可读时拒绝校验。
+# 返回依赖摘要并纳入 prestate；执行前重算，检测审批期间的依据变化。
+# 成功无需向模型追加长报告；失败返回具体可修正的约束。
+
 import copy
 import html
 import json
@@ -50,6 +57,7 @@ class _Guard:
         return self.rows[key]
 
     def window(self, row: dict) -> None:
+        # 日期精度由原始值决定。提前期取 BOM 的 produce_delay，不由模型估算。
         start, deadline, bom_id = _when(row.get("date_start")), _when(row.get("date_deadline")), _id(row.get("bom_id"))
         if start is None or deadline is None or bom_id is None:
             return  # An unfinished draft does not yet assert a complete time window.
@@ -124,6 +132,8 @@ class _Guard:
             raise ValueError("workcenter qualification identity evidence is unavailable; validate again")
 
     def nested(self, parent: dict, commands: list) -> None:
+        # 同时覆盖嵌套创建、更新和已有工单关联。不能只检查顶层字段。
+        # 更新要核对归属；关联要按目标生产单重新检查资格。
         for command in commands:
             code, record_id = command[:2]
             if code in (0, 1):

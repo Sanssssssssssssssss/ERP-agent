@@ -1,6 +1,13 @@
 """Host-selected task sources; no model-authored authority or extra prompt text."""
 from __future__ import annotations
 
+# 可选的宿主依据绑定。规则来自 specification，不能由模型临时指定权威来源。
+# runner 先核对 instruction_sha256；本类继续绑定 Odoo 身份与规则版本。
+# bindings 约束字段来源；purchase_sources 核对采购来源；release_fields 检查放行必填项。
+# 注入只用于 create 缺失字段，且独立来源只有一个允许值。已有值仍须校验。
+# 多个候选不自动猜选；来源歧义、身份变化、规则变化均要求重新处理。
+# 依据进入动作 prestate，注入与拒绝写入独立回执。该能力须显式启用。
+
 import copy
 import html
 import json
@@ -134,6 +141,7 @@ class TaskEvidence:
                 raise ValueError("task sources have ambiguous or unsupported values")
             for row in selected:
                 if field not in row and inject and payload["operation"] == "create" and len(allowed) == 1:
+                    # 仅填补唯一可确定的空缺。不要覆盖模型已提供但错误的值来掩盖冲突。
                     row[field] = copy.deepcopy(next(iter(allowed)))
                     self._event("injected", model=payload["model"], field=field, value=row[field])
                 value = row.get(field)

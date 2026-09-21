@@ -1,5 +1,7 @@
 # ERP-agent
 
+[长期记忆](docs/long-term-memory.md) · [持久 Odoo demo](experiments/demo_odoo/README.md)
+
 Native ERP Agent Harness
 
 [English](README.md) · 简体中文

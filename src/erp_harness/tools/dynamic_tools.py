@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+# 动态工具控制器：基础工具常驻，可选能力组按需发布。
+# 输入是完整工具目录。输出是下一轮的 AgentTool 快照。
+# configure 提交完整期望集合；未列入的可选组会退出当前集合。
+# 模块探测只判断模型是否存在。ACL 和写入授权仍在实际调用时检查。
+# 探测失败记为 unknown；仅明确 module_missing 的组会被拒绝启用。
+# 发布记录包含工具名和契约哈希；审批续跑据此恢复选择。
+
 import json
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
@@ -293,6 +300,8 @@ class DynamicToolController:
             raise RuntimeError("Dynamic tool controller is not bound to a session")
         before = {tool.name for tool in self.tools}
         self._active = tuple(requested)
+        # 此处改变期望集合。publisher 接到 session.stage_tools_for_next_turn。
+        # 同一条模型响应不能通过 configure 立即调用刚启用的工具。
         published = self.tools
         self._publisher(published)
         after = {tool.name for tool in published}

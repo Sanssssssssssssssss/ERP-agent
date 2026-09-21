@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+# 会话生命周期层。业务入口从 SessionConfig 注入模型、工具和宿主回调。
+# AgentHarness 持有内存运行状态；本类管理持久化、恢复、摘要和资源生命周期。
+# load 读取追加式会话条目；消息结束事件触发持久化。
+# transform_context 只生成发送视图。持久化消息仍是原始会话证据。
+# 动态工具通过 stage_tools_for_next_turn 发布；轮次结束时刷新循环中的快照。
+# 审批暂停由 should_stop_after_turn 决定。此层不解释 Odoo 的审批权限。
+# 调整 ERP 配置先看 app/runner.py；不要在通用会话层写具体业务规则。
+
 import asyncio
 import json
 import string
@@ -551,6 +559,8 @@ class HarnessSession:
 
     async def _transform_context(self, messages, signal):
         """Apply the host projection before the session's existing context hooks."""
+        # 顺序固定：宿主投影 → 扩展上下文钩子 → provider。
+        # 外置历史只影响本轮请求；原始工具结果仍可从持久化记录回查。
         projected = self._config.transform_context(messages, signal) if self._config.transform_context else messages
         if isawaitable(projected):
             projected = await projected
@@ -946,6 +956,7 @@ class HarnessSession:
 
     def stage_tools_for_next_turn(self, tools: Sequence[AgentTool]) -> None:
         """Publish a complete tool snapshot for the next model turn."""
+        # 参数是完整集合，不是增量。当前循环持有独立快照，下一轮才应用变更。
         staged = list(tools)
         names = [tool.name for tool in staged]
         if len(names) != len(set(names)):
@@ -3679,6 +3690,7 @@ class HarnessSession:
 
     def _prepare_next_turn_refresh(self, turn: TurnContext) -> AgentLoopTurnUpdate:
         """Refresh Pi AgentSession state before each follow-on model call."""
+        # 从 config 复制完整快照。让下一次请求公布的工具与该轮可执行工具一致。
         system = (
             self._system_prompt_override
             if self._system_prompt_override is not None
@@ -3715,6 +3727,7 @@ class HarnessSession:
         message_id = id(message)
         pending = self._pending_message_writes.get(message_id)
         is_retry = pending is not None
+        # 一条消息的重试沿用同一 entry ID。落盘结果不确定时先查已写 ID，避免重复追加。
         if pending is None:
             entry = MessageEntry(parent_id=self._last_parent_id, message=message)
             pending = _PendingMessageWrite(

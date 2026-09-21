@@ -2,6 +2,15 @@
 
 from __future__ import annotations
 
+# 请求视图优化。输入原始消息，输出消息副本；会话日志和观察回执保留。
+# project_messages：相同读取保留最新全文，旧项换成可核验引用。
+# project_read_history：保留最近两次有效 assistant 响应内的观察值。
+# 更早的大读取可外置为引用；其余结果可按列与行做无损编码。
+# 外置引用可经 read_observation / search_observations 按需回读。
+# 只处理成功且哈希匹配的读取；不外置失败工具、写入结果或模型推理。
+# 无损表格只在实际字节数更小时采用。投影异常则返回原消息。
+# 这里不调用模型。它与 compaction 的模型摘要是两条独立路径。
+
 import hashlib
 import json
 import sys

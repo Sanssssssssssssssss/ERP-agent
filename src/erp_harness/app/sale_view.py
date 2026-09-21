@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+# 桌面业务投影：从工具回执发现单据，再用 NativeReads 刷新关联记录。
+# READBACK_FIELDS 限定读取字段；RELATION_FIELDS 限定沿哪些业务关系展开。
+# 目标单据优先由已验证动作定位。历史搜索里出现的单据不能直接当作本次成果。
+# completion_target 决定所需检查：只读、草稿、确认、过账各不相同。
+# 执行状态回答“运行到哪”；outcome 回答“规定的基础检查是否满足”。
+# passed 需要完整的 native_readback 证据。缺失或不可读保留 unknown。
+# 这里的检查覆盖明确字段与关系，不等于完整业务语义正确，也不等于 bench 分数。
+
 from datetime import datetime, timezone
 import re
 from typing import Any, Callable
@@ -999,6 +1007,7 @@ def refresh_business(
                     queue.append((related_model, related_id))
 
     fresh_by_model: dict[str, list[dict[str, Any]]] = {}
+    # 旧单据仍可展示；本次检查只使用成功刷新的记录，不能让旧值冒充当前证据。
     for (model, record_id), document in observations.items():
         if (model, record_id) in fresh:
             fresh_by_model.setdefault(model, []).append(document)

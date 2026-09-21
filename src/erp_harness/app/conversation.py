@@ -1,6 +1,12 @@
 """Proposal-only Pi conversation worker used by the desktop erp_harness.app."""
 from __future__ import annotations
 
+# 普通对话链路：用户文本 → HarnessSession → 只读查询 / 业务提案。
+# 固定两个工具：read_odoo_reference、propose_business。没有写工具。
+# 查询只能选择预设资源和字段。结果带来源、时间及截断标记。
+# 提案交给 host 确认。提案成功既不表示 Odoo 已写入，也不授予后续写权限。
+# 会话、请求回执、用量分别落盘；未报告的用量桶保留未知。
+
 import argparse
 import asyncio
 import json
@@ -122,6 +128,8 @@ def _bounded_reference_rows(rows, max_rows: int) -> tuple[list[dict], bool]:
 
 
 async def _read_odoo_reference(_call_id, arguments, _signal=None, _on_update=None):
+    # 入参不能指定任意 model、method 或 fields。资源名称映射由后端维护。
+    # 查询失败返回 unavailable；空结果与无法查询必须区分。
     values = dict(arguments or {})
     unknown = sorted(set(values) - {"resource", "query", "limit"})
     if unknown:

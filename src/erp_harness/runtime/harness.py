@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+# 有状态的循环宿主：保存消息、运行标记、取消信号、待处理工具和输入队列。
+# prompt 添加用户消息并启动；continue_ 从可继续的历史状态接着运行。
+# 每个实例只允许一个活动循环。运行中的输入放入 steering 或 follow-up 队列。
+# _run 调用 loop；_publish 更新内存状态，并通知 session 等订阅者。
+# 订阅通知先于事件交给外部消费者；持久化不依赖界面是否继续读取事件。
+# 中断补齐工具配对只维护消息协议。不能据此认定外部操作失败或重新执行。
+
 from asyncio import Event
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
@@ -395,6 +402,8 @@ class AgentHarness:
         return len(self._messages) - before
 
     def _append_interrupted_tool_results(self) -> None:
+        # 为没有结果的 call_id 补中断结果。没有工具执行，也没有 Odoo 回滚。
+        # 真实写入状态仍须查 ActionStore；不要把协议修复当成业务恢复。
         returned_ids = {
             message.tool_call_id
             for message in self._messages
