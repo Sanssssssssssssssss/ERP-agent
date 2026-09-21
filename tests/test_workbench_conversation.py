@@ -16,7 +16,7 @@ import httpx
 from pi_ai.openai_compatible import OpenAICompatibleProvider
 from pi_agent.messages import AssistantMessage, Usage
 from pi_agent.session.entries import CompactionEntry, MessageEntry
-from workbench import conversation
+from erp_harness.app import conversation
 
 
 class WorkbenchConversationTests(unittest.TestCase):

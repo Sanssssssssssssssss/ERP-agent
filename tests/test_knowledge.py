@@ -9,9 +9,9 @@ from pathlib import Path
 from odoo_mcp.field_policy import FieldPolicy, ModelFieldRule
 from odoo_mcp.knowledge_index import BM25Index as ReferenceBM25Index
 
-from odoo_runtime.capabilities import NativeCapabilities
-from odoo_runtime.knowledge import BM25Index
-from odoo_runtime.reads import NativeReads
+from erp_harness.erp.capabilities import NativeCapabilities
+from erp_harness.erp.knowledge import BM25Index
+from erp_harness.erp.reads import NativeReads
 
 
 class FakeOdoo:

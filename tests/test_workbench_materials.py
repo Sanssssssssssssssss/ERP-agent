@@ -5,9 +5,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from workbench.host import Workbench
-from workbench.materials import parse_material
-from workbench.sale_view import business_detail, refresh_business
+from erp_harness.app.host import Workbench
+from erp_harness.app.materials import parse_material
+from erp_harness.app.sale_view import business_detail, refresh_business
 
 
 class _Reads:

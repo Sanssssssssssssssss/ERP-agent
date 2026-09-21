@@ -11,7 +11,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from integration import pi_odoo_runner as runner
+from erp_harness.app import runner as runner
 from pi_ai import OpenAICompatibleProvider
 from pi_coding import CodingSessionConfig
 

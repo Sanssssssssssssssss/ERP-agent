@@ -11,7 +11,7 @@ ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "agent" / "src"))
 
-from integration.stream_events import public_events
+from erp_harness.app.stream_events import public_events
 from pi_agent.session import JsonlSessionStorage
 from pi_ai.env import OpenAICompatibleConfig
 from pi_ai.openai_compatible import OpenAICompatibleProvider

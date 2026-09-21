@@ -124,9 +124,9 @@ export class HostClient {
       ? join(packagedHost, "python", process.platform === "win32" ? "python.exe" : "python")
       : process.env.WORKBENCH_PYTHON || "python";
     const hostRoot = app.isPackaged ? join(packagedHost, "app") : process.env.WORKBENCH_HOST_ROOT || process.cwd();
-    const child = spawn(python, ["-m", "workbench.host", "--data-dir", dataDir], {
+    const child = spawn(python, ["-m", "erp_harness.app.host", "--data-dir", dataDir], {
       cwd: hostRoot,
-      env: { ...env, PYTHONPATH: hostRoot },
+      env,
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     });

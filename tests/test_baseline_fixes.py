@@ -21,10 +21,11 @@ from odoo_mcp import server, tools_read
 from pi_agent.tools import AgentTool, AgentToolResult
 from pi_ai.openai_compatible import OpenAICompatibleProvider
 
-from integration import harbor_agent, pi_odoo_runner
-from integration.world_context import expand_lossless_tables
-from odoo_runtime.world import WorldStore
-from odoo_runtime.world_tools import build_world_tools
+from integration import harbor_agent
+from erp_harness.app import runner as pi_odoo_runner
+from erp_harness.context.projection import expand_lossless_tables
+from erp_harness.context.world import WorldStore
+from erp_harness.context.world_tools import build_world_tools
 
 ROOT = Path(__file__).resolve().parents[1]
 

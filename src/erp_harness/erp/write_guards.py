@@ -10,8 +10,8 @@ import re
 from datetime import timedelta
 from typing import Any
 
-from odoo_runtime.business_facts import _before, _when
-from odoo_runtime.store import ActionStore
+from erp_harness.erp.business_facts import _before, _when
+from erp_harness.erp.store import ActionStore
 
 _MARKER = "workcenter_qualification_v1:"
 _WO_FIELDS = ("production_id", "operation_id", "workcenter_id")

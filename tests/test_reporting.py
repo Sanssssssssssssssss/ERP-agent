@@ -20,7 +20,7 @@ from integration.report import (
     write_index,
 )
 from integration.trial_summary import _failure, _redact
-from odoo_runtime.dynamic_tools import tool_contract_sha256
+from erp_harness.tools.dynamic_tools import tool_contract_sha256
 
 
 class ReportingTest(unittest.TestCase):

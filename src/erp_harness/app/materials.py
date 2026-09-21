@@ -1,4 +1,4 @@
-"""Small, local-only material parser for the desktop workbench."""
+"""Small, local-only material parser for the desktop erp_harness.app."""
 from __future__ import annotations
 
 import csv

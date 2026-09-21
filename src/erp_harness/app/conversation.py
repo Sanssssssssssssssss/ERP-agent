@@ -1,4 +1,4 @@
-"""Proposal-only Pi conversation worker used by the desktop workbench."""
+"""Proposal-only Pi conversation worker used by the desktop erp_harness.app."""
 from __future__ import annotations
 
 import argparse
@@ -22,7 +22,7 @@ from pi_coding.provider_config import (
 from pi_coding.resources import PiResourcePaths
 from pi_coding.session import CodingSession, CodingSessionConfig
 
-from integration.stream_events import public_events
+from erp_harness.app.stream_events import public_events
 
 CONTEXT_WINDOW = 128_000
 READ_MAX_ROWS = 5
@@ -32,8 +32,8 @@ MODEL_COMPAT = {
     "requiresReasoningContentOnAssistantMessages": True,
 }
 CONVERSATION_POLICY = (
-    "You are the ordinary conversation assistant for an ERP workbench. "
-    "The workbench supports sales and invoicing (sale_invoice), purchasing "
+    "You are the ordinary conversation assistant for an ERP erp_harness.app. "
+    "The erp_harness.app supports sales and invoicing (sale_invoice), purchasing "
     "(purchase), and linked sales-purchase-invoice workspaces "
     "(sale_purchase_invoice). It can read native Odoo data and, after approval "
     "for each write, carry out supported order, purchase, and invoice operations "
@@ -88,8 +88,8 @@ def _odoo_reads():
     required = ("ODOO_URL", "ODOO_DB", "ODOO_USERNAME", "ODOO_API_KEY")
     if any(not os.environ.get(key) for key in required):
         raise RuntimeError("explicit Odoo connection settings are required")
-    from odoo_runtime.gateway import Json2ReadClient
-    from odoo_runtime.reads import NativeReads
+    from erp_harness.erp.gateway import Json2ReadClient
+    from erp_harness.erp.reads import NativeReads
     client = Json2ReadClient(
         url=os.environ["ODOO_URL"], db=os.environ["ODOO_DB"],
         username=os.environ["ODOO_USERNAME"], password=os.environ["ODOO_API_KEY"],

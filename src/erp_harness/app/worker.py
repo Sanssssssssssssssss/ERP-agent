@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def worker_command(repo: Path, instruction: Path, usage: Path, session: Path, *, continue_run: bool) -> list[str]:
-    command = [sys.executable, "-m", "integration.pi_odoo_runner",
+    command = [sys.executable, "-m", "erp_harness.app.runner",
                "--instruction-file", str(instruction), "--usage-file", str(usage),
                "--session-file", str(session), "--receipt-dir", str(usage.parent), "--runtime-mode", "native",
                "--read-backend", "native", "--action-backend", "native",
@@ -22,7 +22,7 @@ def conversation_command(repo: Path, instruction: Path, usage: Path, session: Pa
     return [
         sys.executable,
         "-m",
-        "workbench.conversation",
+        "erp_harness.app.conversation",
         "--instruction-file",
         str(instruction),
         "--usage-file",
@@ -55,9 +55,6 @@ def child_environment(session_id: str, run_id: str) -> dict[str, str]:
     # The shared parser uses legacy completeness detection before honoring API_KEY.
     if env.get("ODOO_API_KEY") and not env.get("ODOO_PASSWORD"):
         env["ODOO_PASSWORD"] = env["ODOO_API_KEY"]
-    root = str(Path(__file__).resolve().parents[1])
-    # Do not inherit another checkout's agent/runtime modules into the worker.
-    env["PYTHONPATH"] = os.pathsep.join((str(Path(root) / "agent" / "src"), root))
     return env
 
 
@@ -71,5 +68,4 @@ def conversation_environment(session_id: str, run_id: str) -> dict[str, str]:
     env = {key: os.environ[key] for key in allowed if key in os.environ}
     env["PI_AGENT_SESSION_ID"] = session_id
     env["HARBOR_TRIAL_ID"] = run_id
-    env["PYTHONPATH"] = os.pathsep.join((str(Path(__file__).resolve().parents[1] / "agent" / "src"), str(Path(__file__).resolve().parents[1])))
     return env

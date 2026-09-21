@@ -9,12 +9,12 @@ from pathlib import Path
 from unittest.mock import patch
 import unittest
 
-from odoo_runtime._odoo_core.field_policy import FieldPolicy, ModelFieldRule
-from integration.odoo_tools import native_tool_catalog, route_tools
-from odoo_runtime.world import WorldStore
+from erp_harness.erp._odoo_core.field_policy import FieldPolicy, ModelFieldRule
+from erp_harness.tools.router import native_tool_catalog, route_tools
+from erp_harness.context.world import WorldStore
 from tests.test_actions import _Reader
 from tests.test_world import ENV
-from odoo_runtime.reads import NativeReads, _summarize_field_metadata
+from erp_harness.erp.reads import NativeReads, _summarize_field_metadata
 
 
 class MetadataClient:

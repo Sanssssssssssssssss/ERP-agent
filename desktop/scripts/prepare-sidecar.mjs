@@ -16,7 +16,7 @@ const pythonZip = process.env.WORKBENCH_PYTHON_ZIP ||
   join(repoRoot, ".runtime", "cache", "python-3.13.12-embed-amd64.zip");
 const pythonSha256 = (process.env.WORKBENCH_PYTHON_SHA256 ||
   "76f238f606250c87c6beac75dccd35ee99070a13490555936abb6cb64ecce3d0").toLowerCase();
-const hostRoot = repoRoot;
+const backendWheel = process.env.WORKBENCH_BACKEND_WHEEL || join(repoRoot, "dist", "erp_harness-0.5.4-py3-none-any.whl");
 const sitePackages = process.env.WORKBENCH_SITE_PACKAGES ||
   join(repoRoot, ".venv", "Lib", "site-packages");
 const pythonUrl = process.env.WORKBENCH_PYTHON_URL ||
@@ -45,9 +45,7 @@ process.on("exit", () => {
   try { if (stagingDestination && existsSync(stagingDestination)) rmSync(stagingDestination, { recursive: true, force: true }); } catch { /* best effort during process exit */ }
 });
 
-if (!existsSync(join(hostRoot, "workbench"))) {
-  throw new Error("The sidecar inputs must contain workbench and the native site-packages directory.");
-}
+if (!existsSync(backendWheel)) throw new Error("Build the backend wheel first: uv build --wheel");
 if (!existsSync(sitePackages)) throw new Error(`Missing site-packages: ${sitePackages}`);
 // Refuse an unrelated development environment instead of bundling its packages.
 const pins = new Map((await readFile(join(root, "requirements-host.txt"), "utf8")).trim().split(/\r?\n/).map(line => line.split("==")));
@@ -57,7 +55,7 @@ for (const entry of await readdir(sitePackages)) {
   const metadata = await readFile(join(sitePackages, entry, "METADATA"), "utf8");
   const name = /^Name: (.+)$/m.exec(metadata)?.[1]?.trim();
   const version = /^Version: (.+)$/m.exec(metadata)?.[1]?.trim();
-  if (name === "pip" || name === "pi-agent-python") continue;
+  if (name === "pip" || name === "pi-agent-python" || name === "erp-harness") continue;
   if (!name || pins.get(name) !== version) throw new Error(`Unpinned sidecar dependency: ${name}`);
   installed.set(name, version);
 }
@@ -115,7 +113,7 @@ if (process.platform === "win32") {
 } else {
   await execFile("unzip", ["-q", archive, "-d", pythonDir], {});
 }
-const banned = /^(mcp|mcp_types|odoo_mcp|pi_ai|pi_agent|pi_coding)(?:-|_|\.|$)/i;
+const banned = /^(mcp|mcp_types|odoo_mcp|erp_harness|pi_ai|pi_agent|pi_coding)(?:-|_|\.|$)/i;
 const packaging = /^(pip|setuptools|wheel)(?:-|_|\.|$)/i;
 const rejectJunk = (_source, entry) => {
   const name = basename(entry);
@@ -126,19 +124,18 @@ const rejectSourceJunk = (_source, entry) => {
   const name = basename(entry);
   return !name.endsWith(".pyc") && name !== "__pycache__" && name.toLowerCase() !== "mcp.py";
 };
-await cp(join(hostRoot, "workbench"), join(destination, "app", "workbench"), { recursive: true, filter: rejectSourceJunk });
+
 await cp(sitePackages, join(destination, "app", "site-packages"), { recursive: true, filter: rejectJunk });
 const pth = join(pythonDir, "python313._pth");
 await writeFile(pth, "python313.zip\n.\n../app\n../app/site-packages\nimport site\n", "utf8");
 for (const packageName of ["pi_ai", "pi_agent", "pi_coding"]) {
-  await cp(join(repoRoot, "agent", "src", packageName), join(destination, "app", packageName), { recursive: true, filter: rejectSourceJunk });
+  await cp(join(sitePackages, packageName), join(destination, "app", packageName), { recursive: true, filter: rejectSourceJunk });
 }
-await cp(join(repoRoot, "odoo_runtime"), join(destination, "app", "odoo_runtime"), { recursive: true, filter: rejectSourceJunk });
-const integrationFiles = ["__init__.py", "pi_odoo_runner.py", "stream_events.py", "odoo_tools.py", "world_context.py", "native_tool_catalog.json"];
-await mkdir(join(destination, "app", "integration"), { recursive: true });
-for (const file of integrationFiles) {
-  const source = join(repoRoot, "integration", file);
-  if (existsSync(source)) await cp(source, join(destination, "app", "integration", file), { filter: rejectJunk });
+// Wheels contain the installed product code and package resources.
+if (process.platform === "win32") {
+  await execFile("tar.exe", ["-xf", resolve(backendWheel), "-C", join(destination, "app")], { windowsHide: true });
+} else {
+  await execFile("unzip", ["-q", resolve(backendWheel), "-d", join(destination, "app")], {});
 }
 await mkdir(join(destination, "licenses"), { recursive: true });
 await cp(join(repoRoot, "LICENSE"), join(destination, "licenses", "workbench-MIT.txt"));
@@ -182,25 +179,27 @@ async function digestDirectory(directory) {
   return digests;
 }
 const sourceDigests = {};
-for (const source of ["workbench", "pi_ai", "pi_agent", "pi_coding", "integration", "odoo_runtime", "site-packages"]) {
+for (const source of ["erp_harness", "pi_ai", "pi_agent", "pi_coding", "site-packages"]) {
   sourceDigests[`app/${source}`] = await digestDirectory(join(destination, "app", source));
 }
 await writeFile(join(destination, "manifest.json"), JSON.stringify({
   python_version: "3.13.12",
   python_url: pythonUrl,
   python_archive_sha256: actualSha256,
-  host_root: "app/workbench",
+  host_root: "app",
+  backend_wheel: basename(backendWheel),
+  backend_wheel_sha256: await sha256(backendWheel),
   site_packages: "app/site-packages",
-  source_packages: ["app/workbench", "app/site-packages", "app/pi_ai", "app/pi_agent", "app/pi_coding", "app/integration", "app/odoo_runtime"],
+  source_packages: ["app/erp_harness", "app/site-packages", "app/pi_ai", "app/pi_agent", "app/pi_coding"],
   bundle_digests: sourceDigests,
   file_count: manifestFiles.length,
 }, null, 2) + "\n", "utf8");
 if (process.platform === "win32") {
   await execFile(join(pythonDir, "python.exe"), ["-B", "-c", [
     "import importlib.util, sys",
-    "import workbench.host, integration.pi_odoo_runner, odoo_runtime",
-    "from integration.odoo_tools import native_tool_catalog",
-    "from odoo_runtime._odoo_core.agent_tools import load_model_rename_catalog",
+    "import erp_harness.app.host, erp_harness.app.runner, erp_harness.erp",
+    "from erp_harness.tools.router import native_tool_catalog",
+    "from erp_harness.erp._odoo_core.agent_tools import load_model_rename_catalog",
     "assert native_tool_catalog()",
     "assert load_model_rename_catalog().get('entries')",
     "assert importlib.util.find_spec('mcp') is None",

@@ -14,32 +14,32 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from odoo_runtime._odoo_core.agent_tools import (
+from erp_harness.erp._odoo_core.agent_tools import (
     build_approval_token,
     build_write_preview_report,
     canonical_json,
     validate_write_report,
 )
-from odoo_runtime._odoo_core.audit import record_write_event
-from odoo_runtime._odoo_core.diagnostics import (
+from erp_harness.erp._odoo_core.audit import record_write_event
+from erp_harness.erp._odoo_core.diagnostics import (
     DESTRUCTIVE_METHODS,
     READ_ONLY_METHODS,
     classify_method_safety,
 )
-from odoo_runtime._odoo_core.odoo_client import OdooClient, OdooJson2Error
-from odoo_runtime._odoo_core.rate_limit import check_rate
-from odoo_runtime._odoo_core.tool_helpers import (
+from erp_harness.erp._odoo_core.odoo_client import OdooClient, OdooJson2Error
+from erp_harness.erp._odoo_core.rate_limit import check_rate
+from erp_harness.erp._odoo_core.tool_helpers import (
     max_attachment_upload_bytes,
     validate_method_name,
     validate_model_name,
 )
-from odoo_runtime._odoo_core.write_policy import (
+from erp_harness.erp._odoo_core.write_policy import (
     allowed_side_effect_methods,
     writes_enabled,
 )
-from odoo_runtime.reads import NativeReads
-from odoo_runtime.store import ActionStore
-from odoo_runtime.write_guards import business_write_prestate, manufacturing_confirm_prestate
+from erp_harness.erp.reads import NativeReads
+from erp_harness.erp.store import ActionStore
+from erp_harness.erp.write_guards import business_write_prestate, manufacturing_confirm_prestate
 
 ACTION_TOOLS = frozenset(
     {

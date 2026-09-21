@@ -80,9 +80,9 @@ def provision(env) -> None:
 
 
 def run_gate() -> None:
-    from odoo_runtime.actions import NativeActions
-    from odoo_runtime.reads import NativeReads
-    from odoo_runtime.store import ActionStore
+    from erp_harness.erp.actions import NativeActions
+    from erp_harness.erp.reads import NativeReads
+    from erp_harness.erp.store import ActionStore
 
     root = Path(os.environ.get("ACTION_GATE_ROOT", "/logs/agent"))
     root.mkdir(parents=True, exist_ok=True)

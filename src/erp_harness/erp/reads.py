@@ -21,32 +21,32 @@ from typing import Any, get_type_hints
 
 from pydantic import StrictInt, create_model
 
-from odoo_runtime._odoo_core.audit import audit_posture
-from odoo_runtime._odoo_core.field_policy import (
+from erp_harness.erp._odoo_core.audit import audit_posture
+from erp_harness.erp._odoo_core.field_policy import (
     FieldPolicy,
     FieldPolicyError,
     _parse_field_policy,
     field_policy_file_path,
     field_policy_posture,
 )
-from odoo_runtime._odoo_core.field_ranking import (
+from erp_harness.erp._odoo_core.field_ranking import (
     DEFAULT_MAX_RELEVANT_FIELDS,
     build_text_query_domain,
     rank_relevant_fields,
     select_smart_fields,
 )
-from odoo_runtime._odoo_core.odoo_client import (
+from erp_harness.erp._odoo_core.odoo_client import (
     build_odoo_client,
     list_configured_instances,
     load_instances_config,
 )
-from odoo_runtime._odoo_core.rate_limit import (
+from erp_harness.erp._odoo_core.rate_limit import (
     SlidingWindowRateTracker,
     check_rate,
     rate_report,
 )
-from odoo_runtime._odoo_core.schema_cache import _build_schema_cache
-from odoo_runtime._odoo_core.schemas import (
+from erp_harness.erp._odoo_core.schema_cache import _build_schema_cache
+from erp_harness.erp._odoo_core.schemas import (
     AggregateRecordsResponse,
     FindRecordsResponse,
     GetModelFieldsResponse,
@@ -60,7 +60,7 @@ from odoo_runtime._odoo_core.schemas import (
     SchemaCatalogResponse,
     SearchRecordsResponse,
 )
-from odoo_runtime._odoo_core.tool_helpers import (
+from erp_harness.erp._odoo_core.tool_helpers import (
     SearchEmployeeResponse,
     SearchHolidaysResponse,
     clamp_limit,
@@ -72,7 +72,7 @@ from odoo_runtime._odoo_core.tool_helpers import (
     parse_measure_spec,
     validate_model_name,
 )
-from odoo_runtime._odoo_core.write_policy import (
+from erp_harness.erp._odoo_core.write_policy import (
     allowed_side_effect_methods,
     chatter_direct_enabled,
     load_side_effect_policy,
@@ -727,7 +727,7 @@ class NativeReads:
         if redacted:
             result["redacted_fields"] = redacted
         if rerank_query is not None:
-            from odoo_runtime.knowledge import bm25_rank_texts, flatten_record_text
+            from erp_harness.erp.knowledge import bm25_rank_texts, flatten_record_text
 
             texts = [flatten_record_text(record) for record in records]
             ranking_rows = bm25_rank_texts(rerank_query, texts, len(records))

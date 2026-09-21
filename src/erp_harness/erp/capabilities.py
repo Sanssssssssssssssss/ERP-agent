@@ -17,7 +17,7 @@ from typing import Any, get_type_hints
 
 from pydantic import ConfigDict, create_model
 
-from odoo_runtime._odoo_core.access_helpers import (
+from erp_harness.erp._odoo_core.access_helpers import (
     _access_diagnosis_codes,
     _acl_row_applies,
     _available_user_read_fields,
@@ -29,22 +29,22 @@ from odoo_runtime._odoo_core.access_helpers import (
     _safe_odoo_read,
     access_permission_field,
 )
-from odoo_runtime._odoo_core.accounting_tools import (
+from erp_harness.erp._odoo_core.accounting_tools import (
     MAX_AGING_LINES,
     build_aging_report,
     build_unreconciled_summary,
     fetch_aging_lines,
     parse_as_of,
 )
-from odoo_runtime._odoo_core.agent_tools import (
+from erp_harness.erp._odoo_core.agent_tools import (
     build_domain_report,
     lookup_model_history_report,
     scan_addons_source_report,
 )
-from odoo_runtime._odoo_core.agent_tools import (
+from erp_harness.erp._odoo_core.agent_tools import (
     business_pack_report as build_business_pack_report,
 )
-from odoo_runtime._odoo_core.cross_instance import (
+from erp_harness.erp._odoo_core.cross_instance import (
     DEFAULT_LIMIT_PER_INSTANCE,
     MAX_LIMIT_PER_INSTANCE,
     combine_aggregate_rows,
@@ -54,22 +54,22 @@ from odoo_runtime._odoo_core.cross_instance import (
     select_instances,
     tag_and_merge,
 )
-from odoo_runtime._odoo_core.data_quality import build_data_quality_report
-from odoo_runtime._odoo_core.diagnostics import (
+from erp_harness.erp._odoo_core.data_quality import build_data_quality_report
+from erp_harness.erp._odoo_core.diagnostics import (
     analyze_upgrade_log_report,
     classify_access_error,
     diagnose_odoo_call_report,
     generate_json2_payload_report,
     inspect_model_relationships_report,
 )
-from odoo_runtime._odoo_core.diagnostics import (
+from erp_harness.erp._odoo_core.diagnostics import (
     fit_gap_report as build_fit_gap_report,
 )
-from odoo_runtime._odoo_core.diagnostics import (
+from erp_harness.erp._odoo_core.diagnostics import (
     upgrade_risk_report as build_upgrade_risk_report,
 )
-from odoo_runtime._odoo_core.odoo_client import list_configured_instances
-from odoo_runtime._odoo_core.tool_helpers import (
+from erp_harness.erp._odoo_core.odoo_client import list_configured_instances
+from erp_harness.erp._odoo_core.tool_helpers import (
     clamp_limit,
     normalize_domain_input,
     parse_measure_spec,

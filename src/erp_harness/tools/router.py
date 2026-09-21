@@ -15,18 +15,18 @@ from pi_agent.messages import TextContent
 from pi_agent.tools import AgentTool, AgentToolResult
 from pydantic_core import to_json
 
-from odoo_runtime._odoo_core.odoo_client import READ_CALL_ID
-from odoo_runtime.actions import ACTION_TOOLS, NativeActions
-from odoo_runtime.business_facts import BusinessFacts, attach_business_facts
-from odoo_runtime.capabilities import CAPABILITY_TOOLS, NativeCapabilities
-from odoo_runtime.reads import (
+from erp_harness.erp._odoo_core.odoo_client import READ_CALL_ID
+from erp_harness.erp.actions import ACTION_TOOLS, NativeActions
+from erp_harness.erp.business_facts import BusinessFacts, attach_business_facts
+from erp_harness.erp.capabilities import CAPABILITY_TOOLS, NativeCapabilities
+from erp_harness.erp.reads import (
     NATIVE_READ_RESPONSES,
     READ_RESPONSES,
     NativeReads,
     _summarize_field_metadata,
     normalize_read_arguments,
 )
-from odoo_runtime.world import SIDE_EFFECT_TOOLS, WorldStore
+from erp_harness.context.world import SIDE_EFFECT_TOOLS, WorldStore
 
 
 async def _unrouted_native_tool(*_args, **_kwargs):

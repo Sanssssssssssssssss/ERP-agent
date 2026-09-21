@@ -8,7 +8,7 @@ import math
 import re
 from pathlib import Path
 
-from odoo_runtime.store import ActionStore
+from erp_harness.erp.store import ActionStore
 
 
 def qualification_contract(value):

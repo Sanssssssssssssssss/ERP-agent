@@ -14,11 +14,11 @@ from unittest.mock import patch
 from odoo_mcp.field_policy import FieldPolicy, ModelFieldRule
 from pi_agent.tools import AgentTool, AgentToolResult
 
-from integration.odoo_tools import route_tools
-from odoo_runtime._odoo_core.odoo_client import OdooClient
-from odoo_runtime.capabilities import CAPABILITY_TOOLS, NativeCapabilities, _TaskStore
-from odoo_runtime.gateway import Json2ReadClient
-from odoo_runtime.reads import NativeReads
+from erp_harness.tools.router import route_tools
+from erp_harness.erp._odoo_core.odoo_client import OdooClient
+from erp_harness.erp.capabilities import CAPABILITY_TOOLS, NativeCapabilities, _TaskStore
+from erp_harness.erp.gateway import Json2ReadClient
+from erp_harness.erp.reads import NativeReads
 
 
 class FakeOdoo:
@@ -177,7 +177,7 @@ class NativeCapabilitiesTest(unittest.TestCase):
                 first, task_path=Path(directory) / "tasks.sqlite3"
             )
             with patch(
-                "odoo_runtime.capabilities.list_configured_instances",
+                "erp_harness.erp.capabilities.list_configured_instances",
                 return_value={
                     "first": {"tags": [], "cross_instance": True},
                     "second": {"tags": [], "cross_instance": True},

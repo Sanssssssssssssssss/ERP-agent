@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from odoo_runtime._odoo_core.odoo_client import (
+from erp_harness.erp._odoo_core.odoo_client import (
     load_instances_config,
     normalize_transport,
 )

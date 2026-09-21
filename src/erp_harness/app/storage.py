@@ -27,7 +27,7 @@ class _DataDirLock:
                 fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except Exception as exc:
             self.handle.close()
-            raise RuntimeError("another workbench host already owns this data directory") from exc
+            raise RuntimeError("another erp_harness.app host already owns this data directory") from exc
 
     def close(self) -> None:
         if self._closed:
@@ -68,13 +68,13 @@ class StateStore:
         try:
             value = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            raise RuntimeError("workbench state is unreadable; refusing to start") from exc
+            raise RuntimeError("erp_harness.app state is unreadable; refusing to start") from exc
         if not isinstance(value, dict) or value.get("version") != 1:
-            raise RuntimeError("unsupported workbench state version")
+            raise RuntimeError("unsupported erp_harness.app state version")
         for key, default in (("sessions", {}), ("businesses", {}), ("runs", {}), ("conversation_runs", {}),
                              ("messages", {}), ("approvals", {}), ("materials", {}), ("events", [])):
             if not isinstance(value.get(key, default), type(default)):
-                raise RuntimeError(f"invalid workbench state field: {key}")
+                raise RuntimeError(f"invalid erp_harness.app state field: {key}")
             value.setdefault(key, default)
         return value
 

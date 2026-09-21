@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import unittest
 
-from odoo_runtime.business_facts import BusinessFacts
+from erp_harness.erp.business_facts import BusinessFacts
 
 
 class _Client:

@@ -13,13 +13,13 @@ from pathlib import Path
 def run_gate() -> None:
     from pi_agent.tools import AgentTool, AgentToolResult
 
-    from odoo_runtime.capabilities import CAPABILITY_TOOLS, NativeCapabilities
-    from odoo_runtime.dynamic_tools import (
+    from erp_harness.erp.capabilities import CAPABILITY_TOOLS, NativeCapabilities
+    from erp_harness.tools.dynamic_tools import (
         BASE_TOOLS,
         CAPABILITY_GROUPS,
         DynamicToolController,
     )
-    from odoo_runtime.reads import NativeReads
+    from erp_harness.erp.reads import NativeReads
 
     root = Path(os.environ.get("CAPABILITY_GATE_ROOT", "/logs/agent"))
     root.mkdir(parents=True, exist_ok=True)

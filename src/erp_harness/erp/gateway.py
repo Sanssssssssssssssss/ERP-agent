@@ -15,14 +15,14 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from odoo_runtime._odoo_core.diagnostics import sanitize_odoo_error
-from odoo_runtime._odoo_core.odoo_client import (
+from erp_harness.erp._odoo_core.diagnostics import sanitize_odoo_error
+from erp_harness.erp._odoo_core.odoo_client import (
     OdooClient,
     OdooJson2Error,
     _retry_attempts,
     _retry_backoff_seconds,
 )
-from odoo_runtime._odoo_core.tool_helpers import (
+from erp_harness.erp._odoo_core.tool_helpers import (
     max_attachment_bytes,
     normalize_domain_input,
     validate_model_name,

@@ -22,10 +22,10 @@ from pi_coding.session_usage import collect_session_usage
 
 from integration.reward_adapter import adapt_erp_bench_reward
 from integration.trial_summary import _redact, build_trial_summary
-from odoo_runtime.actions import ACTION_TOOLS
-from odoo_runtime.capabilities import CAPABILITY_TOOLS
-from odoo_runtime.dynamic_tools import tool_contract_sha256
-from odoo_runtime.world import READ_TOOLS, SIDE_EFFECT_TOOLS
+from erp_harness.erp.actions import ACTION_TOOLS
+from erp_harness.erp.capabilities import CAPABILITY_TOOLS
+from erp_harness.tools.dynamic_tools import tool_contract_sha256
+from erp_harness.context.world import READ_TOOLS, SIDE_EFFECT_TOOLS
 
 ROOT = Path(__file__).resolve().parents[1]
 

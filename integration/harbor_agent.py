@@ -177,11 +177,11 @@ async def _install_task_runtime(
     agent: Any, environment: BaseEnvironment, *, native_only: bool = False
 ) -> None:
     root = Path(__file__).resolve().parents[1]
-    runner = root / "integration" / "pi_odoo_runner.py"
-    sources = tuple(
-        root / "agent" / "src" / name for name in ("pi_ai", "pi_agent", "pi_coding")
+    wheels = (
+        Path(os.environ.get("WORKBENCH_BACKEND_WHEEL", root / "dist/erp_harness-0.5.4-py3-none-any.whl")),
+        root / "dist/pi_agent_python-0.1.0-py3-none-any.whl",
     )
-    for source in (*sources, runner):
+    for source in wheels:
         if not source.exists():
             raise RuntimeError(f"Pinned runtime input is missing: {source}")
     if native_only:
@@ -189,15 +189,16 @@ async def _install_task_runtime(
     else:
         await _install_task_mcp(agent, environment)
     await agent.exec_as_root(
-        environment, command="mkdir -p /tmp/pi-odoo-harness/agent/src"
+        environment, command="mkdir -p /tmp/erp-harness-wheels"
     )
-    for source in sources:
-        await environment.upload_dir(
-            source, f"/tmp/pi-odoo-harness/agent/src/{source.name}"
+    for source in wheels:
+        await environment.upload_file(
+            source, f"/tmp/erp-harness-wheels/{source.name}"
         )
-    await environment.upload_file(runner, "/tmp/pi-odoo-runner.py")
-    await environment.upload_dir(root / "integration", "/tmp/pi-odoo-harness/integration")
-    await environment.upload_dir(root / "odoo_runtime", "/tmp/pi-odoo-harness/odoo_runtime")
+    await agent.exec_as_root(environment, command=(
+        "uv pip install --python /tmp/pi-odoo-env/bin/python --no-deps "
+        + shlex.join(f"/tmp/erp-harness-wheels/{source.name}" for source in wheels)
+    ))
 
 
 async def _start_task_mcp(agent: Any, environment: BaseEnvironment) -> None:
@@ -432,8 +433,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             "LLM_MODEL": model,
             "LLM_THINKING_TYPE": self._thinking,
             "PYTHONPATH": (
-                "/tmp/pi-odoo-harness/agent/src:/tmp/pi-odoo-harness"
-                + ("" if native_only else ":/tmp/pi-odoo-mcp-source")
+                "" if native_only else "/tmp/pi-odoo-mcp-source"
             ),
             "PI_AGENT_SESSION_ID": str(self.context_id or self.session_id or "trial"),
             "PI_ODOO_SOURCE_COMMIT": os.environ.get("PI_ODOO_SOURCE_COMMIT", ""),
@@ -450,7 +450,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
             "set -o pipefail; export ODOO_URL=http://127.0.0.1:8069 ODOO_DB=bench ODOO_USERNAME=admin; "
             'export ODOO_API_KEY="$(cat /etc/odoo/api_key)"; '
             'export ODOO_PASSWORD="$ODOO_API_KEY" ODOO_TRANSPORT=json2; '
-            '/tmp/pi-odoo-env/bin/python /tmp/pi-odoo-runner.py '
+            '/tmp/pi-odoo-env/bin/python -m erp_harness.app.runner '
             "--instruction-file /tmp/pi-odoo-instruction.txt "
             "--usage-file /logs/agent/pi-agent-usage.json "
             f"--runtime-mode {'native' if native_only else 'mcp'} "

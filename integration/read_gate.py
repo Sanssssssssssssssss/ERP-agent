@@ -52,9 +52,9 @@ def provision_security(env):
 
 async def run_gate():
     from pi_agent.mcp import McpToolSet
-    from odoo_runtime.reads import NativeReads
-    from odoo_runtime.world import WorldStore
-    from integration.odoo_tools import route_tools
+    from erp_harness.erp.reads import NativeReads
+    from erp_harness.context.world import WorldStore
+    from erp_harness.tools.router import route_tools
 
     root = Path(os.environ.get("READ_GATE_ROOT", "/logs/agent"))
     root.mkdir(parents=True, exist_ok=True)

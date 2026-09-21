@@ -1,4 +1,4 @@
-"""Small durable stdio host for the desktop workbench."""
+"""Small durable stdio host for the desktop erp_harness.app."""
 from __future__ import annotations
 
 import argparse
@@ -139,7 +139,7 @@ class Workbench:
     def __init__(self, data_dir: str | Path, repo: str | Path | None = None,
                  event_sink: Callable[[dict[str, Any]], None] | None = None):
         self.store = StateStore(data_dir)
-        self.root = Path(repo or Path(__file__).resolve().parents[1])
+        self.root = Path(repo or Path.cwd())
         self._lock = threading.RLock()
         self._processes: dict[str, subprocess.Popen[str]] = {}
         self._threads: dict[str, threading.Thread] = {}
@@ -211,7 +211,7 @@ class Workbench:
         return self.health()
 
     def _ledger_statuses(self, run: dict[str, Any]) -> dict[str, str]:
-        from odoo_runtime.store import ActionStore
+        from erp_harness.erp.store import ActionStore
         path = self.store.root / "runs" / run["id"] / "odoo-actions.sqlite3"
         if not path.exists():
             if run.get("pending_approval_action_ids") or any(tool.get("action_id") for tool in run.get("tools", [])):
@@ -564,7 +564,7 @@ class Workbench:
             context = json.dumps({
                 "business": {key: business.get(key) for key in ("id", "type", "title", "goal", "status")},
                 "observed_documents": documents[-20:],
-                "notice": "These are local workbench facts and may be stale; do not describe them as a live Odoo read.",
+                "notice": "These are local erp_harness.app facts and may be stale; do not describe them as a live Odoo read.",
             }, ensure_ascii=False)
         feedback = [row.get("text") for row in self.store.data["messages"].get(session_id, [])
                     if row.get("role") == "system" and isinstance(row.get("text"), str)][-5:]
@@ -911,7 +911,7 @@ class Workbench:
 
     def _action_row(self, run: dict[str, Any], action_id: str) -> dict[str, Any] | None:
         try:
-            from odoo_runtime.store import ActionStore
+            from erp_harness.erp.store import ActionStore
             store = ActionStore(self.store.root / "runs" / run["id"] / "odoo-actions.sqlite3")
             try: return store.get(action_id)
             finally: store.close()
@@ -1420,8 +1420,8 @@ class Workbench:
             document["action_observed_at"] = observed_at
 
     def _native_reads(self, *, timeout: int = 10):
-        from odoo_runtime.gateway import Json2ReadClient
-        from odoo_runtime.reads import NativeReads
+        from erp_harness.erp.gateway import Json2ReadClient
+        from erp_harness.erp.reads import NativeReads
         required = ("ODOO_URL", "ODOO_DB", "ODOO_USERNAME", "ODOO_API_KEY")
         if any(not os.environ.get(key) for key in required):
             raise RuntimeError("explicit Odoo connection settings are required")
@@ -1592,13 +1592,13 @@ class Workbench:
         return {"run": _safe(public_run), "rounds": _safe(rounds), "tools": _safe(tools), "events": _safe(run.get("events", []))}
 
     def _action_for_approval(self, run: dict[str, Any], action_id: str) -> dict[str, Any] | None:
-        from odoo_runtime.store import ActionStore
+        from erp_harness.erp.store import ActionStore
         store = ActionStore(self.store.root / "runs" / run["id"] / "odoo-actions.sqlite3")
         try: return store.get(action_id)
         finally: store.close()
 
     def _terminalize_action(self, run: dict[str, Any], action_id: str, error: str) -> None:
-        from odoo_runtime.store import ActionStore
+        from erp_harness.erp.store import ActionStore
         store = ActionStore(self.store.root / "runs" / run["id"] / "odoo-actions.sqlite3")
         try:
             row = store.get(action_id)
@@ -1644,7 +1644,7 @@ class Workbench:
         self._clear_conversation_active(run, status)
 
     def _approval_prestate_matches(self, row, store) -> bool:
-        from odoo_runtime.actions import NativeActions
+        from erp_harness.erp.actions import NativeActions
         return NativeActions(self._native_reads(), store=store)._current_prestate_matches(row)
 
     def decide_approval(self, session_id: str, business_id: str, run_id: str, action_id: str, decision: str) -> dict[str, Any]:
@@ -1669,7 +1669,7 @@ class Workbench:
             self._finalize_run(run, "failed", "approval_expired")
             self._event("approval_changed", {"session_id": session_id, "business_id": business_id, "run_id": run_id, "action_id": action_id, "status": "expired"})
             return {"ok": False, "status": "expired"}
-        from odoo_runtime.store import ActionStore
+        from erp_harness.erp.store import ActionStore
         store = ActionStore(self.store.root / "runs" / run_id / "odoo-actions.sqlite3")
         try:
             if row.get("prestate_sha256") != ActionStore.digest(row.get("prestate")): raise ValueError("prestate integrity check failed")
@@ -1758,7 +1758,7 @@ class Workbench:
         approval = self.store.data["approvals"].get(action_id)
         if not approval or approval.get("run_id") != run_id or approval.get("business_id") != business_id:
             raise ValueError("approval scope is invalid")
-        from odoo_runtime.store import ActionStore
+        from erp_harness.erp.store import ActionStore
         path = self.store.root / "runs" / run_id / "odoo-actions.sqlite3"
         if not path.exists():
             raise RuntimeError("action ledger is missing")
@@ -1771,7 +1771,7 @@ class Workbench:
                 raise ValueError("approval source does not match action ledger")
             if row.get("status") not in {"sending", "needs_reconciliation", "verified"}:
                 raise ValueError("action is not uncertain; reconciliation refused")
-            from odoo_runtime.actions import NativeActions
+            from erp_harness.erp.actions import NativeActions
             was_uncertain = run.get("status") in {"needs_reconciliation", "blocked"}
             result = NativeActions(self._native_reads(), store=store).reconcile(action_id)
             result = _safe(result)

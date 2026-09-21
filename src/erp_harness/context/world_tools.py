@@ -8,7 +8,7 @@ from typing import Any
 
 from pi_agent.tools import AgentTool, AgentToolResult
 
-from odoo_runtime.world import WorldStore
+from erp_harness.context.world import WorldStore
 
 
 def _result(payload: dict[str, Any]) -> AgentToolResult:

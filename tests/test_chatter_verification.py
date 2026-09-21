@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tests.test_actions import _actions, _Runtime, _Writer
-from odoo_runtime.actions import NativeActions
+from erp_harness.erp.actions import NativeActions
 
 
 class _PlainTextWriter(_Writer):

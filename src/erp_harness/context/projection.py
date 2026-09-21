@@ -9,7 +9,7 @@ from typing import Any, Iterable
 
 from pi_agent.messages import AssistantMessage, TextContent, ToolResultMessage
 
-from odoo_runtime.world import READ_TOOLS, WorldStore
+from erp_harness.context.world import READ_TOOLS, WorldStore
 
 _TABLE_MARKERS = {"__world_table__", "__world_schema_table__"}
 

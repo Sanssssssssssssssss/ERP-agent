@@ -29,18 +29,18 @@ from pi_coding.paths import PiPaths
 from pi_coding.resources import PiResourcePaths
 from pi_coding.session import CodingSession, CodingSessionConfig
 
-from integration.odoo_tools import native_tool_catalog, route_tools
-from integration.stream_events import public_events
-from integration.world_context import project_messages, project_read_history
-from odoo_runtime.actions import NativeActions
-from odoo_runtime.capabilities import NativeCapabilities
-from odoo_runtime.dynamic_tools import CAPABILITY_GROUPS, DynamicToolController
-from odoo_runtime.reads import NativeReads
-from odoo_runtime.sops import build_sop_tools
-from odoo_runtime.store import ActionStore
-from odoo_runtime.task_evidence import TaskEvidence
-from odoo_runtime.world import WorldStore
-from odoo_runtime.world_tools import build_world_tools
+from erp_harness.tools.router import native_tool_catalog, route_tools
+from erp_harness.app.stream_events import public_events
+from erp_harness.context.projection import project_messages, project_read_history
+from erp_harness.erp.actions import NativeActions
+from erp_harness.erp.capabilities import NativeCapabilities
+from erp_harness.tools.dynamic_tools import CAPABILITY_GROUPS, DynamicToolController
+from erp_harness.erp.reads import NativeReads
+from erp_harness.tools.sops import build_sop_tools
+from erp_harness.erp.store import ActionStore
+from erp_harness.erp.task_evidence import TaskEvidence
+from erp_harness.context.world import WorldStore
+from erp_harness.context.world_tools import build_world_tools
 
 CONTEXT_WINDOW = 128_000
 MODEL_COMPAT = {

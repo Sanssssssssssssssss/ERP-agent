@@ -13,12 +13,13 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-from integration import harbor_agent, pi_odoo_runner
+from integration import harbor_agent
+from erp_harness.app import runner as pi_odoo_runner
 from pi_agent.messages import AssistantMessage, ToolResultMessage, UserMessage
 from pi_agent.tools import AgentTool, AgentToolResult
 from pi_coding.session import CodingSession
 from pi_ai.openai_compatible import OpenAICompatibleProvider
-from odoo_runtime.dynamic_tools import BASE_TOOLS, CAPABILITY_GROUPS
+from erp_harness.tools.dynamic_tools import BASE_TOOLS, CAPABILITY_GROUPS
 
 
 class RunnerBudgetTest(unittest.TestCase):

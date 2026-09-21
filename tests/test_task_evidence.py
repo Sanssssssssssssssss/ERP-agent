@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from odoo_runtime.task_evidence import TaskEvidence
+from erp_harness.erp.task_evidence import TaskEvidence
 from tests.test_actions import _actions
 
 
