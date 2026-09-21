@@ -278,17 +278,19 @@ def run(folder):
     print(json.dumps(summaries, ensure_ascii=False))
 
 
-def concurrency(folder):
+def concurrency(folder, *, fully_warm=False):
     assert (folder / "results.json").exists(), "Run the frozen functional cases first"
-    if (folder / "concurrency.json").exists():
+    stem = "concurrency-fully-warm" if fully_warm else "concurrency"
+    if (folder / f"{stem}.json").exists():
         raise ValueError("Use a fresh run instead of overwriting concurrency results")
     os.environ["ERP_KNOWLEDGE_DIR"] = str(folder / "knowledge")
-    os.environ["ODOO_REQUEST_LOG"] = str(folder / "concurrency-rpc.jsonl")
+    os.environ["ODOO_REQUEST_LOG"] = str(folder / f"{stem}-rpc.jsonl")
     cases = [case for case in load(folder / "cases.json") if case["family"] == "order_tail"]
     reports = []
     for workers in (1, 5, 20):
         local = threading.local()
-        tracemalloc.start()
+        if not fully_warm:
+            tracemalloc.start()
 
         def execute(number, local=local, workers=workers):
             cold = not hasattr(local, "runtime")
@@ -303,16 +305,35 @@ def concurrency(folder):
                 passed = score(case, result)["passed"]
             except Exception as error:  # noqa: BLE001 - retain failed experiment receipts.
                 result, passed = {"success": False, "error_type": type(error).__name__, "error": str(error)}, False
-            row = {"phase": "concurrency", "workers": workers, "cold": cold, "case": case["id"], "passed": passed,
+            row = {"phase": stem, "workers": workers, "cold": cold, "case": case["id"], "passed": passed,
                    "tool_success": result.get("success") is True, "elapsed_ms": (time.perf_counter()-start)*1000,
                    "rpc_count": client.rpc_count-before, "result_utf8_bytes": len(json.dumps(result, ensure_ascii=False).encode())}
             log(folder, {**row, "result": result})
             return row
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
+            if fully_warm:
+                barrier = threading.Barrier(workers)
+
+                def prime(_number, barrier=barrier, local=local, workers=workers):
+                    try:
+                        local.runtime = runtime()
+                        _, reads, knowledge = local.runtime
+                        for case in cases[:3]:  # Each worker loads SO, PO, and MO before timing begins.
+                            result = perform(case, reads, knowledge)
+                            log(folder, {"phase": "concurrency_warmup", "workers": workers, "case": case["id"], "result": result})
+                            assert score(case, result)["passed"]
+                        barrier.wait()
+                    except Exception:  # Release other workers when preparation fails.
+                        barrier.abort()
+                        raise
+
+                list(executor.map(prime, range(workers)))
             rows = list(executor.map(execute, range(max(60, workers * 4))))
-        _, peak = tracemalloc.get_traced_memory()
-        tracemalloc.stop()
+        peak = None
+        if not fully_warm:
+            _, peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
         phases = {}
         for cold in (True, False):
             selected = [row for row in rows if row["cold"] == cold]
@@ -324,7 +345,9 @@ def concurrency(folder):
                 "rpc_count": sum(row["rpc_count"] for row in selected)}
         reports.append({"workers": workers, "phases": phases, "python_peak_bytes": peak, "rows": rows})
         print(f"Concurrency {workers}: {sum(r['passed'] for r in rows)}/{len(rows)}", flush=True)
-    write(folder / "concurrency.json", {"levels": reports, "paid_model_calls": 0, "notes": ["cold = new client and index load; warm = same thread runtime", "Python heap excludes SQLite and other native allocations", "P95 cold n=1/5/20 is descriptive only"]})
+    notes = (["All three model indexes are preloaded in every worker before timing", "No tracemalloc instrumentation; heap measured separately in the original concurrency run"] if fully_warm else
+             ["cold = new client and index load; warm = same thread runtime and can include first load of another model", "tracemalloc instrumentation affects latency; heap excludes SQLite and native allocations", "P95 cold n=1/5/20 is descriptive only"])
+    write(folder / f"{stem}.json", {"levels": reports, "paid_model_calls": 0, "notes": notes})
 
 
 def lifecycle(folder):
@@ -343,7 +366,8 @@ def lifecycle(folder):
     canary_id, role_before, results = None, None, []
 
     def mutate(source):
-        source = "assert env.cr.dbname == 'erp_harness_enterprise_v1'\n" + source + "\nenv.cr.commit()\nprint('ENTERPRISE_RESULT=' + json.dumps(result))"
+        # Match Odoo HTTP transaction completion; commit alone leaves other workers' ACL caches stale.
+        source = "assert env.cr.dbname == 'erp_harness_enterprise_v1'\n" + source + "\nenv.cr.commit()\nresult['cache_invalidation_published']=sorted(env.registry.cache_invalidated)\nenv.registry.signal_changes()\nprint('ENTERPRISE_RESULT=' + json.dumps(result))"
         log(receipt, {"phase": "fixture_mutation", "orm_script": source})
         result = shell("import json\n" + source)
         log(receipt, {"phase": "fixture_mutation_result", "result": result})
@@ -423,10 +447,10 @@ def lifecycle(folder):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("operation", choices=["prepare", "run", "concurrency", "lifecycle"])
+    parser.add_argument("operation", choices=["prepare", "run", "concurrency", "warm_concurrency", "lifecycle"])
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     output = args.output.resolve()
     if not output.is_relative_to((ROOT / ".runtime").resolve()):
         raise ValueError("Experiment outputs must remain under .runtime")
-    {"prepare": prepare, "run": run, "concurrency": concurrency, "lifecycle": lifecycle}[args.operation](output)
+    {"prepare": prepare, "run": run, "concurrency": concurrency, "warm_concurrency": lambda folder: concurrency(folder, fully_warm=True), "lifecycle": lifecycle}[args.operation](output)
