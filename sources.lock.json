@@ -87,20 +87,26 @@
         "caches"
       ],
       "applied_patch": {
-        "path": "patches/erp-bench-odoo19.patch",
+        "path": "bench/patches/erp-bench-odoo19.patch",
         "sha256": "7d60acfe660ade90bcf6732b6dd70e2fb00692b204405951a713345afe8c2885",
         "purpose": "Pin Odoo 19 and uv images for the three validated experiment tasks."
       }
     }
   },
   "native_runtime": {
-    "destination": "odoo_runtime",
+    "destination": "src/erp_harness/erp",
     "source_checkpoint": "da229bf12475c2aef38a8dc027c0f2ed66a972a6",
     "stage1_checkpoint": "40d98198a2f3e3ed13717b9000f304bb3a34b121",
     "stage6_checkpoint": "8d7a4d6ea0715a379f894e095ddc95a5f4d97709",
     "stage7_checkpoint": "7644f1a03d0e038603f494e246992b1015f6b4b7",
     "accepted_stage": 7,
-    "source_files": ["integration/native_reads.py", "mcp/src/odoo_mcp/tools_read.py", "mcp/src/odoo_mcp/server_core.py", "odoo_runtime/world.py", "integration/world_context.py"],
+    "source_files": [
+      "integration/native_reads.py",
+      "mcp/src/odoo_mcp/tools_read.py",
+      "mcp/src/odoo_mcp/server_core.py",
+      "odoo_runtime/world.py",
+      "integration/world_context.py"
+    ],
     "license": "MIT",
     "license_path": "mcp/LICENSE",
     "note": "Stages 1-7 are accepted. Stage 7 was verified by one same-case B-only run at 100/100 with zero MCP calls and a valid MCP-free runtime receipt. No Compiler is included."
@@ -108,7 +114,7 @@
   "stage7_extraction": {
     "status": "accepted",
     "source_commit": "76ec136e0c89c414811a12629eb2903d2dc27357",
-    "destination": "odoo_runtime/_odoo_core",
+    "destination": "src/erp_harness/erp/_odoo_core",
     "source_files": [
       "access_helpers.py",
       "accounting_tools.py",
@@ -127,7 +133,7 @@
       "write_policy.py",
       "data/odoo_renames.json"
     ],
-    "tool_catalog": "integration/native_tool_catalog.json",
+    "tool_catalog": "src/erp_harness/tools/native_tool_catalog.json",
     "license": "MIT",
     "license_path": "mcp/LICENSE",
     "note": "Pure Odoo business helpers only; MCP SDK, server, transport, prompts, and resources are not part of the native runtime. agent_tools.py changes only its package-resource root."
@@ -136,13 +142,13 @@
     "source_repository": "erp-agent-odoo",
     "source_path": "src/erp_agent_odoo/bench/trial_summary.py",
     "source_file_sha256": "ee6250ed4c2adfdbea9e974723e197e943dc03dd2197a0ed77781c7bce5cabfc",
-    "destination": "integration/trial_summary.py",
+    "destination": "bench/adapters/trial_summary.py",
     "note": "The original source file is identified by source_file_sha256. The lab reporter reuses the pinned agent's session_export/session_usage modules and suppresses terminal-failure classification when an agent naturally stops after recovering from an intermediate tool error; no compiler, backend service, or second dashboard is included."
   },
   "native_control": {
     "source_repository": "erp-agent-odoo",
     "source_class": "src/erp_agent_odoo/bench/agents.py:PiMcpBaseline",
-    "destination": "integration/native_pi_agent.py",
+    "destination": "bench/adapters/native_pi_agent.py",
     "pi_version": "0.84.1",
     "mcp_extension_version": "1.5.0",
     "harbor_version": "0.22.0",
@@ -178,5 +184,74 @@
     "file_count": 36,
     "tracked_in_git": false,
     "note": "Complete Linux CPython 3.12 dependency wheelhouse for the Stage 7 native Pi plus Odoo runtime. It contains no mcp, mcp-types, or odoo-mcp wheel and is installed without system site packages."
+  },
+  "project_restructure": {
+    "baseline_commit": "fd8bcde3d91bfdc80cdbf4114794d0f235e9e717",
+    "module_mapping": {
+      "pi_ai": "erp_harness.providers",
+      "pi_agent.session": "erp_harness.runtime.storage",
+      "pi_agent": "erp_harness.runtime",
+      "pi_coding.provider_config": "erp_harness.providers.config",
+      "pi_coding.provider_runtime": "erp_harness.providers.runtime",
+      "pi_coding.provider_catalog": "erp_harness.providers.catalog",
+      "pi_coding.catalog_loader": "erp_harness.providers.catalog_loader",
+      "pi_coding.models_dev": "erp_harness.providers.models_dev",
+      "pi_coding.models_dev_store": "erp_harness.providers.models_dev_store",
+      "pi_coding.thinking": "erp_harness.providers.thinking",
+      "pi_coding.credentials": "erp_harness.providers.credentials",
+      "pi_coding.oauth": "erp_harness.providers.oauth",
+      "pi_coding.oauth_types": "erp_harness.providers.oauth_types",
+      "pi_coding.oauth_registry": "erp_harness.providers.oauth_registry",
+      "pi_coding.oauth_device": "erp_harness.providers.oauth_device",
+      "pi_coding.oauth_anthropic": "erp_harness.providers.oauth_anthropic",
+      "pi_coding.oauth_github_copilot": "erp_harness.providers.oauth_github_copilot",
+      "pi_coding.branch_summary": "erp_harness.context.branch_summary",
+      "pi_coding.context": "erp_harness.context.project",
+      "pi_coding.context_window": "erp_harness.context.compaction",
+      "pi_coding.paths": "erp_harness.context.paths",
+      "pi_coding.prompt_templates": "erp_harness.context.prompt_templates",
+      "pi_coding.resources": "erp_harness.context.resources",
+      "pi_coding.skills": "erp_harness.context.skills",
+      "pi_coding.system_prompt": "erp_harness.context.system_prompt",
+      "pi_coding.self_docs": "erp_harness.context.self_docs",
+      "pi_coding.session": "erp_harness.runtime.session",
+      "pi_coding.events": "erp_harness.runtime.session_events",
+      "pi_coding.commands": "erp_harness.runtime.commands",
+      "pi_coding.diagnostics": "erp_harness.runtime.diagnostics",
+      "pi_coding.session_manager": "erp_harness.runtime.session_manager",
+      "pi_coding.session_stats": "erp_harness.runtime.session_stats",
+      "pi_coding.reload": "erp_harness.runtime.reload",
+      "pi_coding.project_trust": "erp_harness.runtime.project_trust",
+      "pi_coding.local_backends": "erp_harness.runtime.local_backends",
+      "pi_coding.built_in_extensions": "erp_harness.runtime.built_in_extensions",
+      "pi_coding.session_preparation": "erp_harness.runtime.session_preparation",
+      "pi_coding.shell_config": "erp_harness.runtime.shell_config",
+      "pi_coding.version": "erp_harness.runtime.version",
+      "pi_coding.extensions": "erp_harness.runtime.hooks",
+      "pi_coding.tools": "erp_harness.tools.filesystem",
+      "pi_coding.image_processing": "erp_harness.tools.image_processing",
+      "pi_coding.session_export": "erp_harness.runtime.exporting.transcript",
+      "pi_coding.session_usage": "erp_harness.runtime.exporting.usage",
+      "pi_coding.tui.themes": "erp_harness.runtime.exporting.themes",
+      "workbench": "erp_harness.app",
+      "odoo_runtime": "erp_harness.erp",
+      "integration.pi_odoo_runner": "erp_harness.app.runner",
+      "integration.stream_events": "erp_harness.app.stream_events",
+      "integration.odoo_tools": "erp_harness.tools.router",
+      "integration.dynamic_tools": "erp_harness.tools.dynamic_tools",
+      "integration.sop_tools": "erp_harness.tools.sops",
+      "integration.world_context": "erp_harness.context.world"
+    },
+    "native_product": "src/erp_harness",
+    "desktop": "desktop",
+    "benchmark_adapters": "bench/adapters",
+    "historical_mcp": "bench/reference/mcp",
+    "removed_reference": "Unused upstream CLI/TUI/application files remain available at the baseline commit.",
+    "directory_mapping": {
+      "integration/": "bench/adapters/ (product modules mapped separately)",
+      "configs/": "bench/configs/",
+      "mcp/": "bench/reference/mcp/",
+      "patches/": "bench/patches/"
+    }
   }
 }

@@ -2,7 +2,7 @@
 import asyncio
 from unittest.mock import patch
 
-from integration.harbor_agent import deadline_command
+from bench.adapters.harbor_agent import deadline_command
 from erp_harness.providers.env import OpenAICompatibleConfig
 from erp_harness.providers.openai_compatible import OpenAICompatibleProvider
 from erp_harness.providers.config import OpenAICompatibleProviderConfig, ProviderSettings, provider_settings_from_json

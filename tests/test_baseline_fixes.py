@@ -21,7 +21,7 @@ from odoo_mcp import server, tools_read
 from erp_harness.runtime.tools import AgentTool, AgentToolResult
 from erp_harness.providers.openai_compatible import OpenAICompatibleProvider
 
-from integration import harbor_agent
+from bench.adapters import harbor_agent
 from erp_harness.app import runner as pi_odoo_runner
 from erp_harness.context.projection import expand_lossless_tables
 from erp_harness.context.world import WorldStore
@@ -36,13 +36,11 @@ class BaselineFixTest(unittest.TestCase):
             with tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 (root / ".runtime" / "wheelhouse-native-py312").mkdir(parents=True)
-                for path in (root / "agent" / "src").joinpath("erp_harness.providers"), (root / "agent" / "src").joinpath("erp_harness.runtime"), (root / "agent" / "src").joinpath("pi_coding"):
-                    path.mkdir(parents=True)
-                (root / "integration").mkdir()
-                (root / "integration" / "pi_odoo_runner.py").touch()
+                (root / "dist").mkdir()
+                (root / "dist/erp_harness-0.5.4-py3-none-any.whl").touch()
                 agent = SimpleNamespace(exec_as_agent=AsyncMock(), exec_as_root=AsyncMock())
                 environment = SimpleNamespace(upload_dir=AsyncMock(), upload_file=AsyncMock())
-                with patch.object(harbor_agent, "__file__", str(root / "integration" / "harbor_agent.py")):
+                with patch.object(harbor_agent, "__file__", str(root / "bench" / "adapters" / "harbor_agent.py")):
                     await harbor_agent._install_task_runtime(agent, environment, native_only=True)
             commands = " ".join(
                 call.kwargs["command"] for call in agent.exec_as_root.await_args_list
@@ -526,7 +524,7 @@ class BaselineFixTest(unittest.TestCase):
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import setup from './integration/native_pi_extension.mjs';
+import setup from './bench/adapters/native_pi_extension.mjs';
 const handlers = new Map(); setup({on: (name, handler) => handlers.set(name, handler)});
 const result = handlers.get('before_provider_request')({payload: {model: 'test', messages: [], max_tokens: 16384, max_completion_tokens: 16384}});
 assert.equal('max_tokens' in result, false); assert.equal('max_completion_tokens' in result, false);

@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from integration.report import (
+from bench.adapters.report import (
     _world_receipts,
     load_entries,
     main,
@@ -19,7 +19,7 @@ from integration.report import (
     tool_failed,
     write_index,
 )
-from integration.trial_summary import _failure, _redact
+from bench.adapters.trial_summary import _failure, _redact
 from erp_harness.tools.dynamic_tools import tool_contract_sha256
 
 
@@ -727,10 +727,10 @@ class ReportingTest(unittest.TestCase):
             with (
                 patch.object(sys, "argv", ["report", "--run-config", str(config)]),
                 patch(
-                    "integration.report.subprocess.run",
+                    "bench.adapters.report.subprocess.run",
                     return_value=subprocess.CompletedProcess([], 2),
                 ) as run,
-                patch("integration.report.report_path") as report,
+                patch("bench.adapters.report.report_path") as report,
             ):
                 with self.assertRaises(SystemExit) as stopped:
                     main()

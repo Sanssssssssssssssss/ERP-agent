@@ -28,7 +28,7 @@ from odoo_mcp.odoo_client import (
     load_instances_config,
 )
 from odoo_mcp.schema_cache import _build_schema_cache
-from erp_harness.runtime.mcp import _agent_tool
+from bench.reference.pi_mcp import _agent_tool
 from erp_harness.runtime.tools import AgentTool, AgentToolResult
 
 from erp_harness.tools.router import native_tool_catalog, route_tools

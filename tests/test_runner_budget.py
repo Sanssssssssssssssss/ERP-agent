@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-from integration import harbor_agent
+from bench.adapters import harbor_agent
 from erp_harness.app import runner as pi_odoo_runner
 from erp_harness.runtime.messages import AssistantMessage, ToolResultMessage, UserMessage
 from erp_harness.runtime.tools import AgentTool, AgentToolResult

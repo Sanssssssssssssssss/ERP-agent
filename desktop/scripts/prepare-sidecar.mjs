@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import process from "node:process";
@@ -140,7 +140,7 @@ await cp(join(repoRoot, "LICENSE"), join(destination, "licenses", "workbench-MIT
 await cp(join(repoRoot, "THIRD_PARTY_NOTICES.md"), join(destination, "licenses", "workbench-NOTICES.md"));
 await cp(join(repoRoot, "docs", "licenses", "pi-agent-MIT.txt"), join(destination, "licenses", "pi-agent-MIT.txt"));
 await cp(join(repoRoot, "docs", "licenses", "pi-agent-NOTICES.md"), join(destination, "licenses", "pi-agent-NOTICES.md"));
-await cp(join(repoRoot, "mcp", "LICENSE"), join(destination, "licenses", "odoo-core-MIT.txt"));
+await cp(join(repoRoot, "bench", "reference", "mcp", "LICENSE"), join(destination, "licenses", "odoo-core-MIT.txt"));
 const packageEntries = await readdir(join(destination, "app", "site-packages"), { withFileTypes: true });
 for (const entry of packageEntries) {
   if (!rejectJunk("", entry.name)) {
@@ -180,13 +180,24 @@ const sourceDigests = {};
 for (const source of ["erp_harness", "site-packages"]) {
   sourceDigests[`app/${source}`] = await digestDirectory(join(destination, "app", source));
 }
+let sourceCommit = null;
+let sourceDirty = null;
+try {
+  const git = args => execFileSync("git", args, { cwd: repoRoot, encoding: "utf8", windowsHide: true }).trim();
+  sourceCommit = git(["rev-parse", "HEAD"]);
+  sourceDirty = Boolean(git(["status", "--porcelain", "--untracked-files=no"]));
+} catch { /* Source archives have no Git metadata; wheel and file hashes still apply. */ }
 await writeFile(join(destination, "manifest.json"), JSON.stringify({
+  source_commit: sourceCommit,
+  source_dirty: sourceDirty,
   python_version: "3.13.12",
   python_url: pythonUrl,
   python_archive_sha256: actualSha256,
   host_root: "app",
   backend_wheel: basename(backendWheel),
   backend_wheel_sha256: await sha256(backendWheel),
+  dependency_lock_sha256: await sha256(join(repoRoot, "uv.lock")),
+  host_requirements_sha256: await sha256(join(root, "requirements-host.txt")),
   site_packages: "app/site-packages",
   source_packages: ["app/erp_harness", "app/site-packages"],
   bundle_digests: sourceDigests,

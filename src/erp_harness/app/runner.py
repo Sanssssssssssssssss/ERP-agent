@@ -210,7 +210,7 @@ async def _source_tools(args):
         return
     toolset_class = McpToolSet
     if toolset_class is None:
-        from bench.reference.pi_mcp import McpToolSet as toolset_class
+        raise RuntimeError("MCP mode requires the isolated benchmark reference runner")
     async with toolset_class(args.mcp_url) as toolset:
         yield toolset.tools
 

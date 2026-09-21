@@ -13,4 +13,4 @@ manifest = pathlib.Path(sys.argv[2]).read_bytes()
 assert json.loads(manifest)["case"] == sys.argv[3]
 assert {a["kwargs"]["snapshot_sha256"] for a in config["agents"]} == {hashlib.sha256(manifest).hexdigest()}
 PY
-exec bash integration/run_baseline.sh "$config"
+exec bash bench/adapters/run_baseline.sh "$config"

@@ -4,7 +4,7 @@ This source tree integrates desktop baseline `6821615186d18b42855bfd0692b471d056
 
 ## Runtime and configuration
 
-The [desktop worker](../workbench/worker.py) invokes [pi_odoo_runner](../integration/pi_odoo_runner.py) with:
+The [desktop worker](../src/erp_harness/app/worker.py) invokes [pi_odoo_runner](../src/erp_harness/app/runner.py) with:
 
 | Setting | Value |
 | --- | --- |
@@ -14,7 +14,7 @@ The [desktop worker](../workbench/worker.py) invokes [pi_odoo_runner](../integra
 | World state | `record` |
 | Desktop writes | Pause for per-action human approval; continue the same session |
 
-Connection settings are entered in the workbench; dependencies and startup commands are in the [README](../README.md#quick-start-windows-development). Historical `configs/stage*.json` retain their original experiment settings, including static-tool controls. Benchmark adapters may use `bench-auto` approval only in disposable task environments.
+Connection settings are entered in the workbench; dependencies and startup commands are in the [README](../README.md#quick-start-windows-development). Historical `bench/configs/stage*.json` retain their original experiment settings, including static-tool controls. Benchmark adapters may use `bench-auto` approval only in disposable task environments.
 
 `TaskEvidence` is optional host-supplied benchmark evidence. The desktop does not supply it. The separate [company-record RAG experiment](../experiments/company_records_rag/README.md) remains outside the workbench runtime.
 

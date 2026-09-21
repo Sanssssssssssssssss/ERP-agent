@@ -1,7 +1,7 @@
 # 完整项目整理与迁移方案
 
 基线：`fd8bcde3d91bfdc80cdbf4114794d0f235e9e717`，已推送。目标是一个完整 ERP Harness：统一后端、完整桌面客户端、独立 benchmark、可验证的安装与升级路径。
-状态：方案；尚未搬动代码、执行迁移测试或调用业务 API。按下面的阶段逐项验收，故障定位到本批并回退；不承诺仅靠目录设计就消除运行风险。
+状态：已开始执行；后端入包、前端拆分、运行内核融合已分批提交。最终安装包与业务验收结果另行记录。按下面的阶段逐项验收，故障定位到本批并回退。
 
 **目标目录**
 
@@ -109,4 +109,4 @@ bench adapter → 同一后端包的 runner → 隔离的 Odoo 环境
 迁移后从根目录执行 `uv sync --locked` 安装后端，前端沿用 `npm --prefix desktop ci`、`npm --prefix desktop run dev`；选择同一项目虚拟环境的 Python。产品入口统一到 `erp_harness.app.host`，普通对话与业务 runner 作为受控子进程启动。
 发布顺序为 `uv build --wheel` → `npm --prefix desktop run prepare:sidecar` → `npm --prefix desktop run dist:portable` → `npm --prefix desktop run package-check`。准备脚本消费指定的本次 wheel，固定平台依赖后装入 sidecar；manifest 记录源码、wheel、依赖、资源及产物哈希；bench 安装同一 wheel。完整交付包含桌面包、开发安装入口、模块地图、测试/业务验收记录与回退说明。
 
-依据：[前端与打包配置](../desktop/package.json)、[IPC 桥](../desktop/src/preload/index.ts)、[桌面后端启动](../desktop/src/main/host.ts)、[现有验收脚本](../desktop/scripts/package-check.mjs)、[数据存储](../workbench/storage.py)、[CI](../.github/workflows/checks.yml)。
+依据：[前端与打包配置](../desktop/package.json)、[IPC 桥](../desktop/src/preload/index.ts)、[桌面后端启动](../desktop/src/main/host.ts)、[现有验收脚本](../desktop/scripts/package-check.mjs)、[数据存储](../src/erp_harness/app/storage.py)、[CI](../.github/workflows/checks.yml)。

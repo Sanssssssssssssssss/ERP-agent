@@ -10,7 +10,7 @@ import tomllib
 
 from erp_harness.tools.router import native_tool_catalog
 from erp_harness.app.runner import CURRENT_TIME_TOOL
-from integration.reward_adapter import adapt_erp_bench_reward
+from bench.adapters.reward_adapter import adapt_erp_bench_reward
 from erp_harness.tools.sops import build_sop_tools
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,13 +23,13 @@ class CleanHarnessTest(unittest.TestCase):
         runner = (ROOT / "src" / "erp_harness" / "app" / "runner.py").read_text(
             encoding="utf-8"
         )
-        patch = (ROOT / "patches" / "erp-bench-odoo19.patch").read_text(
+        patch = (ROOT / "bench" / "patches" / "erp-bench-odoo19.patch").read_text(
             encoding="utf-8"
         )
 
         self.assertEqual(len(tasks), 300)
         self.assertFalse((ROOT / "bench" / "tasks_ui").exists())
-        self.assertFalse((ROOT / "integration" / "native_reads.py").exists())
+        self.assertFalse((ROOT / "bench" / "adapters" / "native_reads.py").exists())
         self.assertTrue((ROOT / "src" / "erp_harness" / "erp" / "reads.py").is_file())
         self.assertEqual(patch.count("diff --git "), 3)
         self.assertNotIn("create_coding_tools", runner)
@@ -64,7 +64,7 @@ class CleanHarnessTest(unittest.TestCase):
 
     def test_stage5_capability_inventory_is_complete_and_compiler_free(self) -> None:
         inventory = json.loads(
-            (ROOT / "configs" / "capabilities.json").read_text(encoding="utf-8")
+            (ROOT / "bench" / "configs" / "capabilities.json").read_text(encoding="utf-8")
         )
         self.assertEqual(inventory["compiler"], "out_of_scope")
         self.assertEqual(len(inventory["tools"]), 42)
@@ -78,12 +78,12 @@ class CleanHarnessTest(unittest.TestCase):
 
     def test_stage7_native_surface_has_no_mcp_runtime_dependency(self) -> None:
         stage6 = json.loads(
-            (ROOT / "configs" / "stage6-knowledge-native-b.json").read_text(
+            (ROOT / "bench" / "configs" / "stage6-knowledge-native-b.json").read_text(
                 encoding="utf-8"
             )
         )
         stage7 = json.loads(
-            (ROOT / "configs" / "stage7-odoo-native-b.json").read_text(
+            (ROOT / "bench" / "configs" / "stage7-odoo-native-b.json").read_text(
                 encoding="utf-8"
             )
         )
@@ -109,7 +109,7 @@ class CleanHarnessTest(unittest.TestCase):
                 stage6["agents"][0]["kwargs"][key],
             )
         inventory = json.loads(
-            (ROOT / "configs" / "capabilities.json").read_text(encoding="utf-8")
+            (ROOT / "bench" / "configs" / "capabilities.json").read_text(encoding="utf-8")
         )
         catalog = json.loads(
             (ROOT / "src" / "erp_harness" / "tools" / "native_tool_catalog.json").read_text(
