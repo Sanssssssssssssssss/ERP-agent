@@ -31,3 +31,9 @@ $env:WORKBENCH_HOST_ROOT = "$PWD"
 验收入口：`retrieval_check.py prepare/run/concurrency/lifecycle --output <本机.runtime目录>`；顺序执行。`live.py freeze` 固定六条业务输入、两题回归配置和源码/安装包哈希；配置已授权的 `LLM_BASE_URL/LLM_API_KEY` 后执行 `live.py E01` 至 `E06`，每题只允许一次。ERPBench 使用 `bench_launch.sh 2003/2156`，WSL PATH 需包含现有 Harbor 环境。原始日志、请求、用量、审批及前后快照均在本机实验目录；总状态只看 `docs/enterprise-validation.md`。
 
 六题各自从 `baseline-10000` 恢复后开始，结束保存 `after-e01` 等快照。查看旧题的当前业务单据前先恢复其对应快照；原始 trace 可直接查看，不依赖当前数据库状态。
+
+八题结束后运行 `python experiments/enterprise_validation/report.py`，离线重算用量和成本门槛，生成本机 `acceptance-results.json`。Harbor 的嵌套评分兼容问题使用现有 reward adapter 处理，原始评分与异常文件保留；该命令不调用模型。
+
+`audit_payments.py <live/E03绝对路径> --fixtures <fixtures.json绝对路径>` 补查逐笔付款与银行匹配；具体参数以 `--help` 为准。原请求在 `live/E01/profile/data/runs/*/requests/`；模型会话、审批、Odoo调用与SQLite动作账本在相邻目录。两道旧题位于 `bench/jobs/`，兼容评分位于 `bench/normalized/`。完整日志、凭据和快照均不上 Git。
+
+`audit_business.py --restore-and-collect` 会串行恢复基线及五个结束快照，按只读事务采集原单、贷项、分录和工位证据，最后恢复 `baseline-10000`。该模式持有与真实业务相同的排他锁；不带参数仅比较已经采集的JSON。补查结果位于 `business-supplement/audit.json`。

@@ -52,13 +52,15 @@ The workflow graphic is schematic; the screenshots show the actual renderer UI.
 
 ## What it does
 
-- Runs a the integrated session loop, providers and native Odoo helpers in `src/erp_harness`.
+- Runs the integrated session loop, providers and native Odoo helpers in `src/erp_harness`.
 - Provides a Windows Electron workbench for sales, purchasing, invoicing, approvals, readback, and run traces.
 - Accepts UTF-8 CSV/TXT materials within the workbench limits, exports observed document lines as UTF-8 BOM CSV, and downloads an already-generated customer-invoice PDF when its Odoo attachment is available.
 - Keeps ERP write actions behind per-action approval and records the pre-state, result, and independent readback.
 - Carries the pinned ERP-Bench dataset and Harbor integration used by the research stages.
 
-The current workbench business projections cover `sale_invoice`, `sale_purchase_invoice`, and `purchase`. The native runtime includes controlled SOP tools and native knowledge index/search/stats. The separate `experiments/company_records_rag` vector experiment is not connected to the Agent or workbench. ERP-Bench remains the independent scorer; a workbench readback is not an ERP-Bench score.
+The current workbench business projections cover `sale_invoice`, `sale_purchase_invoice`, `purchase`, `inventory`, `manufacturing`, `payment`, `refund`, and `reconciliation`. The native runtime includes controlled SOP tools and persistent, identity-scoped BM25 knowledge search. The separate `experiments/company_records_rag` vector experiment is not connected to the Agent or workbench. ERP-Bench remains the independent scorer; a workbench readback is not an ERP-Bench score.
+
+The [standard validation enterprise](experiments/enterprise_validation/README.md) provides an isolated Chinese/CNY Odoo company pair, role accounts, and 10,000 source documents. See its [acceptance ledger](docs/enterprise-validation.md) for actual results and remaining gates. Long-term memory defaults to off.
 
 The desktop worker uses `native` execution with `dynamic` tools, `controlled` SOPs, and `record` world state. This source tree combines the desktop baseline with newer benchmark backend changes; the v0.5.4 download above is the earlier published preview. See [backend integration and validation boundaries](docs/backend-release.md) for the pinned inputs and offline checks. Benchmark `TaskEvidence` requires explicit host configuration and is not enabled by the desktop worker.
 
@@ -99,7 +101,7 @@ Build the backend wheel first and prepare an environment without development dep
 - The native catalog keeps some `mcp_odoo_*` compatibility names; `src/erp_harness/tools/router.py` strips that label before calling the native adapter, with no MCP transport.
 - Odoo writes require explicit approval. An uncertain write moves to readback/reconciliation; it is not silently replayed or marked complete.
 - PDF export is for an observed Odoo document. A down payment invoice or a posted invoice is not evidence that a bank payment occurred.
-- Manufacturing planning/confirmation, banking, reconciliation, payroll, HR, OCR, and company-wide document retrieval are outside the current workbench claim unless a specific source and experiment says otherwise.
+- Manufacturing, stock transfers, payments, refunds and reconciliation are validated against the local synthetic enterprise described above. Real bank/tax integrations, payroll, HR and OCR are outside this validation.
 - The workbench accepts CSV/TXT materials. It does not claim a complete enterprise document index or production deployment.
 
 ## Repository map
