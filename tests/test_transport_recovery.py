@@ -87,10 +87,10 @@ def test_partial_stream_timeout_recovery(tmp_path: Path, recover: bool, error_ty
                     with pytest.raises(RuntimeError, match="Provider run did not complete: Provider network error"):
                         await runner.run(args)
         assert len(calls) == 3
-        rows = [json.loads(line) for line in args.session_file.read_text().splitlines()]
+        rows = [json.loads(line) for line in args.session_file.read_text(encoding="utf-8").splitlines()]
         errors = [row["message"] for row in rows if row.get("message", {}).get("stopReason") == "error"]
         assert errors and all(error_type.__name__ in row["errorMessage"] for row in errors)
-        usage = json.loads(args.usage_file.read_text())
+        usage = json.loads(args.usage_file.read_text(encoding="utf-8"))
         assert usage["modelCalls"] == 3
         # The failed stream has unreported usage, even if a later request recovers.
         assert usage["input"] is None
