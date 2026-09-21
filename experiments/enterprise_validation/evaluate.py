@@ -8,6 +8,7 @@ from manage import RUN, shell
 
 # This source runs in the pinned Odoo shell. No model prose or tool success enters scoring.
 CHECK = r'''
+import json
 from collections import Counter, defaultdict
 from decimal import Decimal
 assert env.cr.dbname == "erp_harness_enterprise_v1"
@@ -28,8 +29,8 @@ def bank_matched(payments, bank_ids):
     return bool(bank) and len(bank)==len(bank_ids) and all(bank.mapped("is_reconciled")) and all(payments.mapped("is_matched")) and all(payments.mapped("is_reconciled")) and set(bank.ids)==set(payments.reconciled_statement_line_ids.ids) and set(bank_lines.ids).issubset(set(linked.ids)) and posted_balanced(payments.move_id | bank.move_id)
 
 if CASE == "data":
-    expected={"sale.order":TARGET//2,"purchase.order":TARGET*3//10,"mrp.production":TARGET//5}
-    for model,count in expected.items():
+    source_counts={"sale.order":TARGET//2,"purchase.order":TARGET*3//10,"mrp.production":TARGET//5}
+    for model,count in source_counts.items():
         records=env[model].search([])
         check(model+"_count",len(records)==count)
         evidence[model+"_states"]=dict(Counter(records.mapped("state")))
@@ -72,7 +73,7 @@ if CASE == "data":
         r=env[item["model"]].browse(item["id"]).exists()
         check(name,bool(r) and r.state==item["state"])
         if item["model"]=="account.payment": check(name+"_bank",bank_matched(r,r.reconciled_statement_line_ids.ids))
-    evidence["counts"]={model:env[model].search_count([]) for model in [*expected,"sale.order.line","purchase.order.line","stock.picking","stock.move","account.move","account.move.line","account.payment","account.partial.reconcile"]}
+    evidence["counts"]={model:env[model].search_count([]) for model in [*source_counts,"sale.order.line","purchase.order.line","stock.picking","stock.move","account.move","account.move.line","account.payment","account.partial.reconcile"]}
 else:
     c=next(c for c in FIXTURES["scenarios"] if c["id"]==CASE)
     r,x=c["records"],c["expected"]
