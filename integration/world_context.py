@@ -150,6 +150,7 @@ def _table_projection(
 def project_messages(world: WorldStore, messages: Iterable[Any]) -> list[Any]:
     """Keep tool pairing and the newest full result; fail open if projection receipts fail."""
     try:
+        # output 只是本次 provider 请求的消息视图；WorldStore 仍保留原始观察历史。
         output = list(messages)
         groups: dict[str, list[tuple[int, ToolResultMessage, dict[str, Any]]]] = {}
         for index, message in enumerate(output):
@@ -165,6 +166,7 @@ def project_messages(world: WorldStore, messages: Iterable[Any]) -> list[Any]:
                 continue
             latest = entries[-1][2]
             for index, message, candidate in entries[:-1]:
+                # 旧重复读取只改为指向最新 receipt，原工具调用 ID 与消息配对位置不变。
                 compact = json.dumps({
                     "success": True,
                     "world_projection": {
@@ -200,6 +202,7 @@ def project_read_history(world: WorldStore, messages: Iterable[Any]) -> list[Any
         if not world.telemetry().get("projection_enabled", True):
             return original
         output = list(original)
+        # 后续非失败的 assistant 消息数用于判断是否已消费；最近两轮不外置，但仍可做表格压缩。
         consumed_after = [0] * len(original)
         assistant_seen = 0
         for index in range(len(original) - 1, -1, -1):
@@ -215,6 +218,7 @@ def project_read_history(world: WorldStore, messages: Iterable[Any]) -> list[Any
             if (not consumed_after[index] or not isinstance(message, ToolResultMessage)
                     or message.is_error or _native_tool_name(message.tool_name) not in READ_TOOLS):
                 continue
+            # receipt/hash 确认对应原消息；引用回读时再由 WorldStore 检查身份与完整性。
             receipt = world.receipt_for_call(message.tool_call_id)
             if (not receipt or not receipt.get("outcome", {}).get("success")
                     or receipt.get("result_sha256") != hashlib.sha256(
@@ -267,6 +271,7 @@ def project_read_history(world: WorldStore, messages: Iterable[Any]) -> list[Any
         world.record_projection(compacted, original_bytes, projected_bytes)
         return output
     except Exception as exc:  # observation must not break the provider request
+        # 节省上下文失败时不阻断 agent：关闭投影并把原消息交给 provider。
         try:
             world.mark_unhealthy("history_projection", exc)
         except Exception:

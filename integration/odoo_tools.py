@@ -135,6 +135,7 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
     native_reads = NATIVE_READ_RESPONSES if native_health else READ_RESPONSES
     for tool in tools:
         name = tool.name.removeprefix("mcp_odoo_")
+        # mcp_odoo_ 前缀保留固定工具契约；是否直连原生实现由下面的运行时依赖和工具集合决定。
         direct_read = native is not None and name in native_reads
         direct_action = actions is not None and name in ACTION_TOOLS
         capability_ready = capabilities is not None and name in CAPABILITY_TOOLS
@@ -160,6 +161,7 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
             world_receipt_unavailable = False
             side_effect_attempted = name in SIDE_EFFECT_TOOLS
             try:
+                # World 记录失败不阻断本次工具调用；会标记不健康并停止后续历史投影。
                 if world is not None and (
                     name in READ_RESPONSES or (direct_read and name != "health_check")
                 ):
@@ -185,6 +187,7 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                     source_raw = dict(raw) if isinstance(raw, dict) else raw
                     if isinstance(source_raw, dict):
                         runtime_evidence = source_raw.pop("_runtime_evidence", None)
+                    # 字段发现结果可先压缩给模型；source_raw 另存入 receipt 供审计。
                     visible_raw = _model_visible_native_read(name, normalized, source_raw)
                     structured = native_reads[name].model_validate(visible_raw).model_dump(
                         mode="json", by_alias=True
@@ -235,6 +238,7 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                 else:
                     result = await tool.execute(call_id, arguments, signal, on_update)
                 if world_receipt_unavailable:
+                    # 业务结果照常返回，但模型必须知道这次不能作为可复用的 World 证据。
                     result = _receipt_unavailable_result(
                         result,
                         fallback_payload=(

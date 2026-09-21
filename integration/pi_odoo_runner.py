@@ -354,6 +354,8 @@ def _next_receipt_sequence(directory: Path):
     return count(latest + 1).__next__
 
 
+# 学习入口：这里组装 ERP 后端、工具和会话；模型与工具的循环由 CodingSession 驱动。
+# 可沿 route_tools 看读写分流，再看 actions 的审批执行和 world_context 的历史投影。
 async def run(args: argparse.Namespace) -> None:
     api_key = os.environ.get("LLM_API_KEY")
     base_url = os.environ.get("LLM_BASE_URL", "").rstrip("/")
@@ -470,6 +472,7 @@ async def run(args: argparse.Namespace) -> None:
                     )
                 except Exception as exc:  # noqa: BLE001 - optional world state must fail open
                     print(f"World initialization failed open: {type(exc).__name__}", file=sys.stderr)
+            # 先绑定工具的实际执行函数，再由 dynamic 模式选择本轮向模型公布的集合。
             full_tools = [
                 *route_tools(
                     source_tools, receipt_dir / "tool-backends.jsonl",
@@ -569,6 +572,7 @@ async def run(args: argparse.Namespace) -> None:
                 # continuation model turn is built.
                 dynamic_log = receipt_dir / "dynamic-tools.jsonl"
                 _restore_dynamic_selection(dynamic_tools, session, dynamic_log)
+                # 工具集合的变更留到下一轮发布，避免同一轮请求与执行使用不同契约。
                 dynamic_tools.bind(session.stage_tools_for_next_turn)
             if getattr(args, "pause_on_approval", False):
                 async def stop_after_approval(turn):
@@ -578,6 +582,7 @@ async def run(args: argparse.Namespace) -> None:
                 # before the next model request.  It therefore pauses at the
                 # safe boundary without an extra paid request.
                 session._harness.config.should_stop_after_turn = stop_after_approval
+            # native 即使使用 record 模式，也会投影已消费的读取历史；原始持久化日志仍保留。
             if world is not None and (world_mode == "project" or runtime_mode == "native"):
                 existing_transform = session._harness.config.transform_context
 
@@ -663,6 +668,7 @@ async def run(args: argparse.Namespace) -> None:
                 async for event in public_events(source):
                     print(json.dumps(event, ensure_ascii=False), flush=True)
 
+                # 按新增持久化条目统计本次用量，审批续跑不会重算旧轮次；compaction 另列。
                 new_entries = [entry for entry in await session.session_entries()
                                if entry.id not in entry_ids_before]
                 assistant = [entry.message for entry in new_entries

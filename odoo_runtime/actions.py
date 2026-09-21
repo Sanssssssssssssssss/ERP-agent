@@ -443,6 +443,7 @@ class NativeActions:
         prestate: Any,
         policy_digest: str,
     ) -> str:
+        # 动作键绑定本次意图、身份、预状态和策略；任一变化都会产生不同的键。
         return ActionStore.digest(
             {
                 "session_id": os.environ.get("PI_AGENT_SESSION_ID", "local"),
@@ -1026,11 +1027,13 @@ class NativeActions:
                 "verification": row.get("verification"),
             }
         if row["status"] in {"sending", "needs_reconciliation"}:
+            # 一旦可能已发送，只能回读确认，绝不能因未知结果再次发送。
             return self._reconcile(row)
         runtime = self.reads.instances[str(row["payload"]["instance"])]
         if row["policy_digest"] != self._policy_snapshot(runtime)[0]:
             return {"success": False, "action_id": action_id, "error": "action policy changed; validate again"}
         if not self._current_prestate_matches(row):
+            # 与本次动作相关的 Odoo 状态改变或证据缺失，会要求重新验证。
             return {
                 "success": False,
                 "action_id": action_id,
@@ -1117,6 +1120,7 @@ class NativeActions:
                 "result": result,
                 "error": "Odoo returned, but post-state verification failed; no retry",
             }
+        # verified 只表示指定字段或状态的回读满足，不代表完整业务目标已正确完成。
         status = "verified" if verification["status"] == "satisfied" else "needs_reconciliation"
         stored = self.store.finish(
             action_id,
@@ -1302,6 +1306,7 @@ class NativeActions:
             trusted = source == "server" and bool(fields_metadata)
             action = None
             if trusted and report.get("success"):
+                # 使用服务端字段元数据且校验成功，才将本次写入提案登记为可审批动作。
                 approval = report["approval"]
                 now = time.time()
                 approval["validated_at"] = now
