@@ -8,14 +8,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from pi_agent.messages import AssistantMessage, TextContent, ToolResultMessage
-from pi_agent.tools import AgentTool, AgentToolResult
+from erp_harness.runtime.messages import AssistantMessage, TextContent, ToolResultMessage
+from erp_harness.runtime.tools import AgentTool, AgentToolResult
 
-from integration.odoo_tools import route_tools
-from integration.world_context import expand_lossless_tables, project_messages, project_read_history
-from odoo_runtime.dynamic_tools import OPTIONAL_NATIVE_BASE_TOOLS
-from odoo_runtime.world import READ_TOOLS, WorldStore
-from odoo_runtime.world_tools import build_world_tools
+from erp_harness.tools.router import route_tools
+from erp_harness.context.projection import expand_lossless_tables, project_messages, project_read_history
+from erp_harness.tools.dynamic_tools import OPTIONAL_NATIVE_BASE_TOOLS
+from erp_harness.context.world import READ_TOOLS, WorldStore
+from erp_harness.context.world_tools import build_world_tools
 
 
 ENV = {
@@ -39,7 +39,7 @@ class WorldStoreTest(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as directory,
             patch.dict(os.environ, ENV),
-            patch("odoo_runtime.world._now", return_value="2026-09-04T00:00:00Z"),
+            patch("erp_harness.context.world._now", return_value="2026-09-04T00:00:00Z"),
         ):
             root = Path(directory)
             world = self.store(root)

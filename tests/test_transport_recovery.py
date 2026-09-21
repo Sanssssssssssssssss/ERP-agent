@@ -11,9 +11,9 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from integration import pi_odoo_runner as runner
-from pi_ai import OpenAICompatibleProvider
-from pi_coding import CodingSessionConfig
+from erp_harness.app import runner as runner
+from erp_harness.providers import OpenAICompatibleProvider
+from erp_harness.runtime.session import SessionConfig
 
 
 @pytest.mark.parametrize("recover", [True, False])
@@ -48,7 +48,7 @@ def test_partial_stream_timeout_recovery(tmp_path: Path, recover: bool, error_ty
         async def no_odoo(_args):
             yield []
 
-        original_load = runner.CodingSession.load
+        original_load = runner.HarnessSession.load
 
         async def load_with_pruned_view(config):
             session = await original_load(config)
@@ -72,11 +72,11 @@ def test_partial_stream_timeout_recovery(tmp_path: Path, recover: bool, error_ty
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             with (
                 patch.object(runner, "_source_tools", no_odoo),
-                patch.object(runner.CodingSession, "load", side_effect=load_with_pruned_view),
+                patch.object(runner.HarnessSession, "load", side_effect=load_with_pruned_view),
                 patch.object(runner, "OpenAICompatibleProvider", side_effect=lambda config:
                              OpenAICompatibleProvider(config, client=client)),
-                patch.object(runner, "CodingSessionConfig", side_effect=lambda **kwargs:
-                             CodingSessionConfig(**kwargs, retry_max_retries=1, retry_base_delay_ms=0)),
+                patch.object(runner, "SessionConfig", side_effect=lambda **kwargs:
+                             SessionConfig(**kwargs, retry_max_retries=1, retry_base_delay_ms=0)),
                 patch.dict(os.environ, {"LLM_API_KEY": "test-only", "LLM_BASE_URL": "https://unused.invalid/v1",
                                        "LLM_MODEL": "deepseek/test", "LLM_PROVIDER": "openai-compatible"}),
                 redirect_stdout(io.StringIO()),
@@ -87,10 +87,10 @@ def test_partial_stream_timeout_recovery(tmp_path: Path, recover: bool, error_ty
                     with pytest.raises(RuntimeError, match="Provider run did not complete: Provider network error"):
                         await runner.run(args)
         assert len(calls) == 3
-        rows = [json.loads(line) for line in args.session_file.read_text().splitlines()]
+        rows = [json.loads(line) for line in args.session_file.read_text(encoding="utf-8").splitlines()]
         errors = [row["message"] for row in rows if row.get("message", {}).get("stopReason") == "error"]
         assert errors and all(error_type.__name__ in row["errorMessage"] for row in errors)
-        usage = json.loads(args.usage_file.read_text())
+        usage = json.loads(args.usage_file.read_text(encoding="utf-8"))
         assert usage["modelCalls"] == 3
         # The failed stream has unreported usage, even if a later request recovers.
         assert usage["input"] is None

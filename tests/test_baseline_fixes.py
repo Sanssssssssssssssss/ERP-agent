@@ -18,13 +18,14 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 from odoo_mcp import server, tools_read
-from pi_agent.tools import AgentTool, AgentToolResult
-from pi_ai.openai_compatible import OpenAICompatibleProvider
+from erp_harness.runtime.tools import AgentTool, AgentToolResult
+from erp_harness.providers.openai_compatible import OpenAICompatibleProvider
 
-from integration import harbor_agent, pi_odoo_runner
-from integration.world_context import expand_lossless_tables
-from odoo_runtime.world import WorldStore
-from odoo_runtime.world_tools import build_world_tools
+from bench.adapters import harbor_agent
+from erp_harness.app import runner as pi_odoo_runner
+from erp_harness.context.projection import expand_lossless_tables
+from erp_harness.context.world import WorldStore
+from erp_harness.context.world_tools import build_world_tools
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,13 +36,11 @@ class BaselineFixTest(unittest.TestCase):
             with tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 (root / ".runtime" / "wheelhouse-native-py312").mkdir(parents=True)
-                for path in (root / "agent" / "src").joinpath("pi_ai"), (root / "agent" / "src").joinpath("pi_agent"), (root / "agent" / "src").joinpath("pi_coding"):
-                    path.mkdir(parents=True)
-                (root / "integration").mkdir()
-                (root / "integration" / "pi_odoo_runner.py").touch()
+                (root / "dist").mkdir()
+                (root / "dist/erp_harness-0.5.4-py3-none-any.whl").touch()
                 agent = SimpleNamespace(exec_as_agent=AsyncMock(), exec_as_root=AsyncMock())
                 environment = SimpleNamespace(upload_dir=AsyncMock(), upload_file=AsyncMock())
-                with patch.object(harbor_agent, "__file__", str(root / "integration" / "harbor_agent.py")):
+                with patch.object(harbor_agent, "__file__", str(root / "bench" / "adapters" / "harbor_agent.py")):
                     await harbor_agent._install_task_runtime(agent, environment, native_only=True)
             commands = " ".join(
                 call.kwargs["command"] for call in agent.exec_as_root.await_args_list
@@ -271,11 +270,11 @@ class BaselineFixTest(unittest.TestCase):
                         ),
                     ),
                     patch(
-                        "pi_coding.session._create_runtime_provider",
+                        "erp_harness.runtime.session._create_runtime_provider",
                         side_effect=AssertionError("Configured provider was replaced"),
                     ),
                     patch.object(
-                        pi_odoo_runner.CodingSession, "_maybe_auto_compact",
+                        pi_odoo_runner.HarnessSession, "_maybe_auto_compact",
                         new_callable=AsyncMock, return_value=False,
                     ) as compact,
                     patch.dict(
@@ -459,7 +458,7 @@ class BaselineFixTest(unittest.TestCase):
                     patch.object(pi_odoo_runner, "NativeCapabilities", side_effect=native_capabilities),
                     patch.object(pi_odoo_runner, "project_read_history", wraps=original_hook) as history_hook,
                     patch.object(pi_odoo_runner, "OpenAICompatibleProvider", side_effect=lambda config: OpenAICompatibleProvider(config, client=client)),
-                    patch("pi_coding.session._create_runtime_provider", side_effect=AssertionError("Configured provider was replaced")),
+                    patch("erp_harness.runtime.session._create_runtime_provider", side_effect=AssertionError("Configured provider was replaced")),
                     patch.dict(os.environ, {
                         "LLM_API_KEY": "test-only", "LLM_BASE_URL": "https://unused.invalid/v1",
                         "LLM_MODEL": "deepseek/test", "LLM_PROVIDER": "openai-compatible",
@@ -525,7 +524,7 @@ class BaselineFixTest(unittest.TestCase):
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import setup from './integration/native_pi_extension.mjs';
+import setup from './bench/adapters/native_pi_extension.mjs';
 const handlers = new Map(); setup({on: (name, handler) => handlers.set(name, handler)});
 const result = handlers.get('before_provider_request')({payload: {model: 'test', messages: [], max_tokens: 16384, max_completion_tokens: 16384}});
 assert.equal('max_tokens' in result, false); assert.equal('max_completion_tokens' in result, false);

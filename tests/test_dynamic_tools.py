@@ -7,9 +7,9 @@ import unittest
 from itertools import count
 from pathlib import Path
 
-from pi_agent.tools import AgentTool, AgentToolResult
+from erp_harness.runtime.tools import AgentTool, AgentToolResult
 
-from odoo_runtime.dynamic_tools import (
+from erp_harness.tools.dynamic_tools import (
     BASE_TOOLS,
     CAPABILITY_GROUPS,
     DynamicToolController,

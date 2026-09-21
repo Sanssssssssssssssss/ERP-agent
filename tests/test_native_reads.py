@@ -28,19 +28,19 @@ from odoo_mcp.odoo_client import (
     load_instances_config,
 )
 from odoo_mcp.schema_cache import _build_schema_cache
-from pi_agent.mcp import _agent_tool
-from pi_agent.tools import AgentTool, AgentToolResult
+from bench.reference.pi_mcp import _agent_tool
+from erp_harness.runtime.tools import AgentTool, AgentToolResult
 
-from integration.odoo_tools import native_tool_catalog, route_tools
-from odoo_runtime._odoo_core.odoo_client import OdooClient
-from odoo_runtime.gateway import OdooResponseLimitError
-from odoo_runtime.reads import (
+from erp_harness.tools.router import native_tool_catalog, route_tools
+from erp_harness.erp._odoo_core.odoo_client import OdooClient
+from erp_harness.erp.gateway import OdooResponseLimitError
+from erp_harness.erp.reads import (
     NATIVE_READ_RESPONSES,
     READ_RESPONSES,
     Json2ReadClient,
     NativeReads,
 )
-from odoo_runtime.world import WorldStore
+from erp_harness.context.world import WorldStore
 
 
 class FakeOdoo:
@@ -169,7 +169,7 @@ class NativeReadsTest(unittest.TestCase):
 
         async def check(directory):
             native = NativeReads(FakeOdoo())
-            with patch("odoo_runtime.world.load_instances_config", return_value=("default", {})):
+            with patch("erp_harness.context.world.load_instances_config", return_value=("default", {})):
                 world = WorldStore(directory / "world.jsonl")
             routed = next(
                 tool for tool in route_tools(
@@ -276,7 +276,7 @@ class NativeReadsTest(unittest.TestCase):
         self.assertEqual(receipt["targets"][0]["records"][0]["id"], 1)
 
     def test_count_measure_preserves_native_and_legacy_counts_and_field_policy(self):
-        from odoo_runtime.capabilities import NativeCapabilities
+        from erp_harness.erp.capabilities import NativeCapabilities
 
         for version, method, key, expected in (
             ("19", "formatted_read_group", "aggregates", ["__count"]),
@@ -300,7 +300,7 @@ class NativeReadsTest(unittest.TestCase):
         self.assertFalse(client.requests)
 
         with tempfile.TemporaryDirectory() as directory, patch(
-            "odoo_runtime.capabilities.list_configured_instances",
+            "erp_harness.erp.capabilities.list_configured_instances",
             return_value={"default": {"tags": [], "cross_instance": True}},
         ):
             client = FakeOdoo()
@@ -422,11 +422,11 @@ class NoMcp(importlib.abc.MetaPathFinder):
         if fullname.split('.')[0] in {'mcp', 'mcp_types', 'odoo_mcp'}:
             raise AssertionError('MCP dependency imported: ' + fullname)
 sys.meta_path.insert(0, NoMcp())
-import pi_agent
-from integration import pi_odoo_runner
-from odoo_runtime.reads import NativeReads, Json2ReadClient
-from odoo_runtime.world import WorldStore
-assert 'pi_agent.mcp' not in sys.modules
+import erp_harness.runtime
+from erp_harness.app import runner as pi_odoo_runner
+from erp_harness.erp.reads import NativeReads, Json2ReadClient
+from erp_harness.context.world import WorldStore
+assert 'erp_harness.runtime.mcp' not in sys.modules
 assert not any(name == 'odoo_mcp' or name.startswith('odoo_mcp.') for name in sys.modules)
 print('MCP_FREE_CORE_IMPORT_OK')
 '''

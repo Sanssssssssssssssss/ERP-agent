@@ -2,10 +2,10 @@
 import asyncio
 from unittest.mock import patch
 
-from integration.harbor_agent import deadline_command
-from pi_ai.env import OpenAICompatibleConfig
-from pi_ai.openai_compatible import OpenAICompatibleProvider
-from pi_coding.provider_config import OpenAICompatibleProviderConfig, ProviderSettings, provider_settings_from_json
+from bench.adapters.harbor_agent import deadline_command
+from erp_harness.providers.env import OpenAICompatibleConfig
+from erp_harness.providers.openai_compatible import OpenAICompatibleProvider
+from erp_harness.providers.config import OpenAICompatibleProviderConfig, ProviderSettings, provider_settings_from_json
 
 
 def test_explicit_no_timeout_roundtrips_and_reaches_http_client():
@@ -13,7 +13,7 @@ def test_explicit_no_timeout_roundtrips_and_reaches_http_client():
     settings = ProviderSettings(providers=(config,))
     restored = provider_settings_from_json({"default_provider": "test", "providers": [config.to_json()]})
     assert restored.providers[0].timeout_seconds is None
-    with patch("pi_coding.provider_config._effective_provider_configs", return_value=(config,)):
+    with patch("erp_harness.providers.config._effective_provider_configs", return_value=(config,)):
         assert provider_settings_from_json(settings.to_json()).providers[0].timeout_seconds is None
     async def check():
         provider = OpenAICompatibleProvider(OpenAICompatibleConfig(api_key="test-only", timeout_seconds=None))

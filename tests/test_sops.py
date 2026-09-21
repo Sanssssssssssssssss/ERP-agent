@@ -7,10 +7,10 @@ import unittest
 from itertools import count
 from pathlib import Path
 
-from odoo_runtime.actions import ACTION_TOOLS
-from odoo_runtime.capabilities import CAPABILITY_TOOLS
-from odoo_runtime.reads import READ_RESPONSES
-from odoo_runtime.sops import SOPS, SOP_TOOLS, build_sop_tools, get_sop
+from erp_harness.erp.actions import ACTION_TOOLS
+from erp_harness.erp.capabilities import CAPABILITY_TOOLS
+from erp_harness.erp.reads import READ_RESPONSES
+from erp_harness.tools.sops import SOPS, SOP_TOOLS, build_sop_tools, get_sop
 
 
 class ControlledSopTest(unittest.TestCase):

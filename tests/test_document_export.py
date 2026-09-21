@@ -1,8 +1,8 @@
 import base64
 import unittest
 
-import workbench.document_export as document_export
-from workbench.document_export import csv_bytes, generate_document_export, result_payload, validate_document_bytes
+import erp_harness.app.document_export as document_export
+from erp_harness.app.document_export import csv_bytes, generate_document_export, result_payload, validate_document_bytes
 
 
 class DocumentExportTest(unittest.TestCase):

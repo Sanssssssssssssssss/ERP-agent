@@ -13,11 +13,11 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 
-from odoo_runtime.store import ActionStore
-from odoo_runtime._odoo_core.field_policy import FieldPolicy
-from odoo_runtime.reads import NativeReads
-from workbench.host import Workbench, _approval_marker
-from workbench.worker import child_environment, worker_command
+from erp_harness.erp.store import ActionStore
+from erp_harness.erp._odoo_core.field_policy import FieldPolicy
+from erp_harness.erp.reads import NativeReads
+from erp_harness.app.host import Workbench, _approval_marker
+from erp_harness.app.worker import child_environment, worker_command
 
 
 class _LiveProcess:
@@ -302,7 +302,7 @@ class WorkbenchHostTests(unittest.TestCase):
         def capture(*args, **kwargs):
             captured.update(kwargs["env"])
             raise OSError("test launch failure")
-        with patch.dict(os.environ, {"LLM_API_KEY": "test", "LLM_BASE_URL": "http://127.0.0.1", "LLM_MODEL": "test"}), patch("workbench.host.subprocess.Popen", side_effect=capture):
+        with patch.dict(os.environ, {"LLM_API_KEY": "test", "LLM_BASE_URL": "http://127.0.0.1", "LLM_MODEL": "test"}), patch("erp_harness.app.host.subprocess.Popen", side_effect=capture):
             with self.assertRaises(OSError):
                 Workbench._launch(self.host, run, continue_run=False)
         self.assertEqual(captured["USERPROFILE"], str(self.host.store.root / "runtime-home"))
@@ -456,7 +456,7 @@ class WorkbenchHostTests(unittest.TestCase):
             return {"success": True, "action_id": action, "action_status": "verified", "verification": {"status": "satisfied", "evidence": {"records": [{"id": 7}]}}}
 
         fake_actions = SimpleNamespace(NativeActions=type("FakeNativeActions", (), {"__init__": lambda self, _reads, store: setattr(self, "store", store), "reconcile": reconcile}))
-        with patch.dict(sys.modules, {"odoo_runtime.actions": fake_actions}), \
+        with patch.dict(sys.modules, {"erp_harness.erp.actions": fake_actions}), \
                 patch.object(self.host, "_native_reads", return_value=SimpleNamespace()):
             result = self.host.reconcile_action(self.sid, business["id"], run["id"], row["action_id"])
         self.assertEqual(result["business"]["id"], business["id"])
@@ -464,7 +464,7 @@ class WorkbenchHostTests(unittest.TestCase):
         self.assertEqual(self.host.store.data["approvals"][row["action_id"]]["status"], "verified")
         event = next(event for event in run["events"] if event["type"] == "reconciliation")
         self.assertEqual((event["kind"], event["model"], event["operation"]), ("method", "sale.order", "action_confirm"))
-        from workbench.sale_view import _verified_action_record_ids
+        from erp_harness.app.sale_view import _verified_action_record_ids
         self.assertEqual(_verified_action_record_ids([run], "sale.order", {"action_confirm"}), {7})
 
     def test_reconcile_refuses_pending_approval(self):
@@ -517,7 +517,7 @@ class WorkbenchHostTests(unittest.TestCase):
             "__init__": lambda self, _reads, store: setattr(self, "store", store),
             "reconcile": cached_reconcile,
         }))
-        with patch.dict(sys.modules, {"odoo_runtime.actions": fake_actions}), \
+        with patch.dict(sys.modules, {"erp_harness.erp.actions": fake_actions}), \
                 patch.object(self.host, "_native_reads", return_value=SimpleNamespace()):
             result = self.host.reconcile_action(self.sid, business["id"], run["id"], row["action_id"])
         self.assertEqual(result["business"]["id"], business["id"])
@@ -534,7 +534,7 @@ class WorkbenchHostTests(unittest.TestCase):
         process = _WorkerInitFailureProcess()
         self.host._native_reads = lambda: SimpleNamespace(call=lambda *args: {"success": True})
         with patch.dict(os.environ, {"LLM_API_KEY": "test", "LLM_BASE_URL": "http://127.0.0.1", "LLM_MODEL": "test"}), \
-                patch("workbench.host.subprocess.Popen", return_value=process):
+                patch("erp_harness.app.host.subprocess.Popen", return_value=process):
             Workbench._launch(self.host, run, continue_run=False)
         self.assertTrue(process.started.wait(1))
         deadline = time.monotonic() + 2
@@ -937,7 +937,7 @@ class WorkbenchHostTests(unittest.TestCase):
         self.assertEqual(env["ODOO_MCP_ENABLE_WRITES"], "1")
         self.assertEqual(env["ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS"], "sale.order.action_confirm,purchase.order.button_confirm,purchase.order.button_approve,sale.advance.payment.inv.create_invoices,account.move.action_post,account.move.send.wizard.action_send_and_print")
         self.assertNotIn("ODOO_MCP_POLICY_FILE", env)
-        self.assertEqual(env["PYTHONPATH"].split(os.pathsep)[-1], str(Path.cwd()))
+        self.assertNotIn("PYTHONPATH", env)
 
     def test_state_store_is_single_host_locked(self):
         with self.assertRaises(RuntimeError):

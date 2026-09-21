@@ -37,7 +37,7 @@ const messages = [
   { id: 'm4', role: 'assistant', text: '十月发票创建提案已准备。当前仍是 draft，审批前尚未执行 Odoo 写入；批准后才会继续。', created_at: now, business_id: 'approval' }
 ]
 const usage = (input, cacheRead, output, reasoning) => ({ input, cache_read: cacheRead, output, reasoning, total: input + output })
-const nativeCatalog = JSON.parse(readFileSync(resolve(process.cwd(), 'integration/native_tool_catalog.json'), 'utf8')).tools
+const nativeCatalog = JSON.parse(readFileSync(resolve(process.cwd(), 'src/erp_harness/tools/native_tool_catalog.json'), 'utf8')).tools
 const catalogByName = new Map(nativeCatalog.map((tool) => [tool.name, tool]))
 const assertCatalogTool = (tool) => {
   const spec = catalogByName.get(tool.name)

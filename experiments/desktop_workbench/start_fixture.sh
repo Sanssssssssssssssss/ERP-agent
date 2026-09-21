@@ -18,8 +18,8 @@ docker run --detach --name "$container" \
   --publish 127.0.0.1:18069:8069 \
   --env PI_ODOO_LAB_SNAPSHOT=1 \
   --env PI_ODOO_SNAPSHOT_CASE=2262_easy_26_buy_only_net_30_no_adjacent_data \
-  --volume "$lab_root/integration/snapshot_entrypoint.sh:/lab-snapshot-entrypoint.sh:ro" \
-  --volume "$lab_root/integration/snapshot.py:/lab-snapshot.py:ro" \
+  --volume "$lab_root/bench/adapters/snapshot_entrypoint.sh:/lab-snapshot-entrypoint.sh:ro" \
+  --volume "$lab_root/bench/adapters/snapshot.py:/lab-snapshot.py:ro" \
   --volume "$snapshot:/snapshot:ro" \
   --volume "$receipt_dir:/logs/agent" \
   --entrypoint /bin/bash "$image" /lab-snapshot-entrypoint.sh

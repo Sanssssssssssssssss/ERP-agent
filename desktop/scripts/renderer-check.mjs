@@ -33,6 +33,7 @@ const bridgeScript = String.raw`
     let materialVersion = 0
     const importedMaterials = new Map()
     let saveBlocked = true
+    let longTermMemory = false
     let failInitialConnectionCheck = true
     let delayedPurchaseDecision = true
     let showAcceptedProjection = false
@@ -146,10 +147,12 @@ const bridgeScript = String.raw`
           if (params.action_id === 'action-b2-send-file' && params.decision === 'approve') throw new Error('DECISION_NETWORK_DOWN')
           return { ok: true }
         }
-        if (method === 'get_settings') return { model: 'deepseek/deepseek-v4-flash/high', base_url: 'http://model.invalid', odoo_url: 'http://odoo.invalid', odoo_db: 'demo', odoo_username: 'admin', has_model_key: false, has_odoo_key: false, environment: 'demo' }
+        if (method === 'get_settings') return { model: 'deepseek/deepseek-v4-flash/high', base_url: 'http://model.invalid', odoo_url: 'http://odoo.invalid', odoo_db: 'demo', odoo_username: 'admin', long_term_memory: longTermMemory, has_model_key: false, has_odoo_key: false, environment: 'demo' }
         if (method === 'save_settings') {
           if (saveBlocked) { saveBlocked = false; throw new Error("Error invoking remote method 'workbench:call': Error: CONFIG_BUSY") }
-          return { model: 'deepseek/deepseek-v4-flash/high', base_url: 'http://model.invalid', odoo_url: 'http://odoo.invalid', odoo_db: 'demo', odoo_username: 'admin', has_model_key: false, has_odoo_key: false, environment: 'demo' }
+          if (typeof params.long_term_memory !== 'boolean') throw new Error('CONFIG_INPUT_INVALID')
+          longTermMemory = params.long_term_memory
+          return { model: 'deepseek/deepseek-v4-flash/high', base_url: 'http://model.invalid', odoo_url: 'http://odoo.invalid', odoo_db: 'demo', odoo_username: 'admin', long_term_memory: longTermMemory, has_model_key: false, has_odoo_key: false, environment: 'demo' }
         }
         if (method === 'export_business_report') return { cancelled: false, path: 'C:\\runtime\\business-b2-receipt.json', artifact: { id: 'artifact-b2', name: 'Business B2 回执.json', path: 'C:\\runtime\\business-b2-receipt.json', kind: 'business_receipt' } }
         if (method === 'open_business_artifact' || method === 'reveal_business_artifact') return { opened: true }
@@ -822,6 +825,8 @@ for (let index = 0; index < 10; index += 1) {
 }
 await page.keyboard.press('Shift+Tab')
 assert.equal(await page.evaluate(() => Boolean(document.querySelector('[role="dialog"]')?.contains(document.activeElement))), true)
+assert.equal(await page.getByRole('checkbox', { name: '启用长期记忆（Mem0）' }).isChecked(), false)
+await page.getByRole('checkbox', { name: '启用长期记忆（Mem0）' }).check()
 await page.getByRole('button', { name: '保存连接设置' }).click()
 await page.getByRole('alert').getByText('当前有业务正在执行或等待审批，请结束后再修改连接设置。').waitFor()
 await page.getByRole('button', { name: '保存连接设置' }).click()
@@ -829,6 +834,13 @@ await page.getByRole('dialog', { name: '连接设置' }).waitFor({ state: 'hidde
 await page.getByRole('status').getByText('设置已保存，连接状态已刷新。').waitFor()
 await page.getByRole('button', { name: '连接设置' }).click()
 await page.getByRole('dialog', { name: '连接设置' }).waitFor()
+assert.equal(await page.getByRole('checkbox', { name: '启用长期记忆（Mem0）' }).isChecked(), true)
+await page.getByRole('checkbox', { name: '启用长期记忆（Mem0）' }).uncheck()
+await page.getByRole('button', { name: '保存连接设置' }).click()
+await page.getByRole('dialog', { name: '连接设置' }).waitFor({ state: 'hidden' })
+await page.getByRole('button', { name: '连接设置' }).click()
+await page.getByRole('dialog', { name: '连接设置' }).waitFor()
+assert.equal(await page.getByRole('checkbox', { name: '启用长期记忆（Mem0）' }).isChecked(), false)
 await page.keyboard.press('Escape')
 await page.getByRole('dialog', { name: '连接设置' }).waitFor({ state: 'hidden' })
 await page.waitForFunction(() => document.activeElement === document.querySelector('.settings-button'))

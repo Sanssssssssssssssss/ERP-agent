@@ -274,6 +274,7 @@ export interface Settings {
   odoo_url: string;
   odoo_db: string;
   odoo_username: string;
+  long_term_memory: boolean;
   has_model_key: boolean;
   has_odoo_key: boolean;
   environment: "demo" | "configured";

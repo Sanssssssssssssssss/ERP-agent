@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from copy import deepcopy
 
-from workbench.sale_view import _run_has_relevant_evidence, _tool_stage, _verified_action_record_ids, business_detail, collect_documents, refresh_business
+from erp_harness.app.sale_view import _run_has_relevant_evidence, _tool_stage, _verified_action_record_ids, business_detail, collect_documents, refresh_business
 
 
 def _state() -> dict:

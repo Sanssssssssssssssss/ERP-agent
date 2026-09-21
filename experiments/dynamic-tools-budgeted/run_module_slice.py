@@ -20,8 +20,8 @@ from itertools import count
 from pathlib import Path
 from typing import Any
 
-from integration.odoo_tools import native_tool_catalog
-from integration.pi_odoo_runner import (
+from erp_harness.tools.router import native_tool_catalog
+from erp_harness.app.runner import (
     CONTEXT_WINDOW,
     CURRENT_TIME_TOOL,
     DYNAMIC_TOOL_POLICY,
@@ -29,10 +29,10 @@ from integration.pi_odoo_runner import (
     MODEL_COMPAT,
     RequestReceipts,
 )
-from odoo_runtime._odoo_core.agent_tools import lookup_model_history_report
-from odoo_runtime._odoo_core.diagnostics import generate_json2_payload_report
-from odoo_runtime.dynamic_tools import DynamicToolController
-from odoo_runtime.sops import build_sop_tools
+from erp_harness.erp._odoo_core.agent_tools import lookup_model_history_report
+from erp_harness.erp._odoo_core.diagnostics import generate_json2_payload_report
+from erp_harness.tools.dynamic_tools import DynamicToolController
+from erp_harness.tools.sops import build_sop_tools
 from pi_agent.messages import AssistantMessage, ToolCall, ToolResultMessage, Usage
 from pi_agent.session import JsonlSessionStorage
 from pi_agent.tools import AgentToolResult
@@ -111,7 +111,7 @@ async def _fixture_search(_call_id: str, arguments: dict[str, Any], *_args) -> A
 
 def _pure_executor(name: str):
     async def execute(_call_id, arguments, *_args):
-        from odoo_runtime.capabilities import normalize_capability_arguments
+        from erp_harness.erp.capabilities import normalize_capability_arguments
 
         arguments = normalize_capability_arguments(name, dict(arguments))
         if name == "generate_json2_payload":

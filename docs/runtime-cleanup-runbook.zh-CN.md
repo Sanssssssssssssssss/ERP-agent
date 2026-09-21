@@ -18,10 +18,10 @@ HEAD 与上述基线不同，应重新核对改动位置和对照版本。每项
 
 | 项目 | 最小修改 | 局部验收条件 |
 | --- | --- | --- |
-| A：参数与记录一致 | [odoo_tools.py](../integration/odoo_tools.py) 的 direct-read 在解析 World 身份前调用一次 `normalize_read_arguments`，身份、receipt、执行共用规范化参数；原始模型请求仍保存在日志。 | 省略 instance、JSON `null`、字符串 `"null"` 均读取默认实例并产生可回读 receipt；合法命名实例身份正确；不存在的实例和非法参数仍失败。正常对照中 `healthy=true`、`projection_enabled=true`。 |
-| B：无命中不凑字段 | 删除 [reads.py](../odoo_runtime/reads.py) 中 `_field_candidates` 在 BM25 无命中时回退通用字段排名的 4 行代码。 | 无命中仍报 unknown field 并提示 `get_model_fields`，不带无关 `Valid candidates`；有命中保留真实候选；受限字段不出现在建议中。候选不能自动替换业务字段。 |
-| C：静态规则只维护一份 | 将 [host.py](../workbench/host.py) 的重复静态规则逐句归入 [conversation.py](../workbench/conversation.py) 的 `CONVERSATION_POLICY`，补齐采购规则后缩短每轮 instruction。 | 采购缺信息、明确实时查询、带材料三类请求仍保留相应行为；业务上下文、材料的不可信标记、逐动作审批和对话只读边界完整。 |
-| D：删除无效参数 | 删除 [worker.py](../workbench/worker.py) 两个 command 函数未使用的 `repo` 参数，同步两处 host 调用及现有测试。 | 生成命令的 native/dynamic/record、审批暂停及续跑参数一致；`Popen(cwd=self.root)` 和环境隔离保留。 |
+| A：参数与记录一致 | [odoo_tools.py](../src/erp_harness/tools/router.py) 的 direct-read 在解析 World 身份前调用一次 `normalize_read_arguments`，身份、receipt、执行共用规范化参数；原始模型请求仍保存在日志。 | 省略 instance、JSON `null`、字符串 `"null"` 均读取默认实例并产生可回读 receipt；合法命名实例身份正确；不存在的实例和非法参数仍失败。正常对照中 `healthy=true`、`projection_enabled=true`。 |
+| B：无命中不凑字段 | 删除 [reads.py](../src/erp_harness/erp/reads.py) 中 `_field_candidates` 在 BM25 无命中时回退通用字段排名的 4 行代码。 | 无命中仍报 unknown field 并提示 `get_model_fields`，不带无关 `Valid candidates`；有命中保留真实候选；受限字段不出现在建议中。候选不能自动替换业务字段。 |
+| C：静态规则只维护一份 | 将 [host.py](../src/erp_harness/app/host.py) 的重复静态规则逐句归入 [conversation.py](../src/erp_harness/app/conversation.py) 的 `CONVERSATION_POLICY`，补齐采购规则后缩短每轮 instruction。 | 采购缺信息、明确实时查询、带材料三类请求仍保留相应行为；业务上下文、材料的不可信标记、逐动作审批和对话只读边界完整。 |
+| D：删除无效参数 | 删除 [worker.py](../src/erp_harness/app/worker.py) 两个 command 函数未使用的 `repo` 参数，同步两处 host 调用及现有测试。 | 生成命令的 native/dynamic/record、审批暂停及续跑参数一致；`Popen(cwd=self.root)` 和环境隔离保留。 |
 
 A 的旧复现脚本在 `.runtime/code-simplification-audit-20260919/instance_null_route_repro.py`，它断言的是旧缺陷。保留原证据，把修复后的正向断言加入现有 receipt 测试；不能把旧脚本“仍通过”当成修复通过。此修复也不处理入口 schema 拒绝的 `relevance="null"`，无需放宽 schema。
 
@@ -31,7 +31,7 @@ A 的旧复现脚本在 `.runtime/code-simplification-audit-20260919/instance_nu
 
 ```powershell
 $py = '.\.venv\Scripts\python.exe'
-$env:PYTHONPATH = "$PWD;$PWD\agent\src"
+$env:PYTHONPATH = "$PWD"
 # A、B：补入上述回归断言后执行
 & $py -X utf8 -B -m unittest tests.test_relation_receipts tests.test_world tests.test_tool_retrieval
 ```

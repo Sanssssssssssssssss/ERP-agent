@@ -14,15 +14,15 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from odoo_runtime._odoo_core.agent_tools import build_write_preview_report
-from odoo_runtime._odoo_core.diagnostics import READ_ONLY_METHODS
-from odoo_runtime._odoo_core.field_policy import FieldPolicy, ModelFieldRule
-from pi_agent.tools import AgentTool, AgentToolResult
+from erp_harness.erp._odoo_core.agent_tools import build_write_preview_report
+from erp_harness.erp._odoo_core.diagnostics import READ_ONLY_METHODS
+from erp_harness.erp._odoo_core.field_policy import FieldPolicy, ModelFieldRule
+from erp_harness.runtime.tools import AgentTool, AgentToolResult
 
-from integration.odoo_tools import route_tools
-from odoo_runtime._odoo_core.odoo_client import OdooClient, OdooJson2Error
-from odoo_runtime.actions import ACTION_TOOLS, NativeActions
-from odoo_runtime.store import ActionStore
+from erp_harness.tools.router import route_tools
+from erp_harness.erp._odoo_core.odoo_client import OdooClient, OdooJson2Error
+from erp_harness.erp.actions import ACTION_TOOLS, NativeActions
+from erp_harness.erp.store import ActionStore
 
 
 class _Reader:
@@ -494,7 +494,7 @@ class NativeActionCheckpointTests(unittest.TestCase):
         self.assertFalse(actions.execute_approved_write(tampered, confirm=True)["success"])
         with (
             patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1"}),
-            patch("odoo_runtime.store.time.time", return_value=time.time() + 3600),
+            patch("erp_harness.erp.store.time.time", return_value=time.time() + 3600),
         ):
             self.assertFalse(
                 actions.execute_approved_write(compact, confirm=True)[
@@ -1580,7 +1580,7 @@ class NativeActionCheckpointTests(unittest.TestCase):
             self.assertFalse(untrusted["approval_status"]["stored"])
             self.assertEqual(untrusted["approval"]["values"], {"name": "Unstored"})
             with patch(
-                "integration.odoo_tools.BusinessFacts.inspect",
+                "erp_harness.tools.router.BusinessFacts.inspect",
                 return_value={"facts": [{"source": "trusted"}], "issues": []},
             ) as inspect:
                 validated_result = await validate.execute(

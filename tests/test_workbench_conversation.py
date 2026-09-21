@@ -13,10 +13,10 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-from pi_ai.openai_compatible import OpenAICompatibleProvider
-from pi_agent.messages import AssistantMessage, Usage
-from pi_agent.session.entries import CompactionEntry, MessageEntry
-from workbench import conversation
+from erp_harness.providers.openai_compatible import OpenAICompatibleProvider
+from erp_harness.runtime.messages import AssistantMessage, Usage
+from erp_harness.runtime.storage.entries import CompactionEntry, MessageEntry
+from erp_harness.app import conversation
 
 
 class WorkbenchConversationTests(unittest.TestCase):
@@ -180,7 +180,7 @@ class WorkbenchConversationTests(unittest.TestCase):
 
             async def run():
                 with (
-                    patch.object(conversation.CodingSession, "load", new=AsyncMock(return_value=fake)),
+                    patch.object(conversation.HarnessSession, "load", new=AsyncMock(return_value=fake)),
                     patch.dict(
                         os.environ,
                         {"LLM_API_KEY": "test-only", "LLM_BASE_URL": "https://unused.invalid/v1", "LLM_MODEL": "test/model"},
