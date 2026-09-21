@@ -179,7 +179,6 @@ async def _install_task_runtime(
     root = Path(__file__).resolve().parents[1]
     wheels = (
         Path(os.environ.get("WORKBENCH_BACKEND_WHEEL", root / "dist/erp_harness-0.5.4-py3-none-any.whl")),
-        root / "dist/pi_agent_python-0.1.0-py3-none-any.whl",
     )
     for source in wheels:
         if not source.exists():

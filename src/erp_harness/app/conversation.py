@@ -8,19 +8,19 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pi_agent.messages import AssistantMessage
-from pi_agent.session.entries import CompactionEntry, MessageEntry
-from pi_agent.session import JsonlSessionStorage
-from pi_agent.tools import AgentTool, AgentToolResult
-from pi_ai.env import OpenAICompatibleConfig
-from pi_ai.openai_compatible import OpenAICompatibleProvider
-from pi_coding.provider_config import (
+from erp_harness.runtime.messages import AssistantMessage
+from erp_harness.runtime.storage.entries import CompactionEntry, MessageEntry
+from erp_harness.runtime.storage import JsonlSessionStorage
+from erp_harness.runtime.tools import AgentTool, AgentToolResult
+from erp_harness.providers.env import OpenAICompatibleConfig
+from erp_harness.providers.openai_compatible import OpenAICompatibleProvider
+from erp_harness.providers.config import (
     OpenAICompatibleProviderConfig,
     ProviderModelMetadata,
     ProviderSettings,
 )
-from pi_coding.resources import PiResourcePaths
-from pi_coding.session import CodingSession, CodingSessionConfig
+from erp_harness.context.resources import ResourcePaths
+from erp_harness.runtime.session import HarnessSession, SessionConfig
 
 from erp_harness.app.stream_events import public_events
 
@@ -385,8 +385,8 @@ async def run(args: argparse.Namespace) -> None:
         thinking_parameter="reasoning_effort",
         thinking_defaults={model: thinking},
     )
-    session = await CodingSession.load(
-        CodingSessionConfig(
+    session = await HarnessSession.load(
+        SessionConfig(
             provider=provider,
             owns_initial_provider=True,
             model=model,
@@ -394,7 +394,7 @@ async def run(args: argparse.Namespace) -> None:
             cwd=Path.cwd(),
             tools=[READ_ODOO_REFERENCE, PROPOSE_BUSINESS],
             max_turns=None,
-            resource_paths=PiResourcePaths(
+            resource_paths=ResourcePaths(
                 root=args.receipt_dir / ".pi-agent",
                 agents_root=args.receipt_dir / ".agents",
                 project_resources_enabled=False,
@@ -412,7 +412,7 @@ async def run(args: argparse.Namespace) -> None:
     try:
         print(json.dumps({
             "type": "run_metadata", "kind": "conversation", "model": model,
-            "runtime": "CodingSession", "toolNames": [READ_ODOO_REFERENCE.name, PROPOSE_BUSINESS.name],
+            "runtime": "HarnessSession", "toolNames": [READ_ODOO_REFERENCE.name, PROPOSE_BUSINESS.name],
             "toolMode": "proposal_plus_readonly", "odooToolCount": 1,
         }, ensure_ascii=False), flush=True)
         # Use append-only journal entries rather than session.messages.  A

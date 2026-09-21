@@ -7,7 +7,7 @@ import json
 import sys
 from typing import Any, Iterable
 
-from pi_agent.messages import AssistantMessage, TextContent, ToolResultMessage
+from erp_harness.runtime.messages import AssistantMessage, TextContent, ToolResultMessage
 
 from erp_harness.context.world import READ_TOOLS, WorldStore
 

@@ -11,8 +11,8 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from pi_agent.messages import TextContent
-from pi_agent.tools import AgentTool, AgentToolResult
+from erp_harness.runtime.messages import TextContent
+from erp_harness.runtime.tools import AgentTool, AgentToolResult
 from pydantic_core import to_json
 
 from erp_harness.erp._odoo_core.odoo_client import READ_CALL_ID

@@ -132,13 +132,10 @@ class CleanHarnessTest(unittest.TestCase):
         self.assertNotIn("from odoo_mcp", runtime)
         self.assertNotIn("import odoo_mcp", runtime)
         project = tomllib.loads(
-            (ROOT / "agent" / "pyproject.toml").read_text(encoding="utf-8")
+            (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         )["project"]
         self.assertNotIn("mcp==2.0.0", project["dependencies"])
-        self.assertEqual(project["optional-dependencies"]["mcp"], [
-            "mcp==2.0.0",
-            "mcp-types==2.0.0",
-        ])
+        self.assertNotIn("pi-agent-python", " ".join(project["dependencies"]))
 
         with tempfile.TemporaryDirectory() as directory:
             tools = [

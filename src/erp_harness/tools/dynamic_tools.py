@@ -10,7 +10,7 @@ from inspect import isawaitable
 from pathlib import Path
 from typing import Any
 
-from pi_agent.tools import AgentTool, AgentToolResult
+from erp_harness.runtime.tools import AgentTool, AgentToolResult
 
 BASE_TOOLS = frozenset(
     {

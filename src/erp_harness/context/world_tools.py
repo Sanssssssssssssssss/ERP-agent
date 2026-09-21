@@ -6,7 +6,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from pi_agent.tools import AgentTool, AgentToolResult
+from erp_harness.runtime.tools import AgentTool, AgentToolResult
 
 from erp_harness.context.world import WorldStore
 

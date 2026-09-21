@@ -12,7 +12,7 @@ from typing import ClassVar
 from unittest.mock import patch
 
 from odoo_mcp.field_policy import FieldPolicy, ModelFieldRule
-from pi_agent.tools import AgentTool, AgentToolResult
+from erp_harness.runtime.tools import AgentTool, AgentToolResult
 
 from erp_harness.tools.router import route_tools
 from erp_harness.erp._odoo_core.odoo_client import OdooClient

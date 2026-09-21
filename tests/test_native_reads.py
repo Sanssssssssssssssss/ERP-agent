@@ -28,8 +28,8 @@ from odoo_mcp.odoo_client import (
     load_instances_config,
 )
 from odoo_mcp.schema_cache import _build_schema_cache
-from pi_agent.mcp import _agent_tool
-from pi_agent.tools import AgentTool, AgentToolResult
+from erp_harness.runtime.mcp import _agent_tool
+from erp_harness.runtime.tools import AgentTool, AgentToolResult
 
 from erp_harness.tools.router import native_tool_catalog, route_tools
 from erp_harness.erp._odoo_core.odoo_client import OdooClient
@@ -422,11 +422,11 @@ class NoMcp(importlib.abc.MetaPathFinder):
         if fullname.split('.')[0] in {'mcp', 'mcp_types', 'odoo_mcp'}:
             raise AssertionError('MCP dependency imported: ' + fullname)
 sys.meta_path.insert(0, NoMcp())
-import pi_agent
+import erp_harness.runtime
 from erp_harness.app import runner as pi_odoo_runner
 from erp_harness.erp.reads import NativeReads, Json2ReadClient
 from erp_harness.context.world import WorldStore
-assert 'pi_agent.mcp' not in sys.modules
+assert 'erp_harness.runtime.mcp' not in sys.modules
 assert not any(name == 'odoo_mcp' or name.startswith('odoo_mcp.') for name in sys.modules)
 print('MCP_FREE_CORE_IMPORT_OK')
 '''

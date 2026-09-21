@@ -1,11 +1,10 @@
-"""Run one Pi CodingSession with the fixed Odoo tool contract."""
+"""Run one Pi HarnessSession with the fixed Odoo tool contract."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
 import hashlib
-import inspect
 import json
 import os
 import sys
@@ -14,20 +13,20 @@ from datetime import UTC, datetime
 from itertools import count
 from pathlib import Path
 
-from pi_agent.messages import AssistantMessage, ToolResultMessage
-from pi_agent.session import JsonlSessionStorage
-from pi_agent.session.entries import CompactionEntry, MessageEntry
-from pi_agent.tools import AgentTool, AgentToolResult
-from pi_ai.env import OpenAICompatibleConfig
-from pi_ai.openai_compatible import OpenAICompatibleProvider
-from pi_coding.provider_config import (
+from erp_harness.runtime.messages import AssistantMessage, ToolResultMessage
+from erp_harness.runtime.storage import JsonlSessionStorage
+from erp_harness.runtime.storage.entries import CompactionEntry, MessageEntry
+from erp_harness.runtime.tools import AgentTool, AgentToolResult
+from erp_harness.providers.env import OpenAICompatibleConfig
+from erp_harness.providers.openai_compatible import OpenAICompatibleProvider
+from erp_harness.providers.config import (
     OpenAICompatibleProviderConfig,
     ProviderModelMetadata,
     ProviderSettings,
 )
-from pi_coding.paths import PiPaths
-from pi_coding.resources import PiResourcePaths
-from pi_coding.session import CodingSession, CodingSessionConfig
+from erp_harness.context.paths import RuntimePaths
+from erp_harness.context.resources import ResourcePaths
+from erp_harness.runtime.session import HarnessSession, SessionConfig
 
 from erp_harness.tools.router import native_tool_catalog, route_tools
 from erp_harness.app.stream_events import public_events
@@ -166,7 +165,7 @@ def _receipt_dynamic_selection(path: Path) -> tuple[bool, tuple[str, ...] | None
     return False, None
 
 
-def _restore_dynamic_selection(dynamic_tools: DynamicToolController, session: CodingSession, dynamic_log: Path) -> None:
+def _restore_dynamic_selection(dynamic_tools: DynamicToolController, session: HarnessSession, dynamic_log: Path) -> None:
     receipt_found, active = _receipt_dynamic_selection(dynamic_log)
     if not receipt_found:
         # A new run keeps the business session transcript but has a new receipt
@@ -211,7 +210,7 @@ async def _source_tools(args):
         return
     toolset_class = McpToolSet
     if toolset_class is None:
-        from pi_agent.mcp import McpToolSet as toolset_class
+        from bench.reference.pi_mcp import McpToolSet as toolset_class
     async with toolset_class(args.mcp_url) as toolset:
         yield toolset.tools
 
@@ -354,7 +353,7 @@ def _next_receipt_sequence(directory: Path):
     return count(latest + 1).__next__
 
 
-# 学习入口：这里组装 ERP 后端、工具和会话；模型与工具的循环由 CodingSession 驱动。
+# 学习入口：这里组装 ERP 后端、工具和会话；模型与工具的循环由 HarnessSession 驱动。
 # 可沿 route_tools 看读写分流，再看 actions 的审批执行和 world_context 的历史投影。
 async def run(args: argparse.Namespace) -> None:
     api_key = os.environ.get("LLM_API_KEY")
@@ -527,8 +526,15 @@ async def run(args: argparse.Namespace) -> None:
                 thinking_defaults={model: thinking},
             )
             runtime_date = datetime.now().astimezone().date().isoformat()
-            session = await CodingSession.load(
-                CodingSessionConfig(
+            async def stop_after_approval(turn):
+                return any(_approval_required(result) for result in turn.tool_results)
+
+            def project_context(messages, signal):
+                projected = project_messages(world, messages) if world_mode == "project" else list(messages)
+                return project_read_history(world, projected) if runtime_mode == "native" else projected
+
+            session = await HarnessSession.load(
+                SessionConfig(
                     provider=provider,
                     owns_initial_provider=True,
                     model=model,
@@ -536,9 +542,12 @@ async def run(args: argparse.Namespace) -> None:
                     cwd=cwd,
                     tools=list(session_tools),
                     max_turns=args.max_turns,
-                    resource_paths=PiResourcePaths(
+                    # Pause only after the tool result is durably recorded.
+                    should_stop_after_turn=stop_after_approval if getattr(args, "pause_on_approval", False) else None,
+                    transform_context=project_context if world is not None and (world_mode == "project" or runtime_mode == "native") else None,
+                    resource_paths=ResourcePaths(
                         root=receipt_dir / ".pi-agent",
-                        paths=PiPaths(
+                        paths=RuntimePaths(
                             home=receipt_dir / ".pi-agent",
                             agents_home=receipt_dir / ".agents",
                         ),
@@ -574,30 +583,6 @@ async def run(args: argparse.Namespace) -> None:
                 _restore_dynamic_selection(dynamic_tools, session, dynamic_log)
                 # 工具集合的变更留到下一轮发布，避免同一轮请求与执行使用不同契约。
                 dynamic_tools.bind(session.stage_tools_for_next_turn)
-            if getattr(args, "pause_on_approval", False):
-                async def stop_after_approval(turn):
-                    return any(_approval_required(result) for result in turn.tool_results)
-
-                # The hook runs after the tool result has been persisted and
-                # before the next model request.  It therefore pauses at the
-                # safe boundary without an extra paid request.
-                session._harness.config.should_stop_after_turn = stop_after_approval
-            # native 即使使用 record 模式，也会投影已消费的读取历史；原始持久化日志仍保留。
-            if world is not None and (world_mode == "project" or runtime_mode == "native"):
-                existing_transform = session._harness.config.transform_context
-
-                async def project_context(messages, signal):
-                    projected = (
-                        project_messages(world, messages)
-                        if world_mode == "project" else list(messages)
-                    )
-                    if runtime_mode == "native":
-                        projected = project_read_history(world, projected)
-                    transformed = existing_transform(projected, signal) if existing_transform else projected
-                    return await transformed if inspect.isawaitable(transformed) else transformed
-
-                # The session owns refresh; only compose its existing hook for this run.
-                session._harness.config.transform_context = project_context
             try:
                 system_prompt_path = args.session_file.with_name(
                     "pi-agent-system-prompt.txt"
@@ -639,7 +624,7 @@ async def run(args: argparse.Namespace) -> None:
                                  "parameters": tool.parameters}
                                 for tool in session_tools
                             ], sort_keys=True).encode()).hexdigest(),
-                            "runtime": "CodingSession",
+                            "runtime": "HarnessSession",
                             "sessionFile": str(args.session_file),
                             "systemPromptFile": str(system_prompt_path),
                             "systemPromptSha256": hashlib.sha256(

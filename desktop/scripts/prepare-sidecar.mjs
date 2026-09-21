@@ -128,9 +128,7 @@ const rejectSourceJunk = (_source, entry) => {
 await cp(sitePackages, join(destination, "app", "site-packages"), { recursive: true, filter: rejectJunk });
 const pth = join(pythonDir, "python313._pth");
 await writeFile(pth, "python313.zip\n.\n../app\n../app/site-packages\nimport site\n", "utf8");
-for (const packageName of ["pi_ai", "pi_agent", "pi_coding"]) {
-  await cp(join(sitePackages, packageName), join(destination, "app", packageName), { recursive: true, filter: rejectSourceJunk });
-}
+
 // Wheels contain the installed product code and package resources.
 if (process.platform === "win32") {
   await execFile("tar.exe", ["-xf", resolve(backendWheel), "-C", join(destination, "app")], { windowsHide: true });
@@ -140,8 +138,8 @@ if (process.platform === "win32") {
 await mkdir(join(destination, "licenses"), { recursive: true });
 await cp(join(repoRoot, "LICENSE"), join(destination, "licenses", "workbench-MIT.txt"));
 await cp(join(repoRoot, "THIRD_PARTY_NOTICES.md"), join(destination, "licenses", "workbench-NOTICES.md"));
-await cp(join(repoRoot, "agent", "LICENSE"), join(destination, "licenses", "pi-agent-MIT.txt"));
-await cp(join(repoRoot, "agent", "THIRD_PARTY_NOTICES.md"), join(destination, "licenses", "pi-agent-NOTICES.md"));
+await cp(join(repoRoot, "docs", "licenses", "pi-agent-MIT.txt"), join(destination, "licenses", "pi-agent-MIT.txt"));
+await cp(join(repoRoot, "docs", "licenses", "pi-agent-NOTICES.md"), join(destination, "licenses", "pi-agent-NOTICES.md"));
 await cp(join(repoRoot, "mcp", "LICENSE"), join(destination, "licenses", "odoo-core-MIT.txt"));
 const packageEntries = await readdir(join(destination, "app", "site-packages"), { withFileTypes: true });
 for (const entry of packageEntries) {
@@ -179,7 +177,7 @@ async function digestDirectory(directory) {
   return digests;
 }
 const sourceDigests = {};
-for (const source of ["erp_harness", "pi_ai", "pi_agent", "pi_coding", "site-packages"]) {
+for (const source of ["erp_harness", "site-packages"]) {
   sourceDigests[`app/${source}`] = await digestDirectory(join(destination, "app", source));
 }
 await writeFile(join(destination, "manifest.json"), JSON.stringify({
@@ -190,7 +188,7 @@ await writeFile(join(destination, "manifest.json"), JSON.stringify({
   backend_wheel: basename(backendWheel),
   backend_wheel_sha256: await sha256(backendWheel),
   site_packages: "app/site-packages",
-  source_packages: ["app/erp_harness", "app/site-packages", "app/pi_ai", "app/pi_agent", "app/pi_coding"],
+  source_packages: ["app/erp_harness", "app/site-packages"],
   bundle_digests: sourceDigests,
   file_count: manifestFiles.length,
 }, null, 2) + "\n", "utf8");
@@ -204,7 +202,7 @@ if (process.platform === "win32") {
     "assert load_model_rename_catalog().get('entries')",
     "assert importlib.util.find_spec('mcp') is None",
     "assert importlib.util.find_spec('odoo_mcp') is None",
-    "assert 'pi_agent.mcp' not in sys.modules",
+    "assert not any(name.startswith(('pi_', 'textual', 'typer')) for name in sys.modules)",
   ].join("; ")], { windowsHide: true });
 }
 if (existsSync(backupDestination)) {

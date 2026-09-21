@@ -8,8 +8,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from pi_agent.messages import AssistantMessage, TextContent, ToolResultMessage
-from pi_agent.tools import AgentTool, AgentToolResult
+from erp_harness.runtime.messages import AssistantMessage, TextContent, ToolResultMessage
+from erp_harness.runtime.tools import AgentTool, AgentToolResult
 
 from erp_harness.tools.router import route_tools
 from erp_harness.context.projection import expand_lossless_tables, project_messages, project_read_history

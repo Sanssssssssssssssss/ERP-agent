@@ -17,7 +17,7 @@ from unittest.mock import Mock, patch
 from erp_harness.erp._odoo_core.agent_tools import build_write_preview_report
 from erp_harness.erp._odoo_core.diagnostics import READ_ONLY_METHODS
 from erp_harness.erp._odoo_core.field_policy import FieldPolicy, ModelFieldRule
-from pi_agent.tools import AgentTool, AgentToolResult
+from erp_harness.runtime.tools import AgentTool, AgentToolResult
 
 from erp_harness.tools.router import route_tools
 from erp_harness.erp._odoo_core.odoo_client import OdooClient, OdooJson2Error

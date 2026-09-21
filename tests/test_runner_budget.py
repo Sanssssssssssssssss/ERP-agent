@@ -15,10 +15,10 @@ import httpx
 
 from integration import harbor_agent
 from erp_harness.app import runner as pi_odoo_runner
-from pi_agent.messages import AssistantMessage, ToolResultMessage, UserMessage
-from pi_agent.tools import AgentTool, AgentToolResult
-from pi_coding.session import CodingSession
-from pi_ai.openai_compatible import OpenAICompatibleProvider
+from erp_harness.runtime.messages import AssistantMessage, ToolResultMessage, UserMessage
+from erp_harness.runtime.tools import AgentTool, AgentToolResult
+from erp_harness.runtime.session import HarnessSession
+from erp_harness.providers.openai_compatible import OpenAICompatibleProvider
 from erp_harness.tools.dynamic_tools import BASE_TOOLS, CAPABILITY_GROUPS
 
 
@@ -544,7 +544,7 @@ class RunnerBudgetTest(unittest.TestCase):
             )
             captured_configs = []
             captured_session_configs = []
-            original_load = CodingSession.load
+            original_load = HarnessSession.load
 
             async def capture_load(cls, config):
                 captured_session_configs.append(config)
@@ -559,7 +559,7 @@ class RunnerBudgetTest(unittest.TestCase):
                 with (
                     patch.object(pi_odoo_runner, "McpToolSet", ToolSet),
                     patch.object(pi_odoo_runner, "OpenAICompatibleProvider", side_effect=make_provider),
-                    patch.object(CodingSession, "load", classmethod(capture_load)),
+                    patch.object(HarnessSession, "load", classmethod(capture_load)),
                     patch.dict(
                         os.environ,
                         {
