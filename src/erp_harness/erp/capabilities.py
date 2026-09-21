@@ -537,9 +537,10 @@ class NativeCapabilities:
         limit: int = 500,
         replace: bool = False,
         instance: str | None = None,
+        full_refresh: bool = False,
     ) -> dict[str, Any]:
         return self.knowledge.index_knowledge(
-            model, domain, fields, limit, replace, instance
+            model, domain, fields, limit, replace, instance, full_refresh
         )
 
     def search_knowledge(

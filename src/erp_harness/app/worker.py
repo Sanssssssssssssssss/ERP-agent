@@ -9,6 +9,8 @@ import os
 import sys
 from pathlib import Path
 
+from erp_harness.erp.business_operations import ENTERPRISE_METHODS
+
 
 def worker_command(repo: Path, instruction: Path, usage: Path, session: Path, *, continue_run: bool) -> list[str]:
     command = [sys.executable, "-m", "erp_harness.app.runner",
@@ -42,7 +44,7 @@ def conversation_command(repo: Path, instruction: Path, usage: Path, session: Pa
 def child_environment(session_id: str, run_id: str) -> dict[str, str]:
     allowed = ("PATH", "SystemRoot", "TEMP", "TMP", "PYTHONUTF8", "PYTHONDONTWRITEBYTECODE",
                "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "LLM_THINKING_TYPE",
-               "ODOO_URL", "ODOO_DB", "ODOO_USERNAME", "ODOO_API_KEY", "ERP_MEMORY_MODE")
+               "ODOO_URL", "ODOO_DB", "ODOO_USERNAME", "ODOO_API_KEY", "ERP_MEMORY_MODE", "ERP_KNOWLEDGE_DIR", "ERP_KNOWLEDGE_MAX_DOCS")
     env = {key: os.environ[key] for key in allowed if key in os.environ}
     env.setdefault("ERP_MEMORY_MODE", "off")
     env["PI_AGENT_SESSION_ID"] = session_id
@@ -58,6 +60,7 @@ def child_environment(session_id: str, run_id: str) -> dict[str, str]:
         "sale.advance.payment.inv.create_invoices",
         "account.move.action_post",
         "account.move.send.wizard.action_send_and_print",
+        *ENTERPRISE_METHODS,
     ))
     # The shared parser uses legacy completeness detection before honoring API_KEY.
     if env.get("ODOO_API_KEY") and not env.get("ODOO_PASSWORD"):

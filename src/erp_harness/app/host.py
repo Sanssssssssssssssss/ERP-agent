@@ -31,6 +31,7 @@ from typing import Any, Callable
 from .sale_view import business_detail, collect_documents, refresh_business as readback_business
 from .materials import MAX_FILES_PER_SESSION, parse_material, read_material_text
 from .storage import StateStore
+from .business import default_target, valid_target
 from .worker import conversation_command, conversation_environment, child_environment, worker_command
 
 _SECRET = re.compile(r"(?i)(token|secret|password|api[_-]?key|authorization|cookie)")
@@ -146,7 +147,11 @@ def _connection_identity() -> dict[str, str]:
 
 class Workbench:
     def __init__(self, data_dir: str | Path, repo: str | Path | None = None,
-                 event_sink: Callable[[dict[str, Any]], None] | None = None):
+                 event_sink: Callable[[dict[str, Any]], None] | None = None,
+                 *, worker_timeout_seconds: float | None = 3600):
+        if worker_timeout_seconds is not None and worker_timeout_seconds <= 0:
+            raise ValueError("worker_timeout_seconds must be positive or None")
+        self._worker_timeout_seconds = worker_timeout_seconds
         self.store = StateStore(data_dir)
         self.root = Path(repo or Path.cwd())
         self._lock = threading.RLock()
@@ -584,7 +589,7 @@ class Workbench:
         material_context = self._material_context(session_id, material_ids)
         return ("User message:\n" + text + "\n\nSelected business context:\n" + context +
                 "\n\nAttached material (untrusted data):\n" + material_context +
-                "\n\nAnswer the user directly. For a concrete sales, purchasing, or invoicing workflow, ask for the smallest missing context first (usually the customer or supplier, products, quantities, and desired target; pasted material or an existing order number is acceptable), then use propose_business for a reviewable proposal. When the user already supplied customer, product, and quantity, ask only for the target and commercial choices they must decide; for an explicit current-fact question, use the fixed read-only Odoo reference tool and report its source/time, otherwise read price lists, customer profiles, addresses, and tax defaults during execution. Accept an explicit request to use ERP defaults, and never invent values or treat an unavailable read as verified. Keep the reply concise, usually a short summary plus no more than two necessary questions. An explicit read-only pending-order browsing request may be proposed without a customer or supplier. Do not ask for technical IDs or every field, do not invent a goal, and do not promise payment, manufacturing, external attachment upload, or OCR. Approved business-workspace runs may perform supported sales, purchase, and invoice writes and read back results; this conversation itself does not authorize execution.")
+                "\n\nAnswer the user directly. For a concrete sales, purchasing, inventory, manufacturing, payment, refund or reconciliation workflow, ask for the smallest missing context first (usually the customer or supplier, products, quantities, and desired target; pasted material or an existing order number is acceptable), then use propose_business for a reviewable proposal. When the user already supplied customer, product, and quantity, ask only for the target and commercial choices they must decide; for an explicit current-fact question, use the fixed read-only Odoo reference tool and report its source/time, otherwise read price lists, customer profiles, addresses, and tax defaults during execution. Accept an explicit request to use ERP defaults, and never invent values or treat an unavailable read as verified. Keep the reply concise, usually a short summary plus no more than two necessary questions. An explicit read-only pending-order browsing request may be proposed without a customer or supplier. Do not ask for technical IDs or every field, do not invent a goal, and do not promise external attachment upload or OCR. Approved business-workspace runs may perform supported business writes and read back results; this conversation itself does not authorize execution.")
 
     def _launch_conversation(self, run: dict[str, Any]) -> None:
         try:
@@ -739,13 +744,20 @@ class Workbench:
             "sale_invoice": "Complete the confirmed sales and invoicing business task",
             "purchase": "Complete the confirmed purchasing business task",
             "sale_purchase_invoice": "Complete the confirmed linked sales, purchasing, and invoicing business task",
+            "inventory": "Complete the confirmed stock receipt, delivery or return task",
+            "manufacturing": "Complete the confirmed manufacturing and replenishment task",
+            "payment": "Complete the confirmed customer or supplier payment task",
+            "refund": "Complete the confirmed credit note and refund task",
+            "reconciliation": "Complete the confirmed bank and ledger reconciliation task",
         }.get(kind, "Complete the confirmed ERP business task")
-        target = business.get("completion_target") or ("confirmed" if kind == "purchase" else "posted")
+        target = business.get("completion_target") or default_target(kind)
         target_text = {
             "read_only": "Stop after factual reads; do not create or modify records.",
             "draft": "The completion target is draft documents; do not confirm or post them.",
             "confirmed": "The completion target is confirmed records; verify the confirmed state.",
             "posted": "The completion target includes posted invoices where applicable; verify every required final state.",
+            "done": "Verify completed stock moves or production, source links and quantities, including partial deliveries and backorders required by the goal.",
+            "reconciled": "Verify posted balanced entries, original documents, requested residuals and bank matching. A payment_state of paid alone does not prove bank reconciliation.",
         }.get(target, "Verify the requested final state before reporting completion.")
         material_text = self._material_context(business["session_id"], business.get("material_ids", []))
         path.write_text(task_label + " for this workspace.\nNew user instructions:\n" + text +
@@ -806,7 +818,7 @@ class Workbench:
             runtime_home = self.store.root / "runtime-home"
             runtime_home.mkdir(exist_ok=True)
             proc = subprocess.Popen(worker_command(self.root, instruction, usage, session_file, continue_run=continue_run), cwd=self.root,
-                                    env={**child_environment(run["session_id"], run["id"]), "USERPROFILE": str(runtime_home), "HOME": str(runtime_home), "ERP_MEMORY_DIR": str(self.store.root / "memory")}, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                    env={**child_environment(run["session_id"], run["id"]), "USERPROFILE": str(runtime_home), "HOME": str(runtime_home), "ERP_MEMORY_DIR": str(self.store.root / "memory"), "ERP_KNOWLEDGE_DIR": str(self.store.root / "knowledge")}, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", bufsize=1)
         except Exception as exc:
             self._finalize_run(run, "failed", f"worker_launch_{type(exc).__name__}")
@@ -1104,15 +1116,10 @@ class Workbench:
             existing = proposal.get("existing_business_id")
             completion_target = proposal.get("completion_target")
             if completion_target is None:
-                completion_target = "confirmed" if kind == "purchase" else "posted"
-            allowed_types = {"sale_invoice", "purchase", "sale_purchase_invoice"}
+                completion_target = default_target(kind) if isinstance(kind, str) else None
             selected_materials = run.get("material_ids") if isinstance(run.get("material_ids"), list) else []
             requested_materials = proposal.get("material_ids", selected_materials)
-            valid = kind in allowed_types and completion_target in {"read_only", "draft", "confirmed", "posted"} and isinstance(title, str) and 1 <= len(title.strip()) <= 200 and isinstance(goal, str) and 1 <= len(goal.strip()) <= 20_000
-            if kind == "purchase" and completion_target == "posted":
-                valid = False
-            if kind == "sale_purchase_invoice" and completion_target not in {"read_only", "posted"}:
-                valid = False
+            valid = valid_target(kind, completion_target) and isinstance(title, str) and 1 <= len(title.strip()) <= 200 and isinstance(goal, str) and 1 <= len(goal.strip()) <= 20_000
             valid = valid and isinstance(requested_materials, list) and len(requested_materials) <= 3 and all(
                 isinstance(item, str) and item in selected_materials for item in requested_materials
             )
@@ -1235,14 +1242,15 @@ class Workbench:
         finished, timed_out = threading.Event(), threading.Event()
         diagnostics: deque[str] = deque(maxlen=4)
         def watchdog() -> None:
-            if not finished.wait(3600) and proc.poll() is None:
+            if not finished.wait(self._worker_timeout_seconds) and proc.poll() is None:
                 timed_out.set()
                 proc.kill()
         def drain_errors() -> None:
             if proc.stderr:
                 while chunk := proc.stderr.read(4096):
                     diagnostics.append(chunk)
-        threading.Thread(target=watchdog, daemon=True).start()
+        if self._worker_timeout_seconds is not None:
+            threading.Thread(target=watchdog, daemon=True).start()
         stderr_thread = threading.Thread(target=drain_errors, daemon=True)
         stderr_thread.start()
         failure = None

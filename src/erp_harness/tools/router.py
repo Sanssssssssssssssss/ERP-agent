@@ -326,6 +326,11 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                 raise
             finally:
                 if side_effect_attempted:
+                    if capabilities is not None:
+                        try:
+                            capabilities.knowledge.invalidate(instance=arguments.get("instance"), reason="side-effect attempt or ambiguous result")
+                        except Exception as exc:
+                            event["knowledge_invalidation_failed"] = type(exc).__name__
                     invalidated_reads = native or (actions.reads if actions is not None else None)
                     if invalidated_reads is not None:
                         try:

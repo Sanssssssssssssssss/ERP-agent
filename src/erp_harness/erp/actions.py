@@ -45,6 +45,14 @@ from erp_harness.erp._odoo_core.write_policy import (
     allowed_side_effect_methods,
     writes_enabled,
 )
+from erp_harness.erp.business_operations import (
+    FINANCE_MODELS,
+    ONE_SHOT_METHODS,
+    execution_kwargs,
+    handles,
+    method_prestate,
+    method_verify,
+)
 from erp_harness.erp.reads import NativeReads
 from erp_harness.erp.store import ActionStore
 from erp_harness.erp.write_guards import business_write_prestate, manufacturing_confirm_prestate
@@ -465,6 +473,9 @@ class NativeActions:
 
     @staticmethod
     def _resource_key(kind: str, payload: dict[str, Any]) -> str:
+        if payload.get("model") in FINANCE_MODELS:
+            # ponytail: one finance lock per instance; multi-invoice locks need ledger support.
+            return ActionStore.digest([payload.get("instance"), "enterprise-finance"])
         ids = payload.get("record_ids") or payload.get("kwargs", {}).get("ids") or []
         if payload.get("model") == "sale.order" or (
             payload.get("model") == "sale.advance.payment.inv"
@@ -492,6 +503,10 @@ class NativeActions:
     ) -> dict[str, Any]:
         source, approved = self._approval_source(identity)
         now = time.time()
+        resource_key = self._resource_key(kind, payload)
+        enterprise = prestate.get("enterprise", {})
+        if enterprise.get("kind") == "return":
+            resource_key = ActionStore.digest([payload.get("instance"), "stock-return", enterprise["picking"]["id"]])
         return self.store.register(
             action_key=self._action_key(
                 kind, payload, identity, prestate, policy_digest
@@ -503,7 +518,7 @@ class NativeActions:
             file_digests=file_digests or {},
             policy_digest=policy_digest,
             approval_source=source,
-            resource_key=self._resource_key(kind, payload),
+            resource_key=resource_key,
             run_id=os.environ.get("HARBOR_TRIAL_ID", os.environ.get("PI_AGENT_SESSION_ID", "local")),
             session_id=os.environ.get("PI_AGENT_SESSION_ID", "local"),
             expires_at=now + self.approval_ttl_seconds,
@@ -563,6 +578,9 @@ class NativeActions:
                 "last_message_id": int(rows[0]["id"]) if rows else 0,
             }
         ids = [int(value) for value in payload.get("kwargs", {}).get("ids") or []]
+        enterprise = method_prestate(self.reads.instances[instance], payload)
+        if enterprise is not None:
+            return enterprise
         if (model, str(payload.get("method"))) == _OFFICIAL_INVOICE_PDF_METHOD:
             if len(ids) != 1:
                 raise ValueError(
@@ -718,7 +736,52 @@ class NativeActions:
         field: str,
         actual: Any,
         expected: Any,
+        previous: Any = None,
     ) -> bool | None:
+        commands = (isinstance(actual, list) and isinstance(expected, list) and bool(expected)
+                    and all(isinstance(c, (list, tuple)) and len(c) >= 2 and type(c[0]) is int and c[0] in range(7) for c in expected))
+        if commands and (previous or any(command[0] != 0 for command in expected)):
+            runtime = self.reads.instances[instance]
+            relation = (runtime._metadata(model).get(field) or {}).get("relation")
+            if not relation or any(type(value) is not int for value in actual):
+                return False
+            target = set(previous or [])
+            updates, created, removed = {}, [], set()
+            for command in expected:
+                code, record_id = command[:2]
+                if code == 0:
+                    created.append(command)
+                elif code == 1:
+                    if record_id not in target or len(command) < 3 or not isinstance(command[2], dict):
+                        return False
+                    updates.setdefault(record_id, {}).update(command[2])
+                elif code in {2, 3}:
+                    target.discard(record_id)
+                    if code == 2:
+                        removed.add(record_id)
+                elif code == 4:
+                    target.add(record_id)
+                elif code == 5:
+                    target.clear()
+                    created.clear()
+                else:
+                    target = set(command[2])
+                    created.clear()
+            actual_ids = set(actual)
+            if not target <= actual_ids or len(actual_ids - target) != len(created):
+                return False
+            if removed and self._read_rows(instance, relation, sorted(removed), ["id"]):
+                return False
+            metadata = runtime._metadata(relation)
+            for record_id, values in updates.items():
+                if record_id in removed:
+                    continue
+                rows = self._read_rows(instance, relation, [record_id], ["id", *values])
+                if not rows and record_id not in target:
+                    continue  # One2many unlink/clear may cascade-delete the updated child.
+                if len(rows) != 1 or any(not self._matches(rows[0].get(key), value, (metadata.get(key) or {}).get("type")) for key, value in values.items()):
+                    return False
+            return (not created or self._created_relation_matches(instance, model, field, sorted(actual_ids - target), created))
         if not (
             isinstance(actual, list)
             and isinstance(expected, list)
@@ -815,7 +878,8 @@ class NativeActions:
                     if _official_empty_relation_matches(model, field, actual.get(field), value):
                         continue
                     relation_match = self._created_relation_matches(
-                        instance, model, field, actual.get(field), value
+                        instance, model, field, actual.get(field), value,
+                        next((item.get(field) for item in row.get("prestate", {}).get("records", []) if item.get("id") == record_id), None),
                     )
                     if relation_match is False or (
                         relation_match is None
@@ -880,6 +944,9 @@ class NativeActions:
             }
         method = str(payload["method"])
         ids = [int(value) for value in payload.get("kwargs", {}).get("ids") or []]
+        enterprise = method_verify(self.reads.instances[instance], payload, row["prestate"], result)
+        if enterprise is not None:
+            return enterprise
         if (model, method) == _OFFICIAL_INVOICE_PDF_METHOD:
             invoice_ids = [
                 int(item["id"])
@@ -1715,6 +1782,9 @@ class NativeActions:
                 }
             args = list(args or [])
             kwargs = dict(kwargs or {})
+            if (model, method) == ("account.move.reversal", "reverse_moves") and "is_modify" in kwargs:
+                if kwargs.pop("is_modify") is not False:
+                    raise ValueError("credit-note reversal requires is_modify=false; cancel-and-reinvoice is a different operation")
             if (model, method) == _OFFICIAL_INVOICE_PDF_METHOD:
                 extra = sorted(set(kwargs) - {"ids"})
                 if extra:
@@ -1732,7 +1802,7 @@ class NativeActions:
                     "error": "write execution disabled; set ODOO_MCP_ENABLE_WRITES=1 to enable",
                     "classification": safety,
                 }
-            required_ids = (model, method) in _KNOWN_METHOD_STATES or (
+            required_ids = handles({"model": model, "method": method}) or (model, method) in _KNOWN_METHOD_STATES or (
                 model,
                 method,
             ) in {
@@ -1772,6 +1842,18 @@ class NativeActions:
                 "instance": name,
             }
             identity = self._identity(name)
+            if f"{model}.{method}" in ONE_SHOT_METHODS:
+                previous = self.store.find_sent(
+                    kind="method", payload=payload, identity=identity,
+                    run_id=os.environ.get("HARBOR_TRIAL_ID", os.environ.get("PI_AGENT_SESSION_ID", "local")),
+                    session_id=os.environ.get("PI_AGENT_SESSION_ID", "local"),
+                )
+                if previous is not None:
+                    # Never reinterpret changed residuals as permission to reuse a consumed wizard.
+                    if previous["policy_digest"] != policy_digest:
+                        return {"success": False, "action_id": previous["action_id"], "action_status": previous["status"],
+                                "error": "this wizard was already sent under a different policy; reconcile its recorded outcome before creating a new wizard"}
+                    return self._execute_row(previous, lambda: None)
             action = self._register(
                 "method",
                 payload,
@@ -1791,7 +1873,7 @@ class NativeActions:
 
             def send() -> Any:
                 try:
-                    return self._send(name, model, method, **kwargs)
+                    return self._send(name, model, method, **execution_kwargs(payload, action["prestate"]))
                 except xmlrpc.client.Fault as fault:
                     if _NONE_MARSHAL_FAULT_MARKER not in str(fault.faultString or ""):
                         raise

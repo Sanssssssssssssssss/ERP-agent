@@ -9,14 +9,14 @@ from pathlib import Path
 
 from erp_harness.erp.actions import ACTION_TOOLS
 from erp_harness.erp.capabilities import CAPABILITY_TOOLS
-from erp_harness.erp.reads import READ_RESPONSES
+from erp_harness.erp.reads import READ_RESPONSES, NATIVE_READ_RESPONSES
 from erp_harness.tools.sops import SOPS, SOP_TOOLS, build_sop_tools, get_sop
 
 
 class ControlledSopTest(unittest.TestCase):
     def test_all_sops_are_reachable_and_reference_advertised_tools(self) -> None:
-        self.assertEqual(len(SOPS), 11)
-        advertised = set(READ_RESPONSES) | set(ACTION_TOOLS) | set(CAPABILITY_TOOLS) | {"get_current_time"}
+        self.assertEqual(len(SOPS), 15)
+        advertised = set(READ_RESPONSES) | set(NATIVE_READ_RESPONSES) | set(ACTION_TOOLS) | set(CAPABILITY_TOOLS) | {"get_current_time"}
         for name, spec in SOPS.items():
             self.assertTrue(spec["required_tools"], name)
             self.assertEqual(set(spec["required_tools"]) - advertised, set(), name)

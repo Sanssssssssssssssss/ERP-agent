@@ -11,6 +11,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import re
 from typing import Any, Callable
+from .business import BUSINESS_LABELS, ENTERPRISE_TYPES, default_target
+from . import enterprise_view
 
 
 READBACK_FIELDS: dict[str, tuple[str, ...]] = {
@@ -139,8 +141,8 @@ def _read_result(payload: Any, expected_id: int) -> tuple[dict[str, Any] | None,
     return result, None
 
 
-def _read_one(reads: Callable[[str, dict[str, Any]], Any] | Any, model: str, record_id: int) -> tuple[dict[str, Any] | None, str | None]:
-    arguments = {"model": model, "record_id": record_id, "fields": list(READBACK_FIELDS[model])}
+def _read_one(reads: Callable[[str, dict[str, Any]], Any] | Any, model: str, record_id: int, fields=None) -> tuple[dict[str, Any] | None, str | None]:
+    arguments = {"model": model, "record_id": record_id, "fields": list(fields if fields is not None else READBACK_FIELDS[model])}
     try:
         call = reads if callable(reads) else getattr(reads, "call")
         return _read_result(call("read_record", arguments), record_id)
@@ -287,6 +289,8 @@ def _stages_for(business_type: str, completion_target: str = "posted") -> tuple[
     The stage list is therefore truncated at the target, while retaining the
     final independent verification stage.
     """
+    if business_type in ENTERPRISE_TYPES:
+        return (("read", "读取当前状态"), ("verify", "独立核验")) if completion_target == "read_only" else (("read", "读取当前状态"), (business_type, BUSINESS_LABELS[business_type]), ("verify", "独立核验"))
     if business_type == "purchase":
         stages = PURCHASE_STAGES
     elif business_type == "sale_purchase_invoice":
@@ -397,6 +401,11 @@ def _annotate_document_scope(
     documents: list[dict[str, Any]], runs: list[dict[str, Any]], business_type: str,
 ) -> list[dict[str, Any]]:
     """Mark historical order documents and their explicitly linked records."""
+    if business_type in ENTERPRISE_TYPES:
+        targets, _ = enterprise_view.action_targets(list(reversed(runs)))
+        if not targets:
+            return documents
+        return [{**doc, "document_scope": "current" if (doc.get("model"), doc.get("id")) in targets else "reference", "is_reference": (doc.get("model"), doc.get("id")) not in targets} for doc in documents]
     target_ids = _target_order_ids_for_runs(runs, business_type)
     target_model = "purchase.order" if business_type == "purchase" else "sale.order"
     line_model = "purchase.order.line" if target_model == "purchase.order" else "sale.order.line"
@@ -483,6 +492,16 @@ def _evidence(document: dict[str, Any], label: str) -> dict[str, Any] | None:
 
 def _action_stage(model: Any, operation: Any) -> str | None:
     model, operation = str(model or "").lower(), str(operation or "").lower()
+    if model in {"stock.picking", "stock.move", "stock.backorder.confirmation", "stock.return.picking"}:
+        return "inventory"
+    if model.startswith("mrp."):
+        return "manufacturing"
+    if model in {"account.payment", "account.payment.register"}:
+        return "payment"
+    if model == "account.move.reversal":
+        return "refund"
+    if model in {"account.move.line", "account.bank.statement.line"}:
+        return "reconciliation"
     if model == "sale.order" and operation == "action_confirm":
         return "confirm"
     if model == "sale.order" and operation == "create":
@@ -541,6 +560,9 @@ def _run_has_relevant_evidence(
     business_type: str = "sale_invoice", completion_target: str = "posted",
 ) -> bool:
     documents = run.get("documents") if isinstance(run.get("documents"), list) else []
+    if business_type in ENTERPRISE_TYPES:
+        targets, _ = enterprise_view.action_targets([run])
+        return any(doc.get("source") == "refresh_native_read" and ((doc.get("model"), doc.get("id")) in targets or completion_target == "read_only") for doc in readback_documents or [])
     if business_type == "purchase":
         orders = [doc for doc in documents if isinstance(doc, dict) and doc.get("model") == "purchase.order" and doc.get("source_run_id") == run.get("id")]
         if not orders:
@@ -608,6 +630,10 @@ def _execution_projection(
     business_type: str = "sale_invoice",
     completion_target: str = "posted",
 ) -> dict[str, Any]:
+    def action_stage(model, operation):
+        stage = _action_stage(model, operation)
+        return business_type if stage and business_type in ENTERPRISE_TYPES else stage
+
     stage_defs = _stages_for(business_type, completion_target)
     evidence_by_stage: dict[str, list[dict[str, Any]]] = {stage_id: [] for stage_id, _ in stage_defs}
     observed_by_stage: dict[str, bool] = {stage_id: False for stage_id, _ in stage_defs}
@@ -619,7 +645,7 @@ def _execution_projection(
         item = _evidence(document, label)
         model = document.get("model")
         fields = document.get("fields") if isinstance(document.get("fields"), dict) else {}
-        relevant = model in {"sale.order", "purchase.order", "account.move"}
+        relevant = model in {"sale.order", "purchase.order", "account.move"} or (business_type in ENTERPRISE_TYPES and model in enterprise_view.FIELDS)
         if relevant:
             observed_by_stage["read"] = True
         if item is None:
@@ -645,6 +671,8 @@ def _execution_projection(
                 evidence_by_stage["invoice"].append(item)
         elif model == "purchase.order" and "purchase" in evidence_by_stage:
             evidence_by_stage["purchase"].append(item)
+        if business_type in evidence_by_stage and business_type in ENTERPRISE_TYPES and relevant:
+            evidence_by_stage[business_type].append(item)
 
     verified_actions: dict[str, list[dict[str, Any]]] = {stage_id: [] for stage_id, _ in stage_defs}
     for run in runs:
@@ -656,7 +684,7 @@ def _execution_projection(
                 continue
             arguments = tool.get("arguments") if isinstance(tool.get("arguments"), dict) else {}
             model, operation = _tool_action_fields(tool)
-            stage_id = _action_stage(model, operation)
+            stage_id = action_stage(model, operation)
             if not stage_id or stage_id not in verified_actions or not isinstance(run.get("id"), str):
                 continue
             verified_actions[stage_id].append({"run_id": run["id"], "tool_id": tool.get("id"), "action_id": tool.get("action_id") or result.get("action_id"), "kind": "action", "model": model, "operation": operation, "label": "结构化 ERP 动作已核验"})
@@ -665,7 +693,7 @@ def _execution_projection(
         if approval.get("status") != "pending_approval" or not isinstance(approval.get("run_id"), str):
             continue
         operation = str(approval.get("operation") or approval.get("method") or "")
-        stage_id = _action_stage(approval.get("model"), operation)
+        stage_id = action_stage(approval.get("model"), operation)
         if not stage_id or stage_id not in evidence_by_stage:
             continue
         item = {"run_id": approval["run_id"], "action_id": approval.get("action_id"), "kind": "action", "label": "等待主机审批的 ERP 动作"}
@@ -676,7 +704,7 @@ def _execution_projection(
         verification = approval.get("verification") if isinstance(approval.get("verification"), dict) else {}
         if approval.get("status") != "verified" or verification.get("status") != "satisfied":
             continue
-        stage_id = _action_stage(approval.get("model"), approval.get("operation"))
+        stage_id = action_stage(approval.get("model"), approval.get("operation"))
         if stage_id in verified_actions and isinstance(approval.get("run_id"), str):
             verified_actions[stage_id].append({"run_id": approval["run_id"], "action_id": approval.get("action_id"), "kind": "action", "model": approval.get("model"), "operation": approval.get("operation") or approval.get("method"), "label": "结构化 ERP 动作已核验"})
 
@@ -738,6 +766,9 @@ def _execution_projection(
             else:
                 status = {"passed": "verified", "failed": "failed", "unknown": "unknown"}.get(check.get("status"), "unknown")
                 detail = check.get("detail", detail)
+        elif stage_id in ENTERPRISE_TYPES and evidence:
+            status = "verified" if outcome_status == "passed" and current_evidence else "observed"
+            detail = "当前业务关系已独立回读。" if status == "verified" else "已观测动作，等待终态核验。"
         elif stage_id == "verify":
             current_read = [row for row in evidence_by_stage["read"] if not current_run_id or row.get("run_id") == current_run_id]
             current_run = runs[0] if runs else None
@@ -757,7 +788,7 @@ def _execution_projection(
     if current_run and current_run.get("status") == "awaiting_approval":
         pending = set(current_run.get("pending_approval_action_ids") or [])
         pending_stages = [
-            _action_stage(row.get("model"), row.get("operation"))
+            action_stage(row.get("model"), row.get("operation"))
             for row in approvals or []
             if row.get("action_id") in pending and row.get("status") == "pending_approval"
         ]
@@ -767,7 +798,9 @@ def _execution_projection(
         current_stage_id = next((_tool_stage(tool) for tool in reversed(tools) if isinstance(tool, dict) and _tool_stage(tool)), None)
         if not current_stage_id:
             pending = set(current_run.get("pending_approval_action_ids") or [])
-            current_stage_id = next((_action_stage(row.get("model"), row.get("operation") or row.get("method")) for row in approvals or [] if row.get("action_id") in pending), None)
+            current_stage_id = next((action_stage(row.get("model"), row.get("operation") or row.get("method")) for row in approvals or [] if row.get("action_id") in pending), None)
+    if business_type in ENTERPRISE_TYPES and current_stage_id not in {None, "read", "verify"}:
+        current_stage_id = business_type
     result: dict[str, Any] = {"stages": stages}
     if isinstance(current_run_id, str):
         result["run_id"] = current_run_id
@@ -777,6 +810,8 @@ def _execution_projection(
 
 
 def _required_check_names(business_type: str, completion_target: str) -> set[str]:
+    if business_type in ENTERPRISE_TYPES:
+        return {"enterprise_observed"} if completion_target == "read_only" else {"enterprise_observed", "enterprise_settled", "enterprise_final"}
     if business_type == "purchase":
         return {"observed_purchase", "observed_supplier"} if completion_target == "read_only" else ({
             "observed_purchase", "observed_supplier", "observed_document_states", "purchase_lines_valid", "purchase_draft",
@@ -832,7 +867,9 @@ def _outcome(checks: list[dict[str, Any]], business_type: str = "sale_invoice",
         "业务目标所需的基础检查未通过。" if status == "failed" else
         "缺少足够的结构化读取证据，暂不能判断业务目标结果。"
     )
-    label = labels.get(business_type, labels["sale_invoice"])
+    if business_type in ENTERPRISE_TYPES and status == "passed":
+        detail = "当前单据终态与基础关系检查通过。"
+    label = labels.get(business_type, BUSINESS_LABELS.get(business_type, labels["sale_invoice"]) + "基础检查")
     return {"status": status, "label": label, "detail": detail, "scope": scope}
 
 
@@ -950,6 +987,16 @@ def refresh_business(
         [row for row in state.get("runs", {}).values() if row.get("business_id") == business_id],
         key=_run_sort_key,
     )
+    kind = business.get("type", "sale_invoice")
+    if kind in ENTERPRISE_TYPES:
+        target = business.get("completion_target") or default_target(kind)
+        rows, failures, checks, targets = enterprise_view.readback(kind, target, runs, lambda model, record_id, fields: _read_one(native_reads, model, record_id, fields))
+        observations = {}
+        for (model, record_id), row in rows.items():
+            projected = collect_documents("read_record", {"model": model, "record_id": record_id}, {"success": True, "result": row}, source_run_id=targets.get((model, record_id)) or (runs[-1]["id"] if runs else None))
+            if projected:
+                observations[(model, record_id)] = {**projected[0], "source": "refresh_native_read", "observed_at": _now()}
+        return _finish_readback(state, business, runs, observations, failures, checks, kind, target)
     observations: dict[tuple[str, int], dict[str, Any]] = {}
     failures: dict[tuple[str, int], str] = {}
     fresh: set[tuple[str, int]] = set()
@@ -1085,7 +1132,7 @@ def business_detail(state: dict[str, Any], business_id: str) -> dict[str, Any]:
     if business is None:
         raise KeyError("unknown business")
     business_type = business.get("type", "sale_invoice")
-    completion_target = business.get("completion_target") or ("confirmed" if business_type == "purchase" else "posted")
+    completion_target = business.get("completion_target") or default_target(business_type)
     runs = sorted(
         [row for row in state["runs"].values() if row.get("business_id") == business_id],
         key=_run_sort_key,

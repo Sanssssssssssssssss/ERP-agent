@@ -200,6 +200,18 @@ class ActionStore:
                 ).fetchone()
             )
 
+    def find_sent(self, *, kind: str, payload: dict, identity: dict,
+                  run_id: str, session_id: str) -> dict[str, Any] | None:
+        """Find an irreversible attempt in this execution scope, even if dependencies changed."""
+        with self._lock:
+            return self._decode(self._db.execute(
+                """SELECT * FROM action_ledger WHERE kind = ? AND payload_sha256 = ?
+                   AND identity_sha256 = ? AND run_id = ? AND session_id = ?
+                   AND status IN ('sending', 'needs_reconciliation', 'verified')
+                   ORDER BY created_at DESC LIMIT 1""",
+                (kind, self.digest(payload), self.digest(identity), run_id, session_id),
+            ).fetchone())
+
     def approve(self, action_id: str, source: str) -> bool:
         """Trusted host hook. This method is intentionally not exposed as an agent tool."""
         # source 用于记录授权来源。真正的信任边界是只向宿主开放此入口。

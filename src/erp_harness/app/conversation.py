@@ -29,6 +29,7 @@ from erp_harness.context.resources import ResourcePaths
 from erp_harness.runtime.session import HarnessSession, SessionConfig
 
 from erp_harness.app.stream_events import public_events
+from erp_harness.app.business import BUSINESS_TARGETS, COMPLETION_TARGETS, default_target, valid_target
 
 CONTEXT_WINDOW = 128_000
 READ_MAX_ROWS = 5
@@ -41,7 +42,8 @@ CONVERSATION_POLICY = (
     "You are the ordinary conversation assistant for an ERP erp_harness.app. "
     "The erp_harness.app supports sales and invoicing (sale_invoice), purchasing "
     "(purchase), and linked sales-purchase-invoice workspaces "
-    "(sale_purchase_invoice). It can read native Odoo data and, after approval "
+    "(sale_purchase_invoice), inventory, manufacturing, payment, refund and reconciliation. "
+    "It can read native Odoo data and, after approval "
     "for each write, carry out supported order, purchase, and invoice operations "
     "and read back their results. It can help prepare an order for an existing "
     "customer and product, or a purchase request with a supplier and lines, then "
@@ -65,8 +67,10 @@ CONVERSATION_POLICY = (
     "is missing or ambiguous. "
     "Keep the reply concise: a short summary and usually no more than two necessary "
     "questions. Do not promise "
-    "payment, manufacturing, external attachment upload, or OCR, and do not claim "
-    "a purchase is complete before the workspace has verified it. "
+    "external attachment upload or OCR, and do not claim "
+    "a business is complete before the workspace has verified it. Payment and refund "
+    "goals require the original document, amount, currency and company; bank reconciliation "
+    "requires matching journal entries, not merely an invoice marked paid. "
     "Ordinary discussion must not create a proposal. After a successful proposal "
     "tool call, tell the user briefly to click the card button '创建业务工作区', "
     "then click '开始执行'. Do not ask the user to reply with confirmation and do "
@@ -82,6 +86,9 @@ _REFERENCE_SPECS = {
     "sale_order": ("sale.order", ["id", "name", "state", "partner_id", "amount_total", "currency_id", "invoice_status"]),
     "purchase_order": ("purchase.order", ["id", "name", "state", "partner_id", "amount_total", "currency_id"]),
     "invoice": ("account.move", ["id", "name", "state", "move_type", "partner_id", "amount_total", "currency_id", "payment_state", "invoice_origin"]),
+    "transfer": ("stock.picking", ["id", "name", "state", "partner_id", "origin", "scheduled_date"]),
+    "production": ("mrp.production", ["id", "name", "state", "product_id", "product_qty"]),
+    "payment": ("account.payment", ["id", "name", "state", "partner_id", "amount", "currency_id", "is_matched"]),
 }
 _ODOO_READS = None
 
@@ -140,7 +147,7 @@ async def _read_odoo_reference(_call_id, arguments, _signal=None, _on_update=Non
     query = values.get("query", "")
     limit = values.get("limit", READ_MAX_ROWS)
     if not isinstance(resource, str) or resource not in _REFERENCE_SPECS:
-        error = "resource must be customer, product, payment_term, sale_order, purchase_order, or invoice"
+        error = "resource must be one of: " + ", ".join(_REFERENCE_SPECS)
         payload = {"success": False, "status": "invalid", "error": error}
         return AgentToolResult(content=json.dumps(payload), details=payload)
     if not isinstance(query, str) or len(query.strip()) > 200:
@@ -189,7 +196,7 @@ READ_ODOO_REFERENCE = AgentTool(
     parameters={
         "type": "object",
         "properties": {
-            "resource": {"type": "string", "enum": ["customer", "product", "payment_term", "sale_order", "purchase_order", "invoice"]},
+            "resource": {"type": "string", "enum": list(_REFERENCE_SPECS)},
             "query": {"type": "string", "maxLength": 200},
             "limit": {"type": "integer", "minimum": 1, "maximum": READ_MAX_ROWS},
         },
@@ -274,9 +281,9 @@ def _aggregate_usage(assistant: list[AssistantMessage], compactions: list[Compac
 async def _propose_business(_call_id, arguments, _signal=None, _on_update=None):
     values = dict(arguments or {})
     kind = values.get("type")
-    if kind not in {"sale_invoice", "purchase", "sale_purchase_invoice"}:
+    if not isinstance(kind, str) or kind not in BUSINESS_TARGETS:
         return AgentToolResult(
-            content=json.dumps({"success": False, "error": "type must be sale_invoice, purchase, or sale_purchase_invoice"}),
+            content=json.dumps({"success": False, "error": "unsupported business type"}),
             details={"success": False, "error": "unsupported business type"},
         )
     title = values.get("title")
@@ -285,7 +292,7 @@ async def _propose_business(_call_id, arguments, _signal=None, _on_update=None):
     material_ids = values.get("material_ids")
     completion_target = values.get("completion_target")
     if completion_target is None:
-        completion_target = "confirmed" if kind == "purchase" else "posted"
+        completion_target = default_target(kind)
     if not isinstance(title, str) or not 1 <= len(title.strip()) <= 200:
         error = "title must be 1..200 characters"
     elif not isinstance(goal, str) or not 1 <= len(goal.strip()) <= 20_000:
@@ -295,8 +302,8 @@ async def _propose_business(_call_id, arguments, _signal=None, _on_update=None):
     elif material_ids is not None and (not isinstance(material_ids, list) or len(material_ids) > 3 or
                                        any(not isinstance(item, str) or not item.strip() for item in material_ids)):
         error = "material_ids must contain at most 3 non-empty strings"
-    elif completion_target not in {"read_only", "draft", "confirmed", "posted"}:
-        error = "completion_target must be read_only, draft, confirmed, or posted"
+    elif not valid_target(kind, completion_target):
+        error = "completion_target is not supported for this business type"
     else:
         proposal = {"type": kind, "title": title.strip(), "goal": goal.strip(), "completion_target": completion_target}
         if existing is not None:
@@ -317,7 +324,7 @@ PROPOSE_BUSINESS = AgentTool(
     name="propose_business",
     label="Propose business",
     description=(
-        "Create a reviewable sale_invoice, purchase, or sale_purchase_invoice proposal "
+        "Create a reviewable ERP business proposal "
         "after the user states a concrete business goal or explicitly asks to browse "
         "pending orders read-only. "
         "Ask for the smallest missing business context first; do not invent a goal "
@@ -327,12 +334,12 @@ PROPOSE_BUSINESS = AgentTool(
     parameters={
         "type": "object",
         "properties": {
-            "type": {"type": "string", "enum": ["sale_invoice", "purchase", "sale_purchase_invoice"]},
+            "type": {"type": "string", "enum": list(BUSINESS_TARGETS)},
             "title": {"type": "string", "minLength": 1, "maxLength": 200},
             "goal": {"type": "string", "minLength": 1, "maxLength": 20_000},
             "existing_business_id": {"type": "string", "minLength": 1, "maxLength": 128},
             "material_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "maxItems": 3},
-            "completion_target": {"type": "string", "enum": ["read_only", "draft", "confirmed", "posted"]},
+            "completion_target": {"type": "string", "enum": list(COMPLETION_TARGETS)},
         },
         "required": ["type", "title", "goal"],
         "additionalProperties": False,

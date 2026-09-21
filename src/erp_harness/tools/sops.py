@@ -36,6 +36,55 @@ def _spec(
 
 
 SOPS = {
+    "stock_delivery_and_return": _spec(
+        "Receive, deliver or return stock with explicit actual quantities and source links.",
+        kind="workflow", read_only=False, parameters={"source": True},
+        tools=["read_record", "find_records", "validate_write", "execute_approved_write", "execute_method"],
+        models=["stock.picking", "stock.move", "stock.return.picking", "stock.backorder.confirmation"],
+        steps=[
+            "Resolve the source picking, company, products, units, requested quantities and available stock. Read exact move IDs; do not copy historical order lines.",
+            "For returns create stock.return.picking for the original done picking, set only the requested product_return_moves quantities, then call action_create_returns once. Read the resulting picking and its original-move links.",
+            "Confirm/assign the transfer as needed. Approve actual stock.move.quantity and picked values, then execute stock.picking.button_validate. Partial completion must explicitly preserve or resolve the remainder; the runtime supports stock.backorder.confirmation.process for a keep-backorder decision.",
+            "Read done moves and backorders; verify original products, quantities, directions and company. A wizard action or a successful RPC is not proof of completed stock movement.",
+        ],
+    ),
+    "manufacture_and_replenish": _spec(
+        "Complete BOM manufacturing after material receipts and component production.",
+        kind="workflow", read_only=False, parameters={"production": True},
+        tools=["read_supply_context", "read_record", "validate_write", "execute_approved_write", "execute_method"],
+        models=["mrp.production", "mrp.bom", "mrp.workorder", "purchase.order", "stock.picking"],
+        steps=[
+            "Stop at the user's requested target. A planning or confirmation-only task must not consume stock, receive purchases or finish production.",
+            "Read the exact production/BOM, material gap, units, operations and qualified workcenters. Replenish only the observed shortage through approved purchase or component production.",
+            "Receive physical materials before component production, and finish components before parent production. Preserve source links and planned/actual time relationships.",
+            "Confirm and assign production. Approve qty_producing, call set_qty_producing, verify actual component consumption and work orders, then call button_mark_done.",
+            "Read production and raw/finished moves; verify completed quantity, no negative stock, BOM/workcenter and receipt-before-start relationships.",
+        ],
+    ),
+    "payment_and_bank_reconciliation": _spec(
+        "Register an approved partial or full payment, then reconcile its supplied bank evidence.",
+        kind="workflow", read_only=False, parameters={"invoice": True, "amount": True},
+        tools=["read_record", "find_records", "validate_write", "execute_approved_write", "execute_method"],
+        models=["account.move", "account.payment.register", "account.payment", "account.move.line", "account.bank.statement.line"],
+        steps=[
+            "Read the posted invoice, open payable/receivable lines, company, partner, currency and amount. Verify existing payments and the requested manual bank journal/outstanding account. Keep partial-payment differences open; never invent a write-off.",
+            "Create account.payment.register for the source lines, using current Odoo defaults and approved amount/journal/date. Call action_create_payments once per wizard, then read the created payment and reduced source residual.",
+            "For bank matching, read the supplied statement line and its posted move. Reconcile the matching outstanding-account lines from payment and bank moves through account.move.line.reconcile; verify same company, currency, partner, account and opposite amounts.",
+            "Read matched debit/credit links, residuals, balanced posted entries and payment.is_matched. Community payment_state=paid alone is not bank reconciliation. An unknown write needs ledger reconciliation before any replacement payment.",
+        ],
+    ),
+    "credit_note_and_refund": _spec(
+        "Return only requested goods, create the corresponding original-linked credit, and refund it.",
+        kind="workflow", read_only=False, parameters={"invoice": True, "return": True},
+        tools=["read_record", "find_records", "validate_write", "execute_approved_write", "execute_method"],
+        models=["account.move.reversal", "account.move", "account.move.line", "account.payment.register", "stock.return.picking"],
+        steps=[
+            "Read the original invoice, delivery/receipt and payment status. Complete the specified physical return using stock_delivery_and_return; preserve original move links.",
+            "Create account.move.reversal for the original invoice and call reverse_moves with is_modify=false once. This creates a draft credit, not a cash refund.",
+            "For a partial return, approve changes to the draft credit's product lines so only the returned goods and quantities remain. Preserve source invoice, company, partner, currency and tax relationships; verify the final total before action_post.",
+            "Register the approved credit payment and reconcile supplied refund bank evidence through payment_and_bank_reconciliation. Read credit residual, original invoice residual, return quantity and bank match before reporting completion.",
+        ],
+    ),
     "diagnose_failed_odoo_call": _spec(
         "Diagnose a failed Odoo call before considering a retry.",
         kind="diagnostic",

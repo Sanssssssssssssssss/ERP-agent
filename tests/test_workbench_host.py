@@ -103,6 +103,13 @@ class WorkbenchHostTests(unittest.TestCase):
         business = self._business(goal)
         return business, self.host.start_run(self.sid, business["id"])
 
+    def test_unlimited_worker_does_not_arm_watchdog(self):
+        _, run = self._run()
+        self.host._worker_timeout_seconds = None
+        with patch("erp_harness.app.host.threading.Thread", wraps=threading.Thread) as threads:
+            self.host._consume_worker(run["id"], _EventProcess([]), Path(self.tmp.name) / "missing-usage.json")
+        self.assertNotIn("watchdog", [call.kwargs["target"].__name__ for call in threads.call_args_list])
+
     def test_business_connection_binds_new_business_and_accepts_same_identity(self):
         business = self._business("connection binding")
         env = {"ODOO_URL": "https://odoo.example/", "ODOO_DB": "demo", "ODOO_USERNAME": "alice", "ODOO_API_KEY": "secret"}
@@ -935,7 +942,9 @@ class WorkbenchHostTests(unittest.TestCase):
         env = child_environment("s", "r")
         self.assertEqual(env["ODOO_ACTION_APPROVAL_MODE"], "host")
         self.assertEqual(env["ODOO_MCP_ENABLE_WRITES"], "1")
-        self.assertEqual(env["ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS"], "sale.order.action_confirm,purchase.order.button_confirm,purchase.order.button_approve,sale.advance.payment.inv.create_invoices,account.move.action_post,account.move.send.wizard.action_send_and_print")
+        from erp_harness.erp.business_operations import ENTERPRISE_METHODS
+        expected = {"sale.order.action_confirm", "purchase.order.button_confirm", "purchase.order.button_approve", "sale.advance.payment.inv.create_invoices", "account.move.action_post", "account.move.send.wizard.action_send_and_print", *ENTERPRISE_METHODS}
+        self.assertEqual(set(env["ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS"].split(",")), expected)
         self.assertNotIn("ODOO_MCP_POLICY_FILE", env)
         self.assertNotIn("PYTHONPATH", env)
 

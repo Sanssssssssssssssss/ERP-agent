@@ -1,5 +1,5 @@
-export type BusinessType = "sale_invoice" | "sale_purchase_invoice" | "purchase";
-export type CompletionTarget = "read_only" | "draft" | "confirmed" | "posted";
+export type BusinessType = "sale_invoice" | "sale_purchase_invoice" | "purchase" | "inventory" | "manufacturing" | "payment" | "refund" | "reconciliation";
+export type CompletionTarget = "read_only" | "draft" | "confirmed" | "posted" | "done" | "reconciled";
 export type Role = "user" | "assistant" | "system";
 export type ApprovalDecision = "approve" | "reject";
 

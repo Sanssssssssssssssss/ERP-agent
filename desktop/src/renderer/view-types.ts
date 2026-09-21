@@ -4,11 +4,12 @@ BusinessArtifact,
 BusinessDetailProjection,
 Message
 } from './protocol'
+import type { BusinessType } from '../shared/protocol'
 
 
 export type ConnectionState = 'checking' | 'connected' | 'disconnected' | 'crashed' | 'protocol_error'
 
-export type BusinessTypeCode = 'sale_invoice' | 'purchase' | 'sale_purchase_invoice'
+export type BusinessTypeCode = BusinessType
 
 export type MaterialRecord = { id: string; session_id: string; name: string; size: number; sha256: string; created_at: string; row_count?: number; preview?: string; media_type?: string }
 
