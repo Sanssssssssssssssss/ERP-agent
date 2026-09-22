@@ -13,6 +13,7 @@ import json
 import os
 import re
 import unicodedata
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -317,7 +318,6 @@ async def _read_odoo_reference(_call_id, arguments, _signal=None, _on_update=Non
                     record["internal_company"] = companies[record["id"]]
             payload["resource_semantics"] = "A contact can be a customer, supplier, employee or internal company contact; this lookup alone does not establish a customer relationship. Internal company ownership uses res.company IDs in company_id."
         if records and all("state" in row for row in records):
-            from collections import Counter
             payload["page_counts_by_state"] = dict(Counter(row["state"] for row in records))
         if coverage is not None:
             payload.update({**coverage, "match": "bm25", "complete": False, "notice": "ranked candidates; not an exhaustive answer"})
