@@ -232,6 +232,9 @@ class WorkbenchConversationTests(unittest.TestCase):
     def test_read_odoo_reference_is_bounded_and_source_stamped(self):
         class FakeReads:
             def call(self, name, arguments):
+                if arguments["model"] == "res.company":
+                    assert arguments["domain"] == [["partner_id", "in", [0, 1, 2, 3, 4]]]
+                    return {"success": True, "result": [{"id": 2, "name": "内部公司", "partner_id": [1, "联系人"]}]}
                 self.name, self.arguments = name, arguments
                 return {"success": True, "result": [{"id": i, "name": "客户" + str(i)} for i in range(20)]}
 
@@ -243,6 +246,9 @@ class WorkbenchConversationTests(unittest.TestCase):
         self.assertEqual(fake.arguments["model"], "res.partner")
         self.assertEqual(fake.arguments["fields"], conversation._REFERENCE_SPECS["customer"][1])
         self.assertEqual(len(details["records"]), 5)
+        self.assertEqual(details["records"][1]["entity_kind"], "internal_company_contact")
+        self.assertEqual(details["records"][1]["internal_company"], [2, "内部公司"])
+        self.assertEqual(details["records"][2]["entity_kind"], "contact")
         self.assertTrue(details["truncated"])
         self.assertEqual(details["source"], "native_odoo_read")
         self.assertTrue(details["observed_at"].endswith("Z"))

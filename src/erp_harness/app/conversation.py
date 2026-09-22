@@ -303,6 +303,17 @@ async def _read_odoo_reference(_call_id, arguments, _signal=None, _on_update=Non
         if _SOURCE_MESSAGES and _TASK_ENTITIES:
             payload["user_named_entities"] = _TASK_ENTITIES
             payload["entity_semantics"] = "Names recalled from the original user text. Internal ERP company scope uses company_id; its res.partner contact uses partner_id only when the user means that contact as counterparty. Digits in names are not IDs. These hints are not exhaustive."
+        if resource == "customer":
+            # res.partner 同时存客户、供应商、员工和内部公司联系人，不能凭资源别名判定角色。
+            company_rows = reads.call("search_records", {"model": "res.company", "domain": [["partner_id", "in", [r["id"] for r in records]]],
+                                                        "fields": ["id", "name", "partner_id"], "limit": READ_PAGE_MAX}) if records else {}
+            companies = {r["partner_id"][0]: [r["id"], r["name"]] for r in company_rows.get("result", [])
+                         if company_rows.get("success") and r.get("partner_id")}
+            for record in records:
+                record["entity_kind"] = "internal_company_contact" if record["id"] in companies else "contact"
+                if record["id"] in companies:
+                    record["internal_company"] = companies[record["id"]]
+            payload["resource_semantics"] = "customer is the legacy name of a res.partner contact lookup. A contact can be a customer, supplier, employee or internal company contact; this lookup alone does not establish a customer relationship. Internal company ownership uses res.company IDs in company_id."
         if records and all("state" in row for row in records):
             from collections import Counter
             payload["page_counts_by_state"] = dict(Counter(row["state"] for row in records))
@@ -362,6 +373,8 @@ READ_ODOO_REFERENCE = AgentTool(
     label="Read Odoo reference",
     description=(
         "Read current ERP facts. S... sales use sale_order; P... purchase orders use purchase_order. "
+        "company means the internal document owner (company_id). customer searches all contacts (res.partner), "
+        "including suppliers and internal company contacts; it does not establish a customer role (partner_id). "
         "query is a name/reference or space-separated text fragments. Use domain for company, partner ID, "
         "state, amount and date conditions, order for sorting, include_count for the full matching count. "
         "A name's digits are not an ID: resolve the full customer/supplier name first. "
