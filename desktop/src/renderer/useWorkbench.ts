@@ -50,6 +50,7 @@ export function useWorkbench() {
   const [settingsDraft, setSettingsDraft] = useState<Record<string, string>>({})
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [notice, setNotice] = useState('')
+  const [blockedSend, setBlockedSend] = useState('')
   const [renamingId, setRenamingId] = useState('')
   const [messageBusinessId, setMessageBusinessId] = useState('')
   const [sessionQuery, setSessionQuery] = useState('')
@@ -209,6 +210,7 @@ export function useWorkbench() {
     const result = await call<SessionDetail>('get_session', { session_id: sessionId })
     if (requestId !== sessionRequestRef.current || sessionIdRef.current !== sessionId) return
     setSession(result)
+    setSessions((current) => current.map((item) => item.id === sessionId ? result.session : item))
     conversationRunsRef.current = result.conversation_runs ?? []
     const latestConversation = [...conversationRunsRef.current].filter((run) => run.business_id == null).sort((left, right) => String(right.started_at || '').localeCompare(String(left.started_at || '')))[0]
     if (latestConversation && ['completed', 'failed', 'cancelled', 'interrupted'].includes(latestConversation.status)) {
@@ -465,6 +467,7 @@ export function useWorkbench() {
     quietBusinessRequestRef.current += 1
     traceRequestRef.current += 1
     setSelectedSessionId(id)
+    setBlockedSend('')
     setSelectedBusinessId('')
     setBusinessDetail(null)
     setBusinessLoading(false)
@@ -621,6 +624,10 @@ export function useWorkbench() {
     const requestSessionId = selectedSessionId
     const messageKey = `${requestSessionId}:${text}:${attachedMaterials.map((material) => material.id).join(',')}`
     if (messageInFlightRef.current.has(messageKey)) return
+    if (hasActiveExecution || conversationRunsRef.current.some((run) => ['running', 'cancel_requested'].includes(run.status))) {
+      setBlockedSend('请等待当前运行结束；需要修改待审批动作，请在审批卡选择“提出修改”。输入已保留。')
+      return
+    }
     messageInFlightRef.current.add(messageKey)
     setLoading(true)
     setDraft('')
@@ -652,6 +659,14 @@ export function useWorkbench() {
 
   const confirmProposal = async (proposal: ProposalLike, confirmed: boolean) => {
     if (!selectedSessionId) return
+    const message = session?.messages.find((item) => item.proposal?.id === proposal.id)
+    if (message?.proposal?.status === 'confirmed' && message.business_id) {
+      chooseBusiness(message.business_id)
+      return
+    }
+    if (message?.proposal?.status !== 'pending' || proposal.id !== pendingProposal?.id || proposalUnavailable) return
+    const producer = conversationRunsRef.current.find((run) => run.id === message.run_id || run.proposal_ids?.includes(proposal.id))
+    if (producer && ['running', 'cancel_requested'].includes(producer.status)) return
     const requestSessionId = selectedSessionId
     const proposalKey = `${requestSessionId}:${proposal.id}`
     if (proposalInFlightRef.current.has(proposalKey)) return
@@ -752,6 +767,36 @@ export function useWorkbench() {
       if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) await reloadCurrent()
     } catch (reason) {
       if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) { setApprovalProgress(null); setError(messageForError(reason)) }
+    } finally {
+      approvalInFlightRef.current.delete(approvalKey)
+      if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) setLoading(false)
+    }
+  }
+
+  const requestApprovalRevision = async (approval: Approval, text: string) => {
+    const requestSessionId = selectedSessionId
+    const requestBusinessId = approval.business_id
+    const approvalKey = `${requestSessionId}:${requestBusinessId}:${approval.run_id}:${approval.action_id}`
+    if (!text.trim() || !requestSessionId || requestBusinessId !== selectedBusinessId || approval.status !== 'pending_approval') throw new Error('请选择待审批动作并填写修改要求。')
+    if (approvalInFlightRef.current.has(approvalKey)) throw new Error('该审批正在提交，请稍候。')
+    approvalInFlightRef.current.add(approvalKey)
+    setLoading(true)
+    try {
+      const result = await call<{ ok: boolean; run_id?: string }>('request_approval_revision', {
+        session_id: requestSessionId, business_id: requestBusinessId,
+        run_id: approval.run_id, action_id: approval.action_id, text: text.trim()
+      })
+      if (result.ok !== true) throw new Error('修改要求未被接受，请核对当前审批状态。')
+      if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) {
+        setApprovalProgress(null)
+        setMessageBusinessId(requestBusinessId)
+        setThinkingRun({ sessionId: requestSessionId, runId: result.run_id || '' })
+        setConversationOpen(true)
+        setTab('execution')
+        await reloadCurrent().catch((reason) => setError(messageForError(reason)))
+      }
+    } catch (reason) {
+      throw new Error(messageForError(reason))
     } finally {
       approvalInFlightRef.current.delete(approvalKey)
       if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) setLoading(false)
@@ -929,7 +974,17 @@ export function useWorkbench() {
   }
 
   const visibleMessages = session?.messages ?? []
-  const pendingProposal = visibleMessages.find((message) => message.proposal?.status === 'pending')?.proposal
+  const pendingProposalMessage = [...visibleMessages].reverse().find((message) => message.proposal?.status === 'pending')
+  const pendingProposal = pendingProposalMessage?.proposal
+  const proposalRun = conversationRunsRef.current.find((run) => run.id === pendingProposalMessage?.run_id || (pendingProposal && run.proposal_ids?.includes(pendingProposal.id)))
+  const proposalBusy = Boolean(proposalRun && ['running', 'cancel_requested'].includes(proposalRun.status))
+  const latestUser = [...visibleMessages].reverse().find((message) => message.role === 'user')
+  const newerProposal = proposalRun?.proposal_ids?.length ? proposalRun.proposal_ids.at(-1) !== pendingProposal?.id
+    : Boolean(pendingProposalMessage?.run_id && visibleMessages.slice(visibleMessages.indexOf(pendingProposalMessage) + 1).some((message) => message.run_id === pendingProposalMessage.run_id && message.proposal))
+  const proposalUnavailable = newerProposal ? '该提案已被更新，请使用最新业务说明。'
+    : proposalRun && !['completed', 'running', 'cancel_requested'].includes(proposalRun.status) ? '本轮回复未完成，请重新说明业务要求。'
+    : pendingProposal?.source_messages?.length && latestUser && !pendingProposal.source_messages.some((message) => message.id === latestUser.id)
+      ? '已有新的业务要求，请等待更新后的提案。' : ''
   return {
     sessions,
     session,
@@ -965,6 +1020,8 @@ export function useWorkbench() {
     settingsSaving,
     notice,
     setNotice,
+    blockedSend,
+    setBlockedSend,
     renamingId,
     setRenamingId,
     messageBusinessId,
@@ -1004,6 +1061,7 @@ export function useWorkbench() {
     cancelRun,
     cancelConversation,
     decideApproval,
+    requestApprovalRevision,
     reconcileApproval,
     refreshBusiness,
     openSettings,
@@ -1015,6 +1073,8 @@ export function useWorkbench() {
     openArtifact,
     openTraceTarget,
     resizeBusiness,
-    pendingProposal
+    pendingProposal,
+    proposalBusy,
+    proposalUnavailable
   }
 }

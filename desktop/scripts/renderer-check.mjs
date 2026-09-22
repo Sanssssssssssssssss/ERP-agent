@@ -42,7 +42,7 @@ const bridgeScript = String.raw`
     const session = (id, title, businesses) => ({ id, title, created_at: '2026-09-08T08:00:00Z', updated_at: '2026-09-08T09:00:00Z', archived: false, status: 'idle', businesses })
     const business = (id, session_id, title, status = 'idle', goal = '处理订单与发票') => ({ id, session_id, type: id === 'business-b2' ? 'sale_purchase_invoice' : 'sale_invoice', title, goal, status, created_at: '2026-09-08T08:00:00Z', updated_at: '2026-09-08T09:00:00Z', active_run_id: id + '-run' })
     const b1 = business('business-b1', 'session-b', 'Business B1')
-    const b2 = { ...business('business-b2', 'session-b', 'Business B2', 'awaiting_approval'), material_ids: ['material-b2'] }
+    const b2 = { ...business('business-b2', 'session-b', 'Business B2', 'completed'), material_ids: ['material-b2'] }
     const b3 = business('business-b3', 'session-b', 'Business B3｜这是一个很长的企业业务标题用于窄面板换行检查', 'needs_reconciliation', '核对中断写入是否已经落库，并保留当前运行与历史单据证据。')
     const b4 = business('business-b4', 'session-b', 'Business B4', 'completed', '你好，能做什么？\n确认订单，暂不发货。')
     const sessions = [session('session-a', 'Session A', [business('business-a1', 'session-a', 'Business A1')]), session('session-b', 'Session B', [b1, b2, b3, b4])]
@@ -81,12 +81,18 @@ const bridgeScript = String.raw`
     })
     const sessionDetails = {
       'session-a': { session: sessions[0], messages: [], businesses: sessions[0].businesses, conversation_runs: [], live_messages: [] },
-      'session-b': { session: sessions[1], messages: [{ id: 'm1', role: 'assistant', text: '已识别两个业务工作区。', created_at: '2026-09-08T08:01:00Z' }, { id: 'm-user', role: 'user', text: '我想查看订单', created_at: '2026-09-08T08:01:30Z' }, { id: 'proposal-1', role: 'assistant', text: '主机合成的提案正文不应重复显示', created_at: '2026-09-08T08:02:00Z', proposal: { id: 'proposal-1', title: '新业务意图', goal: '处理一笔新的销售业务', type: 'sale_invoice', completion_target: 'posted', status: 'pending' } }], businesses: sessions[1].businesses, conversation_runs: [{ id: 'conversation-run-b', session_id: 'session-b', business_id: null, kind: 'conversation', status: 'running' }], live_messages: [] }
+      'session-b': { session: sessions[1], messages: [{ id: 'm1', role: 'assistant', text: '已识别两个业务工作区。', created_at: '2026-09-08T08:01:00Z' }, { id: 'm-user', role: 'user', text: '我想查看订单', created_at: '2026-09-08T08:01:30Z' }, { id: 'proposal-1', run_id: 'proposal-run-b', role: 'assistant', text: '主机合成的提案正文不应重复显示', created_at: '2026-09-08T08:02:00Z', proposal: { id: 'proposal-1', title: '新业务意图', goal: '处理一笔新的销售业务', type: 'sale_invoice', completion_target: 'posted', status: 'pending' } }], businesses: sessions[1].businesses, conversation_runs: [{ id: 'proposal-run-b', session_id: 'session-b', business_id: null, kind: 'conversation', status: 'completed' }], live_messages: [] }
     }
+    sessionDetails['session-b'].messages.unshift({ id: 'superseded-proposal', role: 'assistant', text: '早期未完成的提案', created_at: '2026-09-08T08:01:45Z', proposal: { id: 'superseded-proposal', title: '不能创建的旧提案', goal: '旧目标', type: 'sale_invoice', status: 'pending' } })
     sessionDetails['session-b'].messages.push({ id: 'b4-confirmed-proposal', business_id: b4.id, role: 'assistant', text: '已确认业务说明', created_at: '2026-09-08T08:02:30Z', proposal: { id: 'b4-proposal', title: b4.title, goal: '确认订单，暂不发货。', type: b4.type, status: 'confirmed' } }, { id: 'b4-pending-update', business_id: b4.id, role: 'assistant', text: '未确认更新', created_at: '2026-09-08T08:02:31Z', proposal: { id: 'b4-pending', title: b4.title, goal: '尚未批准的改动', type: b4.type, status: 'rejected' } })
     sessionDetails['session-b'].materials = [{ id: 'material-b2', session_id: 'session-b', name: '订单材料.csv', size: 42, sha256: 'sha-b2', created_at: '2026-09-08T08:44:00Z', row_count: 5, preview: '客户,产品,数量\\nNimbus,服务,2', media_type: 'text/csv' }]
     window.__bridgeCalls = calls
     window.__traceVersion = 0
+    window.__businessBusy = false
+    window.__setRunState = (busy, conversation = 'completed') => { window.__businessBusy = busy; b2.status = busy ? 'awaiting_approval' : 'completed'; sessionDetails['session-b'].conversation_runs[0].status = conversation }
+    window.__updateProposal = (id, patch) => { const row = sessionDetails['session-b'].messages.find(message => message.proposal?.id === id); if (row) Object.assign(row.proposal, patch) }
+    window.__setProducerProposals = (ids) => { sessionDetails['session-b'].conversation_runs[0].proposal_ids = ids }
+    window.__setProposalStatus = (id, status) => { const row = sessionDetails['session-b'].messages.find(message => message.proposal?.id === id); if (row) row.proposal.status = status }
     window.__persistConversationMessage = (message) => sessionDetails['session-b'].messages.push(message)
     window.__setSessionMessages = (id, messages) => { sessionDetails[id].messages = messages }
     window.__removeConversationMessage = (id) => { sessionDetails['session-b'].messages = sessionDetails['session-b'].messages.filter((message) => message.id !== id) }
@@ -112,6 +118,7 @@ const bridgeScript = String.raw`
           const id = params.business_id
           await wait(id === 'business-b1' ? 180 : 12)
           const result = details(sessions.flatMap((item) => item.businesses).find((item) => item.id === id))
+          if (id === 'business-b2' && !window.__businessBusy) { result.runs[1].status = 'completed'; result.approvals = []; result.business = { ...result.business, status: 'completed' } }
           if (id === 'business-b4') {
             result.runs[1].summary = '本轮已确认订单，尚未发货。'; result.runs[1].verification_status = 'passed'
             result.business = { ...b4, readback: { latest_run_id: 'business-b4-run', stale: false } }
@@ -121,6 +128,7 @@ const bridgeScript = String.raw`
             if (window.__resultScenario === 'stale') result.business.readback.latest_run_id = 'business-b4-old-run'
             if (window.__resultScenario === 'missing') { delete result.runs[1].summary; result.summary = '旧轮次总结，不能显示' }
           }
+          if (id === 'business-b2' && window.__revisionAccepted) { result.runs[1].status = 'cancelled'; result.business.status = 'cancelled'; result.approvals = result.approvals.map(row => ({ ...row, status: 'rejected' })); result.activity = { phase: 'idle', label: '等待更新后的业务方案', detail: '旧审批已撤销。' } }
           if (id === 'business-b2' && showAcceptedProjection) { result.approvals = []; result.business.status = 'running'; result.runs[1].status = 'running'; result.activity = { phase: 'model', label: '等待模型响应', detail: '审批已完成，模型正在继续处理。' } }
           return result
         }
@@ -149,6 +157,13 @@ const bridgeScript = String.raw`
           if (params.format === 'pdf') return { cancelled: true }
           return { cancelled: false, path: 'C:\\runtime\\SO-B2.csv', artifact: { id: 'artifact-doc-csv', name: 'SO-B2.csv', path: 'C:\\runtime\\SO-B2.csv', kind: 'document_csv', available: true } }
         }
+        if (method === 'request_approval_revision') {
+          await wait(80)
+          if (params.text === '测试预检失败') throw new Error('修改预检失败，原审批仍保留。')
+          window.__revisionAccepted = true; window.__businessBusy = false; b2.status = 'cancelled'
+          sessionDetails['session-b'].conversation_runs = [{ id: 'revision-conversation', session_id: 'session-b', kind: 'conversation', business_id: null, context_business_id: 'business-b2', status: 'running' }]
+          return { ok: true, run_id: 'revision-conversation' }
+        }
         if (method === 'decide_approval') {
           if (params.action_id === 'action-b2-purchase' && params.decision === 'approve') {
             if (delayedPurchaseDecision) { delayedPurchaseDecision = false; await wait(4300) }
@@ -169,6 +184,7 @@ const bridgeScript = String.raw`
         if (method === 'open_odoo_record') return { opened: true }
         if (method === 'reconcile_action') return details(b3)
         if (method === 'send_message') {
+          if (params.session_id === 'session-b') { sessionDetails['session-b'].conversation_runs[0].id = 'conversation-run-b'; sessionDetails['session-b'].conversation_runs[0].status = 'running' }
           if (params.text === 'delayed mutation' || params.text === 'thinking hold') await wait(180)
           if (params.text === 'snapshot public') {
             sessionDetails['session-b'].messages.push({ id: 'snapshot-public', role: 'assistant', text: '快照中的公开回答', run_id: 'conversation-run-b', created_at: '2026-09-08T09:02:00Z' })
@@ -195,7 +211,8 @@ const bridgeScript = String.raw`
           sessionDetails['session-b'].live_messages = [{ id: 'cancel-live', session_id: 'session-b', business_id: null, run_id: params.run_id, sequence: 0, text: '取消前已经收到的片段', role: 'assistant', status: 'interrupted' }]
           return { ok: true, run_id: params.run_id, status: 'cancelled' }
         }
-        if (method === 'cancel_run' || method === 'confirm_business' || method === 'rename_session' || method === 'archive_session') return null
+        if (method === 'confirm_business') { const row = sessionDetails[params.session_id].messages.find(message => message.proposal?.id === params.proposal_id); if (row) { for (const message of sessionDetails[params.session_id].messages) if (message.proposal?.status === 'pending' && message !== row) message.proposal.status = 'rejected'; row.proposal.status = params.confirmed ? 'confirmed' : 'rejected'; row.business_id = params.confirmed ? 'business-b1' : null }; return params.confirmed ? b1 : null }
+        if (method === 'cancel_run' || method === 'rename_session' || method === 'archive_session') return null
         throw new Error('unexpected bridge method: ' + method)
       }
     }
@@ -255,6 +272,23 @@ await page.getByRole('button', { name: '打开会话', exact: true }).click()
 await page.locator('.conversation-pane').waitFor()
 const proposalButton = page.getByRole('button', { name: '创建业务工作区' })
 await proposalButton.waitFor()
+assert.equal(await page.locator('.proposal-card').count(), 1)
+assert.equal(await page.locator('.proposal-card h3').textContent(), '新业务意图')
+await page.evaluate(() => { window.__setRunState(false, 'running'); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
+await page.getByText('正在完善提案，回复结束后可确认。', { exact: true }).waitFor()
+assert.equal(await proposalButton.isDisabled(), true)
+await page.evaluate(() => { window.__setRunState(false); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
+await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent === '创建业务工作区' && !button.disabled))
+for (const status of ['failed', 'interrupted']) {
+  await page.evaluate((value) => { window.__setRunState(false, value); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) }, status)
+  await page.getByText('本轮回复未完成，请重新说明业务要求。', { exact: true }).waitFor()
+  assert.equal(await proposalButton.isDisabled(), true)
+}
+await page.evaluate(() => { window.__setRunState(false); window.__updateProposal('proposal-1', { source_messages: [{ id: 'old-request', text: '旧要求' }] }); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
+await page.getByText('已有新的业务要求，请等待更新后的提案。', { exact: true }).waitFor()
+assert.equal(await proposalButton.isDisabled(), true)
+await page.evaluate(() => { window.__updateProposal('proposal-1', { source_messages: [{ id: 'm-user', text: '我想查看订单' }] }); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
+await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent === '创建业务工作区' && !button.disabled))
 assert.equal(await page.getByText('主机合成的提案正文不应重复显示', { exact: true }).count(), 0)
 assert.equal(await page.locator('.message.assistant:not(.thinking-message):not(.live-message)').count(), 1)
 await page.getByText('完成目标：发票已过账', { exact: true }).waitFor()
@@ -266,6 +300,17 @@ await page.evaluate(() => {
 await page.waitForTimeout(25)
 const proposalCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'confirm_business'))
 assert.equal(proposalCalls.length, 1)
+assert.equal(proposalCalls[0].params.proposal_id, 'proposal-1')
+const createdProposal = page.locator('.proposal-receipt').filter({ hasText: '新业务意图' })
+await createdProposal.getByRole('button', { name: '打开业务' }).waitFor()
+await createdProposal.getByRole('button', { name: '打开业务' }).click()
+assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'confirm_business').length), 1)
+assert.equal(await page.getByRole('button', { name: '创建业务工作区' }).count(), 0)
+await page.evaluate(() => { window.__setProposalStatus('superseded-proposal', 'pending'); window.__setProducerProposals(['superseded-proposal', 'proposal-1']); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
+await page.getByText('该提案已被更新，请使用最新业务说明。', { exact: true }).waitFor()
+assert.equal(await page.getByRole('button', { name: '创建业务工作区' }).isDisabled(), true)
+await page.evaluate(() => { window.__setProposalStatus('superseded-proposal', 'rejected'); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
+await page.getByRole('button', { name: '创建业务工作区' }).waitFor({ state: 'hidden' })
 await page.getByRole('button', { name: /Session B/ }).click()
 await page.waitForTimeout(30)
 assert.equal(await page.locator('.conversation-header h2').textContent(), 'Session B')
@@ -331,11 +376,33 @@ const sequentialBusinessElapsed = Date.now() - sequentialBusinessStarted
 // Composer target is explicit: current-business followups carry context_business_id; ordinary discussion omits business scope.
 const messageTarget = page.getByLabel('讨论范围')
 const composer = page.getByRole('textbox', { name: '会话消息' })
+async function readyComposer() {
+  await page.evaluate(() => { window.__setRunState(false); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
+  await page.waitForTimeout(60)
+}
+const sendsBeforeBusy = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'send_message').length)
+for (const scope of ['approval', 'execution', 'conversation']) {
+  await page.evaluate((value) => { window.__showAcceptedProjection(value === 'execution'); window.__setRunState(value !== 'conversation', value === 'conversation' ? 'running' : 'completed'); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) }, scope)
+  await page.waitForTimeout(60)
+  await messageTarget.selectOption('__conversation__')
+  await composer.fill('执行中暂存的修改要求')
+  await composer.press('Enter')
+  assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'send_message').length), sendsBeforeBusy)
+  await page.getByRole('button', { name: '发送', exact: true }).click()
+  const blockedDialog = page.getByRole('alertdialog', { name: '当前运行尚未结束' })
+  await blockedDialog.waitFor()
+  assert.equal((await page.locator('.composer textarea').inputValue()).trim(), '执行中暂存的修改要求')
+  assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'send_message').length), sendsBeforeBusy)
+  await blockedDialog.getByRole('button', { name: '知道了' }).click()
+}
+await page.evaluate(() => window.__showAcceptedProjection(false))
 await messageTarget.selectOption('business-b2')
+await readyComposer()
 await composer.fill('继续处理当前业务')
 await page.getByRole('button', { name: '发送' }).click()
 await page.waitForTimeout(25)
 await messageTarget.selectOption('__conversation__')
+await readyComposer()
 await composer.fill('开始一个新的业务意图')
 await page.getByRole('button', { name: '发送' }).click()
 await page.waitForTimeout(25)
@@ -345,6 +412,7 @@ assert.deepEqual(sentMessages.map(({ params }) => params), [
   { session_id: 'session-b', text: '开始一个新的业务意图' }
 ])
 await messageTarget.selectOption('__conversation__')
+await readyComposer()
 await composer.fill('thinking hold')
 await page.getByRole('button', { name: '发送' }).click()
 await page.locator('.thinking-message').waitFor()
@@ -358,6 +426,7 @@ await page.waitForTimeout(220)
 await page.getByRole('tab', { name: /Business B2/ }).click()
 await page.getByRole('heading', { name: 'Business B2' }).waitFor()
 await messageTarget.selectOption('business-b2')
+await readyComposer()
 await composer.fill('dedupe send')
 await page.evaluate(() => {
   const button = [...document.querySelectorAll('button')].find((item) => item.textContent?.includes('发送'))
@@ -366,7 +435,10 @@ await page.evaluate(() => {
 await page.waitForTimeout(25)
 const dedupeSendCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'send_message' && params.text === 'dedupe send'))
 assert.equal(dedupeSendCalls.length, 1)
+assert.equal(await page.getByRole('alertdialog', { name: '当前运行尚未结束' }).count(), 0)
 
+await page.evaluate(() => { window.__setRunState(true, 'running'); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b2' } }) })
+await page.waitForTimeout(60)
 // Stream events are scoped by session, business, run and message. Duplicate
 // chunks are ignored, the terminal text is authoritative, and a business stream
 // remains visible beside ordinary conversation output.
@@ -411,12 +483,14 @@ const conversationCancelCalls = await page.evaluate(() => window.__bridgeCalls.f
 assert.deepEqual(conversationCancelCalls.map(({ params }) => params), [{ session_id: 'session-b', run_id: 'conversation-run-b' }])
 await page.getByText('已停止 · 回复未完成', { exact: true }).waitFor()
 assert.equal(await page.locator('.thinking-message').count(), 0)
+await readyComposer()
 await composer.fill('failed conversation')
 await page.getByRole('button', { name: '发送' }).click()
 await page.getByText('对话失败，可继续输入', { exact: true }).waitFor()
 await page.getByText('查看错误详情', { exact: true }).click()
 await page.getByText('CONVERSATION_TOOL_FAILED', { exact: true }).waitFor()
 assert.ok((await page.locator('.conversation-run-status').textContent())?.includes('当前回复未完成'))
+await readyComposer()
 await composer.fill('completed retry')
 await page.getByRole('button', { name: '发送' }).click()
 await page.locator('.thinking-message').waitFor()
@@ -427,6 +501,7 @@ assert.equal(await page.locator('.thinking-message').count(), 0)
 
 // A persisted assistant message for the active run is public output, so a
 // reload snapshot must clear the thinking placeholder instead of duplicating it.
+await readyComposer()
 await composer.fill('snapshot public')
 await page.getByRole('button', { name: '发送' }).click()
 await page.getByText('快照中的公开回答', { exact: true }).waitFor()
@@ -435,6 +510,7 @@ await page.evaluate(() => window.__removeConversationMessage('snapshot-public'))
 
 // A delayed send response from the old session must not reload that session over a newer selection.
 await messageTarget.selectOption('business-b2')
+await readyComposer()
 await composer.fill('delayed mutation')
 await page.getByRole('button', { name: '发送' }).click()
 await page.getByRole('button', { name: /Session A/ }).click()
@@ -454,6 +530,8 @@ await page.getByRole('alertdialog', { name: '归档会话' }).waitFor()
 await page.getByRole('alertdialog', { name: '归档会话' }).getByRole('button', { name: '取消' }).click()
 await page.getByRole('alertdialog', { name: '归档会话' }).waitFor({ state: 'hidden' })
 
+await page.evaluate(() => { window.__setRunState(true); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
+await page.waitForTimeout(60)
 // B1 is deliberately slow. B2 must win the business detail race.
 await page.getByRole('tab', { name: /Business B2/ }).click()
 await page.getByRole('tab', { name: /Business B1/ }).click()
@@ -601,12 +679,13 @@ await approvalDiff.waitFor()
 const diffHeader = approvalDiff.locator('.field-diff-head > span')
 assert.deepEqual(await diffHeader.allTextContents(), ['字段', '执行前', '拟提交'])
 const diffText = await approvalDiff.textContent()
-assert.ok(diffText?.includes('client_order_ref'))
+assert.ok(diffText?.includes('客户参考'))
+assert.equal(diffText?.includes('client_order_ref'), false)
 assert.ok(diffText?.includes('新建 / 无前态'))
 assert.ok(diffText?.includes('PI-DYNAMIC-MVP-20260908'))
-assert.ok(diffText?.includes('Nimbus Bureau（ID 10）'))
-assert.ok(diffText?.includes('30Days（ID 4）'))
-assert.ok(diffText?.includes('商品 ID 2'))
+assert.ok(diffText?.includes('Nimbus Bureau'))
+assert.ok(diffText?.includes('30Days'))
+assert.ok(diffText?.includes('商品名称未读取（记录 2）'))
 assert.ok(diffText?.includes('数量 1'))
 assert.ok(diffText?.includes('单价 695.22'))
 assert.equal(diffText?.includes('记录（records）'), false)
@@ -616,9 +695,10 @@ const purchaseApproval = page.locator('.approval-row').filter({ hasText: '确认
 await purchaseApproval.waitFor()
 assert.ok((await purchaseApproval.textContent())?.includes('采购订单'))
 assert.ok((await purchaseApproval.textContent())?.includes('P00001（ID 1）'))
-assert.ok((await purchaseApproval.textContent())?.includes('供应商（partner_id）'))
-assert.ok((await purchaseApproval.textContent())?.includes('数量 3'))
-const sendFileApproval = page.locator('.approval-row').filter({ hasText: '生成正式发票文件' })
+assert.equal(await purchaseApproval.locator('.field-diff').count(), 0)
+assert.ok((await purchaseApproval.locator('.approval-business-context').textContent())?.includes('Alpine Supplier'))
+assert.ok((await purchaseApproval.locator('.approval-business-context').textContent())?.includes('36.00'))
+const sendFileApproval = page.locator('.approval-row').filter({ hasText: '生成正式发票 PDF' })
 await sendFileApproval.waitFor()
 assert.ok((await sendFileApproval.textContent())?.includes('发票文件向导'))
 assert.ok((await sendFileApproval.textContent())?.includes('is_move_sent'))
@@ -684,7 +764,7 @@ await page.waitForTimeout(120)
 assert.ok((await page.locator('.approval-progress').textContent())?.includes('正在提交审批决定'))
 await page.getByText('业务状态已变化，审批未生效。', { exact: true }).first().waitFor({ timeout: 6000 })
 assert.equal(await page.getByText('正在提交审批决定…', { exact: true }).count(), 0)
-assert.ok((await page.locator('.approval-row').allTextContents()).join('\n').includes('生成正式发票文件'))
+assert.ok((await page.locator('.approval-row').allTextContents()).join('\n').includes('生成正式发票 PDF'))
 await sendFileApproval.getByRole('button', { name: '批准这项业务动作' }).click()
 await page.getByText('DECISION_NETWORK_DOWN', { exact: true }).waitFor()
 assert.equal(await page.getByText('正在提交审批决定…', { exact: true }).count(), 0)
@@ -1023,6 +1103,29 @@ for (const { rowBox, buttonBox, disabled } of approvalLayout) {
   assert.equal(disabled, false)
 }
 await page.setViewportSize({ width: 1600, height: 1000 })
+// A revision retires the old approval and starts a read-only proposal turn only.
+await page.evaluate(() => { window.__enterpriseCase = null; window.__showAcceptedProjection(false); window.__setRunState(true); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b2' } }) })
+await page.getByRole('tab', { name: /^变更与审批/ }).click()
+const revisionApproval = page.locator('.approval-row').filter({ hasText: '创建发票与贷项' }).first()
+await revisionApproval.getByRole('button', { name: '提出修改', exact: true }).click()
+const revisionInput = revisionApproval.getByRole('textbox', { name: '希望怎样修改这项动作？' })
+await revisionInput.fill('测试预检失败')
+const executionsBeforeRevision = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => ['send_message', 'start_run', 'decide_approval'].includes(method)).length)
+await revisionApproval.getByRole('button', { name: '提交修改要求', exact: true }).click()
+await revisionApproval.getByRole('alert').getByText('修改预检失败，原审批仍保留。', { exact: true }).waitFor()
+assert.equal(await revisionInput.inputValue(), '测试预检失败')
+assert.equal(await revisionApproval.getByRole('button', { name: '批准这项业务动作' }).isDisabled(), true)
+await revisionInput.fill('数量改为 5 件，先保留草稿。')
+await revisionApproval.getByRole('button', { name: '提交修改要求', exact: true }).evaluate((button) => { for (let index = 0; index < 5; index += 1) button.click() })
+await page.locator('.thinking-message').waitFor()
+await page.getByRole('tab', { name: /^变更与审批/ }).click()
+await page.waitForFunction(() => !document.querySelector('.business-content .loading-line'))
+assert.equal(await page.locator('.approval-row.pending').count(), 0)
+assert.equal(await page.getByLabel('讨论范围').inputValue(), 'business-b2')
+const revisionCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'request_approval_revision'))
+assert.equal(revisionCalls.length, 2)
+assert.deepEqual(revisionCalls[1].params, { session_id: 'session-b', business_id: 'business-b2', run_id: 'business-b2-run', action_id: 'action-b2', text: '数量改为 5 件，先保留草稿。' })
+assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => ['send_message', 'start_run', 'decide_approval'].includes(method)).length), executionsBeforeRevision)
 assert.equal(pageErrors.length, 0, pageErrors.join('\n'))
 
 const calls = await page.evaluate(() => window.__bridgeCalls.map(({ method }) => method))
@@ -1061,7 +1164,7 @@ for (const [type, model, label] of [['inventory', 'stock.picking', '收发货与
 }
 assert.equal(pageErrors.length, 0, pageErrors.join('\n'))
 console.log('renderer-check: PASS')
-console.log('checked: session/business/trace stale guards, same-run trace refresh, changed routing, host crash/retry, message scope, session search, approval scope+preflight labels, purchase/file approval labels, invoice PDF availability, business-chain scope labels, document selection across refresh, CONFIG_BUSY mapping, settings save+Escape, splitter overflow, evidence navigation, unknown-write no-retry, historical activity preservation')
+console.log('checked: session/business/trace stale guards, same-run trace refresh, changed routing, host crash/retry, message scope, session search, approval scope+preflight labels, purchase/file approval labels, invoice PDF availability, business-chain scope labels, document selection across refresh, CONFIG_BUSY mapping, settings save+Escape, splitter overflow, evidence navigation, unknown-write no-retry, historical activity preservation, latest proposal guards, busy-send draft preservation, approval revision failure/success without automatic execution')
 console.log(`pressure: session50=${sessionPressureElapsed}ms business50=${businessPressureElapsed}ms business20sequential=${sequentialBusinessElapsed}ms trace300=${traceBurstElapsed}ms trace_rpc_delta=${burstTraceCallsAfter - burstTraceCallsBefore} business_rpc_delta=${burstBusinessCallsAfter - burstBusinessCallsBefore} repeated={proposal:${proposalCalls.length},send:${dedupeSendCalls.length},start:${startCalls.length},approve:${repeatedApproveCalls.length},cancel:${cancelCalls.length}}`)
 await browser.close()
 server.close()

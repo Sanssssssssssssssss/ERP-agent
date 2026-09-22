@@ -83,13 +83,15 @@ def _structured(value: Any) -> dict[str, Any]:
 def _approval_marker(payload: dict[str, Any]) -> tuple[str | None, str | None, dict[str, Any]]:
     """Normalize all native approval envelopes without trusting model text."""
     approval = payload.get("approval") if isinstance(payload.get("approval"), dict) else {}
-    status_obj = payload.get("approval_status") if isinstance(payload.get("approval_status"), dict) else {}
-    action_status = payload.get("action_status")
     action_id = payload.get("action_id") or approval.get("action_id")
-    status = status_obj.get("status") or action_status or approval.get("status")
-    if status == "pending_approval" and isinstance(action_id, str) and action_id:
-        return action_id, "pending_approval", approval
-    if payload.get("approval_required") is True and isinstance(action_id, str) and action_id:
+    status = None
+    for key in ("action_status", "approval_status", "status", "approval"):
+        value = payload.get(key)
+        value = value.get("status") if isinstance(value, dict) else value
+        if isinstance(value, str) and value in {"pending_approval", "needs_reconciliation", "sending", "executing", "verified", "known_failed", "approved"}:
+            status = value
+            break
+    if (status == "pending_approval" or status is None and payload.get("approval_required") is True) and isinstance(action_id, str) and action_id:
         return action_id, "pending_approval", approval
     return None, None, approval
 
@@ -584,7 +586,8 @@ class Workbench:
                 "notice": "These are local erp_harness.app facts and may be stale; do not describe them as a live Odoo read.",
             }, ensure_ascii=False)
         feedback = [row.get("text") for row in self.store.data["messages"].get(session_id, [])
-                    if row.get("role") == "system" and isinstance(row.get("text"), str)][-5:]
+                    if row.get("role") == "system" and isinstance(row.get("text"), str) and
+                    row.get("business_id") in {None, context_business_id}][-5:]
         if feedback:
             context += "\nPrevious host feedback:\n" + "\n".join(feedback)
         material_context = self._material_context(session_id, material_ids)
@@ -625,9 +628,31 @@ class Workbench:
         self._threads[run["id"]] = thread
         thread.start()
 
+    def _require_idle(self, except_run_id: str | None = None) -> None:
+        runs = [*self.store.data["runs"].values(), *self.store.data.get("conversation_runs", {}).values()]
+        if (self._closing or self._processes or
+                any(row.get("id") != except_run_id and row.get("status") in
+                    {"running", "awaiting_approval", "cancel_requested"} for row in runs) or
+                any(row.get("active_run_id") and row["active_run_id"] != except_run_id
+                    for row in self.store.data["sessions"].values())):
+            raise RuntimeError("当前任务正在执行或等待审批，请完成当前任务后再发送；修改待审批动作请使用审批卡上的修改入口。")
+
+    def _require_known_writes(self, business: dict[str, Any]) -> None:
+        for previous in self.store.data["runs"].values():
+            if previous.get("business_id") != business["id"]:
+                continue
+            try:
+                statuses = self._ledger_statuses(previous)
+            except Exception:
+                statuses = {"unknown": "needs_reconciliation"}
+            if previous.get("status") == "needs_reconciliation" or any(
+                    value in {"sending", "executing", "needs_reconciliation"} for value in statuses.values()):
+                raise RuntimeError("business is blocked by an unresolved write; refresh and reconcile first")
+
     def send_message(self, session_id: str, text: str, business_id: str | None = None,
                      context_business_id: str | None = None,
-                     material_ids: list[str] | None = None) -> dict[str, Any]:
+                     material_ids: list[str] | None = None, *,
+                     _revision_business_id: str | None = None) -> dict[str, Any]:
         session = self._session(session_id)
         text = str(text).strip()
         if not text or len(text) > 20_000:
@@ -647,8 +672,7 @@ class Workbench:
             material_ids = list(session.get("pending_material_ids", []))
         for material_id in material_ids:
             self._material(session_id, material_id)
-        if session.get("active_run_id"):
-            raise RuntimeError("host already has an active run")
+        self._require_idle()
         if material_ids and business_id is not None:
             business = self._business(session_id, business_id)
             existing_materials = list(dict.fromkeys(business.get("material_ids", [])))
@@ -675,6 +699,8 @@ class Workbench:
                "rounds": [], "tools": [], "documents": [],
                "events": [], "live_messages": [], "instruction": self._conversation_prompt(session_id, text, context_business_id, material_ids),
                "ttft_ms": None, "last_event_at": None}
+        if _revision_business_id:
+            run["revision_business_id"] = _revision_business_id
         sources = []
         for prior in self.store.data["messages"].get(session_id, []):
             if prior.get("proposal", {}).get("status") == "confirmed":
@@ -696,8 +722,21 @@ class Workbench:
         for message in reversed(self.store.data["messages"].get(session_id, [])):
             proposal = message.get("proposal")
             if proposal and proposal.get("id") == proposal_id:
+                if proposal["status"] == ("confirmed" if confirmed else "rejected"):
+                    return self._business(session_id, message["business_id"]) if confirmed else None
                 if proposal["status"] != "pending":
                     raise ValueError("proposal already decided")
+                producer = next((row for row in self.store.data.get("conversation_runs", {}).values()
+                                 if proposal_id in row.get("proposal_ids", [])), None)
+                if producer and confirmed:
+                    if producer.get("status") in {"running", "cancel_requested"} or producer["id"] in self._processes:
+                        raise RuntimeError("请等待本轮提案生成完成后再确认。")
+                    if producer.get("status") != "completed":
+                        raise ValueError("本轮提案未正常完成，请重新说明需求以生成完整提案。")
+                    if producer.get("proposal_ids", [])[-1] != proposal_id:
+                        proposal.update({"status": "rejected", "decision_reason": "superseded"})
+                        self._event("business_proposal_decided", {"session_id": session_id, "proposal_id": proposal_id, "confirmed": False})
+                        raise ValueError("这份提案已有更新版本，请确认最新提案。")
                 sources = proposal.get("source_messages", [])
                 if confirmed and sources:
                     current = {m["id"]: m for m in self.store.data["messages"][session_id] if m.get("role") == "user"}
@@ -706,7 +745,7 @@ class Workbench:
                     source_ids = {m["id"] for m in sources}
                     latest = next((m for m in reversed(self.store.data["messages"][session_id]) if m.get("role") == "user"), None)
                     if latest and latest["id"] not in source_ids:
-                        raise ValueError("new user instructions require a new proposal")
+                        raise ValueError("需求已有补充，请使用最新需求重新生成提案。")
                 # 模型摘要不升级为用户授权。旧提案沿用原字段，新提案保存原话与来源。
                 goal = "\n".join(m["text"] for m in sources) if sources else proposal["goal"]
                 from .conversation import resolve_references
@@ -814,20 +853,14 @@ class Workbench:
 
     def start_run(self, session_id: str, business_id: str) -> dict[str, Any]:
         session, business = self._session(session_id), self._business(session_id, business_id)
-        if self._closing or self._processes or session.get("active_run_id") or any(row.get("status") in {"running", "awaiting_approval", "cancel_requested"} for row in self.store.data["runs"].values()):
-            raise RuntimeError("only one active run is allowed on this host")
+        self._require_idle()
         self._validate_materials_available(session_id, business.get("material_ids", []))
         self._ensure_business_connection(business)
-        for previous in self.store.data["runs"].values():
-            if previous.get("business_id") != business_id:
-                continue
-            try:
-                statuses = self._ledger_statuses(previous)
-            except Exception:
-                statuses = {"unknown": "needs_reconciliation"}
-            if previous.get("status") == "needs_reconciliation" or any(value in {"sending", "executing", "needs_reconciliation"} for value in statuses.values()):
-                business["status"] = "blocked"
-                raise RuntimeError("business is blocked by an unresolved write; refresh and reconcile first")
+        try:
+            self._require_known_writes(business)
+        except RuntimeError:
+            business["status"] = "blocked"
+            raise
         run_id, stamp = uid("r"), now()
         run = {"id": run_id, "business_id": business_id, "session_id": session_id, "status": "running", "started_at": stamp,
                "ended_at": None, "error": None, "usage": None, "tool_count": 0, "model_rounds": 0, "elapsed_seconds": None,
@@ -1156,7 +1189,7 @@ class Workbench:
         if not failed and proposal is not None:
             kind = proposal.get("type")
             title, goal = proposal.get("title"), proposal.get("goal")
-            existing = proposal.get("existing_business_id")
+            existing = run.get("revision_business_id") or proposal.get("existing_business_id")
             completion_target = proposal.get("completion_target")
             if completion_target is None:
                 completion_target = default_target(kind) if isinstance(kind, str) else None
@@ -1190,8 +1223,12 @@ class Workbench:
                     proposal_row["resolved_references"] = resolved
                 if existing is not None:
                     proposal_row["existing_business_id"] = existing
+                for previous in self.store.data["messages"].get(run["session_id"], []):
+                    older = previous.get("proposal", {})
+                    if older.get("id") in run.get("proposal_ids", []) and older.get("status") == "pending":
+                        older.update({"status": "rejected", "decision_reason": "superseded"})
                 message = {"id": uid("m"), "role": "assistant", "text": f"业务提案：{proposal_row['title']}\n{proposal_row['goal']}",
-                           "created_at": now(), "business_id": None, "proposal": proposal_row}
+                           "created_at": now(), "business_id": None, "run_id": run["id"], "proposal": proposal_row}
                 self.store.data["messages"].setdefault(run["session_id"], []).append(message)
                 run.setdefault("proposal_ids", []).append(proposal_row["id"])
                 tool["proposal_id"] = proposal_row["id"]
@@ -1804,6 +1841,44 @@ class Workbench:
             return {"ok": True, "status": "rejected", "run_id": run_id, "action_id": action_id}
         finally: store.close()
 
+    def request_approval_revision(self, session_id: str, business_id: str, run_id: str,
+                                  action_id: str, text: str) -> dict[str, Any]:
+        """Retire unsent approvals before discussing a replacement, never replay writes."""
+        if not isinstance(text, str) or not 1 <= len(text.strip()) <= 20_000:
+            raise ValueError("text must be 1..20000 characters")
+        business = self._business(session_id, business_id)
+        run = self.store.data["runs"].get(run_id)
+        approval = self.store.data["approvals"].get(action_id)
+        if (not run or run.get("session_id") != session_id or run.get("business_id") != business_id or
+                run.get("status") != "awaiting_approval" or
+                action_id not in run.get("pending_approval_action_ids", []) or not approval or
+                any(approval.get(key) != value for key, value in
+                    (("session_id", session_id), ("business_id", business_id), ("run_id", run_id), ("status", "pending_approval")))):
+            raise ValueError("approval scope is invalid")
+        self._require_idle(except_run_id=run_id)
+        self._require_known_writes(business)
+        self._ensure_business_connection(business, bind=False)
+        self._validate_materials_available(session_id, business.get("material_ids", []))
+        row = self._action_for_approval(run, action_id)
+        if (not row or row.get("session_id") != session_id or row.get("run_id") != run_id or
+                row.get("status") != "pending_approval"):
+            raise ValueError("action scope or state is invalid")
+        if float(row.get("expires_at", 0)) < time.time():
+            raise ValueError("审批已过期，请先结束旧运行，再重新提出需求。")
+        self._finalize_run(run, "cancelled", "revision_requested_by_user")
+        if run["status"] != "cancelled":
+            raise RuntimeError("business is blocked by an unresolved write; refresh and reconcile first")
+        self.store.data["messages"].setdefault(session_id, []).append({
+            "id": uid("m"), "role": "system", "created_at": now(), "business_id": business_id,
+            "text": "用户要求调整待审批业务。本轮未执行的授权已撤销，已成功写入的事实保留。"
+                    "根据最新用户修改重新提出这项业务的方案，不得重做已完成动作。原待审批动作：" +
+                    json.dumps({key: approval.get(key) for key in ("model", "operation", "record_ids", "values")}, ensure_ascii=False),
+        })
+        self._event("run_changed", {"session_id": session_id, "business_id": business_id,
+                                    "run_id": run_id, "status": "cancelled"})
+        return self.send_message(session_id, text, context_business_id=business_id,
+                                 _revision_business_id=business_id)
+
     def cancel_run(self, session_id: str, business_id: str, run_id: str) -> dict[str, Any]:
         # 取消停止本地进程，不能撤销已到达 Odoo 的请求。收尾仍以账本为准。
         self._business(session_id, business_id)
@@ -1906,7 +1981,7 @@ class Workbench:
     def _dispatch(self, method: str, params: dict[str, Any]) -> Any:
         # RPC 方法必须显式列入表。禁止按传入名称直接 getattr 调用宿主对象。
         # 带下划线的内部入口由桌面主进程使用；renderer 可达范围还受 preload 限制。
-        methods = {"list_sessions": lambda: self.list_sessions(), "create_session": lambda: self.create_session(params.get("title")), "rename_session": lambda: self.rename_session(params["session_id"], params["title"]), "archive_session": lambda: self.archive_session(params["session_id"]), "get_session": lambda: self.get_session(params["session_id"]), "send_message": lambda: self.send_message(params["session_id"], params["text"], params.get("business_id"), params.get("context_business_id"), params.get("material_ids")), "confirm_business": lambda: self.confirm_business(params["session_id"], params["proposal_id"], _must_bool(params["confirmed"], "confirmed")), "start_run": lambda: self.start_run(params["session_id"], params["business_id"]), "decide_approval": lambda: self.decide_approval(params["session_id"], params["business_id"], params["run_id"], params["action_id"], params["decision"]), "cancel_run": lambda: self.cancel_run(params["session_id"], params["business_id"], params["run_id"]), "cancel_conversation": lambda: self.cancel_conversation(params["session_id"], params["run_id"]), "reconcile_action": lambda: self.reconcile_action(params["session_id"], params["business_id"], params["run_id"], params["action_id"]), "get_business": lambda: self.get_business(params["session_id"], params["business_id"]), "check_business_connection": lambda: self.check_business_connection(params["session_id"], params["business_id"]), "refresh_business": lambda: self.refresh_business(params["session_id"], params["business_id"]), "get_trace": lambda: self.get_trace(params["session_id"], params["business_id"], params.get("run_id")), "_import_material": lambda: self._import_material(params["session_id"], params["name"], params["content_base64"]), "_export_document": lambda: self._export_document(params["session_id"], params["business_id"], params["model"], params["record_id"], params["format"]), "_record_artifact": lambda: self._record_artifact(params["session_id"], params["business_id"], params["path"], params["name"], params.get("run_id"), params.get("kind", "business_receipt"), params.get("model"), params.get("record_id")), "health": self.health, "check_connection": self.check_connection}
+        methods = {"list_sessions": lambda: self.list_sessions(), "create_session": lambda: self.create_session(params.get("title")), "rename_session": lambda: self.rename_session(params["session_id"], params["title"]), "archive_session": lambda: self.archive_session(params["session_id"]), "get_session": lambda: self.get_session(params["session_id"]), "send_message": lambda: self.send_message(params["session_id"], params["text"], params.get("business_id"), params.get("context_business_id"), params.get("material_ids")), "confirm_business": lambda: self.confirm_business(params["session_id"], params["proposal_id"], _must_bool(params["confirmed"], "confirmed")), "start_run": lambda: self.start_run(params["session_id"], params["business_id"]), "decide_approval": lambda: self.decide_approval(params["session_id"], params["business_id"], params["run_id"], params["action_id"], params["decision"]), "request_approval_revision": lambda: self.request_approval_revision(params["session_id"], params["business_id"], params["run_id"], params["action_id"], params["text"]), "cancel_run": lambda: self.cancel_run(params["session_id"], params["business_id"], params["run_id"]), "cancel_conversation": lambda: self.cancel_conversation(params["session_id"], params["run_id"]), "reconcile_action": lambda: self.reconcile_action(params["session_id"], params["business_id"], params["run_id"], params["action_id"]), "get_business": lambda: self.get_business(params["session_id"], params["business_id"]), "check_business_connection": lambda: self.check_business_connection(params["session_id"], params["business_id"]), "refresh_business": lambda: self.refresh_business(params["session_id"], params["business_id"]), "get_trace": lambda: self.get_trace(params["session_id"], params["business_id"], params.get("run_id")), "_import_material": lambda: self._import_material(params["session_id"], params["name"], params["content_base64"]), "_export_document": lambda: self._export_document(params["session_id"], params["business_id"], params["model"], params["record_id"], params["format"]), "_record_artifact": lambda: self._record_artifact(params["session_id"], params["business_id"], params["path"], params["name"], params.get("run_id"), params.get("kind", "business_receipt"), params.get("model"), params.get("record_id")), "health": self.health, "check_connection": self.check_connection}
         if method not in methods: raise KeyError("unknown method")
         return methods[method]()
 

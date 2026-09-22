@@ -6,7 +6,7 @@ const LOCAL_METHODS = new Set(["get_settings", "save_settings", "import_material
 
 export const METHODS = new Set<WorkbenchMethod>([
   "list_sessions", "create_session", "rename_session", "archive_session", "get_session",
-  "send_message", "confirm_business", "get_business", "check_business_connection", "start_run", "decide_approval",
+  "send_message", "confirm_business", "get_business", "check_business_connection", "start_run", "decide_approval", "request_approval_revision",
   "cancel_run", "cancel_conversation", "get_trace", "refresh_business", "reconcile_action", "health", "check_connection",
 ]);
 

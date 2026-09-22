@@ -186,6 +186,63 @@ class RunnerBudgetTest(unittest.TestCase):
         self.assertTrue(pi_odoo_runner._approval_required(nested))
         self.assertFalse(pi_odoo_runner._approval_required(malformed))
 
+    def test_current_action_state_overrides_legacy_approval_flag(self):
+        for status, expected in (("verified", False), ("known_failed", False), ("approved", False),
+                                 ("pending_approval", True), ("needs_reconciliation", True), ("sending", True), ("executing", True)):
+            for nested in (False, True):
+                payload = {"approval_required": True, "action_status": {"status": status} if nested else status,
+                           "approval_status": {"status": "pending_approval"}}
+                with self.subTest(status=status, nested=nested):
+                    self.assertEqual(pi_odoo_runner._approval_required({"details": {"structuredContent": payload}}), expected)
+        self.assertTrue(pi_odoo_runner._approval_required({"approval_required": True}))
+        self.assertTrue(pi_odoo_runner._approval_required({"status": "success", "approval_required": True}))
+
+    def test_verified_chatter_receipt_continues_to_final_summary_without_another_approval(self):
+        async def check(root):
+            requests = []
+            # Actual failing trace envelope: the obsolete flag remains true after verification.
+            receipt = {"approval_required": True, "success": True, "action_id": "chatter-verified",
+                       "action_status": "verified", "result": [7433], "verification": {"status": "satisfied"}}
+            async def execute(*_args, **_kwargs):
+                return AgentToolResult(content=json.dumps(receipt), details=receipt)
+            class ToolSet:
+                def __init__(self, _url):
+                    self.tools = [AgentTool(name="chatter_post", label="Chatter", description="Post a note",
+                                           parameters={"type": "object", "properties": {}}, execute_fn=execute)]
+                async def __aenter__(self): return self
+                async def __aexit__(self, *args): return None
+            def handler(request):
+                requests.append(json.loads(request.content))
+                delta = ({"tool_calls": [{"index": 0, "id": "chatter-call", "type": "function",
+                                          "function": {"name": "chatter_post", "arguments": "{}"}}]}
+                         if len(requests) == 1 else {"content": "留言已核验，业务处理完成。"})
+                body = {"choices": [{"delta": delta, "finish_reason": "tool_calls" if len(requests) == 1 else "stop"}],
+                        "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}}
+                return httpx.Response(200, text="data: " + json.dumps(body) + "\n\ndata: [DONE]\n\n",
+                                      headers={"content-type": "text/event-stream"})
+            instruction = root / "instruction.txt"
+            instruction.write_text("Post the approved note, then summarize.", encoding="utf-8")
+            args = SimpleNamespace(instruction_file=instruction, session_file=root / "session.jsonl",
+                                   usage_file=root / "usage.json", receipt_dir=root / "run", mcp_url="http://unused.invalid",
+                                   max_turns=3, max_model_requests=3, max_output_tokens=None, pause_on_approval=True)
+            stdout = io.StringIO()
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                with (patch.object(pi_odoo_runner, "McpToolSet", ToolSet),
+                      patch.object(pi_odoo_runner, "OpenAICompatibleProvider", side_effect=lambda config: OpenAICompatibleProvider(config, client=client)),
+                      patch.dict(os.environ, {"LLM_API_KEY": "test-only", "LLM_BASE_URL": "https://unused.invalid/v1",
+                                             "LLM_MODEL": "deepseek/test", "LLM_PROVIDER": "openai-compatible", "LLM_THINKING_TYPE": "high"}),
+                      contextlib.redirect_stdout(stdout)):
+                    await pi_odoo_runner.run(args)
+            self.assertEqual(len(requests), 2)
+            self.assertEqual(json.loads(args.usage_file.read_text())["modelCalls"], 2)
+            rows = [json.loads(line) for line in args.session_file.read_text(encoding="utf-8").splitlines()]
+            assistant = [row["message"] for row in rows if row.get("type") == "message" and row.get("message", {}).get("role") == "assistant"]
+            self.assertEqual(assistant[-1]["stopReason"], "stop")
+            self.assertIn("留言已核验", json.dumps(assistant[-1], ensure_ascii=False))
+            self.assertEqual(sum(row.get("message", {}).get("role") == "toolResult" for row in rows), 1)
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(check(Path(directory)))
+
     def test_dynamic_history_recovery_is_typed_fail_closed_and_latest(self):
         def result(payload, *, is_error=False):
             return ToolResultMessage(

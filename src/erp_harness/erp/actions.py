@@ -87,6 +87,7 @@ _OFFICIAL_INVOICE_PDF_METHOD = (
     "account.move.send.wizard",
     "action_send_and_print",
 )
+_APPROVAL_DOCUMENT_FIELDS = ("name", "partner_id", "company_id", "currency_id", "amount_total")
 
 
 def _related_record_id(value: Any) -> int | None:
@@ -631,7 +632,7 @@ class NativeActions:
                 instance,
                 "account.move",
                 [invoice_id],
-                ["id", "state", "move_type", "invoice_pdf_report_id", "is_move_sent"],
+                ["id", "state", "move_type", "invoice_pdf_report_id", "is_move_sent", *_APPROVAL_DOCUMENT_FIELDS],
             )
             if {int(row["id"]) for row in invoice if type(row.get("id")) is int} != {invoice_id}:
                 raise ValueError(f"official invoice PDF target does not exist: account.move {invoice_id}")
@@ -643,7 +644,10 @@ class NativeActions:
             return {"wizard": wizard, "invoice": invoice}
         state = _KNOWN_METHOD_STATES.get((model, str(payload.get("method"))))
         if state:
-            records = self._read_rows(instance, model, ids, ["id", state[0]])
+            fields = ["id", state[0]]
+            if model in {"sale.order", "purchase.order", "account.move"}:
+                fields.extend(_APPROVAL_DOCUMENT_FIELDS)
+            records = self._read_rows(instance, model, ids, fields)
             requested_ids = {int(value) for value in ids}
             returned_ids = {int(row["id"]) for row in records if type(row.get("id")) is int}
             if returned_ids != requested_ids:
@@ -655,7 +659,7 @@ class NativeActions:
             "sale.advance.payment.inv",
             "create_invoices",
         ):
-            wizard = self._read_rows(instance, model, ids, ["id", "sale_order_ids"])
+            wizard = self._read_rows(instance, model, ids, ["id", "sale_order_ids", "advance_payment_method"])
             requested_wizard_ids = {int(value) for value in ids}
             returned_wizard_ids = {int(row["id"]) for row in wizard if type(row.get("id")) is int}
             if returned_wizard_ids != requested_wizard_ids:
@@ -668,7 +672,7 @@ class NativeActions:
                     "read/create the correct wizard before create_invoices"
                 )
             order_ids = [int(value) for row in wizard for value in row.get("sale_order_ids") or []]
-            orders = self._read_rows(instance, "sale.order", order_ids, ["id", "invoice_ids"])
+            orders = self._read_rows(instance, "sale.order", order_ids, ["id", "state", "invoice_ids", *_APPROVAL_DOCUMENT_FIELDS])
             requested_order_ids = {int(value) for value in order_ids}
             returned_order_ids = {int(row["id"]) for row in orders if type(row.get("id")) is int}
             if returned_order_ids != requested_order_ids:
@@ -1742,7 +1746,7 @@ class NativeActions:
                 "mode": "execute",
                 "model": model,
                 "record_id": record_id,
-                "approval_required": True,
+                "approval_required": result.get("action_status") == "pending_approval",
                 **result,
             }
         except Exception as exc:  # noqa: BLE001 - tool boundary returns structured errors

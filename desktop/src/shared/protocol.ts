@@ -49,6 +49,7 @@ export interface ConversationRun {
   ended_at?: string;
   error?: string;
   error_detail?: string;
+  proposal_ids?: string[];
 }
 
 export interface LiveMessage {
@@ -301,6 +302,7 @@ export type WorkbenchMethod =
   | "check_business_connection"
   | "start_run"
   | "decide_approval"
+  | "request_approval_revision"
   | "cancel_run"
   | "reconcile_action"
   | "get_trace"

@@ -75,6 +75,7 @@ class ChatterVerificationTest(unittest.TestCase):
                 count = len(self.writer.calls)
                 replay = self.execute(approval)
                 self.assertTrue(sent["success"], sent)
+                self.assertFalse(sent["approval_required"])
                 self.assertTrue(replay["replayed"])
                 self.assertEqual(len(self.writer.calls), count)
                 self.assertEqual(self.writer.calls[-1][3]["body"], body)

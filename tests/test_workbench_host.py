@@ -775,6 +775,7 @@ class WorkbenchHostTests(unittest.TestCase):
         self._approval_state(run, row)
         self.host._finalize_run(run, "failed", "worker failed before approval")
         self.assertNotIn("pending_approval_action_ids", run)
+
         self.assertEqual(self.host._action_row(run, row["action_id"])["status"], "known_failed")
 
         business2, run2 = self._run("uncertain pending")
@@ -787,6 +788,32 @@ class WorkbenchHostTests(unittest.TestCase):
         self.host._finalize_run(run2, "failed", "worker failed during write")
         self.assertEqual(run2["status"], "needs_reconciliation")
         self.assertEqual(run2["pending_approval_action_ids"], [row2["action_id"]])
+
+    def test_verified_chatter_legacy_flag_does_not_reopen_approval_or_block_summary(self):
+        business, run = self._run("verified chatter")
+        row = self._action(run)
+        ledger = ActionStore(Path(self.tmp.name) / "runs" / run["id"] / "odoo-actions.sqlite3")
+        ledger.finish(row["action_id"], "verified", result=[7433], verification={"status": "satisfied"})
+        ledger.close()
+        receipt = {"approval_required": True, "success": True, "action_id": row["action_id"],
+                   "action_status": "verified", "result": [7433], "verification": {"status": "satisfied"}}
+        self.assertEqual(_approval_marker(receipt)[:2], (None, None))
+        self.assertEqual(_approval_marker({**receipt, "action_status": "known_failed"})[:2], (None, None))
+        process = _EventProcess([
+            {"type": "tool_execution_start", "tool_call_id": "chatter", "tool_name": "chatter_post", "args": {}},
+            {"type": "tool_execution_end", "tool_call_id": "chatter", "tool_name": "chatter_post", "result": receipt},
+            {"type": "turn_end", "message": {"role": "assistant", "content": [{"type": "text", "text": "已完成留言。"}],
+                                             "stop_reason": "stop", "usage": {"input": 1, "output": 1, "total": 2}}},
+            {"type": "message_end", "message": {"role": "assistant", "content": [{"type": "text", "text": "已完成留言。"}]}},
+        ])
+        self.host._processes[run["id"]] = process
+        with patch.object(self.host, "_refresh_after_completed_run"):
+            self.host._consume_worker(run["id"], process, Path(self.tmp.name) / "usage.json")
+        self.assertEqual(run["status"], "completed")
+        self.assertEqual(run["summary"], "已完成留言。")
+        self.assertEqual(run["tools"][0]["status"], "completed")
+        self.assertNotIn("pending_approval_action_ids", run)
+        self.assertEqual(self.host.store.data["approvals"], {})
 
     def test_trace_without_run_id_uses_started_at_then_id(self):
         business = self._business("trace ordering")
@@ -965,6 +992,122 @@ class WorkbenchHostTests(unittest.TestCase):
         self.assertEqual(run["context_business_id"], context_business["id"])
         self.assertNotIn("proposal", self.host.store.data["messages"][self.sid][-1])
         self.assertEqual(self.host.store.data["sessions"][self.sid]["active_run_id"], run["id"])
+
+    def test_confirm_business_is_idempotent_but_cannot_reverse_a_decision(self):
+        business = self._business("one workspace")
+        proposal_id = self.host.store.data["messages"][self.sid][-1]["proposal"]["id"]
+        self.assertEqual(self.host.confirm_business(self.sid, proposal_id, True)["id"], business["id"])
+        self.assertEqual(len(self.host.store.data["businesses"]), 1)
+        with self.assertRaises(ValueError):
+            self.host.confirm_business(self.sid, proposal_id, False)
+
+    def test_conversation_and_business_runs_exclude_other_sessions_before_message_is_saved(self):
+        business, run = self._run("busy business")
+        other = self.host.create_session("other")
+        captured = []
+        self.host._launch_conversation = lambda value: captured.append(value)
+        for status in ("running", "awaiting_approval", "cancel_requested"):
+            run["status"] = status
+            with self.subTest(status=status), self.assertRaises(RuntimeError):
+                self.host.send_message(other["id"], "并行聊天")
+        self.assertEqual(self.host.store.data["messages"][other["id"]], [])
+        self.assertEqual(captured, [])
+        self.host._finalize_run(run, "cancelled")
+        self.host.send_message(other["id"], "现在聊天")
+        with self.assertRaises(RuntimeError):
+            self.host.start_run(self.sid, business["id"])
+
+    def test_only_latest_finished_proposal_can_create_a_workspace(self):
+        self.host._launch_conversation = lambda _run: None
+        run_id = self.host.send_message(self.sid, "查询订单")["run_id"]
+        run = self.host.store.data["conversation_runs"][run_id]
+        for number in (1, 2):
+            self.host._conversation_tool_end(run, {
+                "tool_call_id": f"proposal-{number}", "tool_name": "propose_business",
+                "result": {"success": True, "proposal": {"type": "sale_invoice", "title": f"提案{number}",
+                            "goal": "查询订单", "completion_target": "read_only"}},
+            })
+        proposals = [m["proposal"] for m in self.host.store.data["messages"][self.sid] if m.get("proposal")]
+        self.assertEqual([p["status"] for p in proposals], ["rejected", "pending"])
+        with self.assertRaises(RuntimeError):
+            self.host.confirm_business(self.sid, proposals[-1]["id"], True)
+        self.host._finalize_conversation(run, "completed")
+        # Old stored histories did not mark replaced proposals; confirm still rejects those.
+        proposals[0]["status"] = "pending"
+        with self.assertRaises(ValueError):
+            self.host.confirm_business(self.sid, proposals[0]["id"], True)
+        result = self.host.confirm_business(self.sid, proposals[-1]["id"], True)
+        self.assertEqual(result["title"], "提案2")
+        self.assertEqual(len(self.host.store.data["businesses"]), 1)
+
+    def test_approval_revision_retires_unsent_actions_and_keeps_verified_facts(self):
+        business, run = self._run("revision target")
+        pending = self._action(run, key="pending")
+        approved = self._action(run, key="approved")
+        verified = self._action(run, key="verified")
+        for row in (pending, approved, verified):
+            self._approval_state(run, row)
+        ledger = ActionStore(Path(self.tmp.name) / "runs" / run["id"] / "odoo-actions.sqlite3")
+        ledger.approve(approved["action_id"], "desktop_host")
+        ledger.finish(verified["action_id"], "verified", result={"id": 7}, verification={"satisfied": True})
+        ledger.close()
+        self.host.store.data["approvals"][approved["action_id"]]["status"] = "approved"
+        self.host.store.data["approvals"][verified["action_id"]]["status"] = "verified"
+        captured = []
+        self.host._launch_conversation = lambda value: captured.append(value)
+        result = self.host.call("request_approval_revision", {"session_id": self.sid, "business_id": business["id"],
+                                "run_id": run["id"], "action_id": pending["action_id"], "text": "只保留草稿，先不要确认"})
+        self.assertEqual(run["status"], "cancelled")
+        self.assertEqual(self.host._ledger_statuses(run), {
+            pending["action_id"]: "known_failed", approved["action_id"]: "known_failed", verified["action_id"]: "verified"})
+        self.assertEqual(captured[0]["id"], result["run_id"])
+        self.assertEqual(captured[0]["revision_business_id"], business["id"])
+        self.assertIn("只保留草稿", captured[0]["instruction"])
+        self.assertIn("已成功写入的事实保留", captured[0]["instruction"])
+        self.assertEqual(len(self.launches), 1)  # No business execution is restarted.
+        with self.assertRaises(ValueError):
+            self.host.decide_approval(self.sid, business["id"], run["id"], pending["action_id"], "approve")
+        self.host._conversation_tool_end(captured[0], {
+            "tool_call_id": "revision-proposal", "tool_name": "propose_business",
+            "result": {"success": True, "proposal": {"type": "sale_invoice", "title": "调整方案", "goal": "只读核对",
+                                                     "completion_target": "read_only"}},
+        })
+        proposal = self.host.store.data["messages"][self.sid][-1]["proposal"]
+        self.assertEqual(proposal["existing_business_id"], business["id"])
+        self.assertEqual(len(self.host.store.data["businesses"]), 1)
+
+    def test_approval_revision_refuses_uncertain_write_or_live_worker_without_mutation(self):
+        business, run = self._run("revision blocked")
+        pending = self._action(run)
+        self._approval_state(run, pending)
+        self.host._launch_conversation = lambda _run: self.fail("must not launch")
+        count = len(self.host.store.data["messages"][self.sid])
+        process = _LiveProcess()
+        self.host._processes[run["id"]] = process
+        with self.assertRaises(RuntimeError):
+            self.host.request_approval_revision(self.sid, business["id"], run["id"], pending["action_id"], "改金额")
+        self.host._processes.pop(run["id"])
+        uncertain = self._action(run, key="uncertain")
+        ledger = ActionStore(Path(self.tmp.name) / "runs" / run["id"] / "odoo-actions.sqlite3")
+        ledger.finish(uncertain["action_id"], "needs_reconciliation", error="unknown outcome")
+        ledger.close()
+        with self.assertRaises(RuntimeError):
+            self.host.request_approval_revision(self.sid, business["id"], run["id"], pending["action_id"], "改金额")
+        self.assertEqual(run["status"], "awaiting_approval")
+        self.assertEqual(self.host._ledger_statuses(run)[pending["action_id"]], "pending_approval")
+        self.assertEqual(len(self.host.store.data["messages"][self.sid]), count)
+
+    def test_expired_approval_revision_keeps_ledger_messages_and_worker_unchanged(self):
+        business, run = self._run("expired revision")
+        row = self._action(run, expires_at=time.time() - 1)
+        self._approval_state(run, row)
+        count = len(self.host.store.data["messages"][self.sid])
+        self.host._launch_conversation = lambda _run: self.fail("expired revision must not launch")
+        with self.assertRaisesRegex(ValueError, "审批已过期"):
+            self.host.request_approval_revision(self.sid, business["id"], run["id"], row["action_id"], "修改数量")
+        self.assertEqual(run["status"], "awaiting_approval")
+        self.assertEqual(self.host._ledger_statuses(run)[row["action_id"]], "pending_approval")
+        self.assertEqual(len(self.host.store.data["messages"][self.sid]), count)
 
     def test_send_message_worker_events_complete_proposal_from_real_run_shape(self):
         events = [

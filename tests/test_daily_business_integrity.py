@@ -24,6 +24,7 @@ def test_proposal_preserves_original_and_rejects_later_correction(tmp_path):
         host._conversation_tool_end(run, {"tool_call_id": "p", "result": {"success": True, "proposal": proposal}})
         saved = host.store.data["messages"][sid][-1]["proposal"]
         assert saved["source_messages"][0]["text"] == original
+        host._finalize_conversation(run, "completed")
         business = host.confirm_business(sid, saved["id"], True)
         instruction = host._instruction(business, "test-run")
         assert original in instruction.read_text(encoding="utf8")
@@ -31,7 +32,7 @@ def test_proposal_preserves_original_and_rejects_later_correction(tmp_path):
         assert json.loads(instruction.with_name("task-sources.json").read_text())["read_only"]
         saved["status"] = "pending"
         host.store.data["messages"][sid].append({"id": "correction", "role": "user", "text": "改成杭州"})
-        with pytest.raises(ValueError, match="new user"):
+        with pytest.raises(ValueError, match="需求已有补充"):
             host.confirm_business(sid, saved["id"], True)
         # 拒绝旧提案不需要目标仍可读取，也不受新指令影响。
         saved["references"] = [{"resource": "customer", "id": 249, "quote": "旧目标"}]

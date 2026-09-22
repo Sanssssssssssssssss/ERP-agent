@@ -1324,6 +1324,32 @@ class NativeActionCheckpointTests(unittest.TestCase):
         self.assertEqual(result["action_status"], "verified")
         self.assertEqual(len(writer.calls), 1)
 
+    def test_invoice_approval_captures_business_identity_and_rejects_changed_amount(self):
+        actions, writer, runtime = _actions(approval_mode="host")
+        self.addCleanup(actions.store.close)
+        runtime.client.records["sale.order"][7].update(
+            name="S01499", partner_id=[516, "华东机电客户249（苏州）"], company_id=[1, "澄川工业部件有限公司"],
+            currency_id=[7, "CNY"], amount_total=5159.58,
+        )
+        runtime.client.records["sale.advance.payment.inv"][9]["advance_payment_method"] = "delivered"
+        with (patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1", "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": "sale.advance.payment.inv.create_invoices"}),
+              patch.object(runtime.client, "read_records", wraps=runtime.client.read_records) as read):
+            pending = actions.execute_method("sale.advance.payment.inv", "create_invoices", kwargs={"ids": [9]})
+            self.assertTrue(pending["approval_required"])
+            row = actions.store.get(pending["action_id"])
+            self.assertEqual(row["prestate"]["orders"][0]["name"], "S01499")
+            self.assertEqual(row["prestate"]["orders"][0]["partner_id"][0], 516)
+            self.assertEqual(row["prestate"]["orders"][0]["amount_total"], 5159.58)
+            self.assertEqual(row["prestate"]["wizard"][0]["advance_payment_method"], "delivered")
+            self.assertEqual(read.call_count, 2)
+            self.assertTrue(actions.store.approve(pending["action_id"], "desktop_host"))
+            runtime.client.records["sale.order"][7]["amount_total"] = 9999
+            # Approved source amount is part of the digest; changing it needs a fresh review.
+            self.assertFalse(actions._current_prestate_matches(row))
+            result = actions.execute_method("sale.advance.payment.inv", "create_invoices", kwargs={"ids": [9]})
+            self.assertFalse(result["success"])
+        self.assertEqual(writer.calls, [])
+
     def test_official_invoice_pdf_requires_safe_wizard_and_verifies_report(self):
         class PdfWriter(_Writer):
             def __init__(self, reader, *, create_report):

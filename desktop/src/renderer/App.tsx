@@ -2,7 +2,7 @@ import { Button as RadixButton,IconButton as RadixIconButton,Tooltip as RadixToo
 import { Activity,ArrowUpRight,Minus,Settings2,X } from 'lucide-react'
 import { type CSSProperties } from 'react'
 import { BusinessWorkspace } from './features/business/BusinessWorkspace'
-import { ArchiveDialog,ConversationPane,SessionRail } from './features/conversation/ConversationPane'
+import { ArchiveDialog,BlockedSendDialog,ConversationPane,SessionRail } from './features/conversation/ConversationPane'
 import { ConnectionDetailsDialog,SettingsDialog } from './features/settings/SettingsDialog'
 import { connectionLabel,healthLabel,isPendingApproval,odooHealthStatus } from './presentation'
 import { useWorkbench } from './useWorkbench'
@@ -44,6 +44,8 @@ export default function App() {
     settingsSaving,
     notice,
     setNotice,
+    blockedSend,
+    setBlockedSend,
     renamingId,
     setRenamingId,
     messageBusinessId,
@@ -83,6 +85,7 @@ export default function App() {
     cancelRun,
     cancelConversation,
     decideApproval,
+    requestApprovalRevision,
     reconcileApproval,
     refreshBusiness,
     openSettings,
@@ -94,7 +97,9 @@ export default function App() {
     openArtifact,
     openTraceTarget,
     resizeBusiness,
-    pendingProposal
+    pendingProposal,
+    proposalBusy,
+    proposalUnavailable
   } = useWorkbench()
 
 
@@ -114,6 +119,7 @@ export default function App() {
       {settingsOpen && <SettingsDialog settings={settings} draft={settingsDraft} saving={settingsSaving} onChange={(key, value) => setSettingsDraft((current) => ({ ...current, [key]: value }))} onClose={closeSettings} onSave={() => void saveSettings()} />}
       <ConnectionDetailsDialog health={health} connection={connection} busy={hasActiveExecution} open={connectionDetailsOpen} onOpenChange={setConnectionDetailsOpen} onRetry={() => void checkConnection(true)} />
       <ArchiveDialog open={Boolean(archiveTarget)} onOpenChange={(open) => { if (!open) setArchiveTarget('') }} onConfirm={() => { const id = archiveTarget; setArchiveTarget(''); void archiveSession(id) }} />
+      <BlockedSendDialog message={blockedSend} onClose={() => setBlockedSend('')} />
 
       {error && <div className="global-alert" role="alert"><span>{error}</span>{connection !== 'connected' && <button onClick={() => void retryHealth()}>重试连接</button>}<button onClick={() => setError('')}>关闭</button></div>}
       {notice && <div className="global-notice" role="status"><span>{notice}</span><button onClick={() => setNotice('')}>关闭</button></div>}
@@ -152,6 +158,7 @@ export default function App() {
           onStart={() => void startRun()}
           onCancel={(run) => void cancelRun(run)}
           onApproval={(approval, decision) => void decideApproval(approval, decision)}
+          onRequestRevision={requestApprovalRevision}
           onReconcile={(approval) => void reconcileApproval(approval)}
           onTraceTarget={openTraceTarget}
           onToggleConversation={toggleConversation}
@@ -179,6 +186,8 @@ export default function App() {
           selectedBusinessId={selectedBusinessId}
           loading={loading}
           pendingProposal={pendingProposal}
+          proposalBusy={proposalBusy}
+          proposalUnavailable={proposalUnavailable}
           pendingApprovals={(businessDetail?.approvals ?? []).filter(isPendingApproval)}
           approvalBusinessName={activeBusiness?.title || '当前业务'}
           approvalProgress={approvalProgress}
@@ -202,6 +211,7 @@ export default function App() {
           onRemoveMaterial={(id) => setPendingMaterials((current) => current.filter((material) => material.id !== id))}
           onStarter={(goal) => setDraft(goal)}
           onProposal={(proposal, confirmed) => void confirmProposal(proposal, confirmed)}
+          onOpenBusiness={chooseBusiness}
           onCancelConversation={(run) => void cancelConversation(run)}
         />}
       </main>

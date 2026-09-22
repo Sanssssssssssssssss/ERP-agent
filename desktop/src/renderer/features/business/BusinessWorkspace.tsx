@@ -31,7 +31,7 @@ export const tabs: Array<{ id: BusinessTab; label: string }> = [
   { id: 'trace', label: '运行详情' }
 ]
 
-export function BusinessWorkspace({ session, activeBusiness, detail, tab, trace, traceTarget, traceLoading, businessLoading, loading, selectedRunId, onBusinessSelect, onTabChange, onRunSelect, onRefresh, onStart, onCancel, onApproval, onReconcile, onTraceTarget, onToggleConversation, conversationOpen, onExport, exporting, exportPath, onOpenDocument, onDownloadDocument, documentDownloads, selectedDocumentKey, onSelectedDocumentKey, onOpenArtifact, onRevealArtifact, approvalProgress, onOpenApprovals }: {
+export function BusinessWorkspace({ session, activeBusiness, detail, tab, trace, traceTarget, traceLoading, businessLoading, loading, selectedRunId, onBusinessSelect, onTabChange, onRunSelect, onRefresh, onStart, onCancel, onApproval, onRequestRevision, onReconcile, onTraceTarget, onToggleConversation, conversationOpen, onExport, exporting, exportPath, onOpenDocument, onDownloadDocument, documentDownloads, selectedDocumentKey, onSelectedDocumentKey, onOpenArtifact, onRevealArtifact, approvalProgress, onOpenApprovals }: {
   session: SessionDetail | null
   activeBusiness: Business | null
   detail: BusinessDetailProjection | null
@@ -49,6 +49,7 @@ export function BusinessWorkspace({ session, activeBusiness, detail, tab, trace,
   onStart: () => void
   onCancel: (run: Run) => void
   onApproval: (approval: Approval, decision: 'approve' | 'reject') => void
+  onRequestRevision?: (approval: Approval, text: string) => Promise<void>
   onReconcile: (approval: Approval) => void
   onTraceTarget: (target: { run_id?: string; tool_id?: string; action_id?: string; kind?: string }) => void
   onToggleConversation: () => void
@@ -103,7 +104,7 @@ export function BusinessWorkspace({ session, activeBusiness, detail, tab, trace,
           {businessLoading && <div className="loading-line"><LoaderCircle className="spin" size={16} />正在读取业务状态…</div>}
           <RadixTabs.Content value="execution">{!businessLoading && <ExecutionPage detail={detail} activeRun={activeRun} pendingApprovals={pendingApprovals} onOpenApprovals={onOpenApprovals} onRefresh={onRefresh} onStart={onStart} onCancel={onCancel} onEvidence={onTraceTarget} />}</RadixTabs.Content>
            <RadixTabs.Content value="documents">{!businessLoading && <DocumentsPage documents={detail?.documents ?? []} materials={(detail as DetailWithMaterials | null)?.materials ?? []} artifacts={detail?.artifacts ?? []} goal={activeBusiness.goal} stale={detail?.stale ?? false} onExport={onExport} exporting={exporting} exportPath={exportPath} onOpenDocument={onOpenDocument} onDownloadDocument={onDownloadDocument} documentDownloads={documentDownloads} selectedDocumentKey={selectedDocumentKey} onSelectedDocumentKey={onSelectedDocumentKey} onOpenArtifact={onOpenArtifact} onRevealArtifact={onRevealArtifact} onTraceTarget={onTraceTarget} />}</RadixTabs.Content>
-          <RadixTabs.Content value="approvals">{!businessLoading && <ApprovalsPage approvals={detail?.approvals ?? []} documents={detail?.documents ?? []} disabled={loading || businessLoading} onDecision={onApproval} onReconcile={onReconcile} onTraceTarget={onTraceTarget} />}</RadixTabs.Content>
+          <RadixTabs.Content value="approvals">{!businessLoading && <ApprovalsPage approvals={detail?.approvals ?? []} documents={detail?.documents ?? []} disabled={loading || businessLoading} onDecision={onApproval} onRequestRevision={onRequestRevision} onReconcile={onReconcile} onTraceTarget={onTraceTarget} />}</RadixTabs.Content>
           <RadixTabs.Content value="trace">{!businessLoading && <TracePage trace={trace} runs={detail?.runs ?? []} readback={detail?.business.readback} selectedRunId={selectedRunId} loading={traceLoading} target={traceTarget} onRunSelect={onRunSelect} />}</RadixTabs.Content>
           </div>
         </RadixTabs.Root>

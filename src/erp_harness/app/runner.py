@@ -307,39 +307,24 @@ def arguments() -> argparse.Namespace:
 
 def _approval_required(result: object) -> bool:
     """Read the native approval marker without coupling the runner to a tool."""
-    def pause_status(value: object) -> bool:
-        if isinstance(value, str):
-            return value in {"pending_approval", "needs_reconciliation"}
-        if isinstance(value, dict):
-            return pause_status(value.get("status"))
-        return False
-
     details = getattr(result, "details", None)
     if details is None and isinstance(result, dict):
         details = result.get("details", result)
     if hasattr(details, "model_dump"):
         details = details.model_dump()
-    if isinstance(details, dict):
-        structured = details.get("structuredContent", details)
-        if isinstance(structured, dict):
-            if structured.get("approval_required") is True:
-                return True
-            for key in ("approval_status", "action_status"):
-                marker = structured.get(key)
-                if pause_status(marker):
-                    return True
-            if pause_status(structured.get("status")):
-                return True
-    structured = getattr(result, "structuredContent", None)
-    return (
-        isinstance(structured, dict)
-        and (
-            structured.get("approval_required") is True
-            or pause_status(structured.get("status"))
-            or pause_status(structured.get("action_status"))
-            or pause_status(structured.get("approval_status"))
-        )
-    )
+    structured = details.get("structuredContent", details) if isinstance(details, dict) else getattr(result, "structuredContent", None)
+    if not isinstance(structured, dict):
+        return False
+    # Current action state outranks a preview's legacy approval-required flag.
+    for key in ("action_status", "approval_status", "status", "approval"):
+        status = structured.get(key)
+        if isinstance(status, dict):
+            status = status.get("status")
+        if isinstance(status, str) and status in {"pending_approval", "needs_reconciliation", "sending", "executing"}:
+            return True
+        if isinstance(status, str) and status in {"verified", "known_failed", "approved"}:
+            return False
+    return structured.get("approval_required") is True
 
 
 def _next_receipt_sequence(directory: Path):
