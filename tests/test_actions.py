@@ -9,6 +9,7 @@ import os
 import tempfile
 import time
 import unittest
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -177,6 +178,11 @@ class _Writer:
         return {"called": f"{model}.{method}"}
 
 
+def _close_test_store(store, directory):
+    store.close()
+    directory.cleanup()
+
+
 def _actions(
     *,
     path: Path | None = None,
@@ -197,9 +203,8 @@ def _actions(
         approval_ttl_seconds=approval_ttl_seconds,
     )
     if directory is not None:
-        actions._test_directory = directory
-        unittest.addModuleCleanup(directory.cleanup)
-        unittest.addModuleCleanup(actions.store.close)
+        # pytest 也会从其他模块导入此工厂；不能依赖 unittest 的模块清理钩子。
+        weakref.finalize(actions, _close_test_store, actions.store, directory)
     return actions, writer, runtime
 
 
