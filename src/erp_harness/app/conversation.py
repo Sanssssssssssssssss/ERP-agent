@@ -111,7 +111,7 @@ def _task_entities(reads, source_text, knowledge):
     result = reads.call("search_records", {"model": "res.company", "fields": ["id", "name", "partner_id"], "limit": 100})
     companies = result.get("result", []) if result.get("success") else []
     internal = {r["partner_id"][0] for r in companies if r.get("partner_id")}
-    hints = [{"model": "res.company", "id": r["id"], "name": r["name"], "filter_field": "company_id"}
+    hints = [{"model": "res.company", "id": r["id"], "name": r["name"], "filter_field": "company_id", "contact_id": r["partner_id"][0]}
              for r in companies if normalized(r["name"]) in source]
     found = knowledge.search_knowledge(source_text, "res.partner", limit=20)
     if found.get("status") == "index_missing":
@@ -316,6 +316,39 @@ async def _read_odoo_reference(_call_id, arguments, _signal=None, _on_update=Non
             payload["count_status"] = "observed" if type(count) is int else "unavailable"
         if resource == "product":
             payload["price_semantics"] = "list_price only; customer pricelist, tax, and currency are not resolved"
+        # 公司及其联系人可同名、同 ID。只给提示仍会让空的往来查询冒充公司统计。
+        # 平铺 AND 查询可安全保留其他条件，对照两种关系；不替用户选含义。
+        terms = values.get("domain", [])
+        if (match == "keyword" and "company_id" in _REFERENCE_SPECS[resource][1]
+                and terms and all(isinstance(t, (list, tuple)) for t in terms)
+                and not any(t[0] == "company_id" for t in terms)):
+            parties = [t for t in terms if t[0] == "partner_id"]
+            company = next((e for e in (_TASK_ENTITIES or []) if e["model"] == "res.company"
+                            and len(parties) == 1 and parties[0][1] == "=" and parties[0][2] == e.get("contact_id")), None)
+            if company:
+                scoped = {**values, "domain": [["company_id", "=", company["id"]] if t[0] == "partner_id" else t for t in terms],
+                          "limit": min(limit, 3)}
+                alternative = (await _read_odoo_reference(_call_id, scoped)).details
+                # 两份证据均保留来源及范围。每份最多三行，继续读取仍用原分页接口。
+                payload["records"] = records[:3]
+                payload["count"] = len(payload["records"])
+                if "page_counts_by_state" in payload:
+                    payload["page_counts_by_state"] = dict(Counter(r["state"] for r in payload["records"]))
+                if len(records) > 3:
+                    payload.update(truncated=True, may_have_more=True, complete=False, next_offset=offset + 3)
+                payload = {"success": True, "status": "ambiguous_entity_scope", "complete": False,
+                           "notice": "The named entity is both an internal ERP company and a contact. These queries answer different questions. Use order_company for orders belonging to that company, counterparty for orders trading with its contact. Resolve the user's meaning before giving a count; neither interpretation alone verifies intent.",
+                           "interpretations": {"counterparty": payload, "order_company": alternative}}
+                while len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) > READ_MAX_BYTES:
+                    pages = [p for p in payload["interpretations"].values() if p.get("records")]
+                    if not pages:
+                        raise RuntimeError("query scope metadata exceeds the response byte limit")
+                    page = max(pages, key=lambda p: len(json.dumps(p["records"])))
+                    page["records"].pop()
+                    page.update(count=len(page["records"]), truncated=True, may_have_more=True, complete=False,
+                                next_offset=page["offset"] + len(page["records"]) if page["records"] else None)
+                    if "page_counts_by_state" in page:
+                        page["page_counts_by_state"] = dict(Counter(r["state"] for r in page["records"]))
     except Exception as exc:
         denied = any(word in str(exc).lower() for word in ("accesserror", "access denied", "permission", "policy denies", "restricted"))
         payload = {"success": False, "status": "permission_denied" if denied else "unavailable", "source": "native_odoo_read",

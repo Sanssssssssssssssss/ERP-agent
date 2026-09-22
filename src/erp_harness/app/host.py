@@ -699,7 +699,7 @@ class Workbench:
                 if proposal["status"] != "pending":
                     raise ValueError("proposal already decided")
                 sources = proposal.get("source_messages", [])
-                if sources:
+                if confirmed and sources:
                     current = {m["id"]: m for m in self.store.data["messages"][session_id] if m.get("role") == "user"}
                     if any(current.get(m["id"], {}).get("text") != m["text"] for m in sources):
                         raise ValueError("proposal source changed; propose again")
@@ -711,7 +711,7 @@ class Workbench:
                 goal = "\n".join(m["text"] for m in sources) if sources else proposal["goal"]
                 from .conversation import resolve_references
                 references = proposal.get("references", [])
-                resolved = resolve_references(self._native_reads(), references, goal) if references else []
+                resolved = resolve_references(self._native_reads(), references, goal) if confirmed and references else []
                 existing_id = proposal.get("existing_business_id")
                 if confirmed and existing_id is not None:
                     target = self._business(session_id, existing_id)

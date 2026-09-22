@@ -33,6 +33,10 @@ def test_proposal_preserves_original_and_rejects_later_correction(tmp_path):
         host.store.data["messages"][sid].append({"id": "correction", "role": "user", "text": "改成杭州"})
         with pytest.raises(ValueError, match="new user"):
             host.confirm_business(sid, saved["id"], True)
+        # 拒绝旧提案不需要目标仍可读取，也不受新指令影响。
+        saved["references"] = [{"resource": "customer", "id": 249, "quote": "旧目标"}]
+        assert host.confirm_business(sid, saved["id"], False) is None
+        assert saved["status"] == "rejected"
     finally:
         host.close()
 
@@ -97,6 +101,34 @@ def test_chinese_number_recall_upgrades_persisted_materials(tmp_path, monkeypatc
     loaded = knowledge.KnowledgeStore()
     result = loaded.candidates(scope, "res.partner", "请确认给华东机电客户249（杭州）的订单", 20)
     assert result[0]["record_id"] == 249
+
+
+def test_internal_company_contact_queries_expose_both_scopes(monkeypatch):
+    calls = []
+    class Reads:
+        def call(self, name, args):
+            calls.append((name, args))
+            owns = ["company_id", "=", 2] in args["domain"]
+            if name == "aggregate_records":
+                return {"success": True, "rows": [{"__count": 2 if owns else 0}]}
+            return {"success": True, "result": [{"id": 77, "name": "S77"}, {"id": 3362, "name": "S3362"}] if owns else []}
+    monkeypatch.setattr(conversation, "_ODOO_READS", Reads())
+    monkeypatch.setattr(conversation, "_SOURCE_MESSAGES", [])
+    monkeypatch.setattr(conversation, "_TASK_ENTITIES", [{"model": "res.company", "id": 2, "contact_id": 6}])
+    terms = [["partner_id", "=", 6], ["state", "=", "draft"], ["amount_total", ">", 1500]]
+    args = {"resource": "sale_order", "domain": terms, "fields": ["name"], "include_count": True}
+    result = asyncio.run(conversation._read_odoo_reference("r", args)).details
+    assert result["status"] == "ambiguous_entity_scope" and "total_count" not in result
+    assert result["interpretations"]["counterparty"]["total_count"] == 0
+    owned = result["interpretations"]["order_company"]
+    assert owned["total_count"] == 2 and owned["scope"]["domain"] == [["company_id", "=", 2], *terms[1:]]
+    assert args["domain"] == terms and len(calls) == 4
+    # 明确的跨公司往来查询可直接执行，不改变交易对方及所属公司条件。
+    calls.clear()
+    args["domain"] = [*terms, ["company_id", "=", 1]]
+    result = asyncio.run(conversation._read_odoo_reference("r", args)).details
+    assert result["status"] == "observed" and len(calls) == 2
+    assert result["scope"]["domain"] == args["domain"]
 
 
 @pytest.mark.parametrize("change", ["wrong_target", "wrong_partner", "stale_name", "read_only", "valid"])
