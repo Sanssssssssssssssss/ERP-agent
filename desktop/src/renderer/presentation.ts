@@ -11,27 +11,98 @@ import { ConnectionState,MaterialRecord } from './view-types'
 export function isReferenceDocument(document: Document) { return Boolean(document.is_reference || document.document_scope === 'reference') }
 
 export function documentFact(document: Document) {
+  return documentFacts(document).map(({ label, value }) => `${label}：${value}`).join(' · ') || '详细信息尚未读取'
+}
+
+const hasDocumentValue = (value: unknown) => value !== undefined && value !== null && value !== '' && value !== false && (!Array.isArray(value) || value.length > 0)
+
+export function documentMoney(value: unknown, fields: Record<string, unknown>) {
+  if (!hasDocumentValue(value)) return ''
+  const currency = fields.currency ?? fields.currency_name ?? fields.currency_id
+  // Only an observed currency name is useful here; a numeric relation ID is not a currency.
+  const name = Array.isArray(currency) && typeof currency[1] === 'string' ? currency[1] : typeof currency === 'string' ? currency : ''
+  const amount = typeof value === 'number' ? value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 6 }) : readableValue(value)
+  return `${amount}${name ? ` ${name}` : '（币种未读取）'}`
+}
+
+export function documentQuantity(fields: Record<string, unknown>, key?: string) {
+  const value = key ? fields[key] : fields.product_uom_qty ?? fields.product_qty ?? fields.quantity
+  if (!hasDocumentValue(value)) return ''
+  const unit = fields.product_uom_id ?? fields.product_uom ?? fields.uom_id
+  const name = Array.isArray(unit) && typeof unit[1] === 'string' ? unit[1] : typeof unit === 'string' ? unit : ''
+  return `${readableValue(value)}${name ? ` ${name}` : '（单位未读取）'}`
+}
+
+export function documentCurrencyFields(document: Document, documents: Document[] = []) {
   const fields = document.fields
-  const entries = document.model === 'sale.order'
-    ? [['客户', fields.partner_name ?? fields.customer ?? fields.partner_id], ['金额', fields.amount_total ?? fields.total], ['开票', invoiceStatusLabel(String(fields.invoice_status ?? '未知'))]]
-    : document.model === 'mrp.production'
-      ? [['产品', fields.product_id], ['计划数量', fields.product_qty], ['完工数量', fields.qty_produced]]
-      : document.model === 'account.payment'
-        ? [['往来单位', fields.partner_id], ['金额', fields.amount], ['银行匹配', fields.is_matched === true ? '已匹配' : '未核验'], ['原单', fields.invoice_ids]]
-        : document.model === 'account.bank.statement.line'
-          ? [['摘要', fields.payment_ref], ['金额', fields.amount], ['核销', fields.is_reconciled === true ? '已核销' : '未核验']]
-    : document.model === 'account.move'
-      ? [['往来单位', fields.partner_name ?? fields.customer ?? fields.partner_id], ['金额', fields.amount_total ?? fields.total], ['付款', paymentStatusLabel(String(fields.payment_state ?? '未知'))], ['余额', fields.amount_residual ?? fields.residual], ['正式 PDF', invoicePdfStatus(fields)]]
-      : document.model === 'mail.message'
-        ? [['主题', fields.subject], ['作者', fields.author_name ?? fields.author_id], ['留言', fields.body ?? fields.message]]
-        : document.model === 'sale.order.line'
-          ? [['产品', fields.product_name ?? fields.product_id], ['数量', fields.product_uom_qty ?? fields.quantity], ['单价', fields.price_unit]]
-          : document.model === 'account.move.line'
-            ? [['科目', fields.account_name ?? fields.account_id], ['借方', fields.debit], ['贷方', fields.credit]]
-            : document.model === 'account.payment.term'
-              ? [['付款条件', fields.name ?? fields.note], ['说明', fields.description]]
-      : Object.entries(fields).slice(0, 3).map(([key, value]) => [key, value])
-  return entries.filter(([, value]) => value !== undefined && value !== null && value !== '').map(([key, value]) => `${key}:${readableValue(value)}`).join(' · ') || '没有可显示的关键字段'
+  if (fields.currency || fields.currency_name || fields.currency_id) return fields
+  const parentModel = ({ 'sale.order.line': 'sale.order', 'purchase.order.line': 'purchase.order', 'account.move.line': 'account.move' } as Record<string, string>)[document.model]
+  const relation = document.model === 'account.move.line' ? fields.move_id : fields.order_id
+  const parentId = Array.isArray(relation) ? relation[0] : relation
+  const parent = parentModel && parentId != null ? documents.find((item) => item.model === parentModel && String(item.id) === String(parentId)) : undefined
+  return parent ? { ...fields, currency: parent.fields.currency ?? parent.fields.currency_name ?? parent.fields.currency_id } : fields
+}
+
+export function documentAmount(document: Document, documents: Document[] = []) {
+  const fields = documentCurrencyFields(document, documents)
+  const value = ['sale.order', 'purchase.order', 'account.move'].includes(document.model)
+    ? fields.amount_total ?? fields.total
+    : ['account.payment', 'account.bank.statement.line'].includes(document.model)
+      ? fields.amount
+      : ['sale.order.line', 'purchase.order.line', 'account.move.line'].includes(document.model)
+        ? fields.price_total ?? fields.price_subtotal : undefined
+  return documentMoney(value, fields)
+}
+
+export function documentTypeLabel(document: Document) {
+  return document.model === 'account.move'
+    ? ({ out_invoice: '客户发票', in_invoice: '供应商账单', out_refund: '客户贷项', in_refund: '供应商贷项', entry: '会计凭证' } as Record<string, string>)[String(document.fields.move_type)] || documentModelLabel(document.model)
+    : documentModelLabel(document.model)
+}
+
+export function documentFacts(document: Document, documents: Document[] = []): { label: string; value: string }[] {
+  const f = documentCurrencyFields(document, documents)
+  const party = f.partner_name ?? f.customer ?? f.vendor ?? f.partner_id
+  const money = (value: unknown) => documentMoney(value, f)
+  const count = (value: unknown) => Array.isArray(value) ? `${value.length} 条` : undefined
+  const flag = (value: unknown, yes: string, no: string) => typeof value === 'boolean' ? value ? yes : no : undefined
+  let entries: [string, unknown][] = []
+  if (document.model === 'res.partner') {
+    entries = [['邮箱', f.email], ['电话', f.phone ?? f.mobile], ['所属公司', f.company_id], ['所属客户', f.parent_id ?? f.commercial_partner_id], ['联系人用途', ({ invoice: '账单联系人', delivery: '收货联系人', contact: '联系人', other: '其他联系人' } as Record<string, string>)[String(f.type)]], ['职务', f.function], ['地址', [f.street, f.street2, f.city, f.state_id, f.country_id].filter(hasDocumentValue).map(readableValue).join(' ')], ['税号', f.vat]]
+  } else if (['sale.order', 'purchase.order'].includes(document.model)) {
+    entries = [[document.model === 'sale.order' ? '客户' : '供应商', party], ['含税金额', money(f.amount_total ?? f.total)], ['公司', f.company_id], ['明细记录', count(f.order_line)], ['付款条件', f.payment_term_id], ['开票状态', f.invoice_status ? invoiceStatusLabel(String(f.invoice_status)) : undefined], ['客户参考', f.client_order_ref], ['来源单据', f.origin], ['下单日期', f.date_order], ['交付日期', f.commitment_date ?? f.date_planned]]
+  } else if (document.model === 'account.move') {
+    entries = [['往来单位', party], ['含税金额', money(f.amount_total ?? f.total)], ['未付余额', money(f.amount_residual ?? f.residual)], ['付款状态', f.payment_state ? paymentStatusLabel(String(f.payment_state)) : undefined], ['公司', f.company_id], ['来源单据', f.invoice_origin], ['原发票', f.reversed_entry_id], ['开票日期', f.invoice_date], ['明细记录', count(f.invoice_line_ids ?? f.line_ids)], ['正式 PDF', Object.hasOwn(f, 'invoice_pdf_report_id') ? invoicePdfStatus(f) : undefined]]
+  } else if (document.model.endsWith('.line') && document.model !== 'account.bank.statement.line') {
+    entries = [['产品', f.product_name ?? f.product_id], ['所属单据', f.order_id ?? f.move_id], ['数量', documentQuantity(f)], ['单价', money(f.price_unit)], ['未税小计', money(f.price_subtotal)], ['含税小计', money(f.price_total)], ['科目', f.account_name ?? f.account_id], ['借方', documentMoney(f.debit, { currency: f.company_currency_id })], ['贷方', documentMoney(f.credit, { currency: f.company_currency_id })], ['核销状态', flag(f.reconciled, '已核销', '未核销')]]
+  } else if (document.model === 'mrp.production') {
+    entries = [['产品', f.product_id], ['计划数量', documentQuantity(f, 'product_qty')], ['完工数量', documentQuantity(f, 'qty_produced')], ['公司', f.company_id], ['物料清单', f.bom_id], ['投产日期', f.date_start], ['完工日期', f.date_finished]]
+  } else if (document.model === 'stock.picking' || document.model === 'stock.move') {
+    entries = [['往来单位', party], ['公司', f.company_id], ['产品', f.product_id], ['需求数量', documentQuantity(f, 'product_uom_qty')], ['完成数量', documentQuantity(f, 'quantity')], ['来源单据', f.origin ?? f.sale_id], ['原退货单', f.return_id ?? f.origin_returned_move_id], ['出库位置', f.location_id], ['入库位置', f.location_dest_id], ['计划日期', f.scheduled_date], ['明细记录', count(f.move_ids)]]
+  } else if (document.model === 'account.payment' || document.model === 'account.bank.statement.line') {
+    entries = [['往来单位', party], ['金额', money(f.amount)], ['公司', f.company_id], ['摘要', f.payment_ref], ['会计凭证', f.move_id], ['银行匹配', flag(f.is_matched, '已匹配', '未匹配')], ['核销状态', flag(f.is_reconciled, '已核销', '未核销')]]
+  } else if (document.model === 'mail.message') {
+    entries = [['主题', f.subject], ['作者', f.author_name ?? f.author_id], ['收件邮箱', f.outgoing_email_to], ['发送日期', f.date]]
+  } else if (document.model === 'ir.attachment') {
+    entries = [['文件名', f.name], ['文件类型', f.mimetype], ['文件大小', typeof f.file_size === 'number' ? `${(f.file_size / 1024).toLocaleString('zh-CN', { maximumFractionDigits: 1 })} KB` : undefined]]
+  } else {
+    entries = [['公司', f.company_id], ['产品', f.product_name ?? f.product_id], ['供应商', f.partner_name ?? f.partner_id], ['产品型号', f.default_code], ['销售价格', money(f.list_price)], ['条码', f.barcode], ['说明', f.description ?? f.note]]
+  }
+  return entries.filter(([, value]) => hasDocumentValue(value)).map(([label, value]) => ({ label, value: readableValue(value) }))
+}
+
+export function documentLines(document: Document, documents: Document[]) {
+  const relation = ({ 'sale.order': ['sale.order.line', 'order_line', 'order_id'], 'purchase.order': ['purchase.order.line', 'order_line', 'order_id'], 'account.move': ['account.move.line', 'invoice_line_ids', 'move_id'], 'stock.picking': ['stock.move', 'move_ids', 'picking_id'] } as Record<string, string[]>)[document.model]
+  if (!relation) return []
+  const [model, field, parentField] = relation
+  const ids = document.fields[field] ?? (document.model === 'account.move' ? document.fields.line_ids : undefined)
+  return documents.filter((line) => {
+    if (line.model !== model) return false
+    const parent = line.fields[parentField]
+    const parentId = Array.isArray(parent) ? parent[0] : parent
+    if (parentId != null && String(parentId) !== String(document.id)) return false
+    return Array.isArray(ids) ? ids.some((id) => String(id) === String(line.id)) : parentId != null
+  })
 }
 
 export function invoicePdfStatus(fields: Record<string, unknown>) {
@@ -56,16 +127,9 @@ export function documentSourceRun(document: Document) { return document.source_r
 
 export function documentSourceTool(document: Document) { return document.source_tool_id || String(document.fields.source_tool_id || '') || undefined }
 
-export function resourceText(fields: Record<string, unknown>, key: string) {
-  const value = fields[key] ?? fields[`${key}_text`] ?? fields[`${key}_content`]
-  return value == null || value === '' ? '' : readableValue(value)
-}
-
 export function artifactKindLabel(kind?: string) { return ({ business_receipt: '业务回执', odoo_pdf: 'PDF 单据', odoo_csv: '明细 CSV', document_pdf: 'PDF 单据', document_csv: '明细 CSV' } as Record<string, string>)[kind || ''] || kind || '文件' }
 
-export function documentModelLabel(model: string) { return ({ 'sale.order': '销售订单', 'purchase.order': '采购订单', 'account.move': '发票与贷项', 'stock.picking': '收发货与退货', 'mrp.production': '制造单', 'stock.move': '库存移动', 'account.payment': '收付款', 'account.bank.statement.line': '银行流水', 'account.partial.reconcile': '核销匹配', 'account.payment.register': '付款登记', 'account.move.reversal': '贷项向导', 'stock.return.picking': '退货向导', 'res.partner': '往来单位', 'mail.message': '业务留言', 'sale.order.line': '销售明细', 'purchase.order.line': '采购明细', 'account.move.line': '会计分录', 'account.payment.term': '付款条件', 'product.template': '产品', 'product.product': '商品', 'account.journal': '会计日记账', 'sale.advance.payment.inv': '开票向导', 'account.move.send.wizard': '发票文件向导', 'ir.attachment': '附件' } as Record<string, string>)[model] || model }
-
-export function documentSourceLabel(source?: string) { return ({ odoo: 'Odoo 观测', odoo_rpc: 'Odoo 观测', refresh_native_read: '独立回读', native_read_receipt: '原始读取回执', native_action_readback: '动作回读', agent: 'Agent', host: '本地 host' } as Record<string, string>)[source || ''] || '其他来源' }
+export function documentModelLabel(model: string) { return ({ 'sale.order': '销售订单', 'purchase.order': '采购订单', 'account.move': '发票与贷项', 'stock.picking': '收发货与退货', 'mrp.production': '制造单', 'stock.move': '库存移动', 'account.payment': '收付款', 'account.bank.statement.line': '银行流水', 'account.partial.reconcile': '核销匹配', 'account.payment.register': '付款登记', 'account.move.reversal': '贷项向导', 'stock.return.picking': '退货向导', 'res.partner': '往来单位', 'mail.message': '业务留言', 'sale.order.line': '销售明细', 'purchase.order.line': '采购明细', 'account.move.line': '会计分录', 'account.payment.term': '付款条件', 'product.template': '产品', 'product.product': '商品', 'account.journal': '会计日记账', 'sale.advance.payment.inv': '开票向导', 'account.move.send.wizard': '发票文件向导', 'ir.attachment': '附件', 'product.supplierinfo': '供应商报价', 'account.tax': '税率', 'res.currency': '币种', 'res.company': '公司', 'stock.location': '库位', 'mrp.bom': '物料清单', 'mrp.workcenter': '工作中心' } as Record<string, string>)[model] || model }
 
 export function isDownloadableDocument(document: Document) { return ['sale.order', 'purchase.order', 'account.move'].includes(document.model) }
 
@@ -183,14 +247,4 @@ export function readableValue(value: unknown): string {
   }
   if (typeof value === 'object') return jsonText(value).replace(/\s+/g, ' ')
   return String(value)
-}
-
-export function compactGoal(goal?: string, documents: Document[] = []) {
-  const value = goal?.trim()
-  if (!value) return '按已确认目标处理销售订单与客户发票'
-  if (/you may act autonomously|autonomous|authorization/i.test(value)) {
-    const order = documents.find((document) => document.model === 'sale.order')
-    return order?.name ? `处理销售订单 ${order.name} 与客户发票` : '按已确认目标处理销售订单与客户发票'
-  }
-  return value.length > 180 ? `${value.slice(0, 177)}…` : value
 }

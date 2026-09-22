@@ -103,6 +103,7 @@ export interface Run {
   model_rounds?: number;
   elapsed_seconds?: number;
   verification_status?: string;
+  summary?: string;
 }
 
 export interface Approval {

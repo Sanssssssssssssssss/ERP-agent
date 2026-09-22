@@ -55,7 +55,7 @@ export function SessionRail({
       {!collapsed && <label className="session-search"><Search size={15} aria-hidden="true" /><span className="sr-only">搜索会话</span><input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索会话" aria-label="搜索会话" /></label>}
       {!collapsed && <div className="rail-summary"><span>{query ? `${visibleSessions.length} / ${sessions.length} 个会话` : `${sessions.length} 个活跃会话`}</span><span className="quiet-rule" /></div>}
       <div className="session-list">
-        {sessions.length === 0 && !collapsed && <EmptyState title="还没有会话" detail="创建会话后，从一句业务意图开始。" />}
+        {sessions.length === 0 && !collapsed && <EmptyState title="还没有会话" detail="点击新建，输入要查询或办理的业务。" />}
         {sessions.length > 0 && visibleSessions.length === 0 && !collapsed && <EmptyState title="没有匹配会话" detail="换一个名称或会话 ID 试试。" />}
         {visibleSessions.map((item) => (
           <div key={item.id} className={`session-row ${item.id === selectedId ? 'active' : ''}`} title={collapsed ? item.title : undefined}>
@@ -152,12 +152,12 @@ export function ConversationPane({ session, draft, liveMessages, conversationRun
   return (
     <section className={`conversation-pane ${terminalConversation ? 'has-run-status' : ''}`}>
       <header className="conversation-header">
-        <div><span className="eyebrow">会话</span><h2>{session?.session.title || '选择一个会话'}</h2><p>先和 Agent 讨论目标、能力和范围；确认业务后才会进入执行台。</p></div>
+        <div><h2>{session?.session.title || '选择一个会话'}</h2></div>
         <div className="conversation-header-meta"><span className="session-id" title={session?.session.id || undefined}>会话详情</span>{activeConversation && <RadixButton className="conversation-cancel" variant="soft" disabled={loading || activeConversation.status === 'cancel_requested'} onClick={() => onCancelConversation(activeConversation)}><Square size={13} />{activeConversation.status === 'cancel_requested' ? '正在停止…' : '停止对话'}</RadixButton>}</div>
       </header>
       {terminalConversation && <div className={`conversation-run-status status-${terminalConversation.status}`} role="status"><strong>{terminalConversation.status === 'failed' ? '对话失败，可继续输入' : terminalConversation.status === 'cancelled' ? '对话已停止，可继续输入' : '对话已中断，可继续输入'}</strong>{(terminalConversation.error || terminalConversation.error_detail) && <details><summary>查看错误详情</summary><code>{terminalConversation.error || terminalConversation.error_detail}</code>{terminalConversation.error_detail && terminalConversation.error_detail !== terminalConversation.error && <p>{terminalConversation.error_detail}</p>}</details>}</div>}
       <div ref={scrollRef} className="conversation-scroll" onScroll={(event) => { const element = event.currentTarget; const latest = element.scrollHeight - element.scrollTop - element.clientHeight < 24; setAtLatest(latest); if (latest) setHasNew(false) }}>
-        {!session && <EmptyState title="选择一个会话" detail="左侧会话列表会显示已持久化的工作。" />}
+        {!session && <EmptyState title="选择一个会话" detail="从左侧继续处理，或新建会话。" />}
         {session && orderedMessages.length === 0 && visibleLiveMessages.length === 0 && !pendingProposal && !showThinking && <ConversationWelcome onStarter={onStarter} />}
         {orderedMessages.map((item) => item.kind === 'message' ? (() => { const ids = (item.message as MessageWithMaterials).material_ids ?? []; const inherited = ids.filter((id) => materialSeen.has(id)); ids.forEach((id) => materialSeen.add(id)); return <MessageRow key={`message:${item.message.id}`} message={item.message} inheritedMaterialIds={inherited} /> })() : <article className="message assistant live-message" key={`live:${item.message.run_id}:${item.message.id}`}><span className="avatar agent-avatar">A</span><div><div className="message-meta"><strong>Agent</strong><span>{item.message.status === 'ended' ? '回复完成' : item.message.status === 'interrupted' || item.message.status === 'failed' ? '已停止 · 回复未完成' : '实时回复'}</span></div><MessageText text={item.message.text} collapsible={false} /></div></article>)}
         {showThinking && <article className="message assistant thinking-message" aria-live="polite"><span className="avatar agent-avatar">A</span><div><div className="message-meta"><strong>Agent</strong></div><p className="thinking-copy">正在思考…</p></div></article>}
@@ -168,9 +168,9 @@ export function ConversationPane({ session, draft, liveMessages, conversationRun
       <form className="composer" onSubmit={onSubmit} onDragOver={(event) => { event.preventDefault(); event.currentTarget.classList.add('drop-active') }} onDragLeave={(event) => event.currentTarget.classList.remove('drop-active')} onDrop={(event) => { event.preventDefault(); event.currentTarget.classList.remove('drop-active'); onFiles(Array.from(event.dataTransfer.files)) }}>
         <MaterialTray materials={pendingMaterials} busy={materialsBusy} onRemove={onRemoveMaterial} onFiles={onFiles} />
         {inheritedMaterials.length > 0 && <MaterialReuseTray materials={inheritedMaterials} hasNewMaterials={pendingMaterials.length > 0} />}
-        <textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={!session || loading} placeholder={session ? '和 Agent 讨论目标、能力或业务范围…' : '先选择或创建一个会话'} aria-label="会话消息" />
+        <textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={!session || loading} placeholder={session ? '输入要查询或办理的业务…' : '先选择或创建一个会话'} aria-label="会话消息" />
         <div className="composer-footer">
-          <div className="composer-context"><label htmlFor="message-business-target">讨论范围</label><select id="message-business-target" value={messageBusinessId} onChange={(event) => onMessageBusinessChange(event.target.value)} disabled={!session || loading}><option value="__conversation__">整个会话（普通讨论）</option>{businesses.map((business) => <option key={business.id} value={business.id}>{business.title || '未命名业务'} · {labelFor(businessStatusLabel, business.status)}</option>)}</select><span>普通发送只会话，不会自动开始业务执行。</span></div>
+          <div className="composer-context"><label htmlFor="message-business-target">讨论范围</label><select id="message-business-target" value={messageBusinessId} onChange={(event) => onMessageBusinessChange(event.target.value)} disabled={!session || loading}><option value="__conversation__">整个会话（普通讨论）</option>{businesses.map((business) => <option key={business.id} value={business.id}>{business.title || '未命名业务'} · {labelFor(businessStatusLabel, business.status)}</option>)}</select><span>执行写入前需逐项审批。</span></div>
         <div className="composer-actions"><label className="material-picker"><FilePlus2 size={15} />添加材料<input type="file" accept=".csv,.txt,text/csv,text/plain" multiple disabled={!session || loading || materialsBusy} onChange={(event) => { onFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = '' }} /></label><RadixButton type="submit" disabled={!session || loading || materialsBusy || (!draft.trim() && !pendingMaterials.length)}>{loading ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}{loading ? '处理中…' : '发送'}</RadixButton></div>
         </div>
       </form>
@@ -187,11 +187,11 @@ export function MessageRow({ message, inheritedMaterialIds = [] }: { message: Me
 
 export function ConversationWelcome({ onStarter }: { onStarter: (goal: string) => void }) {
   const starters = [
-    { type: 'sale_invoice', title: '销售与开票', detail: '整理已有客户的销售订单，确认后继续开票。', goal: '我想为已有客户整理销售订单，确认后继续开票。' },
-    { type: 'purchase', title: '采购', detail: '先梳理采购需求与供应商信息，再确认执行范围。', goal: '我想整理一笔采购需求，请先告诉我需要补充哪些信息。' },
-    { type: 'sale_purchase_invoice', title: '销售 → 采购 → 开票', detail: '把销售需求、采购环节和开票关系放在同一条业务链里。', goal: '我想梳理销售、采购到开票的完整业务链，请先说明需要补充的信息。' }
+    { type: 'query', title: '查订单', detail: '查客户、金额和处理状态。', goal: '帮我查一张订单的状态。' },
+    { type: 'sale_invoice', title: '确认销售单', detail: '核对订单，确认后暂不发货或开票。', goal: '帮我确认一张销售单，先别发货或开票。' },
+    { type: 'purchase', title: '采购', detail: '整理需求，核对供应商和产品。', goal: '帮我整理采购需求，先核对供应商和产品。' }
   ]
-  return <section className="conversation-welcome" aria-label="开始一个业务讨论"><div className="welcome-kicker">从一句自然语言开始</div><h3>你想先处理哪类业务？</h3><p>选择一个入口只会把目标填入输入框；发送后由 Agent 先澄清范围，不会自动写入 Odoo。</p><div className="welcome-actions">{starters.map((starter) => <button key={starter.type} type="button" className="welcome-card" onClick={() => onStarter(starter.goal)}><span className="welcome-card-title">{starter.title}</span><span>{starter.detail}</span><small>仅预填目标</small></button>)}</div></section>
+  return <section className="conversation-welcome" aria-label="开始一个业务讨论"><h3>处理业务</h3><div className="welcome-actions">{starters.map((starter) => <button key={starter.type} type="button" className="welcome-card" onClick={() => onStarter(starter.goal)}><span className="welcome-card-title">{starter.title}</span><span>{starter.detail}</span></button>)}</div></section>
 }
 
 export function MaterialTray({ materials, busy, onRemove, onFiles }: { materials: MaterialRecord[]; busy: boolean; onRemove: (id: string) => void; onFiles: (files: File[]) => void }) {

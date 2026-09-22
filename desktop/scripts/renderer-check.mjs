@@ -44,7 +44,7 @@ const bridgeScript = String.raw`
     const b1 = business('business-b1', 'session-b', 'Business B1')
     const b2 = { ...business('business-b2', 'session-b', 'Business B2', 'awaiting_approval'), material_ids: ['material-b2'] }
     const b3 = business('business-b3', 'session-b', 'Business B3｜这是一个很长的企业业务标题用于窄面板换行检查', 'needs_reconciliation', '核对中断写入是否已经落库，并保留当前运行与历史单据证据。')
-    const b4 = business('business-b4', 'session-b', 'Business B4', 'completed')
+    const b4 = business('business-b4', 'session-b', 'Business B4', 'completed', '你好，能做什么？\n确认订单，暂不发货。')
     const sessions = [session('session-a', 'Session A', [business('business-a1', 'session-a', 'Business A1')]), session('session-b', 'Session B', [b1, b2, b3, b4])]
     const details = (b) => ({
       business: b.id === 'business-b2' ? { ...b, readback: { latest_run_id: 'business-b2-run', observed_at: '2026-09-08T08:49:00Z', stale: false, checks: [{ name: 'invoice_readback', label: '客户发票回读', status: 'passed', detail: '当前运行后的 Odoo 快照已返回。', source: 'odoo' }] } } : b,
@@ -83,6 +83,7 @@ const bridgeScript = String.raw`
       'session-a': { session: sessions[0], messages: [], businesses: sessions[0].businesses, conversation_runs: [], live_messages: [] },
       'session-b': { session: sessions[1], messages: [{ id: 'm1', role: 'assistant', text: '已识别两个业务工作区。', created_at: '2026-09-08T08:01:00Z' }, { id: 'm-user', role: 'user', text: '我想查看订单', created_at: '2026-09-08T08:01:30Z' }, { id: 'proposal-1', role: 'assistant', text: '主机合成的提案正文不应重复显示', created_at: '2026-09-08T08:02:00Z', proposal: { id: 'proposal-1', title: '新业务意图', goal: '处理一笔新的销售业务', type: 'sale_invoice', completion_target: 'posted', status: 'pending' } }], businesses: sessions[1].businesses, conversation_runs: [{ id: 'conversation-run-b', session_id: 'session-b', business_id: null, kind: 'conversation', status: 'running' }], live_messages: [] }
     }
+    sessionDetails['session-b'].messages.push({ id: 'b4-confirmed-proposal', business_id: b4.id, role: 'assistant', text: '已确认业务说明', created_at: '2026-09-08T08:02:30Z', proposal: { id: 'b4-proposal', title: b4.title, goal: '确认订单，暂不发货。', type: b4.type, status: 'confirmed' } }, { id: 'b4-pending-update', business_id: b4.id, role: 'assistant', text: '未确认更新', created_at: '2026-09-08T08:02:31Z', proposal: { id: 'b4-pending', title: b4.title, goal: '尚未批准的改动', type: b4.type, status: 'rejected' } })
     sessionDetails['session-b'].materials = [{ id: 'material-b2', session_id: 'session-b', name: '订单材料.csv', size: 42, sha256: 'sha-b2', created_at: '2026-09-08T08:44:00Z', row_count: 5, preview: '客户,产品,数量\\nNimbus,服务,2', media_type: 'text/csv' }]
     window.__bridgeCalls = calls
     window.__traceVersion = 0
@@ -111,6 +112,15 @@ const bridgeScript = String.raw`
           const id = params.business_id
           await wait(id === 'business-b1' ? 180 : 12)
           const result = details(sessions.flatMap((item) => item.businesses).find((item) => item.id === id))
+          if (id === 'business-b4') {
+            result.runs[1].summary = '本轮已确认订单，尚未发货。'; result.runs[1].verification_status = 'passed'
+            result.business = { ...b4, readback: { latest_run_id: 'business-b4-run', stale: false } }
+            result.outcome = { status: 'passed', label: '销售订单已确认', detail: '已核对当前订单状态。', scope: 'sale_invoice_confirmed_checks' }
+            if (window.__resultScenario === 'failed') { result.runs[1].status = 'failed'; result.runs[1].verification_status = 'unknown' }
+            if (window.__resultScenario === 'running') { result.runs[1].status = 'running'; result.runs[1].verification_status = 'unknown'; delete result.runs[1].summary; result.outcome = { status: 'unknown', label: '执行中', detail: '完成后核验。', scope: '' } }
+            if (window.__resultScenario === 'stale') result.business.readback.latest_run_id = 'business-b4-old-run'
+            if (window.__resultScenario === 'missing') { delete result.runs[1].summary; result.summary = '旧轮次总结，不能显示' }
+          }
           if (id === 'business-b2' && showAcceptedProjection) { result.approvals = []; result.business.status = 'running'; result.runs[1].status = 'running'; result.activity = { phase: 'model', label: '等待模型响应', detail: '审批已完成，模型正在继续处理。' } }
           return result
         }
@@ -207,9 +217,9 @@ await page.getByText('主机已连接').waitFor()
 // choosing one only fills natural language into the composer.
 await page.getByRole('button', { name: /Session A/ }).click()
 await page.getByRole('heading', { name: 'Session A' }).waitFor()
-await page.getByText('你想先处理哪类业务？').waitFor()
+await page.getByText('处理业务', { exact: true }).waitFor()
 await page.getByRole('button', { name: /^采购 / }).click()
-assert.equal(await page.getByRole('textbox', { name: '会话消息' }).inputValue(), '我想整理一笔采购需求，请先告诉我需要补充哪些信息。')
+assert.equal(await page.getByRole('textbox', { name: '会话消息' }).inputValue(), '帮我整理采购需求，先核对供应商和产品。')
 
 // Materials are imported through the bridge, appear with parsing metadata, and
 // travel with the same-session message. A delayed old-session import is ignored.
@@ -273,7 +283,7 @@ await page.evaluate(() => {
 })
 await page.getByRole('button', { name: /Session A/ }).click()
 await page.getByRole('heading', { name: 'Session A' }).waitFor()
-await page.getByText('你想先处理哪类业务？').waitFor()
+await page.getByText('处理业务', { exact: true }).waitFor()
 assert.equal(await page.locator('.welcome-card').count(), 3)
 assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'send_message').length), sendCallsBeforeProposalOnly)
 await page.evaluate(() => { window.__setSessionMessages('session-a', []); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-a', status: 'idle' } }) })
@@ -467,7 +477,7 @@ assert.ok((await page.locator('.business-facts').textContent()).includes('已确
 assert.ok((await page.locator('.business-facts').textContent()).includes('已过账'))
 assert.ok((await page.locator('.business-facts').textContent()).includes('2 张'))
 assert.ok((await page.locator('.business-facts').textContent()).includes('SO-B2-SECOND'))
-await page.getByText('范围：销售、采购与开票基础核验', { exact: true }).waitFor()
+await page.getByText('核验范围：销售、采购与开票基础核验', { exact: true }).waitFor()
 await page.getByRole('tab', { name: /^单据/ }).click()
 const businessReadsBeforeExport = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'get_business' && params.business_id === 'business-b2').length)
 await page.getByRole('button', { name: '导出业务回执' }).click()
@@ -532,30 +542,31 @@ assert.equal(await page.locator('.resource-preview h3').textContent(), 'S00001')
 await page.evaluate(() => window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b2', type: 'artifact_created' } }))
 await page.waitForTimeout(80)
 assert.equal(await page.locator('.resource-preview h3').textContent(), 'S00001')
-assert.ok((await page.getByRole('button', { name: /Alpine Supplier/ }).textContent())?.includes('往来单位 · —（不适用）'))
-assert.ok((await page.getByRole('button', { name: /Alpine 供货信息/ }).textContent())?.includes('—（不适用）'))
-assert.ok((await page.getByRole('button', { name: /销售税/ }).textContent())?.includes('—（不适用）'))
+assert.ok((await page.getByRole('button', { name: /Alpine Supplier/ }).textContent())?.includes('往来单位'))
+assert.equal((await page.getByRole('button', { name: /Alpine 供货信息/ }).textContent())?.includes('—（不适用）'), false)
+assert.equal((await page.getByRole('button', { name: /销售税/ }).textContent())?.includes('—（不适用）'), false)
 assert.equal(await page.locator('.resource-row').filter({ hasText: '产品' }).count(), 1)
 assert.equal(await page.locator('.resource-row').filter({ hasText: '会计日记账' }).count(), 1)
 assert.equal(await page.locator('.resource-row').filter({ hasText: '开票向导' }).count(), 1)
-assert.ok((await page.getByRole('button', { name: /P00001 明细 1/ }).textContent())?.includes('采购明细 · —（不适用）'))
-assert.ok((await page.getByRole('button', { name: /服务项目变体/ }).textContent())?.includes('商品 · —（不适用）'))
-assert.ok((await page.getByRole('button', { name: /INV-B2 PDF/ }).textContent())?.includes('附件 · —（不适用）'))
-assert.ok((await page.getByRole('button', { name: /发票文件向导/ }).textContent())?.includes('发票文件向导 · —（不适用）'))
-assert.ok((await page.locator('.resource-row').filter({ hasText: '业务留言 1' }).textContent())?.includes('独立回读'))
+assert.ok((await page.getByRole('button', { name: /P00001 明细 1/ }).textContent())?.includes('采购明细'))
+assert.ok((await page.getByRole('button', { name: /服务项目变体/ }).textContent())?.includes('商品'))
+assert.ok((await page.getByRole('button', { name: /INV-B2 PDF/ }).textContent())?.includes('附件'))
+assert.ok((await page.getByRole('button', { name: /发票文件向导/ }).textContent())?.includes('发票文件向导'))
+assert.ok(!(await page.locator('.resource-row').filter({ hasText: '业务留言 1' }).textContent())?.includes('独立回读'))
 await page.getByRole('button', { name: /服务产品 产品/ }).click()
-await page.locator('.resource-preview .state-neutral').waitFor()
+assert.equal(await page.locator('.resource-preview .state-neutral').count(), 0)
 assert.equal(await page.getByRole('button', { name: /下载 服务产品 的 PDF/ }).count(), 0)
 assert.equal(await page.getByRole('button', { name: /导出 服务产品 的 CSV/ }).count(), 0)
 await page.getByRole('button', { name: /SO-B2-SECOND/ }).click()
 const secondOrderText = await page.locator('.resource-preview').textContent()
-assert.ok(secondOrderText?.includes('开票:待开票'))
+assert.ok(secondOrderText?.includes('待开票'))
 assert.ok(!secondOrderText?.includes('付款'))
 await page.getByRole('button', { name: /^INV-B2 发票与贷项/ }).click()
 await page.getByRole('heading', { name: 'INV-B2' }).waitFor()
 const invoiceText = await page.locator('.resource-preview').textContent()
-assert.ok(invoiceText?.includes('付款:未付款'))
-assert.ok(invoiceText?.includes('正式 PDF:待生成'))
+assert.ok(invoiceText?.includes('未付款'))
+assert.equal(await page.locator('.preview-meta dt').filter({ hasText: /^正式 PDF$/ }).textContent(), '正式 PDF')
+assert.equal(await page.locator('.preview-meta dt').filter({ hasText: /^正式 PDF$/ }).locator('+ dd').textContent(), '待生成')
 await page.getByRole('tab', { name: /Business B2/ }).click()
 await page.waitForTimeout(30)
 assert.equal(await page.locator('.business-header h2').textContent(), 'Business B2')
@@ -736,10 +747,11 @@ const traceBurstElapsed = Date.now() - traceBurstStarted
 // current activity, and an uncertain write must remain unknown without a retry.
 await page.getByRole('tab', { name: /Business B3/ }).click()
 await page.getByRole('heading', { name: 'Business B3' }).waitFor()
-const b3Goal = page.getByLabel('业务目标', { exact: true })
+const b3Goal = page.locator('.business-header h2')
 await b3Goal.waitFor()
 const fullB3Goal = '核对中断写入是否已经落库，并保留当前运行与历史单据证据。'
-assert.ok((await b3Goal.textContent()).includes('核对中断写入是否已经落库'))
+assert.ok((await b3Goal.textContent()).includes('Business B3'))
+assert.equal(await page.getByText('查看已确认的业务说明', { exact: true }).count(), 0)
 await page.getByText('查看原始指令', { exact: true }).click()
 await page.locator('.goal-details').getByText(fullB3Goal, { exact: true }).waitFor()
 const currentActivity = await page.locator('.activity-card').textContent()
@@ -769,6 +781,33 @@ assert.equal(await page.locator('.document-table a').count(), 0)
 // not rewrite verified/rejected history into a pending/expired decision.
 await page.getByRole('tab', { name: /Business B4/ }).click()
 await page.getByRole('heading', { name: 'Business B4' }).waitFor()
+await page.getByRole('tab', { name: /^执行台/ }).click()
+const finishedResult = page.getByLabel('执行结果', { exact: true })
+await finishedResult.getByText('销售订单已确认', { exact: true }).waitFor()
+assert.equal(await page.locator('.business-header h2').textContent(), 'Business B4')
+assert.equal(await page.locator('.business-header > div > p').count(), 0)
+await page.getByText('查看已确认的业务说明', { exact: true }).click()
+assert.equal(await page.locator('.business-header .goal-details').first().locator('p').textContent(), '确认订单，暂不发货。')
+await finishedResult.getByText('查看 Agent 完整回复', { exact: true }).click()
+await finishedResult.getByText('本轮已确认订单，尚未发货。', { exact: true }).waitFor()
+const modelCallsBeforeResult = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => ['send_message', 'start_run'].includes(method)).length)
+for (const scenario of ['failed', 'stale', 'missing']) {
+  await page.evaluate((value) => { window.__resultScenario = value; window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b4' } }) }, scenario)
+  if (scenario === 'missing') {
+    await finishedResult.getByText('本轮未返回总结，可查看核验结果和运行详情。', { exact: true }).waitFor()
+    assert.ok(!(await finishedResult.textContent()).includes('旧轮次总结'))
+  } else {
+    await finishedResult.getByText('本轮结果待核对', { exact: true }).waitFor()
+    assert.equal(await finishedResult.getByText('销售订单已确认', { exact: true }).count(), 0)
+  }
+}
+await page.evaluate(() => { window.__resultScenario = 'running'; window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b4' } }) })
+await page.getByRole('button', { name: '取消运行', exact: true }).waitFor()
+await page.locator('.business-content').evaluate((element) => { element.scrollTop = element.scrollHeight })
+await page.evaluate(() => { window.__resultScenario = null; window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b4', status: 'completed' } }) })
+await finishedResult.getByText('销售订单已确认', { exact: true }).waitFor()
+await page.waitForFunction(() => { const result = document.querySelector('.outcome-summary')?.getBoundingClientRect(); const panel = document.querySelector('.business-content')?.getBoundingClientRect(); return result && panel && result.top >= panel.top - 2 && result.top < panel.bottom })
+assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => ['send_message', 'start_run'].includes(method)).length), modelCallsBeforeResult)
 await page.getByRole('tab', { name: /^变更与审批/ }).click()
 const terminalApprovals = page.locator('.approval-row')
 await terminalApprovals.nth(1).waitFor()
@@ -919,9 +958,11 @@ assert.equal(actionSpacing.documentMargin, '0px')
 assert.equal(actionSpacing.documentGap, '14px')
 assert.equal(actionSpacing.artifactGap, '12px')
 await page.setViewportSize({ width: 1600, height: 1000 })
-await page.getByLabel('业务目标', {exact: true}).evaluate(e => { e.textContent = '完整业务目标 '.repeat(1000) })
-assert.ok(await page.getByLabel('业务目标', {exact: true}).evaluate(e => e.clientHeight < 100 && e.scrollHeight > e.clientHeight))
-await page.getByLabel('业务目标', {exact: true}).evaluate(e => { e.textContent = '处理订单与发票' })
+await page.getByText('查看原始指令', {exact: true}).click()
+const originalInstructions = page.locator('.business-header .goal-details p').last()
+await originalInstructions.evaluate(e => { e.textContent = '完整原始指令 '.repeat(1000) })
+assert.ok(await originalInstructions.evaluate(e => e.clientHeight < 200 && e.scrollHeight > e.clientHeight))
+await originalInstructions.evaluate(e => { e.textContent = '处理订单与发票' })
 const globalAlert = page.locator('.global-alert')
 if (await globalAlert.isVisible().catch(() => false)) {
   await globalAlert.getByRole('button', { name: '关闭', exact: true }).click()

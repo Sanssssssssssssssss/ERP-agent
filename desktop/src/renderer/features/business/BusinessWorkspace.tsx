@@ -1,8 +1,8 @@
 import { Button as RadixButton,Tabs as RadixTabs } from '@radix-ui/themes'
 import { Activity,Check as CheckIcon,Clock3,FileText,LoaderCircle,MessageSquare,Play,RefreshCw,Square } from 'lucide-react'
-import { useEffect,useState } from 'react'
+import { useEffect,useRef,useState } from 'react'
 import { EmptyState,MessageText,StatusBadge } from '../../components/common'
-import { activityPhaseLabel,amountWithCurrency,businessTypeMeta,compactGoal,completionTargetLabel,documentStateLabel,documentFact,documentModelLabel,invoiceStatusLabel,isPendingApproval,outcomeScopeLabel,outcomeStatusLabel,paymentStatusLabel,readableValue,runDisplayLabel,stageLabel,stageStatusLabel,toolLabel } from '../../presentation'
+import { activityPhaseLabel,amountWithCurrency,businessTypeMeta,completionTargetLabel,documentStateLabel,documentFact,documentModelLabel,invoiceStatusLabel,isPendingApproval,outcomeScopeLabel,outcomeStatusLabel,paymentStatusLabel,readableValue,runDisplayLabel,stageLabel,stageStatusLabel,toolLabel } from '../../presentation'
 import {
 Approval,
 Business,
@@ -72,8 +72,19 @@ export function BusinessWorkspace({ session, activeBusiness, detail, tab, trace,
     ?? detail?.runs?.find((run) => ['running', 'awaiting_approval', 'cancel_requested'].includes(run.status))
     ?? detail?.runs?.[0]
   const pendingApprovals = detail?.approvals?.filter(isPendingApproval) ?? []
+  const acceptedProposal = [...(session?.messages ?? [])].reverse().find((message) => message.business_id === activeBusiness?.id && message.proposal?.status === 'confirmed')?.proposal
+  const workspaceRef = useRef<HTMLElement>(null)
+  const previousRun = useRef<{ id: string; status: string } | null>(null)
+  useEffect(() => {
+    if (businessLoading) return
+    const previous = previousRun.current
+    previousRun.current = activeRun ? { id: activeRun.id, status: activeRun.status } : null
+    if (tab === 'execution' && previous?.id === activeRun?.id && ['running', 'awaiting_approval', 'cancel_requested'].includes(previous?.status ?? '') && ['completed', 'failed', 'cancelled', 'interrupted', 'needs_reconciliation'].includes(activeRun?.status ?? '')) {
+      workspaceRef.current?.querySelector('.outcome-summary')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }, [activeRun?.id, activeRun?.status, businessLoading, tab])
   return (
-    <main className="business-workspace">
+    <main className="business-workspace" ref={workspaceRef}>
       <div className="business-tabs-bar">
         <div className="business-tabs-heading"><div><span className="eyebrow">业务工作区</span><strong>{businessList.length ? `${businessList.length} 个业务` : '业务页'}</strong></div><RadixButton className="conversation-toggle" variant="soft" aria-label={conversationOpen ? '收起会话' : '打开会话'} onClick={onToggleConversation}><MessageSquare size={15} />{conversationOpen ? '收起会话' : '打开会话'}</RadixButton></div>
         <div className="business-tabs" role="tablist" aria-label="业务工作区">
@@ -82,7 +93,7 @@ export function BusinessWorkspace({ session, activeBusiness, detail, tab, trace,
       </div>
       {!activeBusiness && <EmptyState title="等待业务工作区" detail="在会话中确认一个业务意图后，这里会打开对应工作区。" />}
       {activeBusiness && <>
-        <header className="business-header"><div><span className="eyebrow">{businessTypeMeta(activeBusiness.type).title}</span><h2>{activeBusiness.title}</h2><p tabIndex={0} aria-label="业务目标">{compactGoal(activeBusiness.goal, detail?.documents ?? [])}</p><div className="business-target-line"><span>完成目标</span><strong>{completionTargetLabel(businessInfo?.completion_target, activeBusiness.type)}</strong></div><details className="goal-details"><summary>查看原始指令</summary><p>{activeBusiness.goal || '未知'}</p></details></div><StatusBadge status={activeBusiness.status} label={labelFor(businessStatusLabel, activeBusiness.status)} /></header>
+        <header className="business-header"><div><h2>{activeBusiness.title || businessTypeMeta(activeBusiness.type).title}</h2><div className="business-target-line"><span>完成目标</span><strong>{completionTargetLabel(businessInfo?.completion_target, activeBusiness.type)}</strong></div>{acceptedProposal?.goal && <details className="goal-details"><summary>查看已确认的业务说明</summary><p>{acceptedProposal.goal}</p></details>}<details className="goal-details"><summary>查看原始指令</summary><p>{activeBusiness.goal || '未保存原始指令'}</p></details></div><StatusBadge status={activeBusiness.status} label={labelFor(businessStatusLabel, activeBusiness.status)} /></header>
         {approvalProgress && approvalProgress.businessId === activeBusiness.id && <div className={`approval-progress approval-progress-${approvalProgress.status}`} role="status"><LoaderCircle className={approvalProgress.status === 'submitting' ? 'spin' : ''} size={15} /><span>{approvalProgress.status === 'submitting' ? '正在提交审批决定…' : (approvalProgress.detail || '审批状态未生效，请查看执行详情。')}</span></div>}
         <RadixTabs.Root className="business-tabs-root" value={tab} onValueChange={(value) => onTabChange(value as BusinessTab)}>
           <RadixTabs.List className="business-page-tabs" aria-label="业务页面">
@@ -105,6 +116,19 @@ export function ExecutionPage({ detail, activeRun, pendingApprovals, onOpenAppro
   const hasUnknownWrite = Boolean(detail?.approvals?.some((approval) => approval.status === 'needs_reconciliation') || detail?.runs?.some((run) => run.status === 'needs_reconciliation') || detail?.business.status === 'blocked')
   const canStart = !hasUnknownWrite && (!activeRun || !['running', 'awaiting_approval', 'cancel_requested'].includes(activeRun.status))
   const runActionLabel = activeRun?.status === 'completed' ? '继续执行' : activeRun?.status === 'failed' ? '重新执行' : '开始执行'
+  const ended = Boolean(activeRun && ['completed', 'failed', 'cancelled', 'interrupted', 'needs_reconciliation'].includes(activeRun.status))
+  const oldReadback = Boolean(detail?.stale || (detail?.business.readback?.latest_run_id && detail.business.readback.latest_run_id !== activeRun?.id))
+  const unverifiedFailure = ended && activeRun?.status !== 'completed' && activeRun?.verification_status !== 'passed'
+  const outcome = (oldReadback || unverifiedFailure) && detail?.outcome?.status === 'passed'
+    ? { status: 'unknown', label: '本轮结果待核对', detail: '尚未取得本轮的完整核验结果，请查看核验详情。', scope: '' }
+    : detail?.outcome
+  const result = <section className="outcome-summary" aria-label="执行结果" aria-live="polite">
+    <div className="section-heading"><h3>{outcome?.label || '结果待核对'}</h3><StatusBadge status={outcome?.status} label={outcomeStatusLabel(outcome?.status)} /></div>
+    <p>{outcome?.detail || '完成执行后将在这里显示核验结果。'}</p>
+    {outcome?.scope && <small>核验范围：{outcomeScopeLabel(outcome.scope)}</small>}
+    {ended && <small>{runDisplayLabel(activeRun?.status)}{detail?.observed_at ? ` · 数据更新于 ${formatInstant(detail.observed_at)}` : ''}</small>}
+    {ended && (activeRun?.summary?.trim() ? <details className="run-conclusion"><summary>查看 Agent 完整回复</summary><MessageText text={activeRun.summary} collapsible={false} /></details> : <p>本轮未返回总结，可查看核验结果和运行详情。</p>)}
+  </section>
   return (
     <div className="page-stack">
       <div className="action-row">
@@ -114,14 +138,10 @@ export function ExecutionPage({ detail, activeRun, pendingApprovals, onOpenAppro
           : <RadixButton className="primary-button" disabled={!canStart} title={hasUnknownWrite ? '存在待核对写入，请先在变更与审批中核对' : undefined} onClick={onStart}><Play size={15} />{hasUnknownWrite ? '先核对写入' : runActionLabel}</RadixButton>}
       </div>
       {pendingApprovals.length > 0 && <section className="approval-execution-cta" role="status"><div><strong>运行已暂停，等待人工审批</strong><span>{pendingApprovals.length} 项动作需要确认后才会继续。</span></div><RadixButton className="primary-button" onClick={onOpenApprovals}><CheckIcon size={15} />查看并审批</RadixButton></section>}
-      {detail?.activity && <ActivityCard activity={detail.activity} />}
+      {ended && <>{result}<BusinessFacts documents={detail?.documents ?? []} /></>}
+      {detail?.activity && activeRun?.status !== 'completed' && <ActivityCard activity={detail.activity} />}
       <ExecutionStages execution={detail?.execution} runStatus={activeRun?.status} onEvidence={onEvidence} />
-      <BusinessFacts documents={detail?.documents ?? []} />
-      <section className="outcome-summary">
-        <div className="section-heading"><div><span className="eyebrow">业务结果</span><h3>{detail?.outcome?.label || '结果状态未知'}</h3></div><span>{outcomeStatusLabel(detail?.outcome?.status)}</span></div>
-        <p>{detail?.outcome?.detail || '主机尚未提供业务结果说明。'}</p>
-        {detail?.outcome?.scope && <small>范围：{outcomeScopeLabel(detail.outcome.scope)}</small>}
-      </section>
+      {!ended && <><BusinessFacts documents={detail?.documents ?? []} />{result}</>}
       <details className="verification-fold"><summary>查看独立回读核验 · {detail?.checks?.length ?? 0} 项</summary><VerificationPage checks={detail?.checks ?? []} observedAt={detail?.observed_at} stale={detail?.stale ?? false} /></details>
       <details className="lower-facts"><summary>查看状态与最近运行</summary><section className="status-table-section">
         <div className="section-heading">
@@ -132,7 +152,6 @@ export function ExecutionPage({ detail, activeRun, pendingApprovals, onOpenAppro
           <div><span>工作区状态</span><strong>{labelFor(businessStatusLabel, detail?.business.status)}</strong></div>
           <div><span>当前运行</span><strong>{activeRun ? runDisplayLabel(activeRun.status) : '没有运行'}</strong></div>
           <div><span>回读核验</span><strong>{labelFor({passed: '通过', failed: '未通过', unknown: '未知'}, activeRun?.verification_status)}</strong></div>
-          <div><span>最近摘要</span><strong>{detail?.summary || '暂无主机摘要'}</strong></div>
         </div>
       </section><section className="run-summary">
         <div className="section-heading">
@@ -141,7 +160,7 @@ export function ExecutionPage({ detail, activeRun, pendingApprovals, onOpenAppro
         </div>
         {detail?.runs?.length
           ? detail.runs.slice(0, 4).map((run) => <RunRow key={run.id} run={run} />)
-          : <EmptyState title="还没有运行" detail="读取状态不会触发模型；点击开始执行才会创建运行。" />}
+          : <EmptyState title="尚未执行" detail="确认业务要求后，点击开始执行。" />}
       </section></details>
     </div>
   )
@@ -153,7 +172,7 @@ export function ExecutionStages({ execution, runStatus, onEvidence }: { executio
   useEffect(() => { if (!selectedStageId || !stages.some((stage) => stage.id === selectedStageId)) setSelectedStageId(execution?.current_stage_id || stages[0]?.id || '') }, [execution?.current_stage_id, selectedStageId, stages])
   const selectedStage = stages.find((stage) => stage.id === selectedStageId) ?? stages[0]
   const stageCaption = runStatus === 'completed' ? '本轮已结束 · 可查看各阶段证据' : execution?.current_stage_id ? `当前：${stageLabel(execution.current_stage_id)}` : '当前阶段未知'
-  if (!stages.length) return <section className="stage-panel"><div className="section-heading"><div><span className="eyebrow">执行阶段</span><h3>阶段状态未知</h3></div><span>主机尚未提供阶段计划</span></div><p className="muted">等待业务执行投影。</p></section>
+  if (!stages.length) return <section className="stage-panel"><div className="section-heading"><h3>执行进度</h3></div><p className="muted">尚无执行记录。</p></section>
   return <section className="stage-panel"><div className="section-heading"><div><span className="eyebrow">执行阶段</span><h3>当前业务进度</h3></div><span>{stageCaption}</span></div><div className="stage-layout"><nav className="stage-list" aria-label="业务执行阶段">{stages.map((stage) => <button className={`stage-row stage-${stage.status || 'unknown'} ${stage.id === execution?.current_stage_id ? 'current' : ''} ${stage.id === selectedStage?.id ? 'selected' : ''}`} type="button" key={stage.id} onClick={() => setSelectedStageId(stage.id)}><span className="stage-number" aria-hidden="true">{stage.id === execution?.current_stage_id ? '●' : '○'}</span><span><strong>{stage.label || stageLabel(stage.id)}</strong><small>{stageStatusLabel(stage.status)}</small></span></button>)}</nav><article className="stage-detail"><div className="stage-row-head"><strong>{selectedStage?.label || stageLabel(selectedStage?.id)}</strong><span>{stageStatusLabel(selectedStage?.status)}</span></div><p>{selectedStage?.detail || '没有阶段详情。'}</p>{selectedStage?.evidence?.length ? <div className="evidence-list">{selectedStage.evidence.map((evidence, index) => { const kind = (evidence as BusinessEvidence & { kind?: string }).kind; return <button className="evidence-link" type="button" key={`${evidence.run_id || 'run'}:${evidence.tool_id || index}`} onClick={() => onEvidence(evidence)}>{kind === 'readback' ? '查看独立回读快照' : (evidence.label || '查看执行证据')} · {evidence.observed_at ? formatInstant(evidence.observed_at) : '未知时间'}</button> })}</div> : <span className="muted">暂无关联证据</span>}</article></div></section>
 }
 
