@@ -1207,7 +1207,7 @@ def business_detail(state: dict[str, Any], business_id: str) -> dict[str, Any]:
     )
     factual_checks = list(checks.values())
     required_checks = _required_check_names(business_type, completion_target)
-    visible_checks = [row for row in factual_checks if row.get("name") in required_checks or str(row.get("name", "")).startswith("read_")]
+    visible_checks = [row for row in factual_checks if row.get("name") in required_checks or str(row.get("name", "")).startswith(("read_", "requested_reference_"))]
     public_documents = _annotate_document_scope(list(docs.values()), runs, business_type)
     outcome = _outcome(factual_checks, business_type, completion_target)
     if isinstance(readback, dict) and not readback_fresh:

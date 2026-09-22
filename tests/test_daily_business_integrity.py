@@ -64,10 +64,11 @@ def test_sales_readback_checks_original_party_and_optional_payment_term():
         state = _state()
         state["businesses"]["b1"].update(completion_target="confirmed", references=[{
             "model": "res.partner", "id": partner_id, "quote": "原始客户", "fields": {"id": partner_id}}])
-        refresh_business(state, "b1", NativeReadFixture(records))
+        detail = refresh_business(state, "b1", NativeReadFixture(records))
         readback = state["businesses"]["b1"]["readback"]
         assert readback["outcome"]["status"] == expected
         assert next(c for c in readback["checks"] if c["name"] == "requested_reference_0")["status"] == expected
+        assert next(c for c in detail["checks"] if c["name"] == "requested_reference_0")["status"] == expected
 
 
 def test_reference_paging_and_server_count_share_the_filter(monkeypatch):
