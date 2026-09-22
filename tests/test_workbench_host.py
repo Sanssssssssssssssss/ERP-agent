@@ -971,7 +971,7 @@ class WorkbenchHostTests(unittest.TestCase):
             {"type": "tool_execution_start", "tool_call_id": "call-1", "tool_name": "propose_business",
              "args": {"type": "sale_invoice", "title": "客户开票提案", "goal": "建立订单并开票"}},
             {"type": "tool_execution_end", "tool_call_id": "call-1", "tool_name": "propose_business",
-             "result": {"success": True, "proposal": {"type": "sale_invoice", "title": "客户开票提案", "goal": "建立订单并开票"}}},
+             "result": {"success": True, "proposal": {"type": "sale_invoice", "title": "客户开票提案", "goal": "建立订单并开票", "completion_target": "read_only"}}},
             {"type": "turn_end", "message": {"role": "assistant", "content": [{"type": "text", "text": "请确认这份提案。"}],
              "stop_reason": "stop", "usage": {"input": 1, "output": 2, "total": 3}}},
             {"type": "message_end", "message_id": "assistant-1", "text": "请确认这份提案。", "sequence": 1},

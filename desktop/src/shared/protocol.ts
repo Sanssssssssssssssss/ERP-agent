@@ -68,6 +68,8 @@ export interface BusinessProposal {
   type: BusinessType;
   title: string;
   goal: string;
+  source_messages?: { id: string; text: string }[];
+  resolved_references?: { resource: string; id: number; quote: string; model: string }[];
   status: "pending" | "confirmed" | "rejected";
   completion_target?: CompletionTarget;
   material_ids?: string[];

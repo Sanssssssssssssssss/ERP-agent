@@ -837,6 +837,7 @@ def _required_check_names(business_type: str, completion_target: str) -> set[str
 def _outcome(checks: list[dict[str, Any]], business_type: str = "sale_invoice",
              completion_target: str = "posted") -> dict[str, str]:
     required = _required_check_names(business_type, completion_target)
+    required.update(row["name"] for row in checks if str(row.get("name", "")).startswith("requested_reference_"))
     scope = f"{business_type}_{completion_target}_checks"
     by_name = {row.get("name"): row for row in checks if isinstance(row, dict)}
     statuses = [by_name.get(name, {}).get("status") for name in required]
@@ -876,6 +877,28 @@ def _outcome(checks: list[dict[str, Any]], business_type: str = "sale_invoice",
 def _finish_readback(state: dict[str, Any], business: dict[str, Any], runs: list[dict[str, Any]],
                      observations: dict[tuple[str, int], dict[str, Any]], failures: dict[tuple[str, int], str],
                      checks: list[dict[str, Any]], business_type: str, target: str) -> dict[str, Any]:
+    for index, reference in enumerate(business.get("references", [])):
+        if reference.get("purpose") == "source":
+            continue
+        model, record_id = reference["model"], reference["id"]
+        observed = observations.get((model, record_id))
+        status = "unknown"
+        if observed:
+            expected = {k: v for k, v in reference["fields"].items() if k in {"name", "company_id", "partner_id", "currency_id"}}
+            actual = {**observed.get("fields", {}), "name": observed.get("name")}
+            status = "passed" if all(actual.get(k) == v for k, v in expected.items()) else "failed"
+        # 收尾依据是原始主体与实际目标的关系，不能只看“读过一张单”。
+        relation = "partner_id" if model == "res.partner" else "company_id" if model == "res.company" else None
+        for order_model, kind in (("sale.order", "sale_invoice"), ("purchase.order", "purchase")):
+            ids = _target_order_ids_for_runs(runs, kind)
+            targets = [row for (m, i), row in observations.items() if m == order_model and (not ids or i in ids)]
+            if relation and len(targets) == 1:
+                value = targets[0].get("fields", {}).get(relation)
+                status = "passed" if record_id in _relation_ids(value) else "failed" if value else "unknown"
+            if model == order_model and ids and record_id not in ids:
+                status = "failed"
+        checks.append(_check(f"requested_reference_{index}", f"原始主体：{reference['quote']}", status,
+                             "核对用户原始引用与本次回读关系；不代表自由文本的全部业务条件已验证。"))
     for (model, record_id), failure in failures.items():
         checks.append(_check(f"read_{model}_{record_id}", f"读取 {model} {record_id}", "unknown", f"读取失败：{failure}"))
     business["readback"] = {

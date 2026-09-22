@@ -11,6 +11,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -33,6 +34,7 @@ from erp_harness.app.business import BUSINESS_TARGETS, COMPLETION_TARGETS, defau
 
 CONTEXT_WINDOW = 128_000
 READ_MAX_ROWS = 5
+READ_PAGE_MAX = 20
 READ_MAX_BYTES = 16_384
 MODEL_COMPAT = {
     "supportsReasoningEffort": True,
@@ -80,17 +82,77 @@ CONVERSATION_POLICY = (
 
 
 _REFERENCE_SPECS = {
-    "customer": ("res.partner", ["id", "name", "display_name", "property_payment_term_id"]),
+    "customer": ("res.partner", ["id", "name", "display_name", "email", "city", "company_id", "property_payment_term_id"]),
     "product": ("product.product", ["id", "name", "display_name", "default_code", "list_price"]),
     "payment_term": ("account.payment.term", ["id", "name"]),
-    "sale_order": ("sale.order", ["id", "name", "state", "partner_id", "amount_total", "currency_id", "invoice_status"]),
-    "purchase_order": ("purchase.order", ["id", "name", "state", "partner_id", "amount_total", "currency_id"]),
+    "sale_order": ("sale.order", ["id", "name", "state", "partner_id", "company_id", "date_order", "client_order_ref", "amount_total", "currency_id", "invoice_status"]),
+    "purchase_order": ("purchase.order", ["id", "name", "state", "partner_id", "company_id", "date_order", "partner_ref", "amount_total", "currency_id"]),
+    "company": ("res.company", ["id", "name", "currency_id"]),
+    "tax": ("account.tax", ["id", "name", "amount", "amount_type", "type_tax_use", "company_id"]),
+    "sale_line": ("sale.order.line", ["id", "order_id", "product_id", "product_uom_qty", "price_unit", "tax_ids"]),
+    "purchase_line": ("purchase.order.line", ["id", "order_id", "product_id", "product_qty", "price_unit", "tax_ids"]),
     "invoice": ("account.move", ["id", "name", "state", "move_type", "partner_id", "amount_total", "currency_id", "payment_state", "invoice_origin"]),
     "transfer": ("stock.picking", ["id", "name", "state", "partner_id", "origin", "scheduled_date"]),
     "production": ("mrp.production", ["id", "name", "state", "product_id", "product_qty"]),
     "payment": ("account.payment", ["id", "name", "state", "partner_id", "amount", "currency_id", "is_matched"]),
 }
 _ODOO_READS = None
+_KNOWLEDGE = None
+_SOURCE_MESSAGES = []
+
+
+def resolve_references(reads, references, source_text):
+    """Bind a quoted user name/reference to one live record, never digits inferred from it."""
+    if not isinstance(references, list) or len(references) > 20:
+        raise ValueError("references must contain at most 20 records")
+    resolved = []
+    for reference in references:
+        if (not isinstance(reference, dict) or set(reference) - {"resource", "id", "quote", "purpose"}
+                or not {"resource", "id", "quote"}.issubset(reference)
+                or reference.get("purpose", "target") not in {"target", "source"}):
+            raise ValueError("reference requires resource, id and an exact quote from the user")
+        resource, record_id, quote = (reference[k] for k in ("resource", "id", "quote"))
+        if resource not in _REFERENCE_SPECS or type(record_id) is not int or record_id < 1 or not isinstance(quote, str) or not quote or quote not in source_text:
+            raise ValueError("reference must cite the user's exact name or document reference")
+        model, fields = _REFERENCE_SPECS[resource]
+        names = [f for f in ("name", "default_code", "client_order_ref", "partner_ref", "email") if f in fields]
+        domain = ["|"] * (len(names) - 1) + [[f, "=", quote] for f in names]
+        result = reads.call("search_records", {"model": model, "domain": domain, "fields": fields, "limit": 2})
+        rows = result.get("result", [])
+        if not result.get("success") or len(rows) != 1 or rows[0].get("id") != record_id:
+            raise ValueError("quoted target does not resolve uniquely to that ID in the current role; read or clarify it first")
+        resolved.append({**reference, "model": model, "fields": rows[0]})
+    return resolved
+
+
+def _reference_query(resource, values):
+    """Translate only the public read contract; NativeReads still enforces field ACLs."""
+    model, allowed = _REFERENCE_SPECS[resource]
+    fields = values.get("fields", allowed)
+    domain = values.get("domain", [])
+    order = values.get("order", "id asc")
+    if (not isinstance(fields, list) or not fields or any(f not in allowed for f in fields)
+            or not isinstance(domain, list) or len(domain) > 40 or not isinstance(order, str)):
+        raise ValueError("fields/domain/order have invalid shapes or unsupported fields")
+    for term in domain:
+        if isinstance(term, str) and term in {"&", "|", "!"}:
+            continue
+        if (not isinstance(term, (list, tuple)) or len(term) != 3 or term[0] not in allowed
+                or term[1] not in {"=", "!=", ">", ">=", "<", "<=", "in", "not in", "ilike", "not ilike"}):
+            raise ValueError("domain must use advertised fields and Odoo filter operators")
+    if any(not re.fullmatch(r"(?:" + "|".join(map(re.escape, allowed)) + r")(?:\s+(?:asc|desc))?", part.strip(), re.I)
+           for part in order.split(",")):
+        raise ValueError("order must use advertised fields followed by asc or desc")
+    # 精确条件放 domain。分词只做文本交集，不能把金额/日期拼成关键词。
+    query = values.get("query", "").strip()
+    search_fields = [f for f in ("name", "default_code", "client_order_ref", "partner_ref", "email", "city", "origin") if f in allowed]
+    if resource in {"sale_order", "purchase_order", "invoice"}:
+        search_fields.append("partner_id")
+    if query and not search_fields:
+        raise ValueError("this resource requires domain filters, not free-text query")
+    for token in query.split():
+        domain = domain + ["|"] * (len(search_fields) - 1) + [[f, "ilike", token] for f in search_fields]
+    return model, list(dict.fromkeys(["id", *fields])), domain, order
 
 
 def _odoo_reads():
@@ -138,7 +200,7 @@ async def _read_odoo_reference(_call_id, arguments, _signal=None, _on_update=Non
     # 入参不能指定任意 model、method 或 fields。资源名称映射由后端维护。
     # 查询失败返回 unavailable；空结果与无法查询必须区分。
     values = dict(arguments or {})
-    unknown = sorted(set(values) - {"resource", "query", "limit"})
+    unknown = sorted(set(values) - {"resource", "query", "limit", "offset", "domain", "fields", "order", "include_count", "match"})
     if unknown:
         error = "unsupported reference arguments"
         payload = {"success": False, "status": "invalid", "error": error}
@@ -154,19 +216,47 @@ async def _read_odoo_reference(_call_id, arguments, _signal=None, _on_update=Non
         error = "query must be at most 200 characters"
         payload = {"success": False, "status": "invalid", "error": error}
         return AgentToolResult(content=json.dumps(payload), details=payload)
-    if type(limit) is not int or not 1 <= limit <= READ_MAX_ROWS:
-        error = f"limit must be an integer from 1 to {READ_MAX_ROWS}"
+    if type(limit) is not int or not 1 <= limit <= READ_PAGE_MAX:
+        error = f"limit must be an integer from 1 to {READ_PAGE_MAX}"
         payload = {"success": False, "status": "invalid", "error": error}
         return AgentToolResult(content=json.dumps(payload), details=payload)
-    model, fields = _REFERENCE_SPECS[resource]
+    try:
+        model, fields, domain, order = _reference_query(resource, values)
+        offset = values.get("offset", 0)
+        include_count = values.get("include_count", False)
+        match = values.get("match", "keyword")
+        if type(offset) is not int or offset < 0 or type(include_count) is not bool or match not in {"keyword", "bm25"}:
+            raise ValueError("invalid offset, include_count or match")
+        if match == "bm25" and (not query.strip() or values.get("domain") or offset or include_count):
+            raise ValueError("BM25 supplies candidates only; use structured reads for conditions, counts and complete sets")
+    except (ValueError, TypeError) as exc:
+        payload = {"success": False, "status": "invalid", "error": str(exc)}
+        return AgentToolResult(content=json.dumps(payload), details=payload)
     observed_at = _observed_at()
     try:
-        result = _odoo_reads().call("search_records", {
-            "model": model, "fields": fields, "query": query.strip() or None,
-            "limit": min(limit + 1, READ_MAX_ROWS + 1), "offset": 0,
+        reads = _odoo_reads()
+        coverage = None
+        if match == "bm25":
+            global _KNOWLEDGE
+            from erp_harness.erp.knowledge import NativeKnowledge
+            if _KNOWLEDGE is None or _KNOWLEDGE.reads is not reads:
+                _KNOWLEDGE = NativeKnowledge(reads)
+            found = _KNOWLEDGE.search_knowledge(query, model, limit=limit)
+            if found.get("status") == "index_missing":
+                indexed = _KNOWLEDGE.index_knowledge(model, fields=_REFERENCE_SPECS[resource][1], full_refresh=True)
+                if not indexed.get("success"):
+                    raise RuntimeError("index refresh failed")
+                found = _KNOWLEDGE.search_knowledge(query, model, limit=limit)
+            if not found.get("success"):
+                raise RuntimeError("knowledge read failed")
+            domain = [["id", "in", [r["record_id"] for r in found.get("results", [])]]]
+            coverage = {"coverage": found.get("coverage"), "freshness": found.get("freshness")}
+        result = reads.call("search_records", {
+            "model": model, "fields": fields, "domain": domain,
+            "limit": limit + 1, "offset": offset, "order": order,
         })
         if not isinstance(result, dict) or result.get("success") is not True:
-            raise RuntimeError("native read was unavailable")
+            raise RuntimeError(str(result.get("error", "native read was unavailable")))
         raw_records = result.get("result")
         if not isinstance(raw_records, list) or any(not isinstance(row, dict) for row in raw_records):
             raise RuntimeError("native read returned malformed records")
@@ -175,11 +265,23 @@ async def _read_odoo_reference(_call_id, arguments, _signal=None, _on_update=Non
         payload = {"success": True, "status": "observed", "source": "native_odoo_read",
                    "observed_at": observed_at, "resource": resource, "model": model,
                    "count": len(records), "records": records, "truncated": truncated,
-                   "may_have_more": truncated}
+                   "may_have_more": truncated, "complete": not truncated and offset == 0 and match != "bm25",
+                   "offset": offset, "next_offset": offset + len(records) if truncated and records else None,
+                   "scope": {"domain": domain, "order": order, "fields": fields},
+                   "read_more": "repeat with next_offset; narrow fields if a row exceeds the byte limit"}
+        if coverage is not None:
+            payload.update({**coverage, "match": "bm25", "complete": False, "notice": "ranked candidates; not an exhaustive answer"})
+        if include_count:
+            counted = reads.call("aggregate_records", {"model": model, "domain": domain, "group_by": [], "measures": ["__count"]})
+            rows = counted.get("rows", [])
+            count = rows[0].get("__count") if counted.get("success") and len(rows) == 1 else None
+            payload["total_count"] = count
+            payload["count_status"] = "observed" if type(count) is int else "unavailable"
         if resource == "product":
             payload["price_semantics"] = "list_price only; customer pricelist, tax, and currency are not resolved"
-    except Exception:
-        payload = {"success": False, "status": "unavailable", "source": "native_odoo_read",
+    except Exception as exc:
+        denied = any(word in str(exc).lower() for word in ("accesserror", "access denied", "permission", "policy denies", "restricted"))
+        payload = {"success": False, "status": "permission_denied" if denied else "unavailable", "source": "native_odoo_read",
                    "observed_at": observed_at, "resource": resource, "model": model,
                    "verified": False, "error": "Odoo read could not be verified"}
     return AgentToolResult(content=json.dumps(payload, ensure_ascii=False), details=payload)
@@ -189,16 +291,27 @@ READ_ODOO_REFERENCE = AgentTool(
     name="read_odoo_reference",
     label="Read Odoo reference",
     description=(
-        "Read a small, current Odoo reference snapshot only when the user explicitly asks "
-        "to check a customer, product/price, payment term, order, or invoice. Fixed resources and fields; "
-        "read-only, no writes, no arbitrary model or method. A failed read is unknown."
+        "Read current ERP facts. S... sales use sale_order; P... purchase orders use purchase_order. "
+        "query is a name/reference or space-separated text fragments. Use domain for company, partner ID, "
+        "state, amount and date conditions, order for sorting, include_count for the full matching count. "
+        "A name's digits are not an ID: resolve the full customer/supplier name first. "
+        "Use offset until next_offset is null for ALL records; prefer fields [id,name] for lists. "
+        "Tax IDs are not percentages: read sale_line/purchase_line by order_id, then tax by id. "
+        "match=bm25 is optional fuzzy candidate recall, never a complete set. No writes. "
+        "Available fields by resource: " + json.dumps({k: v[1] for k, v in _REFERENCE_SPECS.items()})
     ),
     parameters={
         "type": "object",
         "properties": {
             "resource": {"type": "string", "enum": list(_REFERENCE_SPECS)},
             "query": {"type": "string", "maxLength": 200},
-            "limit": {"type": "integer", "minimum": 1, "maximum": READ_MAX_ROWS},
+            "limit": {"type": "integer", "minimum": 1, "maximum": READ_PAGE_MAX},
+            "offset": {"type": "integer", "minimum": 0},
+            "domain": {"type": "array", "description": "Odoo domain, e.g. [[\"partner_id\",\"=\",516],[\"amount_total\",\"<=\",2000]]. Fields must be advertised for this resource."},
+            "fields": {"type": "array", "items": {"type": "string"}},
+            "order": {"type": "string", "description": "e.g. date_order desc,id desc. Equal maximum amounts remain a business tie unless user specifies a tie-break."},
+            "include_count": {"type": "boolean"},
+            "match": {"type": "string", "enum": ["keyword", "bm25"]},
         },
         "required": ["resource"],
         "additionalProperties": False,
@@ -306,6 +419,17 @@ async def _propose_business(_call_id, arguments, _signal=None, _on_update=None):
         error = "completion_target is not supported for this business type"
     else:
         proposal = {"type": kind, "title": title.strip(), "goal": goal.strip(), "completion_target": completion_target}
+        references = values.get("references", [])
+        if _SOURCE_MESSAGES and completion_target != "read_only" and not references:
+            payload = {"success": False, "error": "A write proposal needs a live user-quoted document or business party reference. Resolve it first; if the target is unspecified, clarify or propose a read-only lookup."}
+            return AgentToolResult(content=json.dumps(payload), details=payload)
+        if references:
+            try:
+                resolve_references(_odoo_reads(), references, "\n".join(m["text"] for m in _SOURCE_MESSAGES))
+            except (ValueError, TypeError, RuntimeError) as exc:
+                payload = {"success": False, "error": str(exc)}
+                return AgentToolResult(content=json.dumps(payload, ensure_ascii=False), details=payload)
+            proposal["references"] = references
         if existing is not None:
             proposal["existing_business_id"] = existing.strip()
         if material_ids is not None:
@@ -330,6 +454,10 @@ PROPOSE_BUSINESS = AgentTool(
         "Ask for the smallest missing business context first; do not invent a goal "
         "or technical fields. This prepares the proposal and does not execute ERP "
         "writes; execution happens in the business workspace after approval."
+        " Write proposals require references for the user-named existing document or customer/supplier; include the named company too. "
+        "Use only IDs observed in Odoo and quote the exact user-supplied name/reference; digits inside names are not IDs. "
+        "purpose=target binds the intended write subject; purpose=source is a reference document used for copying/derivation, not the write target. "
+        "Preserve constraints exactly: no receiving means do not complete a receipt; confirmation may create pending transfers."
     ),
     parameters={
         "type": "object",
@@ -340,6 +468,9 @@ PROPOSE_BUSINESS = AgentTool(
             "existing_business_id": {"type": "string", "minLength": 1, "maxLength": 128},
             "material_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "maxItems": 3},
             "completion_target": {"type": "string", "enum": list(COMPLETION_TARGETS)},
+            "references": {"type": "array", "maxItems": 20, "items": {"type": "object", "properties": {
+                "resource": {"type": "string", "enum": list(_REFERENCE_SPECS)}, "id": {"type": "integer", "minimum": 1},
+                "quote": {"type": "string"}, "purpose": {"type": "string", "enum": ["target", "source"]}}, "required": ["resource", "id", "quote"], "additionalProperties": False}},
         },
         "required": ["type", "title", "goal"],
         "additionalProperties": False,
@@ -358,6 +489,9 @@ def arguments() -> argparse.Namespace:
 
 
 async def run(args: argparse.Namespace) -> None:
+    global _SOURCE_MESSAGES
+    source_file = os.environ.get("ERP_CONVERSATION_SOURCES")
+    _SOURCE_MESSAGES = json.loads(Path(source_file).read_text(encoding="utf-8")) if source_file else []
     api_key = os.environ.get("LLM_API_KEY")
     base_url = os.environ.get("LLM_BASE_URL", "").rstrip("/")
     model = os.environ.get("LLM_MODEL")
@@ -377,7 +511,7 @@ async def run(args: argparse.Namespace) -> None:
             thinking_format="openai",
             compat=MODEL_COMPAT,
             provider_name=provider_name,
-            timeout_seconds=180,
+            timeout_seconds=None,
             max_retries=0,
             infer_api_from_model=False,
             provider_hooks=receipts,
@@ -392,7 +526,7 @@ async def run(args: argparse.Namespace) -> None:
         context_windows={model: CONTEXT_WINDOW},
         compat=MODEL_COMPAT,
         model_metadata={model: ProviderModelMetadata(reasoning=True, context_window=CONTEXT_WINDOW)},
-        timeout_seconds=180,
+        timeout_seconds=None,
         max_retries=0,
         thinking_levels=(thinking,),
         thinking_models=(model,),

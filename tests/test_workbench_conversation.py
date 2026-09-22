@@ -264,7 +264,7 @@ class WorkbenchConversationTests(unittest.TestCase):
             {"resource": []},
             {"resource": "customer", "unexpected": True},
             {"resource": "customer", "limit": True},
-            {"resource": "customer", "limit": 6},
+            {"resource": "customer", "limit": 21},
         ):
             with self.subTest(arguments=arguments):
                 result = asyncio.run(conversation._read_odoo_reference("call", arguments))

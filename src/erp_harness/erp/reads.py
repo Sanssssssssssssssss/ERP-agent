@@ -1345,8 +1345,8 @@ class NativeReads:
         offset: int = 0, order: str | None = None,
     ) -> dict[str, Any]:
         validate_model_name(model)
-        if not group_by:
-            raise ValueError("group_by must include at least one field")
+        if not isinstance(group_by, list) or (not group_by and not measures):
+            raise ValueError("aggregate requires group_by fields or measures")
         if offset < 0:
             raise ValueError("offset must be greater than or equal to 0")
         # No silent truncation when the caller omitted a limit.

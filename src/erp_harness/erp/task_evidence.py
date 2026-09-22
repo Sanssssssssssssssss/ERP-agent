@@ -41,6 +41,7 @@ class TaskEvidence:
         self.identity = reads.identity_context(self.instance)
         self.digest = ActionStore.digest(self.spec)
         self.bindings = copy.deepcopy(self.spec.get("bindings", []))
+        self.references = copy.deepcopy(self.spec.get("references", []))
         self.release_fields = copy.deepcopy(self.spec.get("release_fields", []))
         for rule in self.release_fields:
             if (not isinstance(rule, dict) or not all(isinstance(rule.get(k), str) and rule[k] for k in ("model", "method"))
@@ -222,7 +223,10 @@ class TaskEvidence:
         return [["release_fields", model, rows]]
 
     def prestate(self, kind, payload):
+        if self.spec.get("read_only"):
+            raise ValueError("the host-confirmed task is read-only; no ERP write is authorized")
         sources = self.bind(payload) if kind == "write" else []
+        sources.extend(self.reference_check(kind, payload))
         if kind == "method":
             sources.extend(self.release_check(payload))
             sources.extend(self.purchase_check(payload))
@@ -248,3 +252,42 @@ class TaskEvidence:
                         raise ValueError("task cannot overwrite its host-bound qualification rule")
             self._event("rules_checked", count=len(rules), model=payload["model"])
         return {"host_task_evidence": {"spec_sha256": self.digest, "sources": sources, "rules": rules}} if sources or rules else {}
+
+    def reference_check(self, kind, payload):
+        """Recheck user-quoted identities at preparation, approval and dispatch."""
+        if not self.references:
+            return []
+        context = payload.get("kwargs", {}).get("context") if kind == "method" else payload.get("context")
+        self._identity_check(payload["instance"], context)
+        evidence = []
+        for reference in self.references:
+            fields = {k: v for k, v in reference["fields"].items()
+                      if k in {"id", "name", "company_id", "partner_id", "currency_id"}}
+            rows = self._search({"model": reference["model"], "domain": [["id", "=", reference["id"]]]}, list(fields))
+            if len(rows) != 1 or any(rows[0].get(k) != v for k, v in fields.items()):
+                raise ValueError("host-bound reference identity changed or is unavailable; renew the proposal")
+            evidence.append(["user_reference", reference["model"], rows[0]])
+        model = payload["model"]
+        ids = payload.get("kwargs", {}).get("ids", []) if kind == "method" else payload.get("record_ids", [])
+        targets = [r for r in self.references if r.get("purpose", "target") == "target"]
+        direct = [r["id"] for r in targets if r["model"] == model]
+        if direct and ids and not set(ids).issubset(direct):
+            raise ValueError("write target differs from the user-quoted records")
+        if model in {"sale.order", "purchase.order", "account.move", "account.payment"}:
+            relations = {field: [r["id"] for r in targets if r["model"] == source]
+                         for field, source in (("partner_id", "res.partner"), ("company_id", "res.company"))}
+            relations = {f: allowed for f, allowed in relations.items() if allowed}
+            if relations:
+                rows = self._search({"model": model, "domain": [["id", "in", ids]]}, ["id", *relations]) if ids else []
+                if ids and {r["id"] for r in rows} != set(ids):
+                    raise ValueError("write targets are unavailable in the current role")
+                if kind == "write":
+                    rows = [{**row, **(payload.get("values") or {})} for row in rows] if ids else (payload.get("values_list") or [payload.get("values") or {}])
+                for row in rows:
+                    for field, allowed in relations.items():
+                        value = row.get(field)
+                        value = value[0] if isinstance(value, list) and value else value
+                        if value not in allowed:
+                            raise ValueError(f"{model}.{field} differs from the user-quoted identity")
+                evidence.append(["target_relations", model, rows])
+        return evidence
