@@ -9,13 +9,15 @@ BUSINESS_TARGETS = {
     "payment": ("read_only", "draft", "posted", "reconciled"),
     "refund": ("read_only", "draft", "posted", "reconciled"),
     "reconciliation": ("read_only", "reconciled"),
+    "invoice_delivery": ("sent",),
 }
 BUSINESS_LABELS = {
     "sale_invoice": "销售与开票", "purchase": "采购", "sale_purchase_invoice": "销售、采购与开票",
     "inventory": "库存收发与退货", "manufacturing": "制造与补货", "payment": "收付款",
     "refund": "退款与贷项", "reconciliation": "银行与账务核销",
+    "invoice_delivery": "发票发送",
 }
-COMPLETION_TARGETS = ("read_only", "draft", "confirmed", "posted", "done", "reconciled")
+COMPLETION_TARGETS = ("read_only", "draft", "confirmed", "posted", "done", "reconciled", "sent")
 ENTERPRISE_TYPES = frozenset({"inventory", "manufacturing", "payment", "refund", "reconciliation"})
 
 

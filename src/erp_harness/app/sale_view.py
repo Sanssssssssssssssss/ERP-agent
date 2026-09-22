@@ -289,6 +289,8 @@ def _stages_for(business_type: str, completion_target: str = "posted") -> tuple[
     The stage list is therefore truncated at the target, while retaining the
     final independent verification stage.
     """
+    if business_type == "invoice_delivery":
+        return (("read", "核对发票与收件人"), ("invoice", "生成正式 PDF 并发送"), ("verify", "核对投递回执"))
     if business_type in ENTERPRISE_TYPES:
         return (("read", "读取当前状态"), ("verify", "独立核验")) if completion_target == "read_only" else (("read", "读取当前状态"), (business_type, BUSINESS_LABELS[business_type]), ("verify", "独立核验"))
     if business_type == "purchase":
@@ -560,6 +562,8 @@ def _run_has_relevant_evidence(
     business_type: str = "sale_invoice", completion_target: str = "posted",
 ) -> bool:
     documents = run.get("documents") if isinstance(run.get("documents"), list) else []
+    if business_type == "invoice_delivery":
+        return any(d.get("model") == "account.move" and d.get("source") == "refresh_native_read" for d in readback_documents or [])
     if business_type in ENTERPRISE_TYPES:
         targets, _ = enterprise_view.action_targets([run])
         return any(doc.get("source") == "refresh_native_read" and ((doc.get("model"), doc.get("id")) in targets or completion_target == "read_only") for doc in readback_documents or [])
@@ -810,6 +814,8 @@ def _execution_projection(
 
 
 def _required_check_names(business_type: str, completion_target: str) -> set[str]:
+    if business_type == "invoice_delivery":
+        return {"invoice_recipient_verified", "invoice_mail_sent"}
     if business_type in ENTERPRISE_TYPES:
         return {"enterprise_observed"} if completion_target == "read_only" else {"enterprise_observed", "enterprise_settled", "enterprise_final"}
     if business_type == "purchase":
@@ -854,6 +860,7 @@ def _outcome(checks: list[dict[str, Any]], business_type: str = "sale_invoice",
         "sale_invoice": "销售与开票基础检查",
     }
     passed_details = {
+        ("invoice_delivery", "sent"): "正式发票 PDF 已交付邮件服务器；不代表收件人已打开或阅读。",
         ("purchase", "read_only"): "采购订单及供应商读取完成。",
         ("purchase", "draft"): "采购草稿及供应商、采购行检查通过。",
         ("purchase", "confirmed"): "采购订单已确认，供应商和采购行检查通过。",
@@ -884,12 +891,12 @@ def _finish_readback(state: dict[str, Any], business: dict[str, Any], runs: list
         observed = observations.get((model, record_id))
         status = "unknown"
         if observed and (model, record_id) not in failures:
-            expected = {k: v for k, v in reference["fields"].items() if k in {"name", "company_id", "partner_id", "currency_id"}}
+            expected = {k: v for k, v in reference["fields"].items() if k in {"name", "company_id", "partner_id", "currency_id"} or (business_type == "invoice_delivery" and k in {"email", "parent_id", "commercial_partner_id", "type", "function", "active"})}
             actual = {**observed.get("fields", {}), "name": observed.get("name")}
             if all(k in actual for k in expected):
                 status = "passed" if all(actual[k] == v for k, v in expected.items()) else "failed"
         # 收尾依据是原始主体与实际目标的关系，不能只看“读过一张单”。
-        relation = "partner_id" if model == "res.partner" else "company_id" if model == "res.company" else None
+        relation = "partner_id" if model == "res.partner" and reference.get("purpose") != "recipient" else "company_id" if model == "res.company" else None
         related_ids = set()
         for order_model, kind in (("sale.order", "sale_invoice"), ("purchase.order", "purchase")):
             ids = _target_order_ids_for_runs(runs, kind)
@@ -995,6 +1002,44 @@ def _finish_chain_readback(state: dict[str, Any], business: dict[str, Any], runs
     return _finish_readback(state, business, runs, observations, failures, checks, "sale_purchase_invoice", business.get("completion_target", "posted"))
 
 
+def _refresh_invoice_delivery(state, business, runs, reads):
+    from erp_harness.erp import invoice_mail
+    from erp_harness.erp.business_operations import _Evidence
+    observations, failures, checks = {}, {}, []
+    try:
+        invoice_id, recipient_id = invoice_mail.requested(business.get("references", []))
+        payload = {"model": "account.move", "method": "message_post", "instance": reads.instance,
+                   "kwargs": {"ids": [invoice_id], "partner_ids": [recipient_id]}}
+        runtime = reads.instances[reads.instance]
+        invoice_mail.parties(_Evidence(runtime, payload), invoice_id, recipient_id)
+        for ref in business["references"]:
+            row, error = _read_one(reads, ref["model"], ref["id"], list(ref["fields"]))
+            if error:
+                failures[(ref["model"], ref["id"])] = error
+                continue
+            docs = collect_documents("read_record", {"model": ref["model"], "record_id": ref["id"]}, {"result": row})
+            observations[(ref["model"], ref["id"])] = {**docs[0], "source": "refresh_native_read", "observed_at": _now()}
+        checks.append(_check("invoice_recipient_verified", "发票公司、客户与财务收件人", "passed", "直接读取公司、商业主体、联系人用途和登记邮箱。"))
+        receipts = []
+        for approval in state.get("approvals", {}).values():
+            evidence = (approval.get("prestate") or {}).get("invoice_mail")
+            if (approval.get("business_id") != business["id"] or not evidence
+                    or evidence["invoice"]["id"] != invoice_id or evidence["recipient"]["id"] != recipient_id):
+                continue
+            receipts.append(invoice_mail.verify(runtime, payload, evidence))
+        if not receipts:
+            # 已发送的发票可以只读完成；必须重新核对地址、正文、PDF 和实际通知状态。
+            evidence = invoice_mail.prestate(runtime, payload)
+            receipts.append(invoice_mail.verify(runtime, payload, evidence, historical=True))
+        sent = any(r["status"] == "satisfied" for r in receipts)
+        checks.append(_check("invoice_mail_sent", "正式 PDF 与邮件投递回执", "passed" if sent else "unknown",
+                             "收件地址、PDF 校验和及 SMTP 接受状态已核对；不代表已读。" if sent else "没有确认投递成功；禁止根据 PDF 或留言状态推断发送完成。"))
+        business["delivery_receipts"] = receipts
+    except Exception as exc:
+        checks.append(_check("invoice_recipient_verified", "发票发送核验", "unknown", str(exc)[:300]))
+    return _finish_readback(state, business, runs, observations, failures, checks, "invoice_delivery", "sent")
+
+
 def refresh_business(
     state: dict[str, Any],
     business_id: str,
@@ -1015,6 +1060,8 @@ def refresh_business(
         key=_run_sort_key,
     )
     kind = business.get("type", "sale_invoice")
+    if kind == "invoice_delivery":
+        return _refresh_invoice_delivery(state, business, runs, native_reads)
     if kind in ENTERPRISE_TYPES:
         target = business.get("completion_target") or default_target(kind)
         rows, failures, checks, targets = enterprise_view.readback(kind, target, runs, lambda model, record_id, fields: _read_one(native_reads, model, record_id, fields))

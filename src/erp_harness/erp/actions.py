@@ -56,6 +56,7 @@ from erp_harness.erp.business_operations import (
 from erp_harness.erp.reads import NativeReads
 from erp_harness.erp.store import ActionStore
 from erp_harness.erp.write_guards import business_write_prestate, manufacturing_confirm_prestate
+from erp_harness.erp import invoice_mail
 
 ACTION_TOOLS = frozenset(
     {
@@ -547,8 +548,14 @@ class NativeActions:
     def _native_prestate(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         instance = str(payload.get("instance") or self.reads.instance)
         model = str(payload.get("model") or "")
+        if kind == "method" and (model, payload.get("method")) == invoice_mail.METHOD:
+            if self.task_evidence is None:
+                raise ValueError("invoice mail requires host-bound invoice and recipient references")
+            return {"invoice_mail": invoice_mail.prestate(self.reads.instances[instance], payload)}
         if kind == "write":
             operation = payload.get("operation")
+            if model in {"mail.mail", "mail.message", "mail.notification"}:
+                raise ValueError("direct mail writes are blocked; use the verified invoice delivery method")
             ids = [int(value) for value in payload.get("record_ids") or []]
             dependencies = business_write_prestate(self.reads.instances[instance], payload)
             guarded = {"business_dependencies": dependencies} if dependencies else {}
@@ -944,6 +951,8 @@ class NativeActions:
             }
         method = str(payload["method"])
         ids = [int(value) for value in payload.get("kwargs", {}).get("ids") or []]
+        if (model, method) == invoice_mail.METHOD:
+            return invoice_mail.verify(self.reads.instances[instance], payload, row["prestate"]["invoice_mail"])
         enterprise = method_verify(self.reads.instances[instance], payload, row["prestate"], result)
         if enterprise is not None:
             return enterprise
@@ -1170,7 +1179,8 @@ class NativeActions:
         try:
             result = send()
         except BaseException as exc:
-            status = "known_failed" if self._known_failure(exc) else "needs_reconciliation"
+            # 邮件可能已离开数据库事务。即使返回 Odoo 错误，也不能自动重发。
+            status = "known_failed" if self._known_failure(exc) and "invoice_mail" not in row["prestate"] else "needs_reconciliation"
             self.store.finish(action_id, status, error=str(exc))
             if not isinstance(exc, Exception):
                 raise
@@ -1808,6 +1818,7 @@ class NativeActions:
             ) in {
                 ("sale.advance.payment.inv", "create_invoices"),
                 _OFFICIAL_INVOICE_PDF_METHOD,
+                invoice_mail.METHOD,
             }
             if args and (not required_ids or len(args) != 1 or "ids" in kwargs):
                 return {
@@ -1842,7 +1853,7 @@ class NativeActions:
                 "instance": name,
             }
             identity = self._identity(name)
-            if f"{model}.{method}" in ONE_SHOT_METHODS:
+            if f"{model}.{method}" in ONE_SHOT_METHODS or (model, method) == invoice_mail.METHOD:
                 previous = self.store.find_sent(
                     kind="method", payload=payload, identity=identity,
                     run_id=os.environ.get("HARBOR_TRIAL_ID", os.environ.get("PI_AGENT_SESSION_ID", "local")),
@@ -1873,7 +1884,9 @@ class NativeActions:
 
             def send() -> Any:
                 try:
-                    return self._send(name, model, method, **execution_kwargs(payload, action["prestate"]))
+                    call_kwargs = (invoice_mail.execution_kwargs(payload, action["prestate"]["invoice_mail"])
+                                   if (model, method) == invoice_mail.METHOD else execution_kwargs(payload, action["prestate"]))
+                    return self._send(name, model, method, **call_kwargs)
                 except xmlrpc.client.Fault as fault:
                     if _NONE_MARSHAL_FAULT_MARKER not in str(fault.faultString or ""):
                         raise

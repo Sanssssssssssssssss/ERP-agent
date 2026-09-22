@@ -255,14 +255,20 @@ class TaskEvidence:
 
     def reference_check(self, kind, payload):
         """Recheck user-quoted identities at preparation, approval and dispatch."""
+        mail = kind == "method" and (payload.get("model"), payload.get("method")) == ("account.move", "message_post")
+        if mail and not self.references:
+            raise ValueError("invoice mail requires host-bound invoice and recipient references")
         if not self.references:
             return []
         context = payload.get("kwargs", {}).get("context") if kind == "method" else payload.get("context")
         self._identity_check(payload["instance"], context)
         evidence = []
+        identity_fields = {"id", "name", "company_id", "partner_id", "currency_id"}
+        if any(r.get("purpose") == "recipient" for r in self.references):
+            identity_fields.update({"email", "parent_id", "commercial_partner_id", "type", "function", "active"})
         for reference in self.references:
             fields = {k: v for k, v in reference["fields"].items()
-                      if k in {"id", "name", "company_id", "partner_id", "currency_id"}}
+                      if k in identity_fields}
             rows = self._search({"model": reference["model"], "domain": [["id", "=", reference["id"]]]}, list(fields))
             if len(rows) != 1 or any(rows[0].get(k) != v for k, v in fields.items()):
                 raise ValueError("host-bound reference identity changed or is unavailable; renew the proposal")
@@ -270,6 +276,21 @@ class TaskEvidence:
         model = payload["model"]
         ids = payload.get("kwargs", {}).get("ids", []) if kind == "method" else payload.get("record_ids", [])
         targets = [r for r in self.references if r.get("purpose", "target") == "target"]
+        if model == "account.move.send.wizard" and any(r.get("purpose") == "recipient" for r in self.references):
+            from .invoice_mail import requested
+            invoice_id, _ = requested(self.references)
+            wizard_rows = self._search({"model": model, "domain": [["id", "in", ids]]}, ["id", "move_id"]) if ids else []
+            if kind == "write":
+                wizard_rows = [{**row, **(payload.get("values") or {})} for row in wizard_rows] if ids else (payload.get("values_list") or [payload.get("values") or {}])
+            for row in wizard_rows:
+                move = row.get("move_id")
+                if (move[0] if isinstance(move, list) and move else move) != invoice_id:
+                    raise ValueError("PDF wizard targets a different invoice than the user requested")
+        if kind == "method" and (model, payload.get("method")) == ("account.move", "message_post"):
+            from .invoice_mail import requested
+            invoice_id, recipient_id = requested(self.references)
+            if ids != [invoice_id] or payload["kwargs"].get("partner_ids") != [recipient_id]:
+                raise ValueError("mail target or recipient differs from the host-confirmed references")
         direct = [r["id"] for r in targets if r["model"] == model]
         if direct and ids and not set(ids).issubset(direct):
             raise ValueError("write target differs from the user-quoted records")

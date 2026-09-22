@@ -46,7 +46,12 @@ CONVERSATION_POLICY = (
     "You are the ordinary conversation assistant for an ERP erp_harness.app. "
     "The erp_harness.app supports sales and invoicing (sale_invoice), purchasing "
     "(purchase), and linked sales-purchase-invoice workspaces "
-    "(sale_purchase_invoice), inventory, manufacturing, payment, refund and reconciliation. "
+    "(sale_purchase_invoice), inventory, manufacturing, payment, refund, reconciliation and invoice_delivery. "
+    "Invoice delivery sends one posted customer invoice's official PDF to a registered billing contact after approval. "
+    "Read invoice.company_id and contact parent_id/commercial_partner_id/type directly; display names and invoice_origin are not relationship proof. "
+    "Use exact document/party conditions when known. For delivery propose type=invoice_delivery, completion_target=sent, "
+    "with invoice and company target references, customer target if named, and contact purpose=recipient. "
+    "Do not substitute another invoice operation when sending is requested. Respond in Simplified Chinese. "
     "It can read native Odoo data and, after approval "
     "for each write, carry out supported order, purchase, and invoice operations "
     "and read back their results. It can help prepare an order for an existing "
@@ -84,7 +89,7 @@ CONVERSATION_POLICY = (
 
 
 _REFERENCE_SPECS = {
-    "contact": ("res.partner", ["id", "name", "display_name", "email", "city", "company_id", "property_payment_term_id"]),
+    "contact": ("res.partner", ["id", "name", "display_name", "email", "city", "company_id", "parent_id", "commercial_partner_id", "type", "function", "active", "property_payment_term_id"]),
     "product": ("product.product", ["id", "name", "display_name", "default_code", "list_price"]),
     "payment_term": ("account.payment.term", ["id", "name"]),
     "sale_order": ("sale.order", ["id", "name", "state", "partner_id", "company_id", "date_order", "client_order_ref", "amount_total", "currency_id", "invoice_status"]),
@@ -93,7 +98,7 @@ _REFERENCE_SPECS = {
     "tax": ("account.tax", ["id", "name", "amount", "amount_type", "type_tax_use", "company_id"]),
     "sale_line": ("sale.order.line", ["id", "order_id", "product_id", "product_uom_qty", "price_unit", "tax_ids"]),
     "purchase_line": ("purchase.order.line", ["id", "order_id", "product_id", "product_qty", "price_unit", "tax_ids"]),
-    "invoice": ("account.move", ["id", "name", "state", "move_type", "partner_id", "amount_total", "currency_id", "payment_state", "invoice_origin"]),
+    "invoice": ("account.move", ["id", "name", "state", "move_type", "company_id", "partner_id", "commercial_partner_id", "amount_total", "currency_id", "payment_state", "invoice_origin", "invoice_line_ids", "invoice_pdf_report_id"]),
     "transfer": ("stock.picking", ["id", "name", "state", "partner_id", "origin", "scheduled_date"]),
     "production": ("mrp.production", ["id", "name", "state", "product_id", "product_qty"]),
     "payment": ("account.payment", ["id", "name", "state", "partner_id", "amount", "currency_id", "is_matched"]),
@@ -134,10 +139,10 @@ def resolve_references(reads, references, source_text):
     if not isinstance(references, list) or len(references) > 20:
         raise ValueError("references must contain at most 20 records")
     resolved = []
-    for reference in references:
+    for reference in sorted(references, key=lambda r: 2 if isinstance(r, dict) and r.get("purpose") == "recipient" else 0 if isinstance(r, dict) and r.get("resource") == "company" else 1):
         if (not isinstance(reference, dict) or set(reference) - {"resource", "id", "quote", "purpose"}
                 or not {"resource", "id", "quote"}.issubset(reference)
-                or reference.get("purpose", "target") not in {"target", "source"}):
+                or reference.get("purpose", "target") not in {"target", "source", "recipient"}):
             raise ValueError("reference requires resource, id and an exact quote from the user")
         resource, record_id, quote = (reference[k] for k in ("resource", "id", "quote"))
         resource = "contact" if resource == "customer" else resource  # 旧提案只在入口兼容。
@@ -146,11 +151,26 @@ def resolve_references(reads, references, source_text):
         model, fields = _REFERENCE_SPECS[resource]
         names = [f for f in ("name", "default_code", "client_order_ref", "partner_ref", "email") if f in fields]
         domain = ["|"] * (len(names) - 1) + [[f, "=", quote] for f in names]
+        if resource == "invoice" and reference.get("purpose", "target") == "target":
+            companies = [r["id"] for r in resolved if r["model"] == "res.company" and r.get("purpose", "target") == "target"]
+            if len(companies) == 1:
+                domain += [["company_id", "=", companies[0]]]
+        if reference.get("purpose") == "recipient":
+            invoices = [r for r in resolved if r["model"] == "account.move" and r.get("purpose", "target") == "target"]
+            if resource != "contact" or len(invoices) != 1:
+                raise ValueError("recipient needs one resolved target invoice first")
+            commercial = invoices[0]["fields"].get("commercial_partner_id")
+            if not commercial:
+                raise ValueError("invoice commercial customer is unavailable")
+            domain += [["commercial_partner_id", "=", commercial[0]], ["active", "=", True]]
         result = reads.call("search_records", {"model": model, "domain": domain, "fields": fields, "limit": 2})
         rows = result.get("result", [])
         if not result.get("success") or len(rows) != 1 or rows[0].get("id") != record_id:
             raise ValueError("quoted target does not resolve uniquely to that ID in the current role; read or clarify it first")
         resolved.append({**reference, "model": model, "fields": rows[0]})
+    if any(r.get("purpose") == "recipient" for r in resolved):
+        from erp_harness.erp.invoice_mail import requested
+        requested(resolved)
     return resolved
 
 
@@ -510,7 +530,10 @@ async def _propose_business(_call_id, arguments, _signal=None, _on_update=None):
             return AgentToolResult(content=json.dumps(payload), details=payload)
         if references:
             try:
-                resolve_references(_odoo_reads(), references, "\n".join(m["text"] for m in _SOURCE_MESSAGES))
+                resolved = resolve_references(_odoo_reads(), references, "\n".join(m["text"] for m in _SOURCE_MESSAGES))
+                if kind == "invoice_delivery":
+                    from erp_harness.erp.invoice_mail import requested
+                    requested(resolved)
             except (ValueError, TypeError, RuntimeError) as exc:
                 payload = {"success": False, "error": str(exc)}
                 return AgentToolResult(content=json.dumps(payload, ensure_ascii=False), details=payload)
@@ -542,6 +565,7 @@ PROPOSE_BUSINESS = AgentTool(
         " Write proposals require references for the user-named existing document or customer/supplier; include the named company too. "
         "Use only IDs observed in Odoo and quote the exact user-supplied name/reference; digits inside names are not IDs. "
         "purpose=target binds the intended write subject; purpose=source is a reference document used for copying/derivation, not the write target. "
+        "For invoice_delivery use purpose=recipient for the billing contact; identical names are resolved within the target invoice's commercial customer. "
         "Preserve constraints exactly: no receiving means do not complete a receipt; confirmation may create pending transfers."
     ),
     parameters={
@@ -555,7 +579,7 @@ PROPOSE_BUSINESS = AgentTool(
             "completion_target": {"type": "string", "enum": list(COMPLETION_TARGETS)},
             "references": {"type": "array", "maxItems": 20, "items": {"type": "object", "properties": {
                 "resource": {"type": "string", "enum": list(_REFERENCE_SPECS)}, "id": {"type": "integer", "minimum": 1},
-                "quote": {"type": "string"}, "purpose": {"type": "string", "enum": ["target", "source"]}}, "required": ["resource", "id", "quote"], "additionalProperties": False}},
+                "quote": {"type": "string"}, "purpose": {"type": "string", "enum": ["target", "source", "recipient"]}}, "required": ["resource", "id", "quote"], "additionalProperties": False}},
         },
         "required": ["type", "title", "goal"],
         "additionalProperties": False,

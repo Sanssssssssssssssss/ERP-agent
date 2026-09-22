@@ -943,7 +943,7 @@ class WorkbenchHostTests(unittest.TestCase):
         self.assertEqual(env["ODOO_ACTION_APPROVAL_MODE"], "host")
         self.assertEqual(env["ODOO_MCP_ENABLE_WRITES"], "1")
         from erp_harness.erp.business_operations import ENTERPRISE_METHODS
-        expected = {"sale.order.action_confirm", "purchase.order.button_confirm", "purchase.order.button_approve", "sale.advance.payment.inv.create_invoices", "account.move.action_post", "account.move.send.wizard.action_send_and_print", *ENTERPRISE_METHODS}
+        expected = {"sale.order.action_confirm", "purchase.order.button_confirm", "purchase.order.button_approve", "sale.advance.payment.inv.create_invoices", "account.move.action_post", "account.move.message_post", "account.move.send.wizard.action_send_and_print", *ENTERPRISE_METHODS}
         self.assertEqual(set(env["ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS"].split(",")), expected)
         self.assertNotIn("ODOO_MCP_POLICY_FILE", env)
         self.assertNotIn("PYTHONPATH", env)

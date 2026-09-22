@@ -113,9 +113,9 @@ export function toolStatusLabel(status?: string) { return labelFor({ completed: 
 
 export function activityPhaseLabel(phase?: string) { return ({ idle: '待执行', planning: '准备中', model: '分析业务目标', reading: '读取业务数据', tool: '调用业务工具', approval: '等待确认', executing: '执行中', cancelling: '正在取消', verifying: '回读核验', completed: '本轮结束', failed: '执行失败', interrupted: '已中断', cancelled: '已取消', reconciliation: '等待对账', unknown: '状态未知' } as Record<string, string>)[phase || ''] || '状态未知' }
 
-export function businessTypeMeta(type?: string) { return ({ inventory: { title: '库存收发与退货', short: '库存' }, manufacturing: { title: '制造与补货', short: '制造' }, payment: { title: '客户收款与供应商付款', short: '收付款' }, refund: { title: '退货退款与贷项', short: '退款' }, reconciliation: { title: '银行与账务核销', short: '核销' }, sale_invoice: { title: '销售与开票', short: '销售发票' }, purchase: { title: '采购', short: '采购流程' }, sale_purchase_invoice: { title: '销售 → 采购 → 开票', short: '业务链' } } as Record<string, { title: string; short: string }>)[type || ''] || { title: '业务工作区', short: '业务' } }
+export function businessTypeMeta(type?: string) { return ({ invoice_delivery: { title: '发票发送', short: '发送发票' }, inventory: { title: '库存收发与退货', short: '库存' }, manufacturing: { title: '制造与补货', short: '制造' }, payment: { title: '客户收款与供应商付款', short: '收付款' }, refund: { title: '退货退款与贷项', short: '退款' }, reconciliation: { title: '银行与账务核销', short: '核销' }, sale_invoice: { title: '销售与开票', short: '销售发票' }, purchase: { title: '采购', short: '采购流程' }, sale_purchase_invoice: { title: '销售 → 采购 → 开票', short: '业务链' } } as Record<string, { title: string; short: string }>)[type || ''] || { title: '业务工作区', short: '业务' } }
 
-export function completionTargetLabel(target?: string, type?: string) { const effective = target || (type === 'purchase' ? 'confirmed' : ['inventory', 'manufacturing'].includes(type || '') ? 'done' : ['payment', 'refund', 'reconciliation'].includes(type || '') ? 'reconciled' : 'posted'); return ({ read_only: '只读浏览', draft: '保留草稿', confirmed: '完成确认', posted: ['payment', 'refund'].includes(type || '') ? '单据已过账' : '发票已过账', done: '业务已完成', reconciled: '账务与银行已核销' } as Record<string, string>)[effective] || '完成目标未知' }
+export function completionTargetLabel(target?: string, type?: string) { const effective = target || (type === 'purchase' ? 'confirmed' : ['inventory', 'manufacturing'].includes(type || '') ? 'done' : ['payment', 'refund', 'reconciliation'].includes(type || '') ? 'reconciled' : 'posted'); return ({ sent: '交付邮件服务器', read_only: '只读浏览', draft: '保留草稿', confirmed: '完成确认', posted: ['payment', 'refund'].includes(type || '') ? '单据已过账' : '发票已过账', done: '业务已完成', reconciled: '账务与银行已核销' } as Record<string, string>)[effective] || '完成目标未知' }
 
 export function materialRowLabel(material: MaterialRecord) { if (material.row_count == null) return '行数未知'; return material.media_type === 'text/csv' ? `${Math.max(0, material.row_count - 1)} 条数据` : `${material.row_count} 行`; }
 
@@ -124,6 +124,7 @@ export function stageLabel(stage?: string) { return ({ material: '材料', read:
 export function stageStatusLabel(status?: string) { return ({ pending: '待处理', active: '进行中', awaiting_approval: '等待审批', observed: '已观测', verified: '已核验', failed: '失败', unknown: '未知' } as Record<string, string>)[status || ''] || '未知' }
 
 export function outcomeScopeLabel(scope?: string) { const kind = scope?.split('_')[0]; if (['inventory', 'manufacturing', 'payment', 'refund', 'reconciliation'].includes(kind || '')) return `${businessTypeMeta(kind).title}核验`; return ({
+  invoice_delivery_sent_checks: '发票与收件人投递核验',
   sale_invoice_read_only_checks: '销售订单与客户发票只读浏览',
   sale_invoice_draft_checks: '销售订单与客户发票草稿核验',
   sale_invoice_confirmed_checks: '销售订单与客户发票确认核验',
@@ -160,6 +161,7 @@ export function operationLabel(operation: string) {
 export function modelLabel(model: string) { return documentModelLabel(model) }
 
 export function readableApprovalTitle(approval: Approval) {
+  if (approval.prestate && typeof approval.prestate === 'object' && 'invoice_mail' in approval.prestate) return '发送正式发票邮件'
   const title = approval.title?.trim()
   const generic = !title || ['erp write approval', 'write approval', 'approval required', 'business approval', 'action approval'].includes(title.toLowerCase())
   if (!generic) return title

@@ -59,6 +59,7 @@ def child_environment(session_id: str, run_id: str) -> dict[str, str]:
         "purchase.order.button_approve",
         "sale.advance.payment.inv.create_invoices",
         "account.move.action_post",
+        "account.move.message_post",
         "account.move.send.wizard.action_send_and_print",
         *ENTERPRISE_METHODS,
     ))

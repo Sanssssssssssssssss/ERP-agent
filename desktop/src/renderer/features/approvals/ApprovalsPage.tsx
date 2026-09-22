@@ -48,6 +48,7 @@ export function ApprovalRow({ approval, documents, disabled, onDecision, onRecon
         <StatusBadge status={expired ? 'expired' : approval.status} label={expired ? '已过期' : approvalStatusLabel(approval.status)} />
       </div>
       <div className="approval-facts"><span>{approvalRecordText(approval, documents)}</span><span>{pending ? formatExpiry(approval.expires_at) : '审批已结束'}</span></div>
+      <InvoiceMailPreview approval={approval} />
       <ApprovalFieldDiff approval={approval} documents={documents} />
       <details>
         <summary>查看拟提交值与执行前状态</summary>
@@ -59,6 +60,13 @@ export function ApprovalRow({ approval, documents, disabled, onDecision, onRecon
       {approval.result != null && <details className={`receipt receipt-details ${pending ? 'receipt-preflight' : ''}`}><summary>{approvalResultLabel(approval.status)}</summary><pre>{jsonText(approval.result)}</pre></details>}
     </article>
   )
+}
+
+function InvoiceMailPreview({ approval }: { approval: Approval }) {
+  const state = approval.prestate as { invoice_mail?: { invoice: { name: string; amount_total: number }; company: { name: string; email: string }; recipient: { name: string }; email_from: string; email_to: string; attachment: { name: string; checksum: string }; subject: string; body: string } } | null
+  const mail = state?.invoice_mail
+  if (!mail) return null
+  return <section className="field-diff" aria-label="待发送邮件"><div className="field-diff-note"><p><strong>{mail.company.name} · {mail.invoice.name}</strong></p><p>发件人：{mail.company.name} · {mail.company.email}</p><p>收件人：{mail.recipient.name} · {mail.email_to}</p><p>附件：{mail.attachment.name}</p><p>主题：{mail.subject}</p><p>{mail.body}</p><small>仅发送给此登记邮箱，不抄送关注者。附件指纹：{mail.attachment.checksum.slice(0, 12)}（完整值见执行前状态）。</small></div></section>
 }
 
 export function ApprovalFieldDiff({ approval, documents }: { approval: Approval; documents: Document[] }) {
