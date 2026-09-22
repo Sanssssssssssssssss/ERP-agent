@@ -83,7 +83,7 @@ CONVERSATION_POLICY = (
 
 
 _REFERENCE_SPECS = {
-    "customer": ("res.partner", ["id", "name", "display_name", "email", "city", "company_id", "property_payment_term_id"]),
+    "contact": ("res.partner", ["id", "name", "display_name", "email", "city", "company_id", "property_payment_term_id"]),
     "product": ("product.product", ["id", "name", "display_name", "default_code", "list_price"]),
     "payment_term": ("account.payment.term", ["id", "name"]),
     "sale_order": ("sale.order", ["id", "name", "state", "partner_id", "company_id", "date_order", "client_order_ref", "amount_total", "currency_id", "invoice_status"]),
@@ -114,8 +114,8 @@ def _task_entities(reads, source_text, knowledge):
     hints = [{"model": "res.company", "id": r["id"], "name": r["name"], "filter_field": "company_id", "contact_id": r["partner_id"][0]}
              for r in companies if normalized(r["name"]) in source]
     found = knowledge.search_knowledge(source_text, "res.partner", limit=20)
-    if found.get("status") == "index_missing" or not set(_REFERENCE_SPECS["customer"][1]).issubset(found.get("coverage", {}).get("fields", [])):
-        indexed = knowledge.index_knowledge("res.partner", fields=_REFERENCE_SPECS["customer"][1], full_refresh=True)
+    if found.get("status") == "index_missing" or not set(_REFERENCE_SPECS["contact"][1]).issubset(found.get("coverage", {}).get("fields", [])):
+        indexed = knowledge.index_knowledge("res.partner", fields=_REFERENCE_SPECS["contact"][1], full_refresh=True)
         if indexed.get("success"):
             found = knowledge.search_knowledge(source_text, "res.partner", limit=20)
     ids = [r["record_id"] for r in found.get("results", [])] if found.get("success") else []
@@ -139,6 +139,7 @@ def resolve_references(reads, references, source_text):
                 or reference.get("purpose", "target") not in {"target", "source"}):
             raise ValueError("reference requires resource, id and an exact quote from the user")
         resource, record_id, quote = (reference[k] for k in ("resource", "id", "quote"))
+        resource = "contact" if resource == "customer" else resource  # 旧提案只在入口兼容。
         if resource not in _REFERENCE_SPECS or type(record_id) is not int or record_id < 1 or not isinstance(quote, str) or not quote or quote not in source_text:
             raise ValueError("reference must cite the user's exact name or document reference")
         model, fields = _REFERENCE_SPECS[resource]
@@ -233,6 +234,7 @@ async def _read_odoo_reference(_call_id, arguments, _signal=None, _on_update=Non
         payload = {"success": False, "status": "invalid", "error": error}
         return AgentToolResult(content=json.dumps(payload), details=payload)
     resource = values.get("resource")
+    resource = "contact" if resource == "customer" else resource  # 旧 trace/会话仍可回读。
     query = values.get("query", "")
     limit = values.get("limit", READ_MAX_ROWS)
     if not isinstance(resource, str) or resource not in _REFERENCE_SPECS:
@@ -303,7 +305,7 @@ async def _read_odoo_reference(_call_id, arguments, _signal=None, _on_update=Non
         if _SOURCE_MESSAGES and _TASK_ENTITIES:
             payload["user_named_entities"] = _TASK_ENTITIES
             payload["entity_semantics"] = "Names recalled from the original user text. Internal ERP company scope uses company_id; its res.partner contact uses partner_id only when the user means that contact as counterparty. Digits in names are not IDs. These hints are not exhaustive."
-        if resource == "customer":
+        if resource == "contact":
             # res.partner 同时存客户、供应商、员工和内部公司联系人，不能凭资源别名判定角色。
             company_rows = reads.call("search_records", {"model": "res.company", "domain": [["partner_id", "in", [r["id"] for r in records]]],
                                                         "fields": ["id", "name", "partner_id"], "limit": READ_PAGE_MAX}) if records else {}
@@ -313,7 +315,7 @@ async def _read_odoo_reference(_call_id, arguments, _signal=None, _on_update=Non
                 record["entity_kind"] = "internal_company_contact" if record["id"] in companies else "contact"
                 if record["id"] in companies:
                     record["internal_company"] = companies[record["id"]]
-            payload["resource_semantics"] = "customer is the legacy name of a res.partner contact lookup. A contact can be a customer, supplier, employee or internal company contact; this lookup alone does not establish a customer relationship. Internal company ownership uses res.company IDs in company_id."
+            payload["resource_semantics"] = "A contact can be a customer, supplier, employee or internal company contact; this lookup alone does not establish a customer relationship. Internal company ownership uses res.company IDs in company_id."
         if records and all("state" in row for row in records):
             from collections import Counter
             payload["page_counts_by_state"] = dict(Counter(row["state"] for row in records))
@@ -373,8 +375,8 @@ READ_ODOO_REFERENCE = AgentTool(
     label="Read Odoo reference",
     description=(
         "Read current ERP facts. S... sales use sale_order; P... purchase orders use purchase_order. "
-        "company means the internal document owner (company_id). customer searches all contacts (res.partner), "
-        "including suppliers and internal company contacts; it does not establish a customer role (partner_id). "
+        "company means the internal document owner (company_id). contact searches all contacts (res.partner), "
+        "including suppliers and internal company contacts; it does not establish a customer role. "
         "query is a name/reference or space-separated text fragments. Use domain for company, partner ID, "
         "state, amount and date conditions, order for sorting, include_count for the full matching count. "
         "A name's digits are not an ID: resolve the full customer/supplier name first. "

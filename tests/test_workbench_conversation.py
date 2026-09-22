@@ -244,7 +244,9 @@ class WorkbenchConversationTests(unittest.TestCase):
         details = result.details
         self.assertEqual(fake.name, "search_records")
         self.assertEqual(fake.arguments["model"], "res.partner")
-        self.assertEqual(fake.arguments["fields"], conversation._REFERENCE_SPECS["customer"][1])
+        self.assertEqual(fake.arguments["fields"], conversation._REFERENCE_SPECS["contact"][1])
+        self.assertEqual(details["resource"], "contact")
+        self.assertNotIn("customer", conversation.READ_ODOO_REFERENCE.parameters["properties"]["resource"]["enum"])
         self.assertEqual(len(details["records"]), 5)
         self.assertEqual(details["records"][1]["entity_kind"], "internal_company_contact")
         self.assertEqual(details["records"][1]["internal_company"], [2, "内部公司"])
