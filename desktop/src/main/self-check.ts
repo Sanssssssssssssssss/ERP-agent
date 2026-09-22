@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { publicSettings, saveSettings, secretEnvironment } from "./settings";
-import { assertRequest, businessScope, canChangeSettings, observedRecordUrl, recordedArtifactPath, safeMaterialName, strictBase64 } from "./ipc-security";
+import { assertRequest, businessScope, canChangeSettings, configuredOdooUrl, observedRecordUrl, recordedArtifactPath, safeMaterialName, strictBase64 } from "./ipc-security";
 import { safeErrorMessage } from "./host";
 
 export async function runSelfCheck(): Promise<void> {
@@ -65,6 +65,8 @@ export async function runSelfCheck(): Promise<void> {
   assert.doesNotThrow(() => assertRequest({ method: "health", params: {} }));
   assert.doesNotThrow(() => assertRequest({ method: "check_connection", params: {} }));
   assert.doesNotThrow(() => assertRequest({ method: "get_settings" }));
+  assert.doesNotThrow(() => assertRequest({ method: "open_odoo" }));
+  assert.throws(() => assertRequest({ method: "open_odoo", params: { url: "https://other.example" } }), /INVALID_PARAMS/);
   assert.throws(() => assertRequest({ method: "shell_exec" }), /METHOD_NOT_ALLOWED/);
   assert.throws(() => assertRequest({ method: "health", params: [] }), /INVALID_PARAMS/);
   assert.doesNotThrow(() => assertRequest({ method: "export_business_report", params: { session_id: "s_a", business_id: "b_a" } }));
@@ -72,6 +74,12 @@ export async function runSelfCheck(): Promise<void> {
   assert.throws(() => businessScope({ session_id: "s_a", business_id: "../b" }), /INVALID_BUSINESS_SCOPE/);
   assert.throws(() => businessScope({ session_id: "s_a", business_id: "b_a", run_id: null }), /INVALID_BUSINESS_SCOPE/);
   const documents = [{ id: "42", model: "sale.order", name: "SO42", state: "sale", fields: {}, source: "native_read_receipt" }];
+  assert.equal(configuredOdooUrl("http://127.0.0.1:18079", "enterprise"), "http://127.0.0.1:18079/web?db=enterprise");
+  assert.equal(configuredOdooUrl("https://odoo.example/erp/", "demo"), "https://odoo.example/erp/web?db=demo");
+  assert.throws(() => configuredOdooUrl("", "demo"), /ODOO_NOT_CONFIGURED/);
+  assert.throws(() => configuredOdooUrl("https://odoo.example", "demo&other=yes"), /ODOO_NOT_CONFIGURED/);
+  for (const endpoint of ["file:///C:/Windows", "javascript:alert(1)", "http://remote.example"]) assert.throws(() => configuredOdooUrl(endpoint, "demo"), /PROTOCOL_INVALID/);
+  for (const endpoint of ["https://user:secret@odoo.example", "https://odoo.example?key=secret", "https://odoo.example#secret"]) assert.throws(() => configuredOdooUrl(endpoint, "demo"), /CREDENTIALS_INVALID/);
   assert.equal(observedRecordUrl("http://127.0.0.1:18069", "demo", documents, "sale.order", 42), "http://127.0.0.1:18069/web?db=demo#id=42&model=sale.order&view_type=form");
   assert.throws(() => observedRecordUrl("https://odoo.example", "demo", documents, "account.move", 42), /RECORD_NOT_OBSERVED/);
   assert.throws(() => observedRecordUrl("https://odoo.example", "demo", documents, "sale.order", 43), /RECORD_NOT_OBSERVED/);

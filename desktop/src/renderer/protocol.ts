@@ -24,6 +24,7 @@ import type {
 
 export type {
   Approval,
+  BusinessReceipt,
   BusinessArtifact,
   Business,
   BusinessDetail,

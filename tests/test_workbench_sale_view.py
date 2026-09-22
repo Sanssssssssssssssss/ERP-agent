@@ -42,6 +42,107 @@ RECORDS = {
 
 
 class SaleViewReadbackTests(unittest.TestCase):
+    def test_malformed_receipt_is_unknown_without_hiding_valid_siblings(self):
+        valid = {"action_id": "valid", "status": "verified", "payload": {"model": "sale.order", "method": "action_confirm"},
+                 "prestate": {}, "verification": {"status": "satisfied"}}
+        for field in ("payload", "prestate", "verification"):
+            with self.subTest(field=field):
+                state = _state()
+                state["runs"]["r2"]["events"] = [{"type": "run_finished"}]
+                state["receipt_ledger"] = {"r2": {"available": True, "rows": [
+                    {**valid, "action_id": "broken", field: [1]}, valid,
+                ]}}
+                receipts = business_detail(state, "b1")["receipts"]
+                self.assertEqual(next(r for r in receipts if r["id"] == "broken")["status"], "unknown")
+                self.assertEqual(next(r for r in receipts if r["id"] == "valid")["status"], "verified")
+                self.assertEqual(next(r for r in receipts if r["kind"] == "archive")["status"], "unknown")
+
+    def test_receipt_ignores_invalid_timestamp_and_preserves_unsent_expiry(self):
+        state = _state()
+        state["receipt_ledger"] = {"r2": {"available": True, "rows": [
+            {"action_id": "valid", "status": "verified", "payload": {}, "verification": {"status": "satisfied"}, "finished_at": 1e100},
+            {"action_id": "expired", "status": "expired", "payload": {}, "sent_at": None},
+        ]}}
+        receipts = business_detail(state, "b1")["receipts"]
+        valid = next(r for r in receipts if r["id"] == "valid")
+        self.assertEqual(valid["status"], "verified")
+        self.assertNotIn("observed_at", valid)
+        expired = next(r for r in receipts if r["id"] == "expired")
+        self.assertEqual(expired["status"], "not_executed")
+        self.assertIn("审批已过期", expired["detail"])
+
+    def test_invalid_tool_arguments_do_not_become_mail_evidence(self):
+        state = _state()
+        state["runs"]["r2"]["tools"] = [{"id": "bad-arguments", "name": "execute_method", "arguments": [1],
+                                            "result": {"success": False, "error": "invalid arguments"}}]
+        mail = next(r for r in business_detail(state, "b1")["receipts"] if r["kind"] == "email")
+        self.assertEqual(mail["status"], "not_observed")
+
+    def test_failed_run_keeps_pdf_and_comment_receipts_but_never_claims_email(self):
+        state = _state()
+        state["runs"]["r2"].update(status="failed", summary="邮件已经发送", tools=[{
+            "id": "blocked-email", "name": "mcp_odoo_execute_method", "status": "error",
+            "arguments": {"model": "account.move.send.wizard", "method": "action_send_and_print"},
+            "result": {"success": False, "error": "official invoice PDF requires sending_methods=false or []; email sending is blocked"},
+        }])
+        state["receipt_ledger"] = {"r2": {"available": True, "rows": [
+            {"action_id": "pdf", "kind": "method", "status": "verified", "payload": {"model": "account.move.send.wizard", "method": "action_send_and_print"},
+             "verification": {"status": "satisfied", "evidence": {"invoice_records": [{"id": 31, "is_move_sent": True}]}}},
+            {"action_id": "comment", "kind": "chatter", "status": "verified", "payload": {"model": "account.move", "method": "message_post", "record_ids": [31]},
+             "verification": {"status": "satisfied", "evidence": {"message_ids": [7433]}}},
+        ]}}
+        receipts = business_detail(state, "b1")["receipts"]
+        self.assertEqual({r["id"] for r in receipts if r["kind"] == "action" and r["status"] == "verified"}, {"pdf", "comment"})
+        mail = [r for r in receipts if r["kind"] == "email"]
+        self.assertEqual([(r["status"], r["tool_id"]) for r in mail], [("failed", "blocked-email")])
+        self.assertIn("不证明邮件", next(r for r in receipts if r["id"] == "pdf")["detail"])
+        self.assertEqual(next(r for r in receipts if r["kind"] == "archive")["status"], "verified")
+
+    def test_prior_sent_receipt_does_not_become_a_new_run_delivery(self):
+        state = _state()
+        state["receipt_ledger"] = {"r1": {"available": True, "rows": [{
+            "action_id": "old-mail", "kind": "method", "status": "verified", "payload": {"model": "account.move", "method": "message_post"},
+            "prestate": {"invoice_mail": {"email_to": "billing@example.test", "attachment": {"name": "INV.pdf"}}},
+            "verification": {"status": "satisfied", "evidence": {"delivery": "smtp_accepted"}},
+        }]}, "r2": {"available": True, "rows": []}}
+        receipts = business_detail(state, "b1")["receipts"]
+        previous = next(r for r in receipts if r["id"] == "old-mail")
+        self.assertEqual((previous["status"], previous["run_id"]), ("verified", "r1"))
+        self.assertIn("不能证明收件人", previous["detail"])
+        latest = next(r for r in receipts if r["kind"] == "email" and r["run_id"] == "r2")
+        self.assertEqual(latest["status"], "not_observed")
+        self.assertIn("本轮没有", latest["detail"])
+
+    def test_missing_ledger_does_not_promote_saved_approval_or_summary(self):
+        state = _state()
+        state["approvals"] = {"a1": {"action_id": "a1", "business_id": "b1", "run_id": "r2", "status": "verified"}}
+        state["runs"]["r2"]["summary"] = "已发送邮件，一切完成。"
+        receipts = business_detail(state, "b1")["receipts"]
+        self.assertEqual(next(r for r in receipts if r["id"] == "a1")["status"], "unknown")
+        self.assertEqual(next(r for r in receipts if r["kind"] == "archive")["status"], "unknown")
+        self.assertEqual(next(r for r in receipts if r["kind"] == "email")["status"], "not_observed")
+
+    def test_live_delivery_readback_is_scoped_and_does_not_claim_a_resend(self):
+        state = _state()
+        state["businesses"]["b1"].update(delivery_receipts_run_id="r2", delivery_receipts=[{
+            "status": "satisfied", "evidence": {"delivery": "smtp_accepted", "invoice_id": 31, "email_to": "billing@example.test"},
+        }])
+        mail = next(r for r in business_detail(state, "b1")["receipts"] if r["kind"] == "email" and r["run_id"] == "r2")
+        self.assertEqual(mail["status"], "verified")
+        self.assertIn("不代表本轮重新发送", mail["detail"])
+        state["businesses"]["b1"]["delivery_receipts_run_id"] = "r1"
+        mail = next(r for r in business_detail(state, "b1")["receipts"] if r["kind"] == "email" and r["run_id"] == "r2")
+        self.assertEqual(mail["status"], "not_observed")
+
+    def test_activity_keeps_running_parallel_tool_visible_after_later_tool_finishes(self):
+        state = _state()
+        state["runs"]["r2"].update(status="running", tools=[
+            {"id": "slow", "name": "read_record", "status": "running", "round": 3},
+            {"id": "fast", "name": "find_records", "status": "completed", "round": 3},
+        ])
+        activity = business_detail(state, "b1")["activity"]
+        self.assertEqual((activity["phase"], activity["tool_id"], activity["tool_status"], activity["round"]), ("tool", "slow", "running", 3))
+
     def test_verified_method_receipt_uses_argument_identity_and_evidence_records(self):
         runs = [{
             "id": "r-confirm", "started_at": "2026-01-02T00:00:00Z",

@@ -1,5 +1,5 @@
 import { Button as RadixButton,IconButton as RadixIconButton,Tooltip as RadixTooltip } from '@radix-ui/themes'
-import { Activity,ArrowUpRight,Minus,Settings2,X } from 'lucide-react'
+import { Activity,ArrowUpRight,ExternalLink,LoaderCircle,Minus,Settings2,X } from 'lucide-react'
 import { type CSSProperties } from 'react'
 import { BusinessWorkspace } from './features/business/BusinessWorkspace'
 import { ArchiveDialog,BlockedSendDialog,ConversationPane,SessionRail } from './features/conversation/ConversationPane'
@@ -58,6 +58,7 @@ export default function App() {
     railCollapsed,
     setRailCollapsed,
     exporting,
+    openingOdoo,
     exportPath,
     pendingMaterials,
     setPendingMaterials,
@@ -94,6 +95,7 @@ export default function App() {
     retryHealth,
     exportBusiness,
     openOdooRecord,
+    openOdoo,
     openArtifact,
     openTraceTarget,
     resizeBusiness,
@@ -109,6 +111,7 @@ export default function App() {
         <div className="brand-lockup"><span className="brand-mark"><Activity size={16} strokeWidth={2.5} /></span><span>ERP-agent</span><small>Odoo 业务执行</small></div>
         <button className="window-bar-state" onClick={() => setConnectionDetailsOpen(true)} aria-label="查看连接状态"><span className={`connection-dot ${connection}`} />{connectionLabel(connection)}<span className="health-separator">·</span><span className={`odoo-health odoo-${odooHealthStatus(health)}`}>Odoo {healthLabel(odooHealthStatus(health))}</span><ArrowUpRight size={13} /></button>
         <RadixTooltip content="配置模型与 Odoo 连接"><RadixButton ref={settingsButtonRef} className="settings-button" variant="soft" onClick={() => void openSettings()}><Settings2 size={15} />连接设置</RadixButton></RadixTooltip>
+        <RadixButton className="open-odoo-button" variant="soft" disabled={openingOdoo} onClick={() => void openOdoo()}>{openingOdoo ? <LoaderCircle className="spin" size={15} /> : <ExternalLink size={15} />}打开 Odoo</RadixButton>
         <div className="window-actions">
           <RadixTooltip content="最小化"><RadixIconButton variant="ghost" aria-label="最小化" onClick={() => void window.workbench?.windowControl('minimize')}><Minus size={16} /></RadixIconButton></RadixTooltip>
           <RadixTooltip content="最大化"><RadixIconButton variant="ghost" aria-label="最大化" onClick={() => void window.workbench?.windowControl('maximize')}><span className="window-maximize-glyph" /></RadixIconButton></RadixTooltip>
@@ -144,6 +147,7 @@ export default function App() {
           session={session}
           activeBusiness={activeBusiness}
           detail={businessDetail}
+          liveMessages={liveMessages}
           tab={tab}
           trace={trace}
           traceTarget={traceTarget}
@@ -163,7 +167,7 @@ export default function App() {
           onTraceTarget={openTraceTarget}
           onToggleConversation={toggleConversation}
           conversationOpen={conversationOpen}
-          onExport={() => void exportBusiness()}
+          onExport={(runId) => void exportBusiness(runId)}
           exporting={exporting}
           exportPath={exportPath}
           onOpenDocument={(document) => void openOdooRecord(document)}

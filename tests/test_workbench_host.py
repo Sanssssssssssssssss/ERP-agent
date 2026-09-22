@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import io
 import os
+import sqlite3
 import sys
 import tempfile
 import threading
 import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from pathlib import Path
@@ -978,6 +980,56 @@ class WorkbenchHostTests(unittest.TestCase):
     def test_state_store_is_single_host_locked(self):
         with self.assertRaises(RuntimeError):
             Workbench(self.tmp.name, repo=Path.cwd())
+
+    def test_execution_receipts_read_durable_ledger_and_do_not_create_missing_evidence(self):
+        business, run = self._run("durable receipt")
+        row = self._action(run)
+        ledger_path = Path(self.tmp.name) / "runs" / run["id"] / "odoo-actions.sqlite3"
+        ledger = ActionStore(ledger_path)
+        ledger.finish(row["action_id"], "verified", verification={"status": "satisfied"})
+        ledger.close()
+        run["tools"] = [{"id": "t1", "name": "execute_method", "status": "completed", "arguments": {}, "result": {}}]
+        self.host._finalize_run(run, "failed", "provider unavailable after write")
+        receipt = next(r for r in self.host.get_business(self.sid, business["id"])["receipts"] if r.get("action_id") == row["action_id"])
+        self.assertEqual(receipt["status"], "verified")
+        ledger_path.unlink()
+        self.assertIsNone(self.host._action_row(run, row["action_id"]))
+        archive = next(r for r in self.host.get_business(self.sid, business["id"])["receipts"] if r["kind"] == "archive")
+        self.assertEqual(archive["status"], "unknown")
+        self.assertFalse(ledger_path.exists())
+
+    def test_receipt_read_does_not_create_schema_in_an_unrelated_database(self):
+        business, run = self._run("unrelated ledger")
+        ledger_path = Path(self.tmp.name) / "runs" / run["id"] / "odoo-actions.sqlite3"
+        ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(ledger_path)) as database:
+            database.execute("CREATE TABLE unrelated(id INTEGER)")
+            database.commit()
+        original = ledger_path.read_bytes()
+        run["tools"] = [{"id": "t1", "name": "read_record", "status": "completed"}]
+        self.assertIsNone(self.host._action_row(run, "missing"))
+        archive = next(r for r in self.host.get_business(self.sid, business["id"])["receipts"] if r["kind"] == "archive")
+        self.assertEqual(archive["status"], "unknown")
+        self.assertEqual(ledger_path.read_bytes(), original)
+        with closing(sqlite3.connect(ledger_path)) as database:
+            self.assertEqual(database.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall(), [("unrelated",)])
+
+    def test_broken_ledger_json_does_not_hide_a_verified_sibling(self):
+        business, run = self._run("partial ledger")
+        broken = self._action(run, key="broken")
+        valid = self._action(run, key="valid")
+        ledger_path = Path(self.tmp.name) / "runs" / run["id"] / "odoo-actions.sqlite3"
+        ledger = ActionStore(ledger_path)
+        ledger.finish(valid["action_id"], "verified", verification={"status": "satisfied"})
+        ledger.close()
+        with closing(sqlite3.connect(ledger_path)) as database:
+            database.execute("UPDATE action_ledger SET payload = ? WHERE action_id = ?", ("{invalid", broken["action_id"]))
+            database.commit()
+        run["tools"] = [{"id": "t1", "name": "execute_method", "status": "completed"}]
+        receipts = self.host.get_business(self.sid, business["id"])["receipts"]
+        self.assertEqual(next(r for r in receipts if r["id"] == broken["action_id"])["status"], "unknown")
+        self.assertEqual(next(r for r in receipts if r["id"] == valid["action_id"])["status"], "verified")
+        self.assertEqual(next(r for r in receipts if r["kind"] == "archive")["status"], "unknown")
 
     def test_plain_message_starts_scoped_conversation_without_odoo_or_proposal(self):
         captured = []

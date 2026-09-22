@@ -231,6 +231,7 @@ export interface BusinessDetail {
   runs: Run[];
   live_messages?: LiveMessage[];
   approvals: Approval[];
+  receipts?: BusinessReceipt[];
   documents: Document[];
   artifacts?: BusinessArtifact[];
   checks: Check[];
@@ -246,12 +247,28 @@ export interface BusinessDetail {
     intent?: string;
     at?: string;
     tool_name?: string;
+    tool_status?: string;
+    tool_id?: string;
     round?: number;
     tool_count?: number;
     model_rounds?: number;
     last_event?: string;
   };
   materials?: Material[];
+}
+
+export interface BusinessReceipt {
+  id: string;
+  title: string;
+  status: "verified" | "unknown" | "not_observed" | "pending" | "not_executed" | "failed";
+  detail: string;
+  kind: "action" | "email" | "archive";
+  run_id?: string;
+  action_id?: string;
+  tool_id?: string;
+  observed_at?: string;
+  model?: string;
+  record_ids?: number[];
 }
 
 export interface Health {
@@ -308,6 +325,7 @@ export type WorkbenchMethod =
   | "get_trace"
   | "refresh_business"
   | "export_business_report"
+  | "open_odoo"
   | "open_odoo_record"
   | "open_business_artifact"
   | "reveal_business_artifact"

@@ -311,6 +311,25 @@ class ActionStore:
             self._db.commit()
             return self._decode(row) or {}
 
+    @staticmethod
+    def read_receipts(path: str | Path, action_id: str | None = None) -> list[dict[str, Any]]:
+        """Read an existing ledger; missing schema and broken rows are never repaired."""
+        database = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True)
+        database.row_factory = sqlite3.Row
+        try:
+            query = "SELECT * FROM action_ledger" + (" WHERE action_id = ?" if action_id else "") + " ORDER BY created_at, action_id"
+            rows = database.execute(query, (action_id,) if action_id else ()).fetchall()
+            result = []
+            for row in rows:
+                try:
+                    result.append(ActionStore._decode(row))
+                except (ValueError, TypeError):
+                    result.append({**{key: row[key] for key in ("action_id", "run_id", "session_id")},
+                                   "status": "unknown", "receipt_error": "invalid_json"})
+            return result
+        finally:
+            database.close()
+
     def summary(self) -> dict[str, Any]:
         with self._lock:
             rows = self._db.execute(

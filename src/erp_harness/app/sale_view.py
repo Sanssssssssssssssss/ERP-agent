@@ -164,7 +164,8 @@ def _activity(
     run = runs[0]
     status = run.get("status")
     tools = run.get("tools") if isinstance(run.get("tools"), list) else []
-    latest_tool = next((tool for tool in reversed(tools) if isinstance(tool, dict)), None)
+    latest_tool = next((tool for tool in reversed(tools) if isinstance(tool, dict) and tool.get("status") == "running"), None)
+    latest_tool = latest_tool or next((tool for tool in reversed(tools) if isinstance(tool, dict)), None)
     pending = any(
         row.get("run_id") == run.get("id") and row.get("status") == "pending_approval"
         for row in approvals
@@ -234,9 +235,11 @@ def _activity(
     if latest_live and run.get("last_event_at"):
         activity["at"] = run["last_event_at"]
     if latest_tool:
+        activity["tool_id"] = latest_tool.get("id")
+        activity["tool_status"] = latest_tool.get("status")
         if isinstance(latest_tool.get("name"), str) and latest_tool.get("name"):
             activity["tool_name"] = latest_tool["name"]
-        if phase == "tool" and isinstance(latest_tool.get("round"), int):
+        if status in {"running", "awaiting_approval"} and isinstance(latest_tool.get("round"), int):
             activity["round"] = latest_tool["round"]
         activity["at"] = latest_tool.get("ended_at") or latest_tool.get("started_at")
     events = run.get("events") if isinstance(run.get("events"), list) else []
@@ -1006,6 +1009,8 @@ def _refresh_invoice_delivery(state, business, runs, reads):
     from erp_harness.erp import invoice_mail
     from erp_harness.erp.business_operations import _Evidence
     observations, failures, checks = {}, {}, []
+    business["delivery_receipts"] = []
+    business["delivery_receipts_run_id"] = runs[-1]["id"] if runs else None
     try:
         invoice_id, recipient_id = invoice_mail.requested(business.get("references", []))
         payload = {"model": "account.move", "method": "message_post", "instance": reads.instance,
@@ -1188,6 +1193,134 @@ def refresh_business(
 
 
 
+def _action_execution_receipt(row, run, titles):
+    if row.get("receipt_error") or not isinstance(row.get("payload"), dict) or any(row.get(key) is not None and not isinstance(row[key], dict) for key in ("prestate", "verification")):
+        raise ValueError("receipt structure invalid")
+    payload, verification = row.get("payload") or {}, row.get("verification") or {}
+    model = payload.get("model", "")
+    operation = payload.get("operation") or payload.get("method", "")
+    ids = payload.get("record_ids") or (payload.get("kwargs") or {}).get("ids") or []
+    evidence = verification.get("evidence") or {}
+    status = row.get("status")
+    verified = status == "verified" and verification.get("status") == "satisfied"
+    public_status = "verified" if verified else "pending" if status in {"pending_approval", "approved"} else "failed" if status == "known_failed" else "unknown"
+    if status in {"known_failed", "expired"} and not row.get("sent_at"):
+        public_status = "not_executed"
+    detail = {"verified": "动作已执行并核验；不代表整项业务目标全部完成。", "pending": "等待审批或执行。",
+              "failed": "动作未通过执行核验。", "not_executed": "本动作未发送至 Odoo。", "unknown": "写入结果或核验依据不完整，需要核对，不能自动重试。"}[public_status]
+    if status == "expired" and public_status == "not_executed":
+        detail = "审批已过期，本动作未发送至 Odoo。"
+    item = {"id": row["action_id"], "action_id": row["action_id"], "run_id": run["id"],
+            "kind": "action", "model": model, "record_ids": ids, "status": public_status,
+            "title": titles.get((model, operation), {"create": "创建业务记录", "write": "更新业务记录", "unlink": "删除业务记录"}.get(operation, "执行业务动作")), "detail": detail}
+    stamp = row.get("finished_at") or row.get("created_at")
+    if type(stamp) in {int, float}:
+        try:
+            item["observed_at"] = datetime.fromtimestamp(stamp, timezone.utc).isoformat().replace("+00:00", "Z")
+        except (ValueError, OverflowError, OSError):
+            pass  # Invalid timestamps do not invent a date or hide otherwise valid effects.
+    if evidence.get("invoice_records"):
+        item["model"], item["record_ids"] = "account.move", [r["id"] for r in evidence["invoice_records"] if isinstance(r, dict) and isinstance(r.get("id"), int)]
+    elif operation == "create":
+        item["record_ids"] = evidence.get("record_ids", [])
+    if (model, operation) == ("account.move.send.wizard", "action_send_and_print"):
+        item["detail"] += " 此步骤只生成 PDF，不证明邮件已发送。"
+    if row.get("kind") == "chatter":
+        item["title"] = "发布单据留言"
+        item["detail"] += " 留言不是邮件投递回执。"
+    mail = (row.get("prestate") or {}).get("invoice_mail")
+    if mail:
+        delivered = verified and evidence.get("delivery") == "smtp_accepted"
+        item.update({"kind": "email", "title": "邮件已交付服务器" if delivered else "邮件投递未确认",
+                     "status": "verified" if delivered else public_status if public_status != "verified" else "unknown",
+                     "detail": ("SMTP 已接受；不能证明收件人已打开或阅读。" if delivered else "本动作没有已核验的邮件投递回执，需核对后再决定下一步。") +
+                               f" 收件地址：{mail.get('email_to') or '未读取'}；附件：{(mail.get('attachment') or {}).get('name') or '未读取'}。"})
+    return item
+
+
+def _run_execution_receipts(state: dict[str, Any], runs: list[dict[str, Any]], approvals: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Latest-run effects from the ledger, independently of worker success or model prose."""
+    if not runs:
+        return []
+    run = runs[0]
+    archive = state.get("receipt_ledger", {}).get(run["id"], {})
+    rows = archive.get("rows", [])
+    titles = {
+        ("sale.advance.payment.inv", "create"): "准备销售开票",
+        ("sale.advance.payment.inv", "create_invoices"): "生成客户发票",
+        ("account.move", "action_post"): "发票或凭证过账",
+        ("account.move.send.wizard", "create"): "保存发票文件处理选项",
+        ("account.move.send.wizard", "action_send_and_print"): "生成正式发票 PDF",
+        ("sale.order", "action_confirm"): "确认销售订单",
+        ("purchase.order", "button_confirm"): "确认采购订单",
+        ("account.payment.register", "action_create_payments"): "登记收付款",
+        ("account.move.reversal", "reverse_moves"): "生成贷项通知",
+        ("stock.picking", "button_validate"): "处理库存收发",
+        ("mrp.production", "button_mark_done"): "登记制造完工",
+        ("account.move.line", "reconcile"): "核销会计分录",
+    }
+    output = []
+    row_errors = False
+    for index, row in enumerate(rows):
+        try:
+            item = _action_execution_receipt(row, run, titles)
+        except (AttributeError, KeyError, TypeError, ValueError):
+            row_errors = True
+            action_id = row.get("action_id") if isinstance(row, dict) else None
+            item = {"id": action_id or f"invalid:{run['id']}:{index}", "kind": "action", "status": "unknown",
+                    "title": "动作回执无法核验", "detail": "该条记录结构不完整；其他正常回执仍可查看，不得据此重试写入。",
+                    "run_id": run["id"], **({"action_id": action_id} if action_id else {})}
+        output.append(item)
+    # A denied email method may have no registered action. Preserve its tool evidence.
+    denied_mail = []
+    for tool in run.get("tools", []):
+        args, result = tool.get("arguments") or {}, tool.get("result") or {}
+        if (not isinstance(args, dict) or not isinstance(result, dict) or result.get("success") is not False or not result.get("error") or
+                tool.get("name", "").removeprefix("mcp_odoo_") != "execute_method"):
+            continue
+        blocked_wizard = args.get("model") == "account.move.send.wizard" and args.get("method") == "action_send_and_print" and "email sending is blocked" in str(result["error"])
+        rejected_mail = args.get("model") == "account.move" and args.get("method") == "message_post" and not result.get("action_id")
+        if blocked_wizard or rejected_mail:
+            missing_target = "invoice delivery requires exactly one invoice, company and recipient reference" in str(result["error"])
+            denied_mail.append({"id": f"mail:{tool['id']}", "kind": "email", "status": "failed", "title": "邮件发送未完成",
+                           "detail": "未确认唯一的发票、公司与收件人，邮件发送被拒绝。" if missing_target else "本轮通过 PDF 向导发送邮件的请求被运行时拒绝，没有发送回执。" if blocked_wizard else "邮件发送请求未通过校验：" + str(result["error"])[:180],
+                           "run_id": run["id"], "tool_id": tool["id"], "observed_at": tool.get("ended_at")})
+    if denied_mail:
+        output.append(next((row for row in denied_mail if row["detail"].startswith("未确认唯一")), denied_mail[0]))
+    business = state["businesses"][run["business_id"]]
+    if business.get("delivery_receipts_run_id") == run["id"] and not any(item["kind"] == "email" and item["status"] == "verified" for item in output):
+        for receipt in business.get("delivery_receipts", []):
+            evidence = receipt.get("evidence") or {}
+            if receipt.get("status") == "satisfied" and evidence.get("delivery") == "smtp_accepted" and type(evidence.get("invoice_id")) is int:
+                output.append({"id": f"delivery:{run['id']}", "kind": "email", "status": "verified", "title": "邮件投递回执已核验",
+                               "detail": f"本轮核对到给 {evidence.get('email_to') or '登记地址'} 的 SMTP 接受回执；不能证明收件人已读，也不代表本轮重新发送。",
+                               "run_id": run["id"], "model": "account.move", "record_ids": [evidence["invoice_id"]]})
+                break
+    if not archive.get("available"):
+        for approval in approvals:
+            if approval.get("run_id") == run["id"]:
+                output.append({"id": approval["action_id"], "kind": "action", "status": "unknown", "title": "动作账本不可用",
+                               "detail": "审批记录仍在，但无法据此确认动作执行结果。", "run_id": run["id"], "action_id": approval["action_id"]})
+    if not any(item["kind"] == "email" for item in output):
+        output.append({"id": f"mail:{run['id']}", "kind": "email", "status": "not_observed", "title": "邮件：无发送记录",
+                       "detail": "本轮没有邮件发送回执。PDF、单据留言和模型总结都不能证明邮件发送。", "run_id": run["id"]})
+    trace_present = bool(run.get("tools") or run.get("events"))
+    output.append({"id": f"archive:{run['id']}", "kind": "archive", "status": "verified" if archive.get("available") and trace_present and not row_errors else "unknown",
+                   "title": "执行记录已留档" if archive.get("available") and trace_present and not row_errors else "执行留档不完整",
+                   "detail": f"本轮保留 {len(rows)} 条动作账本记录与 {len(run.get('tools', []))} 次工具记录，可查看运行详情或导出业务回执。" if archive.get("available") and trace_present and not row_errors else "动作账本或工具记录缺失、不可读或结构损坏；已有日志不能代替缺失的执行证据。",
+                   "run_id": run["id"]})
+    return output
+
+
+def _execution_receipts(state: dict[str, Any], runs: list[dict[str, Any]], approvals: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    historical = []
+    for run in reversed(runs[1:]):
+        for item in _run_execution_receipts(state, [run], approvals):
+            if item["kind"] == "action" or item["kind"] == "email" and item["status"] != "not_observed":
+                historical.append({**item, "title": "此前运行 · " + item["title"]})
+    return historical + _run_execution_receipts(state, runs, approvals)
+
+
 def business_detail(state: dict[str, Any], business_id: str) -> dict[str, Any]:
     business = state["businesses"].get(business_id)
     if business is None:
@@ -1282,7 +1415,7 @@ def business_detail(state: dict[str, Any], business_id: str) -> dict[str, Any]:
             material_rows.append({key: material.get(key) for key in ("id", "session_id", "name", "size", "sha256", "created_at", "row_count", "preview", "media_type")})
     business_public = dict(business)
     business_public["materials"] = material_rows
-    return {"business": business_public, "runs": public_runs, "approvals": approvals,
+    return {"business": business_public, "runs": public_runs, "approvals": approvals, "receipts": _execution_receipts(state, runs, approvals),
             "artifacts": artifacts, "materials": material_rows, "live_messages": live_messages, "documents": public_documents, "checks": visible_checks,
             "observed_at": observed_at,
             "stale": detail_stale,

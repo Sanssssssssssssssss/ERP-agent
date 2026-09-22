@@ -120,6 +120,12 @@ const bridgeScript = String.raw`
           const result = details(sessions.flatMap((item) => item.businesses).find((item) => item.id === id))
           if (id === 'business-b2' && !window.__businessBusy) { result.runs[1].status = 'completed'; result.approvals = []; result.business = { ...result.business, status: 'completed' } }
           if (id === 'business-b4') {
+            result.receipts = [
+              { id: 'receipt-posted', kind: 'action', title: '此前运行 · 发票已过账', status: 'verified', detail: '发票 INV-TEST 已通过落库回读。', run_id: 'business-b4-old-run', action_id: 'action-previous' },
+              { id: 'receipt-pdf', kind: 'action', title: 'PDF 已生成', status: 'verified', detail: '正式 PDF 已生成，附件已登记。', run_id: 'business-b4-run', action_id: 'action-pdf' },
+              { id: 'receipt-email', kind: 'email', title: '邮件：无发送记录', status: 'not_observed', detail: '单据留言不代表邮件发送，没有邮件发送回执。', run_id: 'business-b4-run' },
+              { id: 'receipt-archive', kind: 'archive', title: '运行记录已留存', status: 'verified', detail: '动作账本和运行详情可查。', run_id: 'business-b4-run' }
+            ]
             result.runs[1].summary = '本轮已确认订单，尚未发货。'; result.runs[1].verification_status = 'passed'
             result.business = { ...b4, readback: { latest_run_id: 'business-b4-run', stale: false } }
             result.outcome = { status: 'passed', label: '销售订单已确认', detail: '已核对当前订单状态。', scope: 'sale_invoice_confirmed_checks' }
@@ -130,6 +136,7 @@ const bridgeScript = String.raw`
           }
           if (id === 'business-b2' && window.__revisionAccepted) { result.runs[1].status = 'cancelled'; result.business.status = 'cancelled'; result.approvals = result.approvals.map(row => ({ ...row, status: 'rejected' })); result.activity = { phase: 'idle', label: '等待更新后的业务方案', detail: '旧审批已撤销。' } }
           if (id === 'business-b2' && showAcceptedProjection) { result.approvals = []; result.business.status = 'running'; result.runs[1].status = 'running'; result.activity = { phase: 'model', label: '等待模型响应', detail: '审批已完成，模型正在继续处理。' } }
+          if (id === 'business-b4' && window.__activityScenario) { result.runs[1].status = 'running'; result.business.status = 'running'; result.activity = window.__activityScenario; result.outcome = { status: 'unknown', label: '执行中', detail: '完成后核验。' } }
           return result
         }
         if (method === 'get_trace') {
@@ -182,6 +189,7 @@ const bridgeScript = String.raw`
         if (method === 'export_business_report') return { cancelled: false, path: 'C:\\runtime\\business-b2-receipt.json', artifact: { id: 'artifact-b2', name: 'Business B2 回执.json', path: 'C:\\runtime\\business-b2-receipt.json', kind: 'business_receipt' } }
         if (method === 'open_business_artifact' || method === 'reveal_business_artifact') return { opened: true }
         if (method === 'open_odoo_record') return { opened: true }
+        if (method === 'open_odoo') { if (Object.keys(params).length) throw new Error('INVALID_PARAMS'); if (window.__odooUnconfigured) throw new Error('ODOO_NOT_CONFIGURED'); return { opened: true } }
         if (method === 'reconcile_action') return details(b3)
         if (method === 'send_message') {
           if (params.session_id === 'session-b') { sessionDetails['session-b'].conversation_runs[0].id = 'conversation-run-b'; sessionDetails['session-b'].conversation_runs[0].status = 'running' }
@@ -229,6 +237,9 @@ page.on('console', (message) => { if (message.type() === 'error') console.error(
 await page.goto(`http://127.0.0.1:${serverAddress.port}/`)
 await page.getByRole('button', { name: /Session A/ }).waitFor()
 await page.getByText('主机已连接').waitFor()
+await page.getByRole('button', { name: '打开 Odoo', exact: true }).click()
+await page.getByText('已请求在浏览器打开已配置的 Odoo。', { exact: true }).waitFor()
+assert.deepEqual(await page.evaluate(() => window.__bridgeCalls.find(({ method }) => method === 'open_odoo')?.params), {})
 
 // A new or empty session explains the three supported business entry points;
 // choosing one only fills natural language into the composer.
@@ -457,7 +468,7 @@ await page.getByText('最终回答：当前能力与业务范围已确认。', {
 assert.equal(await page.locator('.thinking-message').count(), 0)
 assert.equal(await page.getByText('重复片段', { exact: true }).count(), 0)
 assert.equal(await page.getByText('终态后不应追加', { exact: true }).count(), 0)
-await page.getByText('业务流公开进度', { exact: true }).waitFor()
+await page.locator('.activity-card').getByText('业务流公开进度', { exact: true }).waitFor()
 await page.getByText('取消前已经收到的片段', { exact: true }).waitFor()
 await page.evaluate(() => {
   window.__persistConversationMessage({ id: 'conversation-live-1', role: 'assistant', text: '最终回答：当前能力与业务范围已确认。\n\n| 项目 | 状态 |\n| --- | --- |\n| 能力 | 已确认 |', created_at: '2026-09-08T09:01:00Z', context_business_id: null })
@@ -879,6 +890,12 @@ for (const scenario of ['failed', 'stale', 'missing']) {
   } else {
     await finishedResult.getByText('本轮结果待核对', { exact: true }).waitFor()
     assert.equal(await finishedResult.getByText('销售订单已确认', { exact: true }).count(), 0)
+    const receipts = page.getByLabel('执行回执与留档')
+    await receipts.getByText('此前运行 · 发票已过账', { exact: true }).waitFor()
+    await receipts.getByText('PDF 已生成', { exact: true }).waitFor()
+    assert.ok((await receipts.textContent()).includes('没有邮件发送回执'))
+    assert.equal(await receipts.locator('.receipt-list > li').first().locator('strong').textContent(), '邮件：无发送记录')
+    assert.equal(await receipts.locator('.spin').count(), 0)
   }
 }
 await page.evaluate(() => { window.__resultScenario = 'running'; window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b4' } }) })
@@ -1162,6 +1179,52 @@ for (const [type, model, label] of [['inventory', 'stock.picking', '收发货与
   await page.getByRole('button', { name: new RegExp('EV-' + type + ' ' + label) }).waitFor()
   assert.equal(await page.getByText('尚未取得销售订单', { exact: true }).count(), 0)
 }
+assert.equal(pageErrors.length, 0, pageErrors.join('\n'))
+// The execution view consumes the existing delta stream without a business RPC.
+await page.getByRole('tab', { name: /Business B4/ }).click()
+await page.getByRole('tab', { name: /^执行台/ }).click()
+await page.evaluate(() => { window.__activityScenario = { phase: 'model_wait', label: '等待模型响应', detail: '请求已提交。', tool_name: 'native_read', tool_status: 'completed' }; window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b4' } }) })
+await page.locator('.activity-card').getByText('等待模型响应', { exact: true }).waitFor()
+assert.equal(await page.locator('.activity-card .spin').count(), 1)
+assert.ok((await page.locator('.activity-meta').textContent()).includes('最近工具：'))
+const deltaBusinessCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'get_business').length)
+await page.evaluate(() => {
+  window.__emitWorkbench({ event: 'message_delta', data: { session_id: 'session-b', business_id: 'business-b4', run_id: 'business-b4-run', message_id: 'execution-live', sequence: 0, text: '公开进度：正在核对发票。' } })
+  window.__emitWorkbench({ event: 'message_delta', data: { session_id: 'session-b', business_id: 'business-b2', run_id: 'business-b2-run', message_id: 'execution-other', sequence: 0, text: '其他业务不能混入当前执行。' } })
+})
+await page.locator('.activity-card').getByText('公开进度：正在核对发票。', { exact: true }).waitFor()
+await page.locator('.activity-card').getByText('正在回复', { exact: true }).waitFor()
+assert.equal((await page.locator('.activity-card').textContent()).includes('其他业务不能混入'), false)
+assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'get_business').length), deltaBusinessCalls)
+await page.evaluate(() => window.__emitWorkbench({ event: 'message_delta', data: { session_id: 'session-b', business_id: 'business-b4', run_id: 'business-b4-run', message_id: 'execution-live', sequence: 1, text: '\n\n' + '正在核对单据来源与付款关系。\n\n'.repeat(70) } }))
+const publicReply = page.locator('.activity-public-text')
+await page.waitForFunction(() => { const element = document.querySelector('.activity-public-text'); return element && element.scrollHeight > element.clientHeight && element.scrollHeight - element.clientHeight - element.scrollTop < 3 })
+await publicReply.evaluate((element) => { element.scrollTop = 0; element.dispatchEvent(new Event('scroll', { bubbles: true })) })
+await page.evaluate(() => window.__emitWorkbench({ event: 'message_delta', data: { session_id: 'session-b', business_id: 'business-b4', run_id: 'business-b4-run', message_id: 'execution-live', sequence: 2, text: '\n最新公开片段。' } }))
+await publicReply.getByText('最新公开片段。', { exact: true }).waitFor({ state: 'attached' })
+assert.equal(await publicReply.evaluate((element) => element.scrollTop), 0)
+await page.evaluate(() => {
+  window.__emitWorkbench({ event: 'message_end', data: { session_id: 'session-b', business_id: 'business-b4', run_id: 'business-b4-run', message_id: 'execution-live', sequence: 3, text: '公开进度：发票已核对，下一步读取付款状态。' } })
+  window.__activityScenario = { phase: 'tool', label: '正在调用工具', detail: '读取付款状态。', tool_name: 'native_read', tool_status: 'running', tool_id: 'current-tool' }
+  window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b4' } })
+})
+await page.locator('.activity-card').getByText('正在调用工具', { exact: true }).waitFor()
+assert.ok((await page.locator('.activity-meta').textContent()).includes('正在执行：'))
+assert.equal(await page.locator('.activity-card').getByText('正在回复', { exact: true }).count(), 0)
+await page.evaluate(() => { window.__activityScenario = null; window.__resultScenario = 'failed'; window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b4' } }) })
+await page.getByLabel('执行回执与留档').getByText('邮件：无发送记录', { exact: true }).waitFor()
+assert.equal(await page.locator('.business-content .spin').count(), 0)
+await page.getByRole('tab', { name: /^运行详情/ }).click()
+await page.locator('.trace-toolbar select').selectOption('business-b4-old-run')
+await page.getByRole('tab', { name: /^执行台/ }).click()
+await page.getByRole('button', { name: '导出业务回执', exact: true }).click()
+await page.getByText('业务回执已导出。', { exact: true }).waitFor()
+assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'export_business_report').at(-1)?.params.run_id), 'business-b4-run')
+await page.evaluate(() => { window.__odooUnconfigured = true })
+await page.getByRole('button', { name: '打开 Odoo', exact: true }).click()
+await page.getByRole('dialog', { name: '连接设置' }).waitFor()
+await page.getByText('请先填写 Odoo 地址与数据库，再打开 Odoo。', { exact: true }).waitFor()
+await page.keyboard.press('Escape')
 assert.equal(pageErrors.length, 0, pageErrors.join('\n'))
 console.log('renderer-check: PASS')
 console.log('checked: session/business/trace stale guards, same-run trace refresh, changed routing, host crash/retry, message scope, session search, approval scope+preflight labels, purchase/file approval labels, invoice PDF availability, business-chain scope labels, document selection across refresh, CONFIG_BUSY mapping, settings save+Escape, splitter overflow, evidence navigation, unknown-write no-retry, historical activity preservation, latest proposal guards, busy-send draft preservation, approval revision failure/success without automatic execution')

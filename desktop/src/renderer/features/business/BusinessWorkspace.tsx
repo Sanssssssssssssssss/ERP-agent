@@ -1,5 +1,5 @@
 import { Button as RadixButton,Tabs as RadixTabs } from '@radix-ui/themes'
-import { Activity,Check as CheckIcon,Clock3,FileText,LoaderCircle,MessageSquare,Play,RefreshCw,Square } from 'lucide-react'
+import { Activity,Check as CheckIcon,Clock3,Download,FileText,LoaderCircle,MessageSquare,Play,RefreshCw,Square } from 'lucide-react'
 import { useEffect,useRef,useState } from 'react'
 import { EmptyState,MessageText,StatusBadge } from '../../components/common'
 import { activityPhaseLabel,amountWithCurrency,businessTypeMeta,completionTargetLabel,documentStateLabel,documentFact,documentModelLabel,invoiceStatusLabel,isPendingApproval,outcomeScopeLabel,outcomeStatusLabel,paymentStatusLabel,readableValue,runDisplayLabel,stageLabel,stageStatusLabel,toolLabel } from '../../presentation'
@@ -10,8 +10,10 @@ BusinessArtifact,
 BusinessDetail,
 BusinessDetailProjection,
 BusinessEvidence,
+BusinessReceipt,
 BusinessTab,
 Document,
+LiveMessage,
 Run,
 SessionDetail,
 TraceBundle,
@@ -31,10 +33,11 @@ export const tabs: Array<{ id: BusinessTab; label: string }> = [
   { id: 'trace', label: '运行详情' }
 ]
 
-export function BusinessWorkspace({ session, activeBusiness, detail, tab, trace, traceTarget, traceLoading, businessLoading, loading, selectedRunId, onBusinessSelect, onTabChange, onRunSelect, onRefresh, onStart, onCancel, onApproval, onRequestRevision, onReconcile, onTraceTarget, onToggleConversation, conversationOpen, onExport, exporting, exportPath, onOpenDocument, onDownloadDocument, documentDownloads, selectedDocumentKey, onSelectedDocumentKey, onOpenArtifact, onRevealArtifact, approvalProgress, onOpenApprovals }: {
+export function BusinessWorkspace({ session, activeBusiness, detail, liveMessages = [], tab, trace, traceTarget, traceLoading, businessLoading, loading, selectedRunId, onBusinessSelect, onTabChange, onRunSelect, onRefresh, onStart, onCancel, onApproval, onRequestRevision, onReconcile, onTraceTarget, onToggleConversation, conversationOpen, onExport, exporting, exportPath, onOpenDocument, onDownloadDocument, documentDownloads, selectedDocumentKey, onSelectedDocumentKey, onOpenArtifact, onRevealArtifact, approvalProgress, onOpenApprovals }: {
   session: SessionDetail | null
   activeBusiness: Business | null
   detail: BusinessDetailProjection | null
+  liveMessages?: LiveMessage[]
   tab: BusinessTab
   trace: TraceBundle | null
   traceTarget: { runId?: string; toolId?: string; actionId?: string; kind?: string } | null
@@ -54,7 +57,7 @@ export function BusinessWorkspace({ session, activeBusiness, detail, tab, trace,
   onTraceTarget: (target: { run_id?: string; tool_id?: string; action_id?: string; kind?: string }) => void
   onToggleConversation: () => void
   conversationOpen: boolean
-  onExport: () => void
+  onExport: (runId?: string) => void
   exporting: boolean
   exportPath: string
   onOpenDocument: (document: Document) => void
@@ -73,6 +76,7 @@ export function BusinessWorkspace({ session, activeBusiness, detail, tab, trace,
     ?? detail?.runs?.find((run) => ['running', 'awaiting_approval', 'cancel_requested'].includes(run.status))
     ?? detail?.runs?.[0]
   const pendingApprovals = detail?.approvals?.filter(isPendingApproval) ?? []
+  const businessMessages = liveMessages.filter((message) => message.session_id === session?.session.id && message.business_id === activeBusiness?.id && (!message.role || message.role === 'assistant'))
   const acceptedProposal = [...(session?.messages ?? [])].reverse().find((message) => message.business_id === activeBusiness?.id && message.proposal?.status === 'confirmed')?.proposal
   const workspaceRef = useRef<HTMLElement>(null)
   const previousRun = useRef<{ id: string; status: string } | null>(null)
@@ -81,7 +85,7 @@ export function BusinessWorkspace({ session, activeBusiness, detail, tab, trace,
     const previous = previousRun.current
     previousRun.current = activeRun ? { id: activeRun.id, status: activeRun.status } : null
     if (tab === 'execution' && previous?.id === activeRun?.id && ['running', 'awaiting_approval', 'cancel_requested'].includes(previous?.status ?? '') && ['completed', 'failed', 'cancelled', 'interrupted', 'needs_reconciliation'].includes(activeRun?.status ?? '')) {
-      workspaceRef.current?.querySelector('.outcome-summary')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      workspaceRef.current?.querySelector('.outcome-summary')?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
     }
   }, [activeRun?.id, activeRun?.status, businessLoading, tab])
   return (
@@ -102,10 +106,10 @@ export function BusinessWorkspace({ session, activeBusiness, detail, tab, trace,
           </RadixTabs.List>
           <div className="business-content">
           {businessLoading && <div className="loading-line"><LoaderCircle className="spin" size={16} />正在读取业务状态…</div>}
-          <RadixTabs.Content value="execution">{!businessLoading && <ExecutionPage detail={detail} activeRun={activeRun} pendingApprovals={pendingApprovals} onOpenApprovals={onOpenApprovals} onRefresh={onRefresh} onStart={onStart} onCancel={onCancel} onEvidence={onTraceTarget} />}</RadixTabs.Content>
-           <RadixTabs.Content value="documents">{!businessLoading && <DocumentsPage documents={detail?.documents ?? []} materials={(detail as DetailWithMaterials | null)?.materials ?? []} artifacts={detail?.artifacts ?? []} goal={activeBusiness.goal} stale={detail?.stale ?? false} onExport={onExport} exporting={exporting} exportPath={exportPath} onOpenDocument={onOpenDocument} onDownloadDocument={onDownloadDocument} documentDownloads={documentDownloads} selectedDocumentKey={selectedDocumentKey} onSelectedDocumentKey={onSelectedDocumentKey} onOpenArtifact={onOpenArtifact} onRevealArtifact={onRevealArtifact} onTraceTarget={onTraceTarget} />}</RadixTabs.Content>
+          <RadixTabs.Content value="execution">{!businessLoading && <ExecutionPage detail={detail} activeRun={activeRun} liveMessages={businessMessages.filter((message) => message.run_id === activeRun?.id)} pendingApprovals={pendingApprovals} onOpenApprovals={onOpenApprovals} onRefresh={onRefresh} onStart={onStart} onCancel={onCancel} onEvidence={onTraceTarget} onExport={() => onExport(activeRun?.id)} exporting={exporting} exportPath={exportPath} />}</RadixTabs.Content>
+           <RadixTabs.Content value="documents">{!businessLoading && <DocumentsPage documents={detail?.documents ?? []} materials={(detail as DetailWithMaterials | null)?.materials ?? []} artifacts={detail?.artifacts ?? []} goal={activeBusiness.goal} stale={detail?.stale ?? false} onExport={() => onExport()} exporting={exporting} exportPath={exportPath} onOpenDocument={onOpenDocument} onDownloadDocument={onDownloadDocument} documentDownloads={documentDownloads} selectedDocumentKey={selectedDocumentKey} onSelectedDocumentKey={onSelectedDocumentKey} onOpenArtifact={onOpenArtifact} onRevealArtifact={onRevealArtifact} onTraceTarget={onTraceTarget} />}</RadixTabs.Content>
           <RadixTabs.Content value="approvals">{!businessLoading && <ApprovalsPage approvals={detail?.approvals ?? []} documents={detail?.documents ?? []} disabled={loading || businessLoading} onDecision={onApproval} onRequestRevision={onRequestRevision} onReconcile={onReconcile} onTraceTarget={onTraceTarget} />}</RadixTabs.Content>
-          <RadixTabs.Content value="trace">{!businessLoading && <TracePage trace={trace} runs={detail?.runs ?? []} readback={detail?.business.readback} selectedRunId={selectedRunId} loading={traceLoading} target={traceTarget} onRunSelect={onRunSelect} />}</RadixTabs.Content>
+          <RadixTabs.Content value="trace">{!businessLoading && <TracePage trace={trace} liveMessages={businessMessages} runs={detail?.runs ?? []} readback={detail?.business.readback} selectedRunId={selectedRunId} loading={traceLoading} target={traceTarget} onRunSelect={onRunSelect} />}</RadixTabs.Content>
           </div>
         </RadixTabs.Root>
       </>}
@@ -113,7 +117,7 @@ export function BusinessWorkspace({ session, activeBusiness, detail, tab, trace,
   )
 }
 
-export function ExecutionPage({ detail, activeRun, pendingApprovals, onOpenApprovals, onRefresh, onStart, onCancel, onEvidence }: { detail: BusinessDetailProjection | null; activeRun?: Run; pendingApprovals: Approval[]; onOpenApprovals: () => void; onRefresh: () => void; onStart: () => void; onCancel: (run: Run) => void; onEvidence: (evidence: BusinessEvidence) => void }) {
+export function ExecutionPage({ detail, activeRun, liveMessages = [], pendingApprovals, onOpenApprovals, onRefresh, onStart, onCancel, onEvidence, onExport, exporting, exportPath }: { detail: BusinessDetailProjection | null; activeRun?: Run; liveMessages?: LiveMessage[]; pendingApprovals: Approval[]; onOpenApprovals: () => void; onRefresh: () => void; onStart: () => void; onCancel: (run: Run) => void; onEvidence: (evidence: BusinessEvidence) => void; onExport: () => void; exporting: boolean; exportPath: string }) {
   const hasUnknownWrite = Boolean(detail?.approvals?.some((approval) => approval.status === 'needs_reconciliation') || detail?.runs?.some((run) => run.status === 'needs_reconciliation') || detail?.business.status === 'blocked')
   const canStart = !hasUnknownWrite && (!activeRun || !['running', 'awaiting_approval', 'cancel_requested'].includes(activeRun.status))
   const runActionLabel = activeRun?.status === 'completed' ? '继续执行' : activeRun?.status === 'failed' ? '重新执行' : '开始执行'
@@ -139,8 +143,10 @@ export function ExecutionPage({ detail, activeRun, pendingApprovals, onOpenAppro
           : <RadixButton className="primary-button" disabled={!canStart} title={hasUnknownWrite ? '存在待核对写入，请先在变更与审批中核对' : undefined} onClick={onStart}><Play size={15} />{hasUnknownWrite ? '先核对写入' : runActionLabel}</RadixButton>}
       </div>
       {pendingApprovals.length > 0 && <section className="approval-execution-cta" role="status"><div><strong>运行已暂停，等待人工审批</strong><span>{pendingApprovals.length} 项动作需要确认后才会继续。</span></div><RadixButton className="primary-button" onClick={onOpenApprovals}><CheckIcon size={15} />查看并审批</RadixButton></section>}
-      {ended && <>{result}<BusinessFacts documents={detail?.documents ?? []} /></>}
-      {detail?.activity && activeRun?.status !== 'completed' && <ActivityCard activity={detail.activity} />}
+      {ended && result}
+      {ended && <ExecutionReceipts receipts={detail?.receipts ?? []} onEvidence={onEvidence} onExport={onExport} exporting={exporting} exportPath={exportPath} />}
+      {detail?.activity && activeRun?.status !== 'completed' && <ActivityCard key={activeRun?.id} activity={detail.activity} run={activeRun} liveMessages={liveMessages} />}
+      {ended && <BusinessFacts documents={detail?.documents ?? []} />}
       <ExecutionStages execution={detail?.execution} runStatus={activeRun?.status} onEvidence={onEvidence} />
       {!ended && <><BusinessFacts documents={detail?.documents ?? []} />{result}</>}
       <details className="verification-fold"><summary>查看独立回读核验 · {detail?.checks?.length ?? 0} 项</summary><VerificationPage checks={detail?.checks ?? []} observedAt={detail?.observed_at} stale={detail?.stale ?? false} /></details>
@@ -202,13 +208,43 @@ export function BusinessFacts({ documents }: { documents: Document[] }) {
   )
 }
 
-export function ActivityCard({ activity }: { activity: NonNullable<BusinessDetail['activity']> }) {
+export function ExecutionReceipts({ receipts, onEvidence, onExport, exporting, exportPath }: { receipts: BusinessReceipt[]; onEvidence: (evidence: BusinessEvidence) => void; onExport: () => void; exporting: boolean; exportPath: string }) {
+  const actions = receipts.filter((receipt) => receipt.kind === 'action')
+  const emails = receipts.filter((receipt) => receipt.kind === 'email')
+  const archives = receipts.filter((receipt) => receipt.kind === 'archive')
+  const labels: Record<BusinessReceipt['status'], string> = { verified: '有回执', unknown: '待核对', not_observed: '无回执', pending: '待审批', not_executed: '未执行', failed: '未完成' }
+  const row = (receipt: BusinessReceipt) => <li className={`execution-receipt receipt-${receipt.status}`} key={receipt.id}>
+    <div className="receipt-heading"><strong>{receipt.title}</strong><span className="receipt-status">{labels[receipt.status]}</span></div>
+    <p>{receipt.detail}</p>
+    <div className="receipt-meta">{receipt.observed_at && <time>{formatInstant(receipt.observed_at)}</time>}{receipt.run_id && <button className="evidence-link" type="button" onClick={() => onEvidence({ run_id: receipt.run_id!, action_id: receipt.action_id, tool_id: receipt.tool_id, kind: receipt.tool_id ? 'tool' : 'action', label: receipt.title })}>查看证据</button>}</div>
+  </li>
+  return <section className="execution-receipts" aria-label="执行回执与留档">
+    <div className="section-heading"><div><h3>执行回执与留档</h3><span className="muted">以落库记录和执行回执为准</span></div><RadixButton variant="soft" disabled={exporting} onClick={onExport}><Download size={15} />{exporting ? '正在导出…' : '导出业务回执'}</RadixButton></div>
+    {receipts.length ? <><ul className="receipt-list">{emails.map(row)}{actions.slice(-4).map(row)}{archives.map(row)}</ul>{actions.length > 4 && <details className="receipt-history"><summary>查看前 {actions.length - 4} 项动作回执</summary><ul className="receipt-list">{actions.slice(0, -4).map(row)}</ul></details>}</> : <p className="muted">尚未读取动作与邮件回执，可查看运行详情或导出业务记录。</p>}
+    {exportPath && <p className="export-path" role="status">已导出：{exportPath}</p>}
+  </section>
+}
+
+export function ActivityCard({ activity, run, liveMessages = [] }: { activity: NonNullable<BusinessDetail['activity']>; run?: Run; liveMessages?: LiveMessage[] }) {
   const phase = activity.phase || 'unknown'
-  const moving = ['model', 'tool', 'cancelling'].includes(phase)
-  const intent = (activity as NonNullable<BusinessDetail['activity']> & { intent?: string }).intent?.trim()
-  const intentPreview = intent && intent.length > 220 ? `${intent.slice(0, 217)}…` : intent
-  return <section key={phase} className={`activity-card activity-phase-${phase}`} aria-label="当前动作">
+  const running = run?.status === 'running' || run?.status === 'cancel_requested'
+  const toolRunning = running && phase === 'tool' && (!activity.tool_status || activity.tool_status === 'running')
+  const moving = running && (['model', 'model_wait', 'cancelling'].includes(phase) || toolRunning)
+  const latestReply = liveMessages.filter((message) => message.text?.trim()).at(-1)
+  const streaming = running && ['model', 'model_wait'].includes(phase) && latestReply?.status === 'streaming'
+  const publicText = latestReply?.text || activity.intent?.trim()
+  const publicTextRef = useRef<HTMLDivElement>(null)
+  const followReplyRef = useRef(true)
+  useEffect(() => { followReplyRef.current = true }, [latestReply?.id])
+  useEffect(() => {
+    const element = publicTextRef.current
+    if (element && followReplyRef.current) element.scrollTop = element.scrollHeight
+  }, [publicText])
+  return <section className={`activity-card activity-phase-${phase}`} aria-label="当前动作" data-active={moving ? 'true' : 'false'}>
     <div className="activity-icon">{moving ? <LoaderCircle className="spin" size={17} /> : phase === 'approval' ? <Clock3 size={17} /> : <Activity size={17} />}</div>
-    <div className="activity-copy"><span className="eyebrow">当前动作</span><strong>{activity.label || '读取状态中'}</strong><p>{activity.detail || '暂无动作详情'}</p>{intent && <div className="activity-intent"><span>Agent 当前说明</span><MessageText text={intentPreview || ''} collapsible={false} />{intent.length > 220 && <details><summary>查看完整说明</summary><MessageText text={intent} collapsible={false} /></details>}</div>}<div className="activity-meta"><span>{activityPhaseLabel(activity.phase)}</span>{activity.tool_name && <span title={activity.tool_name}>{toolLabel(activity.tool_name)}</span>}{activity.round != null && <span>第 {activity.round} 轮</span>}{activity.tool_count != null && <span>{activity.tool_count} 个工具</span>}{activity.model_rounds != null && <span>{activity.model_rounds} 轮模型</span>}{activity.at && <span>{formatInstant(activity.at)}</span>}</div></div>
+    <div className="activity-copy"><span className="eyebrow">当前动作</span><strong role="status">{streaming ? '正在回复' : activity.label || '读取状态中'}</strong><p>{activity.detail || '暂无动作详情'}</p>
+      {publicText && <div className="activity-intent"><span>{streaming ? '公开回复 · 更新中' : '最近公开回复'}</span><div ref={publicTextRef} className="activity-public-text" tabIndex={0} aria-label="公开回复" onScroll={(event) => { const element = event.currentTarget; followReplyRef.current = element.scrollHeight - element.clientHeight - element.scrollTop < 32 }}><MessageText text={publicText} collapsible={false} /></div></div>}
+      <div className="activity-meta"><span>{activityPhaseLabel(activity.phase)}</span>{activity.tool_name && <span title={activity.tool_name}>{toolRunning ? '正在执行：' : '最近工具：'}{toolLabel(activity.tool_name)}</span>}{activity.round != null && <span>第 {activity.round} 轮</span>}{activity.tool_count != null && <span>{activity.tool_count} 个工具</span>}{activity.model_rounds != null && <span>{activity.model_rounds} 轮模型</span>}{activity.at && <span>{formatInstant(activity.at)}</span>}</div>
+    </div>
   </section>
 }

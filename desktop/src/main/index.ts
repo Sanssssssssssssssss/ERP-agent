@@ -5,7 +5,7 @@ import { basename, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { HostClient } from "./host";
 import { publicSettings, saveSettings } from "./settings";
-import { assertRequest, businessScope, canChangeSettings, METHODS, materialSessionId, observedRecordUrl, recordedArtifactPath, safeMaterialName, strictBase64 } from "./ipc-security";
+import { assertRequest, businessScope, canChangeSettings, configuredOdooUrl, METHODS, materialSessionId, observedRecordUrl, recordedArtifactPath, safeMaterialName, strictBase64 } from "./ipc-security";
 import { runSelfCheck } from "./self-check";
 import type { BusinessDetail, SettingsInput, WorkbenchMethod } from "../shared/protocol";
 
@@ -107,6 +107,11 @@ function registerIpc(): void {
       }
     }
     if (settingsChanging) throw new Error("CONFIG_BUSY");
+    if (request.method === "open_odoo") {
+      const settings = await publicSettings();
+      await shell.openExternal(configuredOdooUrl(settings.odoo_url, settings.odoo_db));
+      return { opened: true };
+    }
     if (request.method === "import_material") {
       const params = request.params ?? {};
       const session_id = materialSessionId(params.session_id);

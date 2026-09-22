@@ -1014,9 +1014,10 @@ class Workbench:
     def _action_row(self, run: dict[str, Any], action_id: str) -> dict[str, Any] | None:
         try:
             from erp_harness.erp.store import ActionStore
-            store = ActionStore(self.store.root / "runs" / run["id"] / "odoo-actions.sqlite3")
-            try: return store.get(action_id)
-            finally: store.close()
+            path = self.store.root / "runs" / run["id"] / "odoo-actions.sqlite3"
+            if not path.is_file():
+                return None
+            return next(iter(ActionStore.read_receipts(path, action_id)), None)
         except Exception: return None
 
     def _set_approval(self, run: dict[str, Any], action_id: str, result: dict[str, Any]) -> None:
@@ -1493,6 +1494,20 @@ class Workbench:
                     approval["result"], approval["verification"] = _safe(row.get("result")), _safe(row.get("verification"))
                     self._apply_action_readback(run, approval, row)
         public_state = copy.deepcopy(self.store.data)
+        public_state["receipt_ledger"] = {}
+        for receipt_run in (row for row in public_state["runs"].values() if row.get("business_id") == business_id):
+            from erp_harness.erp.store import ActionStore
+            path = self.store.root / "runs" / receipt_run["id"] / "odoo-actions.sqlite3"
+            archive = {"available": False, "rows": []}
+            if path.is_file():
+                try:
+                    rows = ActionStore.read_receipts(path)
+                    if any(row.get("run_id") != receipt_run["id"] or row.get("session_id") != session_id for row in rows):
+                        raise ValueError("receipt scope mismatch")
+                    archive = {"available": True, "rows": _safe(rows)}
+                except Exception:
+                    pass  # Missing or unreadable evidence stays unknown in the receipt projection.
+            public_state["receipt_ledger"][receipt_run["id"]] = archive
         for row in public_state["runs"].values():
             if row.get("business_id") != business_id:
                 continue
@@ -1625,6 +1640,9 @@ class Workbench:
                 return
             if failure is None and isinstance(readback, dict):
                 current["readback"] = readback
+                if snapshot_business.get("delivery_receipts_run_id") == run_id:
+                    current["delivery_receipts"] = snapshot_business.get("delivery_receipts", [])
+                    current["delivery_receipts_run_id"] = run_id
                 current["readback_status"] = "ready"
                 current["readback_finished_at"] = now()
                 self._event("business_refreshed", {"session_id": session_id, "business_id": business_id,

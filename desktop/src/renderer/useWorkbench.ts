@@ -65,6 +65,7 @@ export function useWorkbench() {
   })
   const [railCollapsed, setRailCollapsed] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [openingOdoo, setOpeningOdoo] = useState(false)
   const [exportPath, setExportPath] = useState('')
   const [pendingMaterials, setPendingMaterials] = useState<MaterialRecord[]>([])
   const [materialsBusy, setMaterialsBusy] = useState(false)
@@ -894,14 +895,14 @@ export function useWorkbench() {
 
   const retryHealth = async () => { await checkConnection(true) }
 
-  const exportBusiness = async () => {
+  const exportBusiness = async (runId = selectedRunId) => {
     if (!selectedSessionId || !selectedBusinessId || exporting) return
     const requestSessionId = selectedSessionId
     const requestBusinessId = selectedBusinessId
     setExporting(true)
     setExportPath('')
     try {
-      const result = await call<{ cancelled: boolean; path?: string }>('export_business_report', { session_id: requestSessionId, business_id: requestBusinessId, ...(selectedRunId ? { run_id: selectedRunId } : {}) })
+      const result = await call<{ cancelled: boolean; path?: string }>('export_business_report', { session_id: requestSessionId, business_id: requestBusinessId, ...(runId ? { run_id: runId } : {}) })
       if (result.cancelled) return
       if (sessionIdRef.current !== requestSessionId || businessIdRef.current !== requestBusinessId) return
       setExportPath(result.path || '导出已完成，但主机没有返回文件路径。')
@@ -912,6 +913,22 @@ export function useWorkbench() {
       setError(messageForError(reason))
     } finally {
       setExporting(false)
+    }
+  }
+
+  const openOdoo = async () => {
+    if (openingOdoo) return
+    setOpeningOdoo(true)
+    try {
+      await call('open_odoo')
+      setNotice('已请求在浏览器打开已配置的 Odoo。')
+    } catch (reason) {
+      if (String(reason).includes('ODOO_NOT_CONFIGURED')) {
+        setNotice('请先填写 Odoo 地址与数据库，再打开 Odoo。')
+        await openSettings()
+      } else setError(messageForError(reason))
+    } finally {
+      setOpeningOdoo(false)
     }
   }
 
@@ -1034,6 +1051,7 @@ export function useWorkbench() {
     railCollapsed,
     setRailCollapsed,
     exporting,
+    openingOdoo,
     exportPath,
     pendingMaterials,
     setPendingMaterials,
@@ -1070,6 +1088,7 @@ export function useWorkbench() {
     retryHealth,
     exportBusiness,
     openOdooRecord,
+    openOdoo,
     openArtifact,
     openTraceTarget,
     resizeBusiness,
