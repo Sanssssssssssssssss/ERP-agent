@@ -16,10 +16,10 @@ from . import enterprise_view
 
 
 READBACK_FIELDS: dict[str, tuple[str, ...]] = {
-    "res.partner": ("id", "name", "display_name", "email"),
-    "sale.order": ("id", "name", "state", "partner_id", "amount_total", "currency_id", "payment_term_id", "order_line", "invoice_ids", "picking_ids", "invoice_status", "commitment_date", "client_order_ref"),
+    "res.partner": ("id", "name", "display_name", "email", "company_id"),
+    "sale.order": ("id", "name", "state", "partner_id", "company_id", "amount_total", "currency_id", "payment_term_id", "order_line", "invoice_ids", "picking_ids", "invoice_status", "commitment_date", "client_order_ref"),
     "sale.order.line": ("id", "name", "order_id", "product_id", "product_uom_qty", "product_uom_id", "price_unit", "price_subtotal", "price_total"),
-    "purchase.order": ("id", "name", "state", "partner_id", "amount_total", "currency_id", "order_line", "origin", "date_order", "date_planned"),
+    "purchase.order": ("id", "name", "state", "partner_id", "company_id", "amount_total", "currency_id", "order_line", "origin", "date_order", "date_planned"),
     "purchase.order.line": ("id", "name", "order_id", "sale_order_id", "sale_line_id", "product_id", "product_qty", "product_uom_id", "price_unit", "price_subtotal", "price_total", "date_planned"),
     "account.move": ("id", "name", "state", "move_type", "partner_id", "amount_total", "currency_id", "invoice_payment_term_id", "invoice_origin", "invoice_line_ids", "payment_state", "amount_residual", "invoice_date", "invoice_pdf_report_id"),
     "account.move.line": ("id", "name", "move_id", "product_id", "quantity", "product_uom_id", "price_unit", "price_subtotal", "price_total"),
@@ -830,7 +830,7 @@ def _required_check_names(business_type: str, completion_target: str) -> set[str
     elif completion_target == "draft":
         return {"observed_order", "observed_customer", "observed_payment_term", "observed_document_states", "order_draft"}
     elif completion_target == "confirmed":
-        return {"observed_order", "observed_customer", "observed_payment_term", "observed_document_states", "order_confirmed"}
+        return {"observed_order", "observed_customer", "observed_document_states", "order_confirmed"}
     return {"observed_order", "observed_customer", "observed_payment_term", "observed_document_states", "order_confirmed", "invoice_linked_to_order", "invoice_posted"}
 
 
@@ -861,7 +861,7 @@ def _outcome(checks: list[dict[str, Any]], business_type: str = "sale_invoice",
         ("sale_purchase_invoice", "posted"): "销售订单已确认，采购订单已确认，关联发票已过账。",
         ("sale_invoice", "read_only"): "销售订单与客户读取完成。",
         ("sale_invoice", "draft"): "销售订单草稿及客户、付款条款检查通过。",
-        ("sale_invoice", "confirmed"): "销售订单已确认，客户和付款条款检查通过。",
+        ("sale_invoice", "confirmed"): "销售订单已确认，客户读取与单据状态检查通过。",
         ("sale_invoice", "posted"): "销售订单已确认，关联发票已过账。",
     }
     detail = passed_details.get((business_type, completion_target), "业务目标检查通过。") if status == "passed" else (
@@ -883,20 +883,24 @@ def _finish_readback(state: dict[str, Any], business: dict[str, Any], runs: list
         model, record_id = reference["model"], reference["id"]
         observed = observations.get((model, record_id))
         status = "unknown"
-        if observed:
+        if observed and (model, record_id) not in failures:
             expected = {k: v for k, v in reference["fields"].items() if k in {"name", "company_id", "partner_id", "currency_id"}}
             actual = {**observed.get("fields", {}), "name": observed.get("name")}
-            status = "passed" if all(actual.get(k) == v for k, v in expected.items()) else "failed"
+            if all(k in actual for k in expected):
+                status = "passed" if all(actual[k] == v for k, v in expected.items()) else "failed"
         # 收尾依据是原始主体与实际目标的关系，不能只看“读过一张单”。
         relation = "partner_id" if model == "res.partner" else "company_id" if model == "res.company" else None
+        related_ids = set()
         for order_model, kind in (("sale.order", "sale_invoice"), ("purchase.order", "purchase")):
             ids = _target_order_ids_for_runs(runs, kind)
-            targets = [row for (m, i), row in observations.items() if m == order_model and (not ids or i in ids)]
+            targets = [row for (m, i), row in observations.items() if m == order_model and (m, i) not in failures and (not ids or i in ids)]
             if relation and len(targets) == 1:
                 value = targets[0].get("fields", {}).get(relation)
-                status = "passed" if record_id in _relation_ids(value) else "failed" if value else "unknown"
+                related_ids.update(_relation_ids(value))
             if model == order_model and ids and record_id not in ids:
                 status = "failed"
+        if relation and related_ids and status != "failed":
+            status = "passed" if record_id in related_ids else "failed"
         checks.append(_check(f"requested_reference_{index}", f"原始主体：{reference['quote']}", status,
                              "核对用户原始引用与本次回读关系；不代表自由文本的全部业务条件已验证。"))
     for (model, record_id), failure in failures.items():
@@ -1133,21 +1137,8 @@ def refresh_business(
         else "unknown"
     )
     checks.append(_check("invoice_posted", "发票已过账", posted_status, "关联发票状态为 posted。" if posted_status == "passed" else "关联发票存在但状态不是 posted。" if posted_status == "failed" else "没有足够读取结果确认发票过账。"))
-    for (model, record_id), failure in failures.items():
-        checks.append(_check(f"read_{model}_{record_id}", f"读取 {model} {record_id}", "unknown", f"读取失败：{failure}"))
+    return _finish_readback(state, business, runs, observations, failures, checks, business_type, target)
 
-    target_outcome = _outcome(checks, business.get("type", "sale_invoice"), business.get("completion_target", "posted"))
-    verification_status = target_outcome["status"]
-    business["readback"] = {
-        "documents": list(observations.values()),
-        "checks": checks,
-        "observed_at": _now(),
-        "stale": bool(failures),
-        "latest_run_id": runs[-1].get("id") if runs else None,
-        "verification_status": verification_status,
-        "outcome": target_outcome,
-    }
-    return business_detail(state, business_id)
 
 
 def business_detail(state: dict[str, Any], business_id: str) -> dict[str, Any]:

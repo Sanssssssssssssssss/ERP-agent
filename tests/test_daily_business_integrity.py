@@ -51,6 +51,21 @@ def test_user_quote_must_resolve_to_live_id():
         conversation.resolve_references(Reads(), [ref], "另一个人")
 
 
+def test_sales_readback_checks_original_party_and_optional_payment_term():
+    from tests.test_workbench_sale_view import _state, RECORDS, NativeReadFixture
+    from erp_harness.app.sale_view import refresh_business
+    records = copy.deepcopy(RECORDS)
+    records[("sale.order", 7)]["payment_term_id"] = False
+    for partner_id, expected in ((10, "passed"), (20, "failed")):
+        state = _state()
+        state["businesses"]["b1"].update(completion_target="confirmed", references=[{
+            "model": "res.partner", "id": partner_id, "quote": "原始客户", "fields": {"id": partner_id}}])
+        refresh_business(state, "b1", NativeReadFixture(records))
+        readback = state["businesses"]["b1"]["readback"]
+        assert readback["outcome"]["status"] == expected
+        assert next(c for c in readback["checks"] if c["name"] == "requested_reference_0")["status"] == expected
+
+
 def test_reference_paging_and_server_count_share_the_filter(monkeypatch):
     calls = []
     class Reads:
