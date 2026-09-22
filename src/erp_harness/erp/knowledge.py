@@ -63,6 +63,9 @@ def tokenize(text: str) -> list[str]:
         if not unicodedata.combining(character)
     )
     tokens = _TOKEN_RE.findall(stripped)
+    # 中文紧邻的编号/型号仍需独立匹配：客户249 与“请查客户249”的前缀不同。
+    tokens.extend(part for token in list(tokens) if _CJK_RE.search(token)
+                  for part in re.findall(r"[a-z0-9_]+", token))
     # Keep the original token for exact names/IDs; bigrams admit Chinese substrings.
     for run in _CJK_RE.findall(stripped):
         tokens.extend(run[i : i + 2] for i in range(len(run) - 1))
@@ -260,7 +263,9 @@ class KnowledgeStore:
             index = BM25Index()
             for (payload,) in connection.execute("SELECT payload FROM documents WHERE model=? ORDER BY id", (model,)):
                 values = json.loads(payload)
-                values["tokens"] = Counter(values["tokens"])
+                # 索引材料可沿用；派生词项按当前分词规则重建，兼容旧 SQLite。
+                values["tokens"] = Counter(tokenize(values["text"]))
+                values["length"] = sum(values["tokens"].values())
                 document = IndexedDocument(**values)
                 index.documents[document.record_id] = document
                 index.total_length += document.length

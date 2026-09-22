@@ -612,7 +612,7 @@ class Workbench:
             proc = subprocess.Popen(
                 conversation_command(self.root, instruction, usage, session_file),
                 cwd=self.root,
-                env={**conversation_environment(run["session_id"], run["id"]), "USERPROFILE": str(runtime_home), "HOME": str(runtime_home), "ERP_CONVERSATION_SOURCES": str(source_file)},
+                env={**conversation_environment(run["session_id"], run["id"]), "USERPROFILE": str(runtime_home), "HOME": str(runtime_home), "ERP_CONVERSATION_SOURCES": str(source_file), "ERP_KNOWLEDGE_DIR": str(self.store.root / "knowledge")},
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, encoding="utf-8", errors="replace", bufsize=1,
             )

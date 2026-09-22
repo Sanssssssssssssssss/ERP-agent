@@ -79,6 +79,26 @@ def test_reference_paging_and_server_count_share_the_filter(monkeypatch):
     assert calls[0][1]["fields"] == ["id", "name"]
 
 
+def test_chinese_number_recall_upgrades_persisted_materials(tmp_path, monkeypatch):
+    from erp_harness.erp import knowledge
+    monkeypatch.setenv("ERP_KNOWLEDGE_DIR", str(tmp_path))
+    assert "249" in knowledge.tokenize("请确认给华东机电客户249（杭州）的订单")
+    store = knowledge.KnowledgeStore()
+    scope = "a" * 64
+    records = [{"id": i, "name": f"华东机电客户{i:03}（杭州）"} for i in range(300)]
+    store.index_records(scope, "res.partner", records, ["id", "name"], {"generation": "old"}, replace=True)
+    # 模拟旧版磁盘分词。重新加载必须从原始材料恢复新词项。
+    with store._database(scope) as db, db:
+        for model, record_id, payload in db.execute("SELECT model,id,payload FROM documents").fetchall():
+            document = json.loads(payload)
+            document["tokens"] = {k: v for k, v in document["tokens"].items() if not k.isdigit()}
+            document["length"] = sum(document["tokens"].values())
+            db.execute("UPDATE documents SET payload=? WHERE model=? AND id=?", (json.dumps(document), model, record_id))
+    loaded = knowledge.KnowledgeStore()
+    result = loaded.candidates(scope, "res.partner", "请确认给华东机电客户249（杭州）的订单", 20)
+    assert result[0]["record_id"] == 249
+
+
 @pytest.mark.parametrize("change", ["wrong_target", "wrong_partner", "stale_name", "read_only", "valid"])
 def test_target_evidence_prevents_sending_wrong_business(tmp_path, monkeypatch, change):
     actions, writer, runtime = _actions(path=tmp_path / "actions.sqlite3", approval_mode="host")

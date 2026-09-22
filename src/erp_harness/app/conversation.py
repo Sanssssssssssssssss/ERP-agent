@@ -12,6 +12,7 @@ import asyncio
 import json
 import os
 import re
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -99,6 +100,32 @@ _REFERENCE_SPECS = {
 _ODOO_READS = None
 _KNOWLEDGE = None
 _SOURCE_MESSAGES = []
+_TASK_ENTITIES = None
+
+
+def _task_entities(reads, source_text, knowledge):
+    """Recall literal user names outside the prompt; IDs retain their model namespace."""
+    def normalized(text):
+        return unicodedata.normalize("NFKC", text).casefold()
+    source = normalized(source_text)
+    result = reads.call("search_records", {"model": "res.company", "fields": ["id", "name", "partner_id"], "limit": 100})
+    companies = result.get("result", []) if result.get("success") else []
+    internal = {r["partner_id"][0] for r in companies if r.get("partner_id")}
+    hints = [{"model": "res.company", "id": r["id"], "name": r["name"], "filter_field": "company_id"}
+             for r in companies if normalized(r["name"]) in source]
+    found = knowledge.search_knowledge(source_text, "res.partner", limit=20)
+    if found.get("status") == "index_missing":
+        indexed = knowledge.index_knowledge("res.partner", fields=["id", "name", "company_id"], full_refresh=True)
+        if indexed.get("success"):
+            found = knowledge.search_knowledge(source_text, "res.partner", limit=20)
+    ids = [r["record_id"] for r in found.get("results", [])] if found.get("success") else []
+    result = reads.call("search_records", {"model": "res.partner", "domain": [["id", "in", ids]], "fields": ["id", "name"], "limit": 20}) if ids else {}
+    for row in result.get("result", []) if result.get("success") else []:
+        if normalized(row["name"]) in source:
+            hints.append({"model": "res.partner", "id": row["id"], "name": row["name"], "filter_field": "partner_id",
+                          "entity_kind": "internal_company_contact" if row["id"] in internal else "contact"})
+    # 候选提示只认原话中的完整名称；不把 BM25 排名当作身份授权。
+    return hints[:20]
 
 
 def resolve_references(reads, references, source_text):
@@ -236,11 +263,15 @@ async def _read_odoo_reference(_call_id, arguments, _signal=None, _on_update=Non
     try:
         reads = _odoo_reads()
         coverage = None
-        if match == "bm25":
-            global _KNOWLEDGE
-            from erp_harness.erp.knowledge import NativeKnowledge
+        global _KNOWLEDGE, _TASK_ENTITIES
+        from erp_harness.erp.knowledge import NativeKnowledge
+        if match == "bm25" or _SOURCE_MESSAGES:
             if _KNOWLEDGE is None or _KNOWLEDGE.reads is not reads:
                 _KNOWLEDGE = NativeKnowledge(reads)
+                _TASK_ENTITIES = None
+            if _SOURCE_MESSAGES and _TASK_ENTITIES is None:
+                _TASK_ENTITIES = _task_entities(reads, "\n".join(m["text"] for m in _SOURCE_MESSAGES), _KNOWLEDGE)
+        if match == "bm25":
             found = _KNOWLEDGE.search_knowledge(query, model, limit=limit)
             if found.get("status") == "index_missing":
                 indexed = _KNOWLEDGE.index_knowledge(model, fields=_REFERENCE_SPECS[resource][1], full_refresh=True)
@@ -269,6 +300,12 @@ async def _read_odoo_reference(_call_id, arguments, _signal=None, _on_update=Non
                    "offset": offset, "next_offset": offset + len(records) if truncated and records else None,
                    "scope": {"domain": domain, "order": order, "fields": fields},
                    "read_more": "repeat with next_offset; narrow fields if a row exceeds the byte limit"}
+        if _SOURCE_MESSAGES and _TASK_ENTITIES:
+            payload["user_named_entities"] = _TASK_ENTITIES
+            payload["entity_semantics"] = "Names recalled from the original user text. Internal ERP company scope uses company_id; its res.partner contact uses partner_id only when the user means that contact as counterparty. Digits in names are not IDs. These hints are not exhaustive."
+        if records and all("state" in row for row in records):
+            from collections import Counter
+            payload["page_counts_by_state"] = dict(Counter(row["state"] for row in records))
         if coverage is not None:
             payload.update({**coverage, "match": "bm25", "complete": False, "notice": "ranked candidates; not an exhaustive answer"})
         if include_count:
@@ -489,7 +526,8 @@ def arguments() -> argparse.Namespace:
 
 
 async def run(args: argparse.Namespace) -> None:
-    global _SOURCE_MESSAGES
+    global _SOURCE_MESSAGES, _TASK_ENTITIES
+    _TASK_ENTITIES = None
     source_file = os.environ.get("ERP_CONVERSATION_SOURCES")
     _SOURCE_MESSAGES = json.loads(Path(source_file).read_text(encoding="utf-8")) if source_file else []
     api_key = os.environ.get("LLM_API_KEY")
