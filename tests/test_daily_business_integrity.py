@@ -131,6 +131,27 @@ def test_internal_company_contact_queries_expose_both_scopes(monkeypatch):
     assert result["scope"]["domain"] == args["domain"]
 
 
+def test_entity_hints_upgrade_shared_contact_index_fields():
+    class Reads:
+        def call(self, name, args):
+            return {"success": True, "result": []}
+    class Knowledge:
+        fields = ["id", "name", "company_id"]
+        refreshes = 0
+        def search_knowledge(self, *args, **kwargs):
+            return {"success": True, "results": [], "coverage": {"fields": self.fields}}
+        def index_knowledge(self, model, *, fields, full_refresh):
+            assert model == "res.partner" and full_refresh
+            self.fields = fields
+            self.refreshes += 1
+            return {"success": True}
+    knowledge = Knowledge()
+    conversation._task_entities(Reads(), "查公司", knowledge)
+    assert knowledge.fields == conversation._REFERENCE_SPECS["customer"][1]
+    conversation._task_entities(Reads(), "查客户", knowledge)
+    assert knowledge.refreshes == 1
+
+
 @pytest.mark.parametrize("change", ["wrong_target", "wrong_partner", "stale_name", "read_only", "valid"])
 def test_target_evidence_prevents_sending_wrong_business(tmp_path, monkeypatch, change):
     actions, writer, runtime = _actions(path=tmp_path / "actions.sqlite3", approval_mode="host")

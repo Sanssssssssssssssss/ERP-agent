@@ -114,8 +114,8 @@ def _task_entities(reads, source_text, knowledge):
     hints = [{"model": "res.company", "id": r["id"], "name": r["name"], "filter_field": "company_id", "contact_id": r["partner_id"][0]}
              for r in companies if normalized(r["name"]) in source]
     found = knowledge.search_knowledge(source_text, "res.partner", limit=20)
-    if found.get("status") == "index_missing":
-        indexed = knowledge.index_knowledge("res.partner", fields=["id", "name", "company_id"], full_refresh=True)
+    if found.get("status") == "index_missing" or not set(_REFERENCE_SPECS["customer"][1]).issubset(found.get("coverage", {}).get("fields", [])):
+        indexed = knowledge.index_knowledge("res.partner", fields=_REFERENCE_SPECS["customer"][1], full_refresh=True)
         if indexed.get("success"):
             found = knowledge.search_knowledge(source_text, "res.partner", limit=20)
     ids = [r["record_id"] for r in found.get("results", [])] if found.get("success") else []
