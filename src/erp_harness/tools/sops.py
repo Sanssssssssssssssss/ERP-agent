@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from erp_harness.runtime.tools import AgentTool, AgentToolResult
+from erp_harness.erp._odoo_core.write_policy import allowed_side_effect_methods
 
 MAX_INPUT_LENGTH = 2_000
 
@@ -300,6 +301,15 @@ def get_sop(sop_id: str, inputs: dict[str, Any] | None = None) -> dict[str, Any]
         operation = supplied["operation"]
         if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]*", operation):
             return {"success": False, "tool": "get_odoo_sop", "error": "Invalid operation name."}
+        # A model's business verb is not evidence that an Odoo method exists.
+        prefix = supplied["model"] + "."
+        reviewed = sorted(name[len(prefix):] for name in allowed_side_effect_methods() if name.startswith(prefix))
+        if operation not in reviewed:
+            return {"success": False, "tool": "get_odoo_sop",
+                    "error": "This exact model.method is not in the current reviewed method policy. Do not execute the guessed name.",
+                    "model": supplied["model"], "operation": operation, "reviewed_methods": reviewed,
+                    "next_action": "Select a reviewed method matching the confirmed goal and check its prerequisites. If none fits, ask the host for review; do not expand policy yourself.",
+                    "authorization": "Listed methods still require task-scope validation and trusted host approval."}
         spec = {**spec, "required_tools": ["read_record", "execute_method"], "steps": [
             "Read the current record and check the requested business method's prerequisites.",
             (f"Use execute_method(model={supplied['model']!r}, method={operation!r}, kwargs={{'ids': [...]}}). "

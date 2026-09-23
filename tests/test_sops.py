@@ -4,6 +4,7 @@ import asyncio
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from itertools import count
 from pathlib import Path
 
@@ -69,12 +70,24 @@ class ControlledSopTest(unittest.TestCase):
         self.assertIn("search_records", get_sop("po_to_receipt", {"purchase_order": "PO001"})["sop"]["required_tools"])
 
     def test_business_method_does_not_use_field_write_pipeline(self):
-        payload = build_sop_payload("safe_write_review", {"model": "sale.order", "operation": "action_confirm"})
+        with patch.dict("os.environ", {"ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": "sale.order.action_confirm"}):
+            payload = build_sop_payload("safe_write_review", {"model": "sale.order", "operation": "action_confirm"})
         tools = payload["sop"]["required_tools"]
         self.assertEqual(tools, ["mcp_odoo_read_record", "mcp_odoo_execute_method"])
         self.assertIn("mcp_odoo_execute_method(model='sale.order', method='action_confirm'", " ".join(payload["sop"]["steps"]))
         self.assertNotIn("mcp_odoo_validate_write", tools)
         self.assertIn("mcp_odoo_validate_write", build_sop_payload("safe_write_review", {"model": "sale.order", "operation": "write"})["sop"]["required_tools"])
+
+    def test_guessed_method_is_not_endorsed_and_policy_is_rechecked(self):
+        with patch("erp_harness.tools.sops.allowed_side_effect_methods", return_value=[
+                "sale.order.action_confirm", "purchase.order.button_confirm"]):
+            for operation in ("confirm", "button_confirm"):
+                result = build_sop_payload("safe_write_review", {"model": "sale.order", "operation": operation})
+                self.assertFalse(result["success"])
+                self.assertEqual(result["reviewed_methods"], ["action_confirm"])
+                self.assertNotIn("sop", result)
+        with patch("erp_harness.tools.sops.allowed_side_effect_methods", return_value=[]):
+            self.assertFalse(get_sop("safe_write_review", {"model": "sale.order", "operation": "action_confirm"})["success"])
 
 
 if __name__ == "__main__":
