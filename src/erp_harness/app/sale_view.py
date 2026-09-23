@@ -138,7 +138,9 @@ def _read_result(payload: Any, expected_id: int) -> tuple[dict[str, Any] | None,
         return None, "native read did not observe the requested record"
     if result["id"] != expected_id:
         return None, f"native read returned id {result['id']} for requested {expected_id}"
-    return result, None
+    # A masked placeholder is not an observed business value.
+    redacted = current.get("redacted_fields") or []
+    return {key: value for key, value in result.items() if key not in redacted}, None
 
 
 def _read_one(reads: Callable[[str, dict[str, Any]], Any] | Any, model: str, record_id: int, fields=None) -> tuple[dict[str, Any] | None, str | None]:
@@ -261,6 +263,24 @@ def _activity(
 
 def _check(name: str, label: str, status: str, detail: str) -> dict[str, Any]:
     return {"name": name, "label": label, "status": status, "detail": detail, "source": "native_readback"}
+
+
+def _payment_term_check(order: dict[str, Any] | None, invoices: list[dict[str, Any]]) -> dict[str, Any]:
+    """False is Odoo's observed empty relation; missing/hidden fields are unknown."""
+    expected_invoices = set(_relation_ids((order or {}).get("fields", {}).get("invoice_ids")))
+    if expected_invoices - {invoice.get("id") for invoice in invoices}:
+        return _check("observed_payment_term", "付款条款读取", "unknown", "关联发票未完整读取，无法核对付款条款字段。")
+    records = [(order, "payment_term_id"), *((invoice, "invoice_payment_term_id") for invoice in invoices)]
+    empty = 0
+    for document, field in records:
+        fields = document.get("fields", {}) if document else {}
+        value = fields.get(field)
+        ids = _relation_ids(value)
+        if field not in fields or not (value is False or len(ids) == 1 and type(ids[0]) is int and ids[0] > 0):
+            return _check("observed_payment_term", "付款条款读取", "unknown", "销售订单或关联发票的付款条款字段未完整读取。")
+        empty += value is False
+    detail = "付款条款字段已读取。" + (f"其中 {empty} 张单据未设置付款条款。" if empty else "")
+    return _check("observed_payment_term", "付款条款读取", "passed", detail + "此项只证明已读取，不表示符合指定付款条件。")
 
 
 STAGES = (
@@ -848,7 +868,7 @@ def _outcome(checks: list[dict[str, Any]], business_type: str = "sale_invoice",
         ("sale_purchase_invoice", "read_only"): "销售与采购相关记录已读取。",
         ("sale_purchase_invoice", "posted"): "销售订单已确认，采购订单已确认，关联发票已过账。",
         ("sale_invoice", "read_only"): "销售订单与客户读取完成。",
-        ("sale_invoice", "draft"): "销售订单草稿及客户、付款条款检查通过。",
+        ("sale_invoice", "draft"): "销售订单草稿及客户检查通过，付款条款读取完成。",
         ("sale_invoice", "confirmed"): "销售订单已确认，客户读取与单据状态检查通过。",
         ("sale_invoice", "posted"): "销售订单已确认，关联发票已过账。",
     }
@@ -971,7 +991,7 @@ def _finish_chain_readback(state: dict[str, Any], business: dict[str, Any], runs
         _check("observed_customer", "已读取客户", "passed" if partner_ids and any(row.get("id") in partner_ids for row in partners) else "unknown", "客户关系与记录均已观测。" if partner_ids else "客户关系未观测完整。"),
         _check("observed_purchase", "当前采购订单", "passed" if purchase else "unknown", "采购订单由 native read 观测。" if purchase else "尚未观测到唯一采购订单。"),
         _check("observed_supplier", "已读取供应商", "passed" if purchase_partner_ids and any(row.get("id") in purchase_partner_ids for row in partners) else "unknown", "供应商关系与记录均已观测。" if purchase_partner_ids else "供应商关系未观测完整。"),
-        _check("observed_payment_term", "已读取付款条款", "passed" if _relation_ids(order_fields.get("payment_term_id")) else "unknown", "销售订单付款条款已观测。" if _relation_ids(order_fields.get("payment_term_id")) else "付款条款未观测完整。"),
+        _payment_term_check(order, invoices),
         _check("observed_document_states", "已读取单据状态", "passed" if order_state and purchase_state and invoice_states and all(invoice_states) else "unknown", "销售、采购和发票状态均已观测。" if order_state and purchase_state and invoice_states else "单据状态未完整观测。"),
         _check("order_confirmed", "销售订单已确认", "passed" if order_state in {"sale", "done"} else "failed" if order_state else "unknown", "销售订单状态为 sale。" if order_state in {"sale", "done"} else "销售订单尚未确认。" if order_state else "销售订单状态未知。"),
         _check("purchase_lines_valid", "采购行有效", "passed" if valid_lines else "failed" if line_ids else "unknown", "采购行包含商品和数量。" if valid_lines else "采购行缺少商品或数量。" if line_ids else "采购行未知。"),
@@ -1122,10 +1142,7 @@ def refresh_business(
     partner_id = _relation_ids(order_fields.get("partner_id"))
     partner_seen = any(doc["id"] in partner_id for doc in fresh_by_model.get("res.partner", []))
     checks.append(_check("observed_customer", "已读取客户", "passed" if partner_seen else "unknown", "客户关系与客户记录均已观测。" if partner_seen else "客户关系或客户记录未观测完整。"))
-    term = order_fields.get("payment_term_id") if order else None
-    if term is None and linked_invoices:
-        term = linked_invoices[0].get("fields", {}).get("invoice_payment_term_id")
-    checks.append(_check("observed_payment_term", "已读取付款条款", "passed" if _relation_ids(term) else "unknown", "付款条款关系已由读取结果提供。" if _relation_ids(term) else "读取结果没有付款条款关系。"))
+    checks.append(_payment_term_check(order, linked_invoices))
     order_state = order.get("state") if order else None
     invoice_states = [doc.get("state") for doc in linked_invoices]
     target = business.get("completion_target", "posted")

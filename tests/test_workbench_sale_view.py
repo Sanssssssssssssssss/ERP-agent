@@ -743,6 +743,55 @@ class SaleViewReadbackTests(unittest.TestCase):
         self.assertEqual(checks["invoice_posted"]["status"], "unknown")
         self.assertNotEqual(checks["invoice_posted"]["status"], "passed")
 
+    def test_nullable_payment_terms_are_observed_in_both_business_paths(self):
+        for kind in ("sale_invoice", "sale_purchase_invoice"):
+            for order_term, invoice_term in ((False, False), (False, [5, "30 Days"]), ([5, "30 Days"], False)):
+                with self.subTest(kind=kind, order_term=order_term, invoice_term=invoice_term):
+                    state, records = _state(), deepcopy(RECORDS)
+                    state["businesses"]["b1"].update(type=kind, completion_target="posted")
+                    records[("sale.order", 7)]["payment_term_id"] = order_term
+                    records[("account.move", 31)]["invoice_payment_term_id"] = invoice_term
+                    if kind == "sale_purchase_invoice":
+                        state["runs"]["r2"]["documents"].append({"model": "purchase.order", "id": 9, "fields": {}})
+                        records[("purchase.order", 9)] = {"id": 9, "name": "PO9", "state": "purchase", "origin": "SO001",
+                            "partner_id": [10, "Acme"], "order_line": [22]}
+                        records[("purchase.order.line", 22)] = {"id": 22, "name": "Line", "order_id": [9, "PO9"],
+                            "product_id": [99, "Widget"], "product_qty": 3}
+                    detail = refresh_business(state, "b1", NativeReadFixture(records))
+                    check = next(c for c in detail["checks"] if c["name"] == "observed_payment_term")
+                    self.assertEqual(check["status"], "passed")
+                    self.assertIn("未设置付款条款", check["detail"])
+                    self.assertIn("不表示符合指定付款条件", check["detail"])
+                    self.assertEqual(detail["outcome"]["status"], "passed")
+
+    def test_missing_masked_or_unreadable_payment_term_cannot_use_other_document_as_fallback(self):
+        for model, record_id, field in (("sale.order", 7, "payment_term_id"), ("account.move", 31, "invoice_payment_term_id")):
+            for failure in ("missing", "null", "masked", "denied"):
+                with self.subTest(model=model, failure=failure):
+                    records = deepcopy(RECORDS)
+                    if failure == "missing":
+                        records[(model, record_id)].pop(field)
+                    elif failure == "null":
+                        records[(model, record_id)][field] = None
+                    elif failure == "masked":
+                        records[(model, record_id)][field] = False
+                    native = NativeReadFixture(records)
+                    def read(name, args):
+                        payload = native(name, args)
+                        if (args["model"], args["record_id"]) == (model, record_id):
+                            if failure == "masked":
+                                payload["redacted_fields"] = [field]
+                            elif failure == "denied":
+                                return {"success": False, "error": "AccessError: permission denied"}
+                        return payload
+                    detail = refresh_business(_state(), "b1", read)
+                    self.assertEqual(detail["outcome"]["status"], "unknown")
+                    check = next(c for c in detail["checks"] if c["name"] == "observed_payment_term")
+                    self.assertEqual(check["status"], "unknown")
+                    if failure == "masked":
+                        document = next(d for d in detail["documents"] if (d["model"], d["id"]) == (model, record_id))
+                        self.assertNotIn(field, document["fields"])
+
     def test_readback_failure_recovers_and_current_checks_replace_old(self):
         state = _state()
         failed = refresh_business(state, "b1", NativeReadFixture(RECORDS, {("account.move", 31)}))
