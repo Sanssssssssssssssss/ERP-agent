@@ -55,6 +55,7 @@ from erp_harness.erp.business_operations import (
 )
 from erp_harness.erp.reads import NativeReads
 from erp_harness.erp.store import ActionStore
+from erp_harness.erp.task_evidence import TaskHandoff, failure_result
 from erp_harness.erp.write_guards import business_write_prestate, manufacturing_confirm_prestate
 from erp_harness.erp import invoice_mail
 from erp_harness.erp.invoice_eligibility import InvoiceEligibilityError, inspect_invoice_eligibility
@@ -542,6 +543,8 @@ class NativeActions:
         return client.read_records(model, ids, fields=fields)
 
     def _prestate(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.task_evidence is not None:
+            self.task_evidence.check_stage(kind, payload)
         state = self._native_prestate(kind, payload)
         if self.task_evidence is not None:
             state.update(self.task_evidence.prestate(kind, payload))
@@ -552,7 +555,7 @@ class NativeActions:
         model = str(payload.get("model") or "")
         if kind == "method" and (model, payload.get("method")) == invoice_mail.METHOD:
             if self.task_evidence is None:
-                raise ValueError("invoice mail requires host-bound invoice and recipient references")
+                raise TaskHandoff("发送发票前需要宿主绑定发票、公司和收件人，请在聊天中确认发送提案。")
             return {"invoice_mail": invoice_mail.prestate(self.reads.instances[instance], payload)}
         if kind == "write":
             operation = payload.get("operation")
@@ -1144,6 +1147,8 @@ class NativeActions:
             # 一旦可能已发送，只能回读确认，绝不能因未知结果再次发送。
             return self._reconcile(row)
         runtime = self.reads.instances[str(row["payload"]["instance"])]
+        if self.task_evidence is not None:
+            self.task_evidence.check_stage(row["kind"], row["payload"])
         if row["policy_digest"] != self._policy_snapshot(runtime)[0]:
             return {"success": False, "action_id": action_id, "error": "action policy changed; validate again"}
         if not self._current_prestate_matches(row):
@@ -1314,7 +1319,7 @@ class NativeActions:
             )
             return report
         except Exception as exc:  # noqa: BLE001 - tool boundary returns structured errors
-            return {"success": False, "tool": "preview_write", "error": str(exc)}
+            return {"tool": "preview_write", **failure_result(exc)}
 
     def validate_write(
         self,
@@ -1478,7 +1483,7 @@ class NativeActions:
             )
             return report
         except Exception as exc:  # noqa: BLE001 - tool boundary returns structured errors
-            return {"success": False, "tool": "validate_write", "error": str(exc)}
+            return {"tool": "validate_write", **failure_result(exc)}
 
     def execute_approved_write(
         self, approval: dict[str, Any], confirm: bool = False
@@ -1656,11 +1661,7 @@ class NativeActions:
                 **result,
             }
         except Exception as exc:  # noqa: BLE001 - tool boundary returns structured errors
-            return {
-                "success": False,
-                "tool": "execute_approved_write",
-                "error": str(exc),
-            }
+            return {"tool": "execute_approved_write", **failure_result(exc)}
 
     def chatter_post(
         self,
@@ -1776,7 +1777,7 @@ class NativeActions:
                 **result,
             }
         except Exception as exc:  # noqa: BLE001 - tool boundary returns structured errors
-            return {"success": False, "error": str(exc)}
+            return failure_result(exc)
 
     def execute_method(
         self,
@@ -1909,7 +1910,7 @@ class NativeActions:
                     "action_id": action["action_id"],
                     "action_status": action["status"],
                     "error": "trusted host approval is required; repeating the call does not authorize it",
-                    "resume": {"tool": "execute_method", "arguments": payload,
+                    "resume": {"tool": "mcp_odoo_execute_method", "arguments": payload,
                                "when": "After trusted host approval, repeat this same execute_method call. Do not use execute_approved_write for method actions."},
                     "classification": safety,
                 }
@@ -1936,10 +1937,11 @@ class NativeActions:
             )
             return {**result, "classification": safety}
         except InvoiceEligibilityError as exc:
-            return {"success": False, "error": str(exc), "business_condition": exc.report,
+            error = TaskHandoff(str(exc), code="business_choice_required", next_action="clarify_business_choice") if exc.report.get("requires_business_choice") else exc
+            return {**failure_result(error), "business_condition": exc.report,
                     "approval_required": False, "retry_safe": False}
         except Exception as exc:  # noqa: BLE001 - tool boundary returns structured errors
-            return {"success": False, "error": str(exc)}
+            return failure_result(exc)
 
 
 __all__ = ["ACTION_TOOLS", "NativeActions"]

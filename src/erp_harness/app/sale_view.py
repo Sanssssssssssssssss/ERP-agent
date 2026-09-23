@@ -175,6 +175,8 @@ def _activity(
     retrying = retry.get("status") == "retrying"
     if status == "needs_reconciliation":
         phase, label, detail = "reconciliation", "需要核对", "存在不确定写入，禁止自动重试。"
+    elif status == "awaiting_input":
+        phase, label, detail = "awaiting_input", "等待补充条件", (run.get("handoff") or {}).get("message", "请在聊天中补充条件，并确认更新后的提案。")
     elif status == "interrupted":
         phase, label, detail = "interrupted", "已中断", "运行因主机或进程中断而停止。"
     elif status == "cancelled":

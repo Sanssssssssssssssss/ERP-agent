@@ -43,6 +43,7 @@ from erp_harness.erp.capabilities import NativeCapabilities
 from erp_harness.tools.dynamic_tools import CAPABILITY_GROUPS, DynamicToolController
 from erp_harness.erp.reads import NativeReads
 from erp_harness.tools.sops import build_sop_tools
+from erp_harness.tools.run_diagnostics import build_diagnostic_tool
 from erp_harness.erp.store import ActionStore
 from erp_harness.erp.task_evidence import TaskEvidence
 from erp_harness.context.world import WorldStore
@@ -62,12 +63,17 @@ SOP_POLICY = (
     "matching procedure with get_odoo_sop. A procedure is guidance, never write "
     "authorization; current tool and host policy still decide."
 )
+EXACT_TOOL_NAME_POLICY = (
+    " Use the exact tool names in the currently published definitions, including "
+    "mcp_odoo_ where present; never abbreviate tool identifiers."
+)
 DYNAMIC_TOOL_POLICY = (
     " Use configure_odoo_tools directly when you know the needed capability groups; "
     "call list_odoo_capabilities when you need to discover group availability. "
     "Select the complete optional capability set needed for the task. A configured "
     "tool set appears on the next model turn; a same-response call to a newly "
     "selected tool is rejected."
+    + EXACT_TOOL_NAME_POLICY
 )
 BUSINESS_EXECUTION_POLICY = (
     " Determine the user-required scope and constraints before acting; for fulfillment, "
@@ -248,16 +254,24 @@ def arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _approval_required(result: object) -> bool:
-    """Read the native approval marker without coupling the runner to a tool."""
+def _tool_payload(result: object) -> dict:
     details = getattr(result, "details", None)
     if details is None and isinstance(result, dict):
         details = result.get("details", result)
     if hasattr(details, "model_dump"):
         details = details.model_dump()
     structured = details.get("structuredContent", details) if isinstance(details, dict) else getattr(result, "structuredContent", None)
-    if not isinstance(structured, dict):
-        return False
+    return structured if isinstance(structured, dict) else {}
+
+
+def _handoff_required(result: object) -> bool:
+    failure = _tool_payload(result).get("failure")
+    return isinstance(failure, dict) and failure.get("requires_user_input") is True
+
+
+def _approval_required(result: object) -> bool:
+    """Read the native approval marker without coupling the runner to a tool."""
+    structured = _tool_payload(result)
     # Current action state outranks a preview's legacy approval-required flag.
     for key in ("action_status", "approval_status", "status", "approval"):
         status = structured.get(key)
@@ -427,6 +441,8 @@ async def run(args: argparse.Namespace) -> None:
                     world,
                     identity_context=(native_runtime.identity_context if native_runtime is not None else None),
                 ) if world is not None else ()),
+                *([build_diagnostic_tool(receipt_dir, args.session_file, native_runtime.identity_context)]
+                  if native_runtime is not None else []),
             ]
             if tool_mode == "dynamic":
                 dynamic_tools = DynamicToolController(
@@ -462,7 +478,9 @@ async def run(args: argparse.Namespace) -> None:
             )
             runtime_date = datetime.now().astimezone().date().isoformat()
             async def stop_after_approval(turn):
-                return any(_approval_required(result) for result in turn.tool_results)
+                return any(_handoff_required(result) or (
+                    getattr(args, "pause_on_approval", False) and _approval_required(result)
+                ) for result in turn.tool_results)
 
             def project_context(messages, signal):
                 # record 也可启用旧读取外置：条件是 native 且 WorldStore 可用。
@@ -486,7 +504,7 @@ async def run(args: argparse.Namespace) -> None:
                     tools=list(session_tools),
                     max_turns=args.max_turns,
                     # Pause only after the tool result is durably recorded.
-                    should_stop_after_turn=stop_after_approval if getattr(args, "pause_on_approval", False) else None,
+                    should_stop_after_turn=stop_after_approval,
                     transform_context=context_transform,
                     resource_paths=ResourcePaths(
                         root=receipt_dir / ".pi-agent",

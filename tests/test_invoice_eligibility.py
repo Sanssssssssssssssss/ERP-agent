@@ -68,7 +68,7 @@ def test_guard_blocks_before_approval_and_detects_changed_invoiceable_quantity()
             assert actions.store.summary()["actions"] == 0
             line.update(qty_to_invoice=2, qty_delivered=2)
             pending = actions.execute_method("sale.advance.payment.inv", "create_invoices", kwargs={"ids": [9]})
-            assert pending["resume"]["tool"] == "execute_method"
+            assert pending["resume"]["tool"] == "mcp_odoo_execute_method"
             row = actions.store.get(pending["action_id"])
             assert actions.store.approve(pending["action_id"], "desktop_host")
             line["qty_to_invoice"] = 1  # Still eligible, but approved quantities changed.

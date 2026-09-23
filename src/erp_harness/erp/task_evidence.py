@@ -18,6 +18,24 @@ from pathlib import Path
 from erp_harness.erp.store import ActionStore
 
 
+class TaskHandoff(ValueError):
+    """The current worker cannot supply missing user choices or host authority."""
+
+    def __init__(self, message: str, *, code: str = "scope_handoff_required",
+                 next_action: str = "renew_proposal"):
+        super().__init__(message)
+        self.code, self.next_action = code, next_action
+
+
+def failure_result(error: Exception) -> dict:
+    result = {"success": False, "error": str(error)}
+    if isinstance(error, TaskHandoff):
+        result.update(approval_required=False, retry_safe=False, failure={
+            "code": error.code, "next_action": error.next_action, "requires_user_input": True,
+        })
+    return result
+
+
 def qualification_contract(value):
     text = html.unescape(re.sub(r"<[^>]+>", "\n", str(value or "")))
     marker = "workcenter_qualification_v1:"
@@ -43,6 +61,12 @@ class TaskEvidence:
         self.bindings = copy.deepcopy(self.spec.get("bindings", []))
         self.references = copy.deepcopy(self.spec.get("references", []))
         self.release_fields = copy.deepcopy(self.spec.get("release_fields", []))
+        self.stage = copy.deepcopy(self.spec.get("stage"))
+        if self.stage is not None:
+            from erp_harness.app.business import valid_target
+            if (not isinstance(self.stage, dict) or self.stage.get("version") != 1
+                    or not valid_target(self.stage.get("business_type"), self.stage.get("completion_target"))):
+                raise ValueError("invalid host-confirmed stage")
         for rule in self.release_fields:
             if (not isinstance(rule, dict) or not all(isinstance(rule.get(k), str) and rule[k] for k in ("model", "method"))
                     or not isinstance(rule.get("fields"), list) or not rule["fields"]
@@ -222,9 +246,33 @@ class TaskEvidence:
         self._event("release_fields_checked", model=model, fields=fields, record_ids=ids)
         return [["release_fields", model, rows]]
 
+    def check_stage(self, kind, payload):
+        """Reject explicit phase advancement; reads and supporting workflows stay free."""
+        if self.spec.get("read_only") or (self.stage or {}).get("completion_target") == "read_only":
+            raise TaskHandoff("当前任务只允许查询。需要写入时，请先在聊天中更新并确认业务提案。")
+        if not self.stage:
+            return  # Existing CLI/bench evidence keeps its original contracts.
+        business_type, target = self.stage["business_type"], self.stage["completion_target"]
+        model, method = payload.get("model"), payload.get("method")
+        values = payload.get("values") or {}
+        rows = payload.get("values_list") or [values]
+        if (business_type != "invoice_delivery" and model == "account.move.send.wizard"
+                and any("email" in (row.get("sending_methods") or []) for row in rows)):
+            raise TaskHandoff("邮件发送不在当前阶段。请先在聊天中确认发票、公司和收件人，生成发送提案。")
+        if business_type == "sale_invoice":
+            invoice = model in {"sale.advance.payment.inv", "account.move", "account.move.line", "account.move.send.wizard"}
+            delivery = model in {"stock.picking", "stock.move", "stock.move.line", "stock.backorder.confirmation"}
+            if target == "confirmed" and (invoice or delivery):
+                raise TaskHandoff("当前阶段只确认销售单，不开票或发货。需要推进业务时，请先更新并确认提案。")
+            if target == "draft" and (delivery or method in {"action_confirm", "action_post"}
+                                      or values.get("state") in {"sale", "posted", "done"}):
+                raise TaskHandoff("当前阶段只保留草稿。确认、过账或发货需要先更新并确认提案。")
+        if (kind == "method" and (model, method) == ("account.move", "message_post")
+                and business_type != "invoice_delivery"):
+            raise TaskHandoff("当前开票阶段不包含邮件发送。请在聊天中确认发票、公司和收件人，生成发送提案。")
+
     def prestate(self, kind, payload):
-        if self.spec.get("read_only"):
-            raise ValueError("the host-confirmed task is read-only; no ERP write is authorized")
+        self.check_stage(kind, payload)
         sources = self.bind(payload) if kind == "write" else []
         sources.extend(self.reference_check(kind, payload))
         if kind == "method":
@@ -251,13 +299,18 @@ class TaskEvidence:
                     if any(old == r["contract"] for r in self.rules) and qualification_contract(payload["values"]["description"]) != old:
                         raise ValueError("task cannot overwrite its host-bound qualification rule")
             self._event("rules_checked", count=len(rules), model=payload["model"])
-        return {"host_task_evidence": {"spec_sha256": self.digest, "sources": sources, "rules": rules}} if sources or rules else {}
+        return {"host_task_evidence": {"spec_sha256": self.digest, "sources": sources, "rules": rules,
+                                      **({"stage": self.stage} if self.stage else {})}} if sources or rules or self.stage else {}
 
     def reference_check(self, kind, payload):
         """Recheck user-quoted identities at preparation, approval and dispatch."""
         mail = kind == "method" and (payload.get("model"), payload.get("method")) == ("account.move", "message_post")
-        if mail and not self.references:
-            raise ValueError("invoice mail requires host-bound invoice and recipient references")
+        if mail:
+            from .invoice_mail import requested
+            try:
+                requested(self.references)
+            except ValueError as exc:
+                raise TaskHandoff("发送依据不完整：需要宿主确认唯一发票、公司和收件人。请在聊天中补充并确认发送提案。") from exc
         if not self.references:
             return []
         context = payload.get("kwargs", {}).get("context") if kind == "method" else payload.get("context")
