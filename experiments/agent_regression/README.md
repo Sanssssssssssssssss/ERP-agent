@@ -35,4 +35,6 @@ python -m experiments.agent_regression.runner --summary
 
 候选调用生产 builder，仅替换声明位置；逆替换必须还原完整原请求。这只控制实验输入，**不要求输出遵循 Golden Trace**。正确身份、授权、业务约束和证据决定结果；额外合理只读、措辞或工具顺序变化允许通过人工复核。无法确定的语义标为 `needs_review`，不调用模型裁判。单节点不证明最终业务成功。
 
+C02 的新 runtime 会在 typed handoff 后暂停，其强制续出的模型回复属于反事实分析。真实暂停由离线会话持久化检查验收，不能把该回复里的工具意图计为生产调用。结果和未通过项见 [简短报告](RESULTS.md)。
+
 `results/*/*/` 保存请求、原始 SSE、意图和结构检查。`summary.json` 单列 fresh/cache/output、reasoning 子集、请求数、工具意图、耗时与未知值；这些数字不参与业务正确性打分。最终业务回归由负责人另行执行。

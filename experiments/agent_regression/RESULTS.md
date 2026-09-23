@@ -24,6 +24,10 @@
 
 离线补修：`5a0acbd` 在审批恢复时复用宿主绑定的阶段说明；`bffeead` 按业务身份校验不同合法参数形式；`a3c0e0a` 验证实际 JSONL 落盘和单轮暂停。B01 新分支仅准备完成，未再次调用模型，收敛效果仍待验证。完整业务环境仍冻结在旧候选，启动门保持关闭。
 
+后续上下文修复也已独立提交：`4b1d625` 移除业务 system 的编码助手前缀和错误的“无可用工具”标签，保留 ERP 契约及日期，离线生成约1.5 KB（原候选2.8 KB）；普通聊天未改。`dac564f` 首轮外置大量未排期、未开始工单，保留负荷与完整引用；原 E02 回包358,782→15,164字节（−95.77%），19页召回1,835行完全一致。其余业务事实和原日志不变。
+
+这两项整合检查 **87 passed / 31 subtests**，独立审查通过，追加付费调用0。字节收益不等于 token、成本或业务收益；已排期及进行中保护由离线样例验证。[System 对照](../../.runtime/agent-regression-20260923/system-prompt-20260923/comparison.json) · [供给重放](../../.runtime/supply-first-projection-20260923/result.json)。
+
 回退点：`regression-baseline-20260923`（`40e7fc6`）。付费结果之后的离线修改单独提交，未复用旧成绩宣称生效。
 
 [运行入口与案例索引](README.md) · [完整用量](../../.runtime/agent-regression-20260923/summary.json) · [A/D 复核](../../.runtime/agent-regression-20260923/reviews/acceptance.json) · [B/C 复核](../../.runtime/agent-regression-20260923/reviews/bc.json) · [B01 根因](../../.runtime/agent-regression-20260923/reviews/b01-root-analysis.md)
