@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from .cases import DEFAULT, ROOT
 from .freeze import canonical, digest, read, verify, write_once
+from .provenance import supplement, verify_provenance
 
 
 def location(payload, pointer):
@@ -111,6 +112,7 @@ def build_candidate(folder, policy):
 def prepare(directory=DEFAULT):
     directory = Path(directory)
     frozen = verify(directory)
+    supplement(directory)
     policy = {x["id"]: ["/messages/0/content"] for x in frozen["cases"]
               if (directory / "cases" / x["id"] / "business.json").exists()}
     # Additive approval before paid requests; original manifests/oracles stay untouched.
@@ -133,9 +135,11 @@ def prepare(directory=DEFAULT):
     freeze_sources = (ROOT / "src/erp_harness/app/host.py", ROOT / "src/erp_harness/app/runner.py", ROOT / "src/erp_harness/tools/sops.py",
                       ROOT / "src/erp_harness/erp/task_evidence.py")
     manifest = {"cases": rows, "freeze_sha256": digest((directory / "freeze.json").read_bytes()),
+                "provenance_sha256": digest((directory / "provenance.json").read_bytes()),
                 "policy_sha256": digest((directory / "patch-policy-v2.json").read_bytes()),
                 "candidate_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
-                "producer_files": {str(p.relative_to(ROOT)): digest(p.read_bytes()) for p in freeze_sources}}
+                "producer_files": {str(p.relative_to(ROOT)): digest(p.read_bytes()) for p in freeze_sources},
+                "experiment_files": {str(p.relative_to(ROOT)): digest(p.read_bytes()) for p in Path(__file__).parent.glob("*.py")}}
     write_once(directory / "prepared.json", manifest)
     return rows
 
@@ -144,10 +148,13 @@ def verify_prepared(directory=DEFAULT):
     directory = Path(directory)
     verify(directory)
     record = read(directory / "prepared.json")
+    verify_provenance(directory)
+    if digest((directory / "provenance.json").read_bytes()) != record["provenance_sha256"]:
+        raise ValueError("Prepared source provenance changed")
     if digest((directory / "freeze.json").read_bytes()) != record["freeze_sha256"] or digest((directory / "patch-policy-v2.json").read_bytes()) != record["policy_sha256"]:
         raise ValueError("Prepared policy/freeze was changed")
     policy = read(directory / "patch-policy-v2.json")["additional_paths"]
-    for filename, expected in record["producer_files"].items():
+    for filename, expected in {**record["producer_files"], **record["experiment_files"]}.items():
         if digest((ROOT / filename).read_bytes()) != expected:
             raise ValueError("Production candidate source changed after preparation: " + filename)
     for case, values in record["cases"].items():
