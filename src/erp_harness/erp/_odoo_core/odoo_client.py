@@ -30,6 +30,7 @@ from .diagnostics import (
 
 SUPPORTED_TRANSPORTS = {"xmlrpc", "json2"}
 READ_CALL_ID: ContextVar[str | None] = ContextVar("odoo_read_call_id", default=None)
+_RPC_RECEIPT: ContextVar[dict | None] = ContextVar("odoo_rpc_receipt", default=None)
 
 
 def _retry_attempts() -> int:
@@ -310,9 +311,9 @@ class OdooClient:
             "rpc_request_id": "rpc_" + uuid4().hex,
             "model": model, "method": method,
             "backend": os.environ.get("ODOO_REQUEST_BACKEND", "mcp"),
-            "tool_call_id": READ_CALL_ID.get(),
+            "tool_call_id": READ_CALL_ID.get(), "dispatch_started": False,
         }
-        self._request_receipt({**receipt, "event": "start", "at": time.time()})
+        token = _RPC_RECEIPT.set(receipt)
         try:
             result = self._json2_call_once(model, method, payload)
             status = 200
@@ -325,6 +326,15 @@ class OdooClient:
             self._request_receipt({**receipt, "event": "end", "at": time.time(),
                                    "status": status, "error_type": error_type,
                                    "elapsed_seconds": time.monotonic() - started})
+            _RPC_RECEIPT.reset(token)
+
+    def _request_started(self) -> None:
+        # Called after payload/config validation, immediately before urlopen.
+        # This proves a local HTTP attempt, never receipt by the remote server.
+        receipt = _RPC_RECEIPT.get()
+        if receipt is not None:
+            receipt["dispatch_started"] = True
+            self._request_receipt({**receipt, "event": "start", "at": time.time()})
 
     @staticmethod
     def _request_receipt(receipt: dict[str, Any]) -> None:
@@ -369,6 +379,7 @@ class OdooClient:
                 f"Making JSON-2 request to {self.hostname}/json/2/{model}/{method}",
                 file=sys.stderr,
             )
+            self._request_started()
             with urllib.request.urlopen(
                 request,
                 timeout=self.timeout,

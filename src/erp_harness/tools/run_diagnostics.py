@@ -75,7 +75,7 @@ def summarize_run(directory: Path, session_file: Path, identity: dict, *, run_id
     result = {"success": True, "scope": "current_run", "business_truth": False,
               "note": "Execution evidence only. Verify business facts using current-permission Odoo reads.",
               "items": [], "evidence_complete": True}
-    calls = {}
+    calls, ambiguous_calls = {}, set()
     # ponytail: scan local receipt metadata; index only if measured run size warrants it.
     for path in sorted((directory / "requests").glob("*.meta.json")):
         rows, complete = _rows(path)
@@ -85,6 +85,8 @@ def summarize_run(directory: Path, session_file: Path, identity: dict, *, run_id
                 return {"success": False, "error_code": "scope_mismatch", "items": []}
             for call in row.get("tool_call_ids", []):
                 if _identifier(call):
+                    if call in calls and calls[call] != row.get("request_id"):
+                        ambiguous_calls.add(call)
                     calls[call] = row.get("request_id")
     events, events_ok = _rows(directory / "tool-backends.jsonl")
     rpc, rpc_ok = _rows(directory / "odoo-native-requests.jsonl")
@@ -126,12 +128,18 @@ def summarize_run(directory: Path, session_file: Path, identity: dict, *, run_id
         matching = [r for r in rpc if r.get("tool_call_id") == call]
         rpc_ids = {r.get("rpc_request_id") for r in matching if r.get("rpc_request_id")}
         # One request ID attached to two tool calls is corrupt correlation, not evidence.
-        conflict = any(r.get("rpc_request_id") in rpc_ids and r.get("tool_call_id") != call for r in rpc)
-        seen = True if matching and not conflict else None
+        conflict = call in ambiguous_calls or any(
+            r.get("rpc_request_id") in rpc_ids and r.get("tool_call_id") != call for r in rpc)
         text = "".join(p.get("text", "") for p in message.get("content", []) if isinstance(p, dict))
         before_dispatch = bool(message.get("isError") and re.fullmatch(r"Tool [\w.-]+ not found(?:\..*)?", text, re.S))
-        if before_dispatch and not matching:
-            seen = False
+        observed_dispatch = any(r.get("dispatch_started") is True for r in matching)
+        explicit_no_dispatch = bool(matching) and all(r.get("dispatch_started") is False for r in matching)
+        if before_dispatch and (starts or observed_dispatch):
+            conflict = True
+        seen = (True if observed_dispatch else False if explicit_no_dispatch
+                or before_dispatch and not matching else None) if not conflict else None
+        if conflict:
+            result["evidence_complete"] = False
         approval = payload.get("approval_status") or payload.get("approval") or {}
         action_id = payload.get("action_id") or (approval.get("action_id") if isinstance(approval, dict) else None)
         action = by_action.get(action_id, {})
@@ -146,7 +154,7 @@ def summarize_run(directory: Path, session_file: Path, identity: dict, *, run_id
         ended_rpc = {r.get("rpc_request_id") for r in matching if r.get("event", "end") == "end"}
         incomplete_rpc = started_rpc - ended_rpc
         result["items"].append({
-            "tool_call_id": call, "request_id": _identifier(calls[call]),
+            "tool_call_id": call, "request_id": _identifier(calls[call]) if call not in ambiguous_calls else None,
             "tool_started": True if starts else False if before_dispatch else None,
             "tool_ended": True if ends or message else None,
             "odoo_request_seen": seen,
@@ -157,8 +165,8 @@ def summarize_run(directory: Path, session_file: Path, identity: dict, *, run_id
             "action_id": _identifier(action_id), "action_status": _action_status(action),
             "world_observation": _identifier(observation.get("receipt_id")), "world_stale": stale,
             "error_code": "correlation_conflict" if conflict else code or "tool_incomplete",
-            "stage": "before_dispatch" if before_dispatch else "unknown",
-            "likely_failure_layer": "tool_dispatch" if before_dispatch else "handoff" if code in {
+            "stage": "before_dispatch" if seen is False else "unknown",
+            "likely_failure_layer": "unknown" if conflict else "tool_dispatch" if before_dispatch else "handoff" if code in {
                 "scope_handoff_required", "business_choice_required", "scope_reconfirmation_required"}
                 else "odoo_transport" if incomplete_rpc else "unknown",
             "next_action": "request_user_input" if code in {

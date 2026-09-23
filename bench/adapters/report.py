@@ -909,7 +909,8 @@ def report_trial(trial: Path, destination: Path) -> dict:
     rpc_logs = list((trial / "agent").glob("odoo-*-requests.jsonl"))
     if rpc_logs:
         rpc_events = [json.loads(line) for path in rpc_logs for line in path.read_text().splitlines() if line.strip()]
-        completed = [event for event in rpc_events if event.get("event", "end") == "end"]
+        completed = [event for event in rpc_events if event.get("event", "end") == "end"
+                     and event.get("dispatch_started") is not False]
         summary["actions"]["odoo_json2_attempts"] = len(completed)
         summary["actions"]["odoo_json2_errors"] = sum(event.get("error_type") is not None for event in completed)
         started_ids = {event["rpc_request_id"] for event in rpc_events if event.get("event") == "start"}

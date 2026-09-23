@@ -162,6 +162,7 @@ class Json2ReadClient(OdooClient):
         )
         context = ssl._create_unverified_context() if self.url.startswith("https://") and not self.verify_ssl else None
         try:
+            self._request_started()
             with urllib.request.urlopen(request, timeout=self.timeout, context=context) as response:
                 raw = response.read(cap + 1)
             if len(raw) > cap:

@@ -45,14 +45,30 @@ def test_correlations_unknown_logs_and_no_business_truth(tmp_path):
     assert len(json.dumps(result).encode()) <= 8192
     rows(tmp_path, "odoo-native-requests.jsonl", {"tool_call_id": "call-b", "event": "end", "status": 200})
     assert diagnose(tmp_path)["items"][0]["odoo_request_seen"] is None
-    rows(tmp_path, "odoo-native-requests.jsonl", {"tool_call_id": "call-a", "event": "start", "rpc_request_id": "rpc-1"})
+    rows(tmp_path, "odoo-native-requests.jsonl", {"tool_call_id": "call-a", "event": "start", "rpc_request_id": "rpc-1", "dispatch_started": True})
     item = diagnose(tmp_path)["items"][0]
     assert item["odoo_request_seen"] is True and item["rpc_incomplete"] is True
     rows(tmp_path, "odoo-native-requests.jsonl",
-         {"tool_call_id": "call-a", "event": "start", "rpc_request_id": "rpc-1"},
+         {"tool_call_id": "call-a", "event": "start", "rpc_request_id": "rpc-1", "dispatch_started": True},
          {"tool_call_id": "call-b", "event": "end", "rpc_request_id": "rpc-1"})
     assert diagnose(tmp_path)["items"][0]["error_code"] == "correlation_conflict"
     assert diagnose(tmp_path)["items"][0]["odoo_request_seen"] is None
+
+
+def test_duplicate_request_ids_and_conflicting_dispatch_remain_unknown(tmp_path):
+    seed(tmp_path)
+    rows(tmp_path, "session.jsonl", {"message": {"role": "toolResult", "toolCallId": "call-a",
+         "isError": True, "content": [{"type": "text", "text": "Tool read_record not found"}]}})
+    rows(tmp_path, "tool-backends.jsonl", {"tool_call_id": "call-a", "event": "start"})
+    item = diagnose(tmp_path)["items"][0]
+    assert item["stage"] == "unknown" and item["odoo_request_seen"] is None
+    assert item["error_code"] == "correlation_conflict"
+    rows(tmp_path, "tool-backends.jsonl")
+    rows(tmp_path / "requests", "0002.meta.json", {"run_id": "run", "session_id": "session",
+         "request_id": "request2", "tool_call_ids": ["call-a"]})
+    item = diagnose(tmp_path)["items"][0]
+    assert item["request_id"] is None and item["odoo_request_seen"] is None
+    assert item["error_code"] == "correlation_conflict"
 
 
 def test_pre_dispatch_only_and_historical_world_staleness(tmp_path):
@@ -96,10 +112,11 @@ def test_identity_scope_and_unresolved_writes_never_replay(tmp_path):
 
 def test_rpc_start_end_ids_preserve_attempt_count_and_timeout_unknown(tmp_path):
     path = tmp_path / "rpc.jsonl"
-    client = OdooClient.__new__(OdooClient)
+    with patch.object(OdooClient, "_connect"):
+        client = OdooClient("http://fixture", "db", "role", "", transport="json2", api_key="secret")
     token = READ_CALL_ID.set("call-a")
     try:
-        with patch.dict("os.environ", {"ODOO_REQUEST_LOG": str(path)}), patch.object(client, "_json2_call_once", side_effect=TimeoutError):
+        with patch.dict("os.environ", {"ODOO_REQUEST_LOG": str(path)}), patch("urllib.request.urlopen", side_effect=TimeoutError):
             try:
                 client._json2_call("sale.order", "action_confirm", {})
             except TimeoutError:
@@ -108,8 +125,24 @@ def test_rpc_start_end_ids_preserve_attempt_count_and_timeout_unknown(tmp_path):
         assert [r["event"] for r in events] == ["start", "end"]
         assert events[0]["rpc_request_id"] == events[1]["rpc_request_id"]
         assert events[1]["status"] is None and events[1]["error_type"] == "TimeoutError"
+        assert all(r["dispatch_started"] for r in events)
         with patch.dict("os.environ", {"ODOO_REQUEST_LOG": str(path)}):
             evidence = NativeReads.__new__(NativeReads).world_rpc_evidence("call-a")
         assert evidence["refs"][0]["completed_attempts"] == 1
     finally:
         READ_CALL_ID.reset(token)
+
+
+def test_invalid_configuration_has_no_http_start(tmp_path):
+    path = tmp_path / "rpc.jsonl"
+    with patch.object(OdooClient, "_connect"):
+        client = OdooClient("http://fixture", "db", "role", "", transport="json2")
+    with patch.dict("os.environ", {"ODOO_REQUEST_LOG": str(path)}), patch("urllib.request.urlopen") as http:
+        try:
+            client._json2_call("sale.order", "read", {})
+        except ValueError:
+            pass
+        http.assert_not_called()
+        events = [json.loads(line) for line in path.read_text().splitlines()]
+        assert len(events) == 1 and events[0]["event"] == "end" and not events[0]["dispatch_started"]
+        assert NativeReads.__new__(NativeReads).world_rpc_evidence(None)["status"] == "no_completed_attempt"
