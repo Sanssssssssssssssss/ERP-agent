@@ -50,6 +50,7 @@ export default function App() {
     renamingId,
     setRenamingId,
     messageBusinessId,
+    resolvedMessageBusinessId,
     setMessageBusinessId,
     sessionQuery,
     setSessionQuery,
@@ -205,14 +206,13 @@ export default function App() {
           onOpenExecution={() => setTab('execution')}
           approvalActivity={businessDetail?.activity}
           businesses={session?.businesses ?? []}
-          messageBusinessId={messageBusinessId || '__conversation__'}
+          messageBusinessId={messageBusinessId}
           onMessageBusinessChange={setMessageBusinessId}
           onDraftChange={setDraft}
           onSubmit={sendMessage}
           pendingMaterials={pendingMaterials}
           reusedMaterials={(() => {
-            const contextId = messageBusinessId === '__conversation__' ? '' : messageBusinessId || selectedBusinessId
-            const contextBusiness = session?.businesses.find((business) => business.id === contextId)
+            const contextBusiness = session?.businesses.find((business) => business.id === resolvedMessageBusinessId)
             const materialIds = contextBusiness?.material_ids?.length ? contextBusiness.material_ids : (session?.session.pending_material_ids ?? [])
             return (session?.materials ?? []).filter((material) => materialIds.includes(material.id)) as MaterialRecord[]
           })()}

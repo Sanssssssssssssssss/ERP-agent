@@ -1045,6 +1045,18 @@ class WorkbenchHostTests(unittest.TestCase):
         self.assertNotIn("proposal", self.host.store.data["messages"][self.sid][-1])
         self.assertEqual(self.host.store.data["sessions"][self.sid]["active_run_id"], run["id"])
 
+    def test_unscoped_status_followup_does_not_pick_existing_business(self):
+        self._business("existing business")
+        captured = []
+        self.host._launch_conversation = lambda run: captured.append(run)
+        with patch.object(self.host, "_native_reads", side_effect=AssertionError("must not connect")):
+            self.host.send_message(self.sid, "所以消息发出去了吗，你check一下")
+        run = captured[0]
+        self.assertIsNone(run["context_business_id"])
+        self.assertEqual(self.host._conversation_status_context(run), {})
+        self.assertIn("status remains unknown", run["instruction"])
+        self.assertNotIn("existing business", run["instruction"])
+
     def test_status_context_drops_stale_facts_and_rejects_changed_connection(self):
         business, run = self._run("read current status")
         run["documents"] = [{"model": "sale.order", "id": 7, "name": "PRIVATE_OLD_NAME", "state": "sale"}]

@@ -247,7 +247,7 @@ export function useWorkbench() {
     })
     setMessageBusinessId((current) => {
       if (current === '__conversation__' || (current && result.businesses.some((item) => item.id === current))) return current
-      return '__conversation__'
+      return ''
     })
     setError('')
   }, [call])
@@ -469,6 +469,10 @@ export function useWorkbench() {
     () => session?.businesses.find((item) => item.id === selectedBusinessId) ?? businessDetail?.business ?? null,
     [businessDetail?.business, selectedBusinessId, session?.businesses]
   )
+  // Empty follows the visible business; an explicit conversation scope stays unbound.
+  const messageContextId = messageBusinessId === '__conversation__' ? '' : messageBusinessId || selectedBusinessId
+  const resolvedMessageBusinessId = session?.session.id === selectedSessionId
+    && session.businesses.some((business) => business.id === messageContextId) ? messageContextId : ''
   const hasActiveExecution = Boolean(
     businessDetail?.runs.some((run) => ['running', 'awaiting_approval', 'cancel_requested'].includes(run.status))
       || session?.businesses.some((business) => ['running', 'awaiting_approval', 'cancel_requested'].includes(business.status))
@@ -493,7 +497,7 @@ export function useWorkbench() {
     setTraceTarget(null)
     setExportPath('')
     setSelectedRunId('')
-    setMessageBusinessId('__conversation__')
+    setMessageBusinessId('')
     setThinkingRun(null)
     setTab('execution')
     conversationStreamsRef.current.clear()
@@ -570,13 +574,13 @@ export function useWorkbench() {
   }
 
   const chooseBusiness = (id: string) => {
+    setMessageBusinessId(id)
     if (businessIdRef.current === id && selectedBusinessId === id) return
     businessIdRef.current = id
     businessRequestRef.current += 1
     quietBusinessRequestRef.current += 1
     traceRequestRef.current += 1
     setSelectedBusinessId(id)
-    setMessageBusinessId(id)
     setBusinessDetail(null)
     setTrace(null)
     setTraceTarget(null)
@@ -649,13 +653,12 @@ export function useWorkbench() {
     setLoading(true)
     setDraft('')
     setThinkingRun({ sessionId: requestSessionId, runId: '' })
-    const contextBusinessId = messageBusinessId === '__conversation__' ? '' : messageBusinessId || selectedBusinessId
     try {
       const result = await call<{ ok?: boolean; run_id?: string }>('send_message', {
         session_id: requestSessionId,
         text,
         ...(attachedMaterials.length ? { material_ids: attachedMaterials.map((material) => material.id) } : {}),
-        ...(contextBusinessId ? { context_business_id: contextBusinessId } : {})
+        ...(resolvedMessageBusinessId ? { context_business_id: resolvedMessageBusinessId } : {})
       })
       if (sessionIdRef.current === requestSessionId) setThinkingRun((current) => current && current.sessionId === requestSessionId ? { ...current, runId: typeof result?.run_id === 'string' ? result.run_id : current.runId } : current)
       if (sessionIdRef.current === requestSessionId) {
@@ -1075,6 +1078,7 @@ export function useWorkbench() {
     renamingId,
     setRenamingId,
     messageBusinessId,
+    resolvedMessageBusinessId,
     setMessageBusinessId,
     sessionQuery,
     setSessionQuery,

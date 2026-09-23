@@ -275,6 +275,11 @@ class WorkbenchConversationTests(unittest.TestCase):
             for arguments, expected in [({}, "unavailable"), ({"business_id": "other"}, "invalid")]:
                 result = asyncio.run(conversation._read_business_status("call", arguments))
                 self.assertEqual(result.details["status"], expected)
+                if not arguments:
+                    self.assertEqual(result.details["reason_code"], "business_scope_required")
+                    self.assertEqual(result.details["business_status"], "unknown")
+                    self.assertEqual(result.details["next_action"], "select_business")
+                    self.assertEqual(json.loads(result.text), result.details)
         with patch.object(conversation, "_BUSINESS_CONTEXT", {"success": False, "status": "scope_mismatch"}):
             result = asyncio.run(conversation._read_business_status("call", {}))
             self.assertEqual(result.details["status"], "scope_mismatch")

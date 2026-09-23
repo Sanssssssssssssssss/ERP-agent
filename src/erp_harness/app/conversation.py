@@ -82,6 +82,8 @@ CONVERSATION_POLICY = (
     "requires matching journal entries, not merely an invoice marked paid. "
     "For the selected business's completion, document state or email delivery, use read_business_status. "
     "It rechecks evidence with your current Odoo permissions; report unknown or denied reads explicitly. "
+    "If business_scope_required is returned, ask the user to select the business in the chat scope selector. "
+    "Its execution and delivery remain unknown; conversation history or missing scope never proves it was not executed. "
     "smtp_accepted does not prove recipient delivery or reading. A status question never authorizes a resend. "
     "Before proposing sales-order invoicing, resolve the order and use read_invoice_eligibility. "
     "A blocked prerequisite requires the user's commercial choice, not another API or changed invoice policy. "
@@ -405,7 +407,9 @@ async def _read_business_status(_call_id, arguments, _signal=None, _on_update=No
     elif _BUSINESS_CONTEXT and _BUSINESS_CONTEXT.get("success") is False:
         payload = _BUSINESS_CONTEXT
     elif not _BUSINESS_CONTEXT or not _BUSINESS_CONTEXT.get("business_id"):
-        payload = {"success": False, "status": "unavailable", "error": "Select the relevant business workspace before checking its execution evidence."}
+        payload = {"success": False, "status": "unavailable", "reason_code": "business_scope_required",
+                   "business_status": "unknown", "next_action": "select_business",
+                   "error": "No business is selected for this chat. Ask the user to select the relevant business in the chat scope selector, then recheck. Execution and email delivery are unknown: this does not mean the business was not executed. Do not infer its state from conversation history or recommend a restart/resend."}
     else:
         try:
             payload = await asyncio.to_thread(
@@ -431,7 +435,7 @@ async def _read_invoice_eligibility(_call_id, arguments, _signal=None, _on_updat
 
 READ_BUSINESS_STATUS = AgentTool(
     name="read_business_status", label="Read business status",
-    description="Recheck the host-selected business's document states, completion checks and email/PDF delivery evidence under current permissions. No arguments, writes or resending. Unknown is not failure or success. SMTP acceptance is not recipient delivery/read proof.",
+    description="Recheck the host-selected business's document states, completion checks and email/PDF delivery evidence under current permissions. No arguments, writes or resending. business_scope_required means ask the user to select the business in the chat scope selector; execution/delivery remain unknown, not unexecuted. Unknown is not failure or success. SMTP acceptance is not recipient delivery/read proof.",
     parameters={"type": "object", "properties": {}, "additionalProperties": False},
     execute_fn=_read_business_status,
 )

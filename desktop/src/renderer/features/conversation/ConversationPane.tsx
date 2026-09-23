@@ -112,6 +112,7 @@ export function ConversationPane({ session, draft, liveMessages, conversationRun
   onStarter: (goal: string) => void
 }) {
   const messages = session?.messages ?? []
+  const selectedBusiness = businesses.find((business) => business.id === selectedBusinessId)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [atLatest, setAtLatest] = useState(true)
   const [hasNew, setHasNew] = useState(false)
@@ -174,7 +175,7 @@ export function ConversationPane({ session, draft, liveMessages, conversationRun
         {inheritedMaterials.length > 0 && <MaterialReuseTray materials={inheritedMaterials} hasNewMaterials={pendingMaterials.length > 0} />}
         <textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={!session || loading} placeholder={session ? '输入要查询或办理的业务…' : '先选择或创建一个会话'} aria-label="会话消息" />
         <div className="composer-footer">
-          <div className="composer-context"><label htmlFor="message-business-target">讨论范围</label><select id="message-business-target" value={messageBusinessId} onChange={(event) => onMessageBusinessChange(event.target.value)} disabled={!session || loading}><option value="__conversation__">整个会话（普通讨论）</option>{businesses.map((business) => <option key={business.id} value={business.id}>{business.title || '未命名业务'} · {labelFor(businessStatusLabel, business.status)}</option>)}</select><span>执行写入前需逐项审批。</span></div>
+          <div className="composer-context"><label htmlFor="message-business-target">讨论范围</label><select id="message-business-target" value={messageBusinessId} onChange={(event) => onMessageBusinessChange(event.target.value)} disabled={!session || loading}><option value="">{selectedBusiness ? `跟随当前业务：${selectedBusiness.title || '未命名业务'}` : '普通讨论（尚未选择业务）'}</option><option value="__conversation__">整个会话（普通讨论）</option>{businesses.map((business) => <option key={business.id} value={business.id}>{business.title || '未命名业务'} · {labelFor(businessStatusLabel, business.status)}</option>)}</select><span>{messageBusinessId === '__conversation__' || (!messageBusinessId && !selectedBusiness) ? '查询执行结果前，请选择具体业务。' : '可核对所选业务的执行结果；写入仍需审批。'}</span></div>
         <div className="composer-actions"><label className="material-picker"><FilePlus2 size={15} />添加材料<input type="file" accept=".csv,.txt,text/csv,text/plain" multiple disabled={!session || loading || materialsBusy} onChange={(event) => { onFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = '' }} /></label><RadixButton type="submit" disabled={!session || loading || materialsBusy || (!draft.trim() && !pendingMaterials.length)}>{loading ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}{loading ? '处理中…' : '发送'}</RadixButton></div>
         </div>
       </form>

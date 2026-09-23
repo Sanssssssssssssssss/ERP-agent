@@ -266,6 +266,8 @@ assert.deepEqual(await page.evaluate(() => window.__bridgeCalls.find(({ method }
 await page.getByRole('button', { name: /Session A/ }).click()
 await page.getByRole('heading', { name: 'Session A' }).waitFor()
 await page.getByText('处理业务', { exact: true }).waitFor()
+assert.equal(await page.getByLabel('讨论范围').inputValue(), '')
+assert.equal(await page.getByLabel('讨论范围').locator('option:checked').textContent(), '跟随当前业务：Business A1')
 // A conversation trace without a business must never issue get_business('', ...).
 const emptyBusinessCallsBefore = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'get_business' && !params.business_id).length)
 await page.evaluate(() => window.__emitWorkbench({ event: 'trace', data: { session_id: 'session-a', business_id: null, run_id: 'conversation-only' } }))
@@ -285,8 +287,11 @@ const materialSend = await page.evaluate(() => window.__bridgeCalls.find(({ meth
 assert.deepEqual(materialSend?.params.material_ids, ['material-1'])
 await page.getByRole('button', { name: /Session B/ }).click()
 await page.getByRole('heading', { name: 'Session B' }).waitFor()
+assert.equal(await page.getByLabel('讨论范围').inputValue(), '')
+await page.getByLabel('讨论范围').selectOption('__conversation__')
 await page.getByRole('button', { name: /Session A/ }).click()
 await page.getByRole('heading', { name: 'Session A' }).waitFor()
+assert.equal(await page.getByLabel('讨论范围').inputValue(), '')
 await page.locator('input[type="file"]').first().setInputFiles({ name: 'cross.csv', mimeType: 'text/csv', buffer: Buffer.from('客户,产品\nA,B') })
 await page.getByRole('button', { name: /Session B/ }).click()
 await page.getByRole('heading', { name: 'Session B' }).waitFor()
@@ -409,7 +414,7 @@ for (let index = 0; index < 20; index += 1) {
 await page.getByRole('heading', { name: 'Business B2' }).waitFor()
 const sequentialBusinessElapsed = Date.now() - sequentialBusinessStarted
 
-// Composer target is explicit: current-business followups carry context_business_id; ordinary discussion omits business scope.
+// Default follows the selected business; explicit whole-conversation scope survives refresh.
 const messageTarget = page.getByLabel('讨论范围')
 const composer = page.getByRole('textbox', { name: '会话消息' })
 async function readyComposer() {
@@ -432,13 +437,19 @@ for (const scope of ['approval', 'execution', 'conversation']) {
   await blockedDialog.getByRole('button', { name: '知道了' }).click()
 }
 await page.evaluate(() => window.__showAcceptedProjection(false))
-await messageTarget.selectOption('business-b2')
+await page.getByRole('tab', { name: /Business B2/ }).click()
+assert.equal(await messageTarget.inputValue(), 'business-b2')
+await messageTarget.selectOption('')
 await readyComposer()
+assert.equal(await messageTarget.inputValue(), '')
+assert.equal(await messageTarget.locator('option:checked').textContent(), '跟随当前业务：Business B2')
+assert.ok((await page.locator('.material-reuse-tray').textContent()).includes('订单材料.csv'))
 await composer.fill('继续处理当前业务')
 await page.getByRole('button', { name: '发送' }).click()
 await page.waitForTimeout(25)
 await messageTarget.selectOption('__conversation__')
 await readyComposer()
+assert.equal(await messageTarget.inputValue(), '__conversation__')
 await composer.fill('开始一个新的业务意图')
 await page.getByRole('button', { name: '发送' }).click()
 await page.waitForTimeout(25)

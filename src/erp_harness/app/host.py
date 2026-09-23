@@ -631,7 +631,7 @@ class Workbench:
 
     def _conversation_prompt(self, session_id: str, text: str, context_business_id: str | None,
                              material_ids: list[str] | None = None) -> str:
-        context = "No business is selected. Answer from conversation context or the fixed read-only Odoo reference tool when the user explicitly asks for a current fact."
+        context = "No business is selected for this chat. Ordinary discussion may use conversation context, and explicit current-fact queries may use the fixed read-only Odoo reference tool. For business execution, completion or email delivery, ask the user to select the relevant business in the chat scope selector. Missing scope or conversation history does not prove a business was not executed; its status remains unknown. Do not choose a business implicitly or recommend a restart/resend."
         if context_business_id:
             business = self._business(session_id, context_business_id)
             context = json.dumps({
