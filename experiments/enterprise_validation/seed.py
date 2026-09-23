@@ -210,6 +210,7 @@ for role, groups in role_groups.items():
     co_ids = [company.id, trade.id] if role == "manager" else [co.id]
     user = ensure("res.users", "user_" + role, {"name": "澄川·" + ("贸易" if role.startswith("trade_") else "工业") + {"sales":"销售", "purchase":"采购", "warehouse":"仓管", "production":"生产", "finance":"财务", "manager":"业务经理"}[role.removeprefix("trade_")],
         "login": ACCOUNTS[role]["login"], "password": ACCOUNTS[role]["password"], "lang": "zh_CN", "tz": "Asia/Shanghai",
+        "email": f"{role}@chengchuan.example",
         "company_id": co.id, "company_ids": [(6, 0, co_ids)], "group_ids": [(6, 0, [env.ref("base.group_user").id] + [env.ref(g).id for g in groups])],
     })
     ACCOUNTS[role].update({"uid": user.id, "company_ids": co_ids, "role": role})
