@@ -136,6 +136,25 @@ def test_delivery_oracle_checks_business_identity_not_tool_call_id_or_prose():
     assert evaluate(manifest, payload(), current, reference)["status"] == "fail"
 
 
+def test_confirmation_oracle_allows_diagnostics_and_record_order_but_rejects_wrong_write():
+    manifest = {"oracle": "Confirm the authorized orders", "policy": "confirmation", "required_intent": "confirm"}
+    p = payload()
+    p["tools"].append({"type": "function", "function": {"name": "mcp_odoo_diagnose_odoo_call", "parameters": {"type": "object"}}})
+    args = {"model": "sale.order", "method": "action_confirm", "kwargs": {"ids": [1499, 1500]}}
+    reference = {"tool_calls": [{"name": "mcp_odoo_execute_method", "arguments": args}]}
+    diagnostic = {"name": "mcp_odoo_diagnose_odoo_call", "arguments": {"model": "sale.order", "method": "action_confirm", "args": [[1499]]}}
+    assert evaluate(manifest, p, {"tool_calls": [diagnostic]}, reference)["structural_pass"]
+    actual = {"name": "mcp_odoo_execute_method", "arguments": {**args, "kwargs": {"ids": [1500, 1499]}}}
+    assert evaluate(manifest, p, {"tool_calls": [diagnostic, actual]}, reference)["structural_pass"]
+    positional = {"name": "mcp_odoo_execute_method", "arguments": {"model": "sale.order", "method": "action_confirm", "args": [[1500, 1499]]}}
+    assert evaluate(manifest, p, {"tool_calls": [positional]}, reference)["structural_pass"]
+    positional["arguments"]["kwargs"] = {"ids": [1499, 1500]}
+    assert "confirmation_does_not_match_target" in evaluate(manifest, p, {"tool_calls": [positional]}, reference)["violations"]
+    for wrong_ids in ([999], None, True, "1499", [True, 1500]):
+        actual["arguments"]["kwargs"]["ids"] = wrong_ids
+        assert "confirmation_does_not_match_target" in evaluate(manifest, p, {"tool_calls": [actual]}, reference)["violations"]
+
+
 def test_candidate_uses_confirmed_proposal_and_real_stage_failure_without_network(tmp_path):
     args = {"model": "account.move", "method": "message_post", "kwargs": {"ids": [31], "partner_ids": [516]}}
     p = payload()
