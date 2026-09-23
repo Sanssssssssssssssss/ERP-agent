@@ -171,7 +171,7 @@ export function healthLabel(status?: string) { return status === 'connected' || 
 
 export function runDisplayLabel(status?: string) { return status === 'completed' ? '本轮结束' : labelFor(runStatusLabel, status) }
 
-export function roundStatusLabel(status?: string) { return labelFor({ completed: '已完成', running: '进行中', pending: '待处理', failed: '失败', interrupted: '已中断', cancelled: '已取消', awaiting_approval: '等待审批' }, status) }
+export function roundStatusLabel(status?: string) { return labelFor({ completed: '已完成', running: '进行中', pending: '待处理', error: '错误', failed: '失败', interrupted: '已中断', cancelled: '已取消', awaiting_approval: '等待审批' }, status) }
 
 export function toolStatusLabel(status?: string) { return labelFor({ completed: '已完成', running: '进行中', error: '错误', failed: '失败', executed: '已执行', awaiting_approval: '等待审批', pending: '待处理', interrupted: '已中断', cancelled: '已取消', unknown: '未知' }, status) }
 

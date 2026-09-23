@@ -27,6 +27,7 @@ export default function App() {
     loading,
     businessLoading,
     traceLoading,
+    loadTraceDetail,
     connection,
     health,
     error,
@@ -152,6 +153,7 @@ export default function App() {
           trace={trace}
           traceTarget={traceTarget}
           traceLoading={traceLoading}
+          onLoadTraceDetail={loadTraceDetail}
           businessLoading={businessLoading}
           loading={loading}
           selectedRunId={selectedRunId}

@@ -31,7 +31,7 @@ from erp_harness.providers.config import (
 from erp_harness.context.resources import ResourcePaths
 from erp_harness.runtime.session import HarnessSession, SessionConfig
 
-from erp_harness.app.stream_events import public_events
+from erp_harness.app.request_receipts import RequestReceipts as _RequestReceipts
 from erp_harness.app.business import BUSINESS_TARGETS, COMPLETION_TARGETS, default_target, valid_target
 
 CONTEXT_WINDOW = 128_000
@@ -425,29 +425,6 @@ READ_ODOO_REFERENCE = AgentTool(
 )
 
 
-class _RequestReceipts:
-    def __init__(self, directory: Path) -> None:
-        self.directory = directory
-        self.number = 0
-
-    async def before_provider_request(self, payload: object) -> object:
-        self.number += 1
-        self.directory.mkdir(parents=True, exist_ok=True)
-        (self.directory / f"{self.number:04d}.request.json").write_text(
-            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
-        )
-        return payload
-
-    async def before_provider_headers(self, headers: dict) -> dict:
-        return headers
-
-    async def after_provider_response(self, status: int, headers: dict) -> None:
-        self.directory.mkdir(parents=True, exist_ok=True)
-        (self.directory / f"{self.number:04d}.response.json").write_text(
-            json.dumps({"status": status}, ensure_ascii=False), encoding="utf-8"
-        )
-
-
 def _sum_usage_bucket(usages: list[object], name: str, *, empty: int | None = None) -> int | None:
     """Sum a bucket only when every participating receipt reported it.
 
@@ -680,7 +657,7 @@ async def run(args: argparse.Namespace) -> None:
         entries_before = await session.session_entries()
         entry_ids_before = {entry.id for entry in entries_before}
         source = session.prompt(args.instruction_file.read_text(encoding="utf-8"))
-        async for event in public_events(source):
+        async for event in receipts.events(source):
             if hasattr(event, "model_dump_json"):
                 line = event.model_dump_json(by_alias=True)
             elif isinstance(event, dict):

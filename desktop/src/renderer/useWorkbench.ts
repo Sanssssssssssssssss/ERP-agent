@@ -18,6 +18,7 @@ SessionSummary,
 Settings,
 TraceBundle
 } from './protocol'
+import type { TraceDetail, TraceDetailKind } from './protocol'
 import { ApprovalProgress,ConnectionState,DownloadReceipt,MaterialRecord,ProposalLike } from './view-types'
 
 export const liveMessageKey = (message: Pick<LiveMessage, 'session_id' | 'business_id' | 'run_id' | 'id'>) => `${message.session_id}:${message.business_id ?? '__conversation__'}:${message.run_id}:${message.id}`
@@ -79,6 +80,8 @@ export function useWorkbench() {
   const sessionRequestRef = useRef(0)
   const businessRequestRef = useRef(0)
   const traceRequestRef = useRef(0)
+  const selectedRunIdRef = useRef(selectedRunId)
+  selectedRunIdRef.current = selectedRunId
   const traceRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const businessRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const quietBusinessRequestRef = useRef(0)
@@ -347,7 +350,8 @@ export function useWorkbench() {
     void call<TraceBundle>('get_trace', {
       session_id: selectedSessionId,
       business_id: selectedBusinessId,
-      run_id: selectedRunId
+      run_id: selectedRunId,
+      summary_only: true
     }).then((result) => {
       if (requestId === traceRequestRef.current) setTrace(result)
     }).catch((reason) => {
@@ -356,6 +360,15 @@ export function useWorkbench() {
       if (requestId === traceRequestRef.current) setTraceLoading(false)
     })
   }, [call, selectedBusinessId, selectedRunId, selectedSessionId, tab, traceRefreshToken])
+
+  const loadTraceDetail = useCallback(async (runId: string, kind: TraceDetailKind, id: string) => {
+    const requestSessionId = sessionIdRef.current
+    const requestBusinessId = businessIdRef.current
+    if (!requestSessionId || !requestBusinessId || selectedRunIdRef.current !== runId) return null
+    const result = await call<TraceDetail>('get_trace_detail', { session_id: requestSessionId, business_id: requestBusinessId, run_id: runId, kind, id })
+    if (sessionIdRef.current !== requestSessionId || businessIdRef.current !== requestBusinessId || selectedRunIdRef.current !== runId) return null
+    return result
+  }, [call])
 
   const reloadCurrent = useCallback(async () => {
     const sessionId = selectedSessionId
@@ -1020,6 +1033,7 @@ export function useWorkbench() {
     loading,
     businessLoading,
     traceLoading,
+    loadTraceDetail,
     connection,
     health,
     error,

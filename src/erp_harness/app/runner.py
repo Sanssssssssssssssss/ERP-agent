@@ -36,7 +36,7 @@ from erp_harness.context.resources import ResourcePaths
 from erp_harness.runtime.session import HarnessSession, SessionConfig
 
 from erp_harness.tools.router import native_tool_catalog, route_tools
-from erp_harness.app.stream_events import public_events
+from erp_harness.app.request_receipts import RequestReceipts
 from erp_harness.context.projection import project_messages, project_read_history
 from erp_harness.erp.actions import NativeActions
 from erp_harness.erp.capabilities import NativeCapabilities
@@ -220,63 +220,6 @@ async def _source_tools(args):
         raise RuntimeError("MCP mode requires the isolated benchmark reference runner")
     async with toolset_class(args.mcp_url) as toolset:
         yield toolset.tools
-
-
-class RequestReceipts:
-    """Keep actual model request bodies locally; never persist auth headers."""
-
-    def __init__(
-        self, directory: Path, max_model_requests: int | None = None
-    ) -> None:
-        if max_model_requests is not None and (
-            type(max_model_requests) is not int or max_model_requests < 1
-        ):
-            raise ValueError("max_model_requests must be a positive integer")
-        self.directory = directory
-        self.max_model_requests = max_model_requests
-        # A resumed worker shares the receipt directory with the initial
-        # worker.  Continue numbering so a continuation never overwrites the
-        # request that established the pending action.
-        existing = [
-            int(path.stem.split(".", 1)[0])
-            for path in directory.glob("*.request.json")
-            if path.stem.split(".", 1)[0].isdigit()
-        ]
-        self.number = max(existing, default=0)
-
-    async def before_provider_request(self, payload: object) -> object:
-        if (
-            self.max_model_requests is not None
-            and self.number >= self.max_model_requests
-        ):
-            raise RuntimeError(
-                f"max_model_requests ({self.max_model_requests}) exceeded"
-            )
-        self.number += 1
-        self.directory.mkdir(parents=True, exist_ok=True)
-        (self.directory / f"{self.number:04d}.request.json").write_text(
-            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
-        )
-        return payload
-
-    async def before_provider_headers(self, headers: dict) -> dict:
-        return headers
-
-    async def after_provider_response(self, status: int, headers: dict) -> None:
-        (self.directory / f"{self.number:04d}.response.json").write_text(
-            json.dumps(
-                {
-                    "status": status,
-                    "request_ids": {
-                        key: value
-                        for key, value in headers.items()
-                        if key.lower()
-                        in {"x-request-id", "request-id", "x-generation-id"}
-                    },
-                }
-            ),
-            encoding="utf-8",
-        )
 
 
 def arguments() -> argparse.Namespace:
@@ -651,7 +594,7 @@ async def run(args: argparse.Namespace) -> None:
                     source = session.continue_()
                 else:
                     source = session.prompt(args.instruction_file.read_text(encoding="utf-8"))
-                async for event in public_events(source):
+                async for event in receipts.events(source):
                     print(json.dumps(event, ensure_ascii=False), flush=True)
 
                 # 按新增持久化条目统计本次用量，审批续跑不会重算旧轮次；compaction 另列。

@@ -38,6 +38,7 @@ const bridgeScript = String.raw`
     let delayedPurchaseDecision = true
     let showAcceptedProjection = false
     let showCompactionUsage = false
+    const traceSnapshots = new Map()
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
     const session = (id, title, businesses) => ({ id, title, created_at: '2026-09-08T08:00:00Z', updated_at: '2026-09-08T09:00:00Z', archived: false, status: 'idle', businesses })
     const business = (id, session_id, title, status = 'idle', goal = '处理订单与发票') => ({ id, session_id, type: id === 'business-b2' ? 'sale_purchase_invoice' : 'sale_invoice', title, goal, status, created_at: '2026-09-08T08:00:00Z', updated_at: '2026-09-08T09:00:00Z', active_run_id: id + '-run' })
@@ -139,6 +140,13 @@ const bridgeScript = String.raw`
           if (id === 'business-b4' && window.__activityScenario) { result.runs[1].status = 'running'; result.business.status = 'running'; result.activity = window.__activityScenario; result.outcome = { status: 'unknown', label: '执行中', detail: '完成后核验。' } }
           return result
         }
+        if (method === 'get_trace_detail') {
+          const saved = traceSnapshots.get(params.session_id + ':' + params.business_id + ':' + params.run_id)
+          if (params.kind === 'run') return { kind: 'run', id: params.id, data: { instruction: '核对订单后开票。', business: { title: params.business_id } } }
+          const data = params.kind === 'tool' ? saved?.tools.find(tool => tool.id === params.id) : params.kind === 'round' ? saved?.rounds.find(round => String(round.index) === params.id) : null
+          if (!data) throw new Error('TRACE_DETAIL_NOT_FOUND')
+          return { kind: params.kind, id: params.id, data }
+        }
         if (method === 'get_trace') {
           await wait(params.business_id === 'business-b1' ? 12 : 220)
           if (params.business_id === 'business-b1') return { run: details(b1).runs[0], rounds: [], tools: [] }
@@ -223,6 +231,14 @@ const bridgeScript = String.raw`
         if (method === 'cancel_run' || method === 'rename_session' || method === 'archive_session') return null
         throw new Error('unexpected bridge method: ' + method)
       }
+    }
+    const originalTraceCall = window.workbench.call.bind(window.workbench)
+    window.workbench.call = async (method, params = {}) => {
+      const result = await originalTraceCall(method, params)
+      if (method !== 'get_trace') return result
+      traceSnapshots.set(params.session_id + ':' + params.business_id + ':' + params.run_id, result)
+      if (!params.summary_only) throw new Error('TRACE_LIST_MUST_BE_SUMMARY')
+      return { ...result, summary_only: true, rounds: result.rounds.map(({ text, ...round }) => round), tools: result.tools.map(({ arguments: args, result: receipt, ...tool }) => ({ ...tool, search_text: JSON.stringify(args) })) }
     }
   })()
 `
@@ -799,7 +815,8 @@ const traceText = await page.locator('.trace-page').textContent()
 assert.ok(traceText.includes('未缓存输入 未知'))
 assert.ok(traceText.includes('mcp_odoo_validate_write'))
 assert.equal(await page.locator('.trace-tool-node').filter({ hasText: 'mcp_odoo_validate_write' }).count(), 1)
-await page.getByRole('button', { name: /第 1 轮/ }).click()
+await page.locator('.trace-node').filter({ hasText: /第 1 轮/ }).click()
+await page.locator('.trace-detail-panel .loading-line').waitFor({ state: 'hidden' })
 assert.ok((await page.locator('.trace-detail-panel').textContent()).length > 1500)
 await page.getByRole('button', { name: /mcp_odoo_validate_write/ }).click()
 const activeToolDetail = await page.locator('.trace-detail-panel').textContent()
@@ -816,6 +833,7 @@ const traceCallsAfter = await page.evaluate(() => window.__bridgeCalls.filter(({
 assert.ok(traceCallsAfter > traceCallsBefore)
 const currentTraceVersion = await page.evaluate(() => window.__traceVersion)
 await page.getByRole('button', { name: /read_business_records/ }).click()
+await page.locator('.trace-detail-panel .loading-line').waitFor({ state: 'hidden' })
 assert.ok((await page.locator('.trace-detail-panel').textContent()).includes(`"version": ${currentTraceVersion}`))
 
 // 300 trace events in one burst must coalesce to one trace read and one quiet business refresh.
@@ -1091,8 +1109,8 @@ await page.getByRole('tab', { name: /Business B2/ }).click()
 await page.evaluate(() => window.__showCompactionUsage())
 await page.getByRole('tab', { name: /^运行详情/ }).click()
 await page.locator('.trace-toolbar select').selectOption('business-b2-run')
-await page.locator('.trace-detail-content').getByText('含上下文压缩 1 次 · 100 token', { exact: true }).waitFor()
-assert.equal(await page.getByText('含上下文压缩 0 次', { exact: false }).count(), 0)
+await page.locator('.trace-detail-content').getByText('压缩记录 1 条 · 100 token', { exact: true }).waitFor()
+assert.equal(await page.getByText('压缩记录 0 条', { exact: false }).count(), 0)
 await page.evaluate(() => window.__showAcceptedProjection(false))
 const businessB3Tab = page.getByRole('tab', { name: /Business B3/ })
 await businessB3Tab.evaluate((element) => {

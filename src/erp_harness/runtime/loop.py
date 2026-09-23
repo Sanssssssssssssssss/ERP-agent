@@ -41,7 +41,7 @@ from erp_harness.runtime.messages import (
     Usage,
     UserMessage,
 )
-from erp_harness.runtime.provider import CancellationToken, ModelProvider
+from erp_harness.runtime.provider import CancellationToken, ModelProvider, scoped_provider_stream
 from erp_harness.runtime.provider_events import (
     AssistantDoneEvent,
     AssistantErrorEvent,
@@ -451,14 +451,14 @@ async def _assistant_events(
     signal: CancellationToken | None,
     session_id: str | None,
 ) -> AsyncIterator[AgentEvent]:
-    source: AsyncIterator[AssistantMessageEvent] = provider.stream_response(
+    source: AsyncIterator[AssistantMessageEvent] = scoped_provider_stream(provider.stream_response(
         model=model,
         system=system,
         messages=messages,
         tools=tools,
         signal=signal,
         session_id=session_id,
-    )
+    ), "normal")
     started = False
     provider_elapsed_ns = 0
     first_output_elapsed_ns: int | None = None

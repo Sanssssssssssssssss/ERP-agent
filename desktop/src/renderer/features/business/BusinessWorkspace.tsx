@@ -25,6 +25,7 @@ import { ApprovalProgress,BusinessWithType,DetailWithMaterials,DownloadReceipt }
 import { ApprovalsPage } from '../approvals/ApprovalsPage'
 import { DocumentsPage } from '../documents/DocumentsPage'
 import { RunRow,TracePage,VerificationPage } from '../traces/TracePage'
+import type { LoadTraceDetail } from '../traces/TraceInspectorDetails'
 
 export const tabs: Array<{ id: BusinessTab; label: string }> = [
   { id: 'execution', label: '执行台' },
@@ -33,7 +34,7 @@ export const tabs: Array<{ id: BusinessTab; label: string }> = [
   { id: 'trace', label: '运行详情' }
 ]
 
-export function BusinessWorkspace({ session, activeBusiness, detail, liveMessages = [], tab, trace, traceTarget, traceLoading, businessLoading, loading, selectedRunId, onBusinessSelect, onTabChange, onRunSelect, onRefresh, onStart, onCancel, onApproval, onRequestRevision, onReconcile, onTraceTarget, onToggleConversation, conversationOpen, onExport, exporting, exportPath, onOpenDocument, onDownloadDocument, documentDownloads, selectedDocumentKey, onSelectedDocumentKey, onOpenArtifact, onRevealArtifact, approvalProgress, onOpenApprovals }: {
+export function BusinessWorkspace({ session, activeBusiness, detail, liveMessages = [], tab, trace, traceTarget, traceLoading, onLoadTraceDetail, businessLoading, loading, selectedRunId, onBusinessSelect, onTabChange, onRunSelect, onRefresh, onStart, onCancel, onApproval, onRequestRevision, onReconcile, onTraceTarget, onToggleConversation, conversationOpen, onExport, exporting, exportPath, onOpenDocument, onDownloadDocument, documentDownloads, selectedDocumentKey, onSelectedDocumentKey, onOpenArtifact, onRevealArtifact, approvalProgress, onOpenApprovals }: {
   session: SessionDetail | null
   activeBusiness: Business | null
   detail: BusinessDetailProjection | null
@@ -42,6 +43,7 @@ export function BusinessWorkspace({ session, activeBusiness, detail, liveMessage
   trace: TraceBundle | null
   traceTarget: { runId?: string; toolId?: string; actionId?: string; kind?: string } | null
   traceLoading: boolean
+  onLoadTraceDetail?: LoadTraceDetail
   businessLoading: boolean
   loading: boolean
   selectedRunId: string
@@ -109,7 +111,7 @@ export function BusinessWorkspace({ session, activeBusiness, detail, liveMessage
           <RadixTabs.Content value="execution">{!businessLoading && <ExecutionPage detail={detail} activeRun={activeRun} liveMessages={businessMessages.filter((message) => message.run_id === activeRun?.id)} pendingApprovals={pendingApprovals} onOpenApprovals={onOpenApprovals} onRefresh={onRefresh} onStart={onStart} onCancel={onCancel} onEvidence={onTraceTarget} onExport={() => onExport(activeRun?.id)} exporting={exporting} exportPath={exportPath} />}</RadixTabs.Content>
            <RadixTabs.Content value="documents">{!businessLoading && <DocumentsPage documents={detail?.documents ?? []} materials={(detail as DetailWithMaterials | null)?.materials ?? []} artifacts={detail?.artifacts ?? []} goal={activeBusiness.goal} stale={detail?.stale ?? false} onExport={() => onExport()} exporting={exporting} exportPath={exportPath} onOpenDocument={onOpenDocument} onDownloadDocument={onDownloadDocument} documentDownloads={documentDownloads} selectedDocumentKey={selectedDocumentKey} onSelectedDocumentKey={onSelectedDocumentKey} onOpenArtifact={onOpenArtifact} onRevealArtifact={onRevealArtifact} onTraceTarget={onTraceTarget} />}</RadixTabs.Content>
           <RadixTabs.Content value="approvals">{!businessLoading && <ApprovalsPage approvals={detail?.approvals ?? []} documents={detail?.documents ?? []} disabled={loading || businessLoading} onDecision={onApproval} onRequestRevision={onRequestRevision} onReconcile={onReconcile} onTraceTarget={onTraceTarget} />}</RadixTabs.Content>
-          <RadixTabs.Content value="trace">{!businessLoading && <TracePage trace={trace} liveMessages={businessMessages} runs={detail?.runs ?? []} readback={detail?.business.readback} selectedRunId={selectedRunId} loading={traceLoading} target={traceTarget} onRunSelect={onRunSelect} />}</RadixTabs.Content>
+          <RadixTabs.Content value="trace">{!businessLoading && <TracePage trace={trace} liveMessages={businessMessages} runs={detail?.runs ?? []} readback={detail?.business.readback} selectedRunId={selectedRunId} loading={traceLoading} target={traceTarget} onRunSelect={onRunSelect} onLoadDetail={onLoadTraceDetail} />}</RadixTabs.Content>
           </div>
         </RadixTabs.Root>
       </>}

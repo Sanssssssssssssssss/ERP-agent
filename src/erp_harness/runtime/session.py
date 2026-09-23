@@ -40,7 +40,7 @@ from erp_harness.runtime.messages import (
     UserMessage,
     message_text,
 )
-from erp_harness.runtime.provider import ModelProvider
+from erp_harness.runtime.provider import ModelProvider, scoped_provider_stream
 from erp_harness.runtime.provider_events import AssistantDoneEvent, AssistantErrorEvent, TextDeltaEvent
 from erp_harness.runtime.storage import (
     BranchSummaryEntry,
@@ -4192,6 +4192,7 @@ class HarnessSession:
                 build_turn_prefix_summary_prompt(plan.turn_prefix_messages),
                 system=SUMMARIZATION_SYSTEM_PROMPT,
                 failure_label="Turn prefix summarization",
+                request_kind="compaction",
             )
             result = _SummaryResult(
                 text=(
@@ -4231,6 +4232,7 @@ class HarnessSession:
             prompt,
             system=SUMMARIZATION_SYSTEM_PROMPT,
             failure_label="Compaction summarization",
+            request_kind="compaction",
         )
 
     async def _complete_summary_prompt(
@@ -4239,6 +4241,7 @@ class HarnessSession:
         *,
         system: str,
         failure_label: str,
+        request_kind: str = "unknown",
     ) -> _SummaryResult:
         summary_messages: list[AgentMessage] = [UserMessage(content=prompt)]
         summary_session_id = f"{self.session_id or 'pi'}:summary:{uuid4().hex}"
@@ -4247,14 +4250,14 @@ class HarnessSession:
         while True:
             text_parts: list[str] = []
             final_message: AssistantMessage | None = None
-            async for event in self._harness.config.provider.stream_response(
+            async for event in scoped_provider_stream(self._harness.config.provider.stream_response(
                 model=self.model,
                 system=system,
                 messages=summary_messages,
                 tools=[],
                 signal=signal,
                 session_id=summary_session_id,
-            ):
+            ), request_kind):
                 if isinstance(event, TextDeltaEvent):
                     text_parts.append(event.delta)
                 elif isinstance(event, AssistantDoneEvent):

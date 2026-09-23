@@ -133,12 +133,14 @@ class OpenAICompatibleProvider:
             signal=signal,
             session_id=session_id,
         )
-        return canonicalize_provider_stream(
+        stream = canonicalize_provider_stream(
             raw,
             api=self._config.api,
             provider=getattr(self._config, "provider_name", "openai-compatible"),
             model=model,
         )
+        observer = getattr(self._config.provider_hooks, "wrap_provider_stream", None)
+        return observer(stream, raw=raw) if callable(observer) else stream
 
     def _stream_provider_events(
         self,
@@ -296,6 +298,7 @@ class OpenAICompatibleProvider:
             attempt = 0
             while True:
                 parser = parser_factory()
+                await self._observe_attempt("before_provider_attempt", request_payload, attempt + 1)
                 try:
                     async with client.stream(
                         "POST", request_url, json=request_payload, headers=headers
@@ -313,6 +316,7 @@ class OpenAICompatibleProvider:
                             body = await response.aread()
                             body_text = body.decode(errors="replace")
                             if self._should_retry(attempt, status_code=response.status_code):
+                                await self._observe_attempt("after_provider_attempt", "retry")
                                 delay = retry_delay_seconds(
                                     attempt,
                                     max_delay_seconds=self._config.max_retry_delay_seconds,
@@ -384,6 +388,7 @@ class OpenAICompatibleProvider:
                 except httpx.HTTPError as exc:
                     # 已输出内容后不在本层重发请求，避免把两次响应拼成同一轮。
                     if not parser.emitted_content and self._should_retry(attempt):
+                        await self._observe_attempt("after_provider_attempt", "retry")
                         delay = retry_delay_seconds(
                             attempt,
                             max_delay_seconds=self._config.max_retry_delay_seconds,
@@ -409,6 +414,12 @@ class OpenAICompatibleProvider:
                     return
 
         return iterator()
+
+    async def _observe_attempt(self, name: str, *args: object) -> None:
+        observer = getattr(self._config.provider_hooks, name, None)
+        if callable(observer):
+            with suppress(Exception):
+                await observer(*args)
 
     def _prompt_cache_key(self, affinity_id: str | None) -> str | None:
         supports = self._config.compat.get("supportsPromptCacheKey")

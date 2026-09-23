@@ -24,6 +24,10 @@ import type {
 
 export type {
   Approval,
+  TraceRequest,
+  TraceAction,
+  TraceDetail,
+  TraceDetailKind,
   BusinessReceipt,
   BusinessArtifact,
   Business,
@@ -77,6 +81,10 @@ export interface TraceBundle {
   rounds: Round[]
   tools: ToolReceipt[]
   events?: Array<Record<string, unknown>>
+  requests?: import('../shared/protocol').TraceRequest[]
+  actions?: import('../shared/protocol').TraceAction[]
+  diagnostics?: Record<string, unknown>
+  summary_only?: boolean
 }
 
 export type HostEvent = WorkbenchEvent

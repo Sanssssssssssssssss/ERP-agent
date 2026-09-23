@@ -1051,6 +1051,9 @@ class Workbench:
     def _tool_start(self, run: dict[str, Any], event: dict[str, Any]) -> None:
         call_id, args = str(event.get("tool_call_id", event.get("toolCallId", ""))), _arguments(event.get("args"))
         run["tools"].append({"id": call_id, "tool_call_id": call_id, "name": str(event.get("tool_name", event.get("toolName", ""))), "round": run["model_rounds"] + 1, "arguments": args, "status": "running", "started_at": now(), "result": None, "action_id": None})
+        for key in ("request_id", "round_id"):
+            if isinstance(event.get(key), str):
+                run["tools"][-1][key] = event[key]
         run["tool_count"] += 1
         self._trace(run, "tool_start", {"tool_call_id": call_id, "tool_name": str(event.get("tool_name", event.get("toolName", ""))), "arguments": args})
 
@@ -1261,6 +1264,9 @@ class Workbench:
         round_usage["input_semantics"] = "uncached"
         row = {"index": run["model_rounds"] + 1, "status": "error" if error_round else "completed", "text": _visible_content(message), "stop_reason": stop_reason, "error": message.get("error_message", message.get("errorMessage")),
                "usage": round_usage, "elapsed_seconds": (timing.get("totalDurationMs") / 1000 if isinstance(timing.get("totalDurationMs"), (int, float)) else None), "tool_ids": [t.get("id") for t in run["tools"][start:]]}
+        for key in ("request_id", "round_id"):
+            if isinstance(event.get(key), str):
+                row[key] = event[key]
         run["rounds"].append(row); run["model_rounds"] += 1
         run["last_stop_reason"] = stop_reason
         run["_round_tool_start"] = len(run["tools"])
@@ -1367,13 +1373,19 @@ class Workbench:
                                                           "first_new_output": run["first_new_output"]})
                         if run.get("_stop_status") and kind not in {"tool_execution_end", "turn_end", "message_end"}:
                             continue
-                        if kind == "auto_retry_start":
+                        if kind in {"request_started", "request_headers", "request_finished", "request_linked"}:
+                            self._trace(run, kind, {key: event[key] for key in ("request_id", "call_id", "request_file", "request_kind", "attempt", "status", "started_at", "headers_received_at", "finished_at", "duration_ms", "http_status", "message_id", "round_id", "tool_call_ids", "error") if key in event})
+                        elif kind == "receipt_warning":
+                            self._trace(run, kind, {key: event[key] for key in ("file", "error_type") if key in event})
+                        elif kind == "auto_retry_start":
                             run["phase"] = "retrying"
                             run["retry"] = {"status": "retrying", "attempt": event.get("attempt"),
                                              "max_attempts": event.get("max_attempts", event.get("maxAttempts")),
                                              "delay_ms": event.get("delay_ms", event.get("delayMs"))}
                             self._event("run_changed", {"run_id": run_id, "phase": "auto_retry",
                                                           "retry": run["retry"]})
+                            error = event.get("error_message", event.get("errorMessage"))
+                            self._trace(run, kind, {**run["retry"], "error": error[:400] if isinstance(error, str) else None})
                         elif kind == "auto_retry_end":
                             run["phase"] = "waiting_for_model" if not event.get("success") else "model_output"
                             retry = run.setdefault("retry", {})
@@ -1381,6 +1393,14 @@ class Workbench:
                                           "attempt": event.get("attempt"), "success": bool(event.get("success"))})
                             self._event("run_changed", {"run_id": run_id, "phase": "auto_retry",
                                                           "retry": retry})
+                            error = event.get("final_error", event.get("finalError"))
+                            self._trace(run, kind, {"status": retry["status"], "attempt": retry["attempt"],
+                                                    "success": retry["success"], "error": error[:400] if isinstance(error, str) else None})
+                        elif kind in {"compaction_start", "compaction_end"}:
+                            error = event.get("error_message", event.get("errorMessage"))
+                            self._trace(run, kind, {**{key: event[key] for key in ("reason", "aborted") if key in event},
+                                                    "will_retry": event.get("will_retry", event.get("willRetry")),
+                                                    "error": error[:400] if isinstance(error, str) else None})
                         elif kind == "tool_execution_start":
                             run.setdefault("_round_tool_start", len(run["tools"]))
                             self._tool_start(run, event)
@@ -1712,20 +1732,35 @@ class Workbench:
         from .document_export import generate_document_export
         return generate_document_export(self._native_reads(), model, record_id, fmt)
 
-    def get_trace(self, session_id: str, business_id: str, run_id: str | None = None) -> dict[str, Any]:
+    def get_trace(self, session_id: str, business_id: str, run_id: str | None = None, summary_only: bool = False) -> dict[str, Any]:
+        _must_bool(summary_only, "summary_only")
         self._business(session_id, business_id)
         runs = [r for r in self.store.data["runs"].values() if r.get("business_id") == business_id and (run_id is None or r["id"] == run_id)]
         if run_id is not None and not runs: raise KeyError("unknown run")
         runs.sort(key=lambda row: (str(row.get("started_at") or ""), str(row.get("id") or "")))
         run = runs[-1] if run_id is None and runs else (runs[0] if runs else None)
         if run is None: return {"run": None, "rounds": [], "tools": [], "events": []}
-        self._stamp_usage_projection(run)
+        if not summary_only:
+            self._stamp_usage_projection(run)
         public_run = {key: value for key, value in run.items() if key not in {"rounds", "tools", "events", "_round_tool_start", "_compaction_known_total", "assistant_text"}}
         if isinstance(public_run.get("usage"), dict):
             public_run["usage"] = self._public_usage(run)
         rounds = self._public_rounds(run)
+        if summary_only:
+            if run.get("session_id") != session_id:
+                raise KeyError("run does not belong to session")
+            from .trace_inspector import TraceInspector
+            return TraceInspector(self.store.root, run, list(self.store.data["approvals"].values()), self.store.data["businesses"][business_id]).summary(public_run, rounds)
         tools = [{key: value for key, value in row.items() if key not in {"tool_call_id", "started_at", "ended_at"}} for row in run.get("tools", [])]
         return {"run": _safe(public_run), "rounds": _safe(rounds), "tools": _safe(tools), "events": _safe(run.get("events", []))}
+
+    def get_trace_detail(self, session_id: str, business_id: str, run_id: str, kind: str, id: str) -> dict[str, Any]:
+        self._business(session_id, business_id)
+        run = self.store.data["runs"].get(run_id)
+        if run is None or run.get("business_id") != business_id or run.get("session_id") != session_id:
+            raise KeyError("run does not belong to this business and session")
+        from .trace_inspector import TraceInspector
+        return TraceInspector(self.store.root, run, list(self.store.data["approvals"].values()), self.store.data["businesses"][business_id]).detail(kind, id)
 
     def _action_for_approval(self, run: dict[str, Any], action_id: str) -> dict[str, Any] | None:
         from erp_harness.erp.store import ActionStore
@@ -1999,7 +2034,7 @@ class Workbench:
     def _dispatch(self, method: str, params: dict[str, Any]) -> Any:
         # RPC 方法必须显式列入表。禁止按传入名称直接 getattr 调用宿主对象。
         # 带下划线的内部入口由桌面主进程使用；renderer 可达范围还受 preload 限制。
-        methods = {"list_sessions": lambda: self.list_sessions(), "create_session": lambda: self.create_session(params.get("title")), "rename_session": lambda: self.rename_session(params["session_id"], params["title"]), "archive_session": lambda: self.archive_session(params["session_id"]), "get_session": lambda: self.get_session(params["session_id"]), "send_message": lambda: self.send_message(params["session_id"], params["text"], params.get("business_id"), params.get("context_business_id"), params.get("material_ids")), "confirm_business": lambda: self.confirm_business(params["session_id"], params["proposal_id"], _must_bool(params["confirmed"], "confirmed")), "start_run": lambda: self.start_run(params["session_id"], params["business_id"]), "decide_approval": lambda: self.decide_approval(params["session_id"], params["business_id"], params["run_id"], params["action_id"], params["decision"]), "request_approval_revision": lambda: self.request_approval_revision(params["session_id"], params["business_id"], params["run_id"], params["action_id"], params["text"]), "cancel_run": lambda: self.cancel_run(params["session_id"], params["business_id"], params["run_id"]), "cancel_conversation": lambda: self.cancel_conversation(params["session_id"], params["run_id"]), "reconcile_action": lambda: self.reconcile_action(params["session_id"], params["business_id"], params["run_id"], params["action_id"]), "get_business": lambda: self.get_business(params["session_id"], params["business_id"]), "check_business_connection": lambda: self.check_business_connection(params["session_id"], params["business_id"]), "refresh_business": lambda: self.refresh_business(params["session_id"], params["business_id"]), "get_trace": lambda: self.get_trace(params["session_id"], params["business_id"], params.get("run_id")), "_import_material": lambda: self._import_material(params["session_id"], params["name"], params["content_base64"]), "_export_document": lambda: self._export_document(params["session_id"], params["business_id"], params["model"], params["record_id"], params["format"]), "_record_artifact": lambda: self._record_artifact(params["session_id"], params["business_id"], params["path"], params["name"], params.get("run_id"), params.get("kind", "business_receipt"), params.get("model"), params.get("record_id")), "health": self.health, "check_connection": self.check_connection}
+        methods = {"list_sessions": lambda: self.list_sessions(), "create_session": lambda: self.create_session(params.get("title")), "rename_session": lambda: self.rename_session(params["session_id"], params["title"]), "archive_session": lambda: self.archive_session(params["session_id"]), "get_session": lambda: self.get_session(params["session_id"]), "send_message": lambda: self.send_message(params["session_id"], params["text"], params.get("business_id"), params.get("context_business_id"), params.get("material_ids")), "confirm_business": lambda: self.confirm_business(params["session_id"], params["proposal_id"], _must_bool(params["confirmed"], "confirmed")), "start_run": lambda: self.start_run(params["session_id"], params["business_id"]), "decide_approval": lambda: self.decide_approval(params["session_id"], params["business_id"], params["run_id"], params["action_id"], params["decision"]), "request_approval_revision": lambda: self.request_approval_revision(params["session_id"], params["business_id"], params["run_id"], params["action_id"], params["text"]), "cancel_run": lambda: self.cancel_run(params["session_id"], params["business_id"], params["run_id"]), "cancel_conversation": lambda: self.cancel_conversation(params["session_id"], params["run_id"]), "reconcile_action": lambda: self.reconcile_action(params["session_id"], params["business_id"], params["run_id"], params["action_id"]), "get_business": lambda: self.get_business(params["session_id"], params["business_id"]), "check_business_connection": lambda: self.check_business_connection(params["session_id"], params["business_id"]), "refresh_business": lambda: self.refresh_business(params["session_id"], params["business_id"]), "get_trace": lambda: self.get_trace(params["session_id"], params["business_id"], params.get("run_id"), params.get("summary_only", False)), "get_trace_detail": lambda: self.get_trace_detail(params["session_id"], params["business_id"], params["run_id"], params["kind"], params["id"]), "_import_material": lambda: self._import_material(params["session_id"], params["name"], params["content_base64"]), "_export_document": lambda: self._export_document(params["session_id"], params["business_id"], params["model"], params["record_id"], params["format"]), "_record_artifact": lambda: self._record_artifact(params["session_id"], params["business_id"], params["path"], params["name"], params.get("run_id"), params.get("kind", "business_receipt"), params.get("model"), params.get("record_id")), "health": self.health, "check_connection": self.check_connection}
         if method not in methods: raise KeyError("unknown method")
         return methods[method]()
 
@@ -2007,7 +2042,11 @@ class Workbench:
         if not isinstance(params, dict):
             raise ValueError("params must be an object")
         with self._lock:
-            return _safe(self._dispatch(method, params))
+            result = self._dispatch(method, params)
+            # Inspector owns recursive redaction, including serialized JSON and numeric usage keys.
+            if method == "get_trace_detail" or (method == "get_trace" and params.get("summary_only") is True):
+                return result
+            return _safe(result)
 
 
 def main() -> None:
@@ -2021,7 +2060,7 @@ def main() -> None:
             if not line.strip(): continue
             request_id = None
             try:
-                request = json.loads(line); request_id = request.get("id"); emit({"id": request_id, "result": _safe(host.call(str(request.get("method")), request.get("params") or {}))})
+                request = json.loads(line); request_id = request.get("id"); emit({"id": request_id, "result": host.call(str(request.get("method")), request.get("params") or {})})
             except Exception as exc: emit({"id": request_id, "error": {"code": getattr(exc, "code", type(exc).__name__), "message": str(exc)[:500]}})
     finally:
         host.close()

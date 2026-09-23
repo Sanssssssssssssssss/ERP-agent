@@ -132,6 +132,9 @@ class WorkbenchConversationTests(unittest.TestCase):
         self.assertEqual(usage["compaction_total"], 0)
         self.assertEqual(usage["total_scope"], "assistant_responses_only")
         self.assertEqual(usage["input_semantics"], "uncached")
+        linked = next(event for event in _events if event["type"] == "request_linked")
+        terminal = next(event for event in _events if event["type"] == "message_end" and event.get("message_id") == linked["message_id"])
+        self.assertEqual((terminal["request_id"], terminal["round_id"]), (linked["request_id"], linked["round_id"]))
 
     def test_run_uses_new_journal_entries_after_compaction(self):
         old = MessageEntry(message=AssistantMessage(

@@ -213,6 +213,10 @@ export interface Round {
   usage?: Usage;
   elapsed_seconds?: number;
   tool_ids: string[];
+  started_at?: string;
+  ended_at?: string;
+  stop_reason?: string;
+  error?: string;
 }
 
 export interface Tool {
@@ -220,11 +224,47 @@ export interface Tool {
   name: string;
   round?: number;
   status: string;
-  arguments: Record<string, unknown>;
+  arguments?: Record<string, unknown>;
   result?: unknown;
   elapsed_seconds?: number;
   action_id?: string;
+  started_at?: string;
+  ended_at?: string;
+  search_text?: string;
 }
+
+export interface TraceRequest {
+  id: string;
+  status: string;
+  kind: string;
+  association: 'linked' | 'unlinked';
+  round?: number;
+  started_at?: string;
+  ended_at?: string;
+  duration_ms?: number;
+  http_status?: number;
+  request_bytes?: number;
+  error?: string;
+  usage?: Usage;
+}
+
+export interface TraceAction {
+  id: string;
+  status: string;
+  kind: string;
+  model: string;
+  operation: string;
+  tool_ids: string[];
+  record_ids?: number[];
+  started_at?: string;
+  ended_at?: string;
+  created_at?: number | string;
+  sent_at?: number | string;
+  finished_at?: number | string;
+}
+
+export type TraceDetailKind = 'run' | 'request' | 'tool' | 'action' | 'round' | 'event';
+export interface TraceDetail { kind: TraceDetailKind; id: string; data: Record<string, unknown>; redaction?: { hidden_chars?: number; redacted_values?: number }; }
 
 export interface BusinessDetail {
   business: Business;
@@ -323,6 +363,7 @@ export type WorkbenchMethod =
   | "cancel_run"
   | "reconcile_action"
   | "get_trace"
+  | "get_trace_detail"
   | "refresh_business"
   | "export_business_report"
   | "open_odoo"
