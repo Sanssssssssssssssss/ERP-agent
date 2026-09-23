@@ -146,3 +146,18 @@ def test_invalid_configuration_has_no_http_start(tmp_path):
         events = [json.loads(line) for line in path.read_text().splitlines()]
         assert len(events) == 1 and events[0]["event"] == "end" and not events[0]["dispatch_started"]
         assert NativeReads.__new__(NativeReads).world_rpc_evidence(None)["status"] == "no_completed_attempt"
+
+
+def test_uncertain_write_is_not_hidden_by_recent_failures(tmp_path):
+    seed(tmp_path)
+    rows(tmp_path / "requests", "0002.meta.json", {"run_id": "run", "session_id": "session",
+         "request_id": "request2", "tool_call_ids": ["call-c"]})
+    rows(tmp_path, "session.jsonl", *[{"message": {"role": "toolResult", "toolCallId": call,
+         "isError": True}} for call in ("call-a", "call-b", "call-c")])
+    action = {"action_id": "act-unknown", "run_id": "run", "session_id": "session",
+              "identity": IDENTITY, "status": "sending"}
+    result = diagnose(tmp_path, [action, *[{**action, "action_id": f"pending-{i}",
+                                           "status": "pending_approval"} for i in range(4)]])
+    assert len(result["items"]) == 3
+    assert result["items"][0]["action_id"] == "act-unknown"
+    assert result["items"][0]["next_action"] == "reconcile_without_replay"

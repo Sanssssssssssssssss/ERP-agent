@@ -176,17 +176,21 @@ def summarize_run(directory: Path, session_file: Path, identity: dict, *, run_id
         })
         if len(result["items"]) == 3:
             break
+    unresolved = []
     linked = {item["action_id"] for item in result["items"]}
     for action in reversed(actions):
-        if len(result["items"]) == 3:
-            break
         if action["action_id"] not in linked and action.get("status") in {
             "pending_approval", "approved", "sending", "executing", "needs_reconciliation"}:
-            result["items"].append({"action_id": _identifier(action["action_id"]),
+            unresolved.append({"action_id": _identifier(action["action_id"]),
                 "action_status": action["status"], "tool_call_id": None, "odoo_request_seen": None,
                 "world_stale": None, "error_code": "unresolved_action", "likely_failure_layer": "unknown",
                 "next_action": "reconcile_without_replay" if action["status"] in {"sending", "executing", "needs_reconciliation"}
                 else "review_existing_approval"})
+    items = unresolved + result["items"]
+    # Uncertain writes must remain visible even when recent parameter failures fill the limit.
+    items.sort(key=lambda item: 0 if item.get("action_status") in {
+        "sending", "executing", "needs_reconciliation"} else 1 if item.get("error_code") != "unresolved_action" else 2)
+    result["items"] = items[:3]
     if len(json.dumps(result, ensure_ascii=False).encode()) > 8192:
         return {"success": False, "error_code": "diagnostic_size_limit", "items": []}
     return result
