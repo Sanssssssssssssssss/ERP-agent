@@ -262,14 +262,22 @@ class TaskEvidence:
         if business_type == "sale_invoice":
             invoice = model in {"sale.advance.payment.inv", "account.move", "account.move.line", "account.move.send.wizard"}
             delivery = model in {"stock.picking", "stock.move", "stock.move.line", "stock.backorder.confirmation"}
-            if target == "confirmed" and (invoice or delivery):
+            schedule_only = (kind == "write" and payload.get("operation") == "write"
+                             and bool(values) and set(values) <= {"scheduled_date", "date_deadline"})
+            if target == "confirmed" and (invoice or delivery and not schedule_only):
                 raise TaskHandoff("当前阶段只确认销售单，不开票或发货。需要推进业务时，请先更新并确认提案。")
             if target == "draft" and (delivery or method in {"action_confirm", "action_post"}
                                       or values.get("state") in {"sale", "posted", "done"}):
                 raise TaskHandoff("当前阶段只保留草稿。确认、过账或发货需要先更新并确认提案。")
-        if (kind == "method" and (model, method) == ("account.move", "message_post")
-                and business_type != "invoice_delivery"):
-            raise TaskHandoff("当前开票阶段不包含邮件发送。请在聊天中确认发票、公司和收件人，生成发送提案。")
+        if kind == "method" and (model, method) == ("account.move", "message_post"):
+            if business_type != "invoice_delivery":
+                raise TaskHandoff("当前开票阶段不包含邮件发送。请在聊天中确认发票、公司和收件人，生成发送提案。")
+            # Check host authority before invoice/PDF parameter reads. This is local, not an RPC.
+            from .invoice_mail import requested
+            try:
+                requested(self.references)
+            except ValueError as exc:
+                raise TaskHandoff("发送依据不完整：需要宿主确认唯一发票、公司和收件人。请在聊天中补充并确认发送提案。") from exc
 
     def prestate(self, kind, payload):
         self.check_stage(kind, payload)

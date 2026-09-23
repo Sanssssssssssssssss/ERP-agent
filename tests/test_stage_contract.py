@@ -50,6 +50,15 @@ def test_confirmed_sales_rejects_shipping_and_invoice_generation(action_fixture,
         evidence.check_stage("method", {"model": model, "method": method, "instance": "default", "kwargs": {"ids": [1]}})
 
 
+def test_confirmed_sales_allows_schedule_support_without_delivery(action_fixture, tmp_path):
+    actions, _, _ = action_fixture
+    evidence = bind(actions, tmp_path / "evidence.json")
+    payload = {"model": "stock.picking", "operation": "write", "values": {"scheduled_date": "2026-09-25"}}
+    evidence.check_stage("write", payload)
+    with pytest.raises(TaskHandoff):
+        evidence.check_stage("write", {**payload, "values": {**payload["values"], "state": "done"}})
+
+
 def test_scope_allows_supporting_manufacturing_and_pdf_but_not_email(action_fixture, tmp_path):
     actions, _, _ = action_fixture
     evidence = bind(actions, tmp_path / "manufacturing.json", kind="manufacturing", target="done")
@@ -71,6 +80,9 @@ def test_missing_mail_authority_is_handoff_but_bad_arguments_are_not(action_fixt
         evidence.reference_check("method", {"model": "account.move", "method": "message_post"})
     result = failure_result(error.value)
     assert _handoff_required(result) and result["retry_safe"] is False
+    # Missing host binding wins over absent invoice details; do not keep guessing IDs.
+    missing = actions.execute_method("account.move", "message_post", kwargs={"ids": [999], "partner_ids": [999]})
+    assert _handoff_required(missing), missing
     invalid = actions.execute_method("sale.order", "action_confirm", kwargs={"ids": [0]})
     assert invalid["success"] is False and not _handoff_required(invalid)
     assert writer.calls == []
