@@ -1,6 +1,21 @@
 # 单轮回归结果 · 2026-09-23
 
-已完成 12 个节点、24 次真实请求，每分支恰好一次 POST；执行 ERP 工具 0 次。付费候选为 `0b08fb2`，完整业务按用户要求暂停。
+最新追加 **10 次真实单轮请求**，源码 `1d39ddd`，DeepSeek v4 Flash / high。每分支一个 POST，无重试、无超时，工具意图只保存。完整业务按用户要求暂停。
+
+| 节点 | 真实模型结果 |
+|---|---|
+| B01 开票收尾，3 分支 | 均提出最终回读，未探索邮件配置。原分支本次也正常，尚不能证明稳定修复 |
+| A03 合法确认，2 分支 | 均确认正确订单 1499，未因目录权限误报模型不存在 |
+| B02 授权发送，2 分支 | 原分支读取 SOP；新 system 提出发票 31、收件人 516 的发送意图。未实际发送 |
+| E02 供给，3 分支 | 均继续只读核对；未声称空闲产能或业务完成。输入 **119,128→13,538**（−88.6%），叠加新 system 为 **13,250** |
+
+**仍待解决/验证**：B02 把“未见发送回执”说成“确认未发送过”，证据表达过强；E02 请求了尚未验证有效的工单字段，组合分支查询前 20 张制造单时未加筛选。下一步意图符合业务范围，不等于字段、工具执行及完整业务已通过。
+
+本批合计 **401,311 tokens**：新输入 **234,549**、缓存输入 **159,616**、输出 **7,146**（其中 reasoning **4,690**）；10 次请求、22 个工具意图、执行工具 0 次，用量未知 0。System 单独减少约 314 输入 token；推理与缓存表现有波动，不能据单次结果推断完整业务成本或稳定性。
+
+[逐分支用量](../../.runtime/agent-regression-context-20260923/summary.json) · [阶段与保护复核](../../.runtime/agent-regression-context-20260923/reviews/phase-system.json) · [供给复核](../../.runtime/agent-regression-context-20260923/reviews/e02.json) · [完整请求与响应](../../.runtime/agent-regression-context-20260923/results/)
+
+此前 `0b08fb2` 已完成 12 个节点、24 次真实请求，执行 ERP 工具 0 次：
 
 - **A02、C01**：候选纠正了空字段确认预检、被拒后换入口发送的问题。
 - **B01 未通过**：仍读取邮件配置。当前目标已正确，28 条旧 assistant 历史保留着后续发送计划；不能由此推断新任务从头运行也会如此。
@@ -22,12 +37,12 @@
 
 离线基础检查 301 passed / 67 subtests；后续相关检查 130 passed / 11 subtests，最后的检查器修正 42 passed。桌面 typecheck、build、Electron 检查通过。尚未取得本轮最终 Odoo 业务状态证据，不发布完整业务通过结论。
 
-离线补修：`5a0acbd` 在审批恢复时复用宿主绑定的阶段说明；`bffeead` 按业务身份校验不同合法参数形式；`a3c0e0a` 验证实际 JSONL 落盘和单轮暂停。B01 新分支仅准备完成，未再次调用模型，收敛效果仍待验证。完整业务环境仍冻结在旧候选，启动门保持关闭。
+离线补修：`5a0acbd` 在审批恢复时复用宿主绑定的阶段说明；`bffeead` 按业务身份校验不同合法参数形式；`a3c0e0a` 验证实际 JSONL 落盘和单轮暂停。B01 新分支实测结果见上。C02 由宿主持久化后直接暂停，不再强制请求模型补说交接。完整业务环境仍冻结在旧候选，启动门保持关闭。
 
 后续上下文修复也已独立提交：`4b1d625` 移除业务 system 的编码助手前缀和错误的“无可用工具”标签，保留 ERP 契约及日期，离线生成约1.5 KB（原候选2.8 KB）；普通聊天未改。`dac564f` 首轮外置大量未排期、未开始工单，保留负荷与完整引用；原 E02 回包358,782→15,164字节（−95.77%），19页召回1,835行完全一致。其余业务事实和原日志不变。
 
-这两项整合检查 **87 passed / 31 subtests**，独立审查通过，追加付费调用0。字节收益不等于 token、成本或业务收益；已排期及进行中保护由离线样例验证。[System 对照](../../.runtime/agent-regression-20260923/system-prompt-20260923/comparison.json) · [供给重放](../../.runtime/supply-first-projection-20260923/result.json)。
+这两项整合检查 **87 passed / 31 subtests**，独立审查通过；本批真实模型结果见上。已排期及进行中保护由离线样例验证。[System 对照](../../.runtime/agent-regression-20260923/system-prompt-20260923/comparison.json) · [供给重放](../../.runtime/supply-first-projection-20260923/result.json)。
 
-回退点：`regression-baseline-20260923`（`40e7fc6`）。付费结果之后的离线修改单独提交，未复用旧成绩宣称生效。
+回退点：`regression-baseline-20260923`（`40e7fc6`）；阶段、system、投射均单独提交。两批合计 **34 次请求，914,179 tokens**，均未执行 ERP 工具。
 
 [运行入口与案例索引](README.md) · [完整用量](../../.runtime/agent-regression-20260923/summary.json) · [A/D 复核](../../.runtime/agent-regression-20260923/reviews/acceptance.json) · [B/C 复核](../../.runtime/agent-regression-20260923/reviews/bc.json) · [B01 根因](../../.runtime/agent-regression-20260923/reviews/b01-root-analysis.md)

@@ -14,6 +14,8 @@ python -m experiments.agent_regression.runner --summary
 
 可用 `--case A01`、`--group tool_contract`、`--arm candidate` 选择子集。每个节点/分支只允许启动一次；失败、取消或用量不明均不补发。HTTP 无超时、无重试、无自动续跑。
 
+阶段与上下文追加对照入口：`python -m experiments.agent_regression.context_followup` 离线准备/核验，显式加 `--paid` 才发送。B01 三分支、A03/B02 各两分支、E02 三分支，共 10 次；已运行分支禁止再次启动。完整证据在 `.runtime/agent-regression-context-20260923/`，结果见 [报告](RESULTS.md)。
+
 `freeze.json` 锁定来源、oracle 和上下文哈希；`cases/*/manifest.json` 的 `boundary` 说明故障传播切点，不能将其当成上游根因的独立证明。A03/B02/B03/C03/D03 是正确保护，D01/D02 是已修问题防回归。B01/C01/C02 的上游问题是当前阶段与历史目标混入；A01/A02 检查工具契约。两个旧 prepared 分支保留其真实来源标识。
 
 `provenance.json` 补充源码版本、根因位置、首次可纠正请求和归档证据哈希。历史补丁版本以当时 source-hashes 为准；未知 commit 不猜测。D01/D02 保留祖先原请求；C02 勘误仅澄清“三类绑定各需唯一”，原 oracle 与通过条件不变。
