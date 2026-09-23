@@ -1,4 +1,4 @@
-"""Run one Pi HarnessSession with the fixed Odoo tool contract."""
+"""Run one business HarnessSession with the fixed Odoo tool contract."""
 
 from __future__ import annotations
 
@@ -84,6 +84,21 @@ BUSINESS_EXECUTION_POLICY = (
     "new evidence; refresh Odoo only when current state is needed."
 )
 McpToolSet = None
+
+
+def build_business_system_prompt(*, sop_mode: str, tool_mode: str,
+                                 runtime_date: str, runtime_timezone: str) -> str:
+    """Use the ERP role without importing the generic coding prompt or tool list."""
+    return (
+        "You are an ERP business execution assistant. Be concise and respond in Simplified Chinese; "
+        "preserve exact tool names and structured fields.\n"
+        f"Runtime local date: {runtime_date}; host timezone: {runtime_timezone}. "
+        "Use get_current_time when a precise current time is needed.\n"
+        + MCP_ONLY_POLICY
+        + BUSINESS_EXECUTION_POLICY
+        + (SOP_POLICY if sop_mode == "controlled" else "")
+        + (DYNAMIC_TOOL_POLICY if tool_mode == "dynamic" else "")
+    )
 
 
 def _usage_message_value(message: AssistantMessage, field: str) -> int | None:
@@ -497,7 +512,8 @@ async def run(args: argparse.Namespace) -> None:
                 thinking_parameter="reasoning_effort",
                 thinking_defaults={model: thinking},
             )
-            runtime_date = datetime.now().astimezone().date().isoformat()
+            runtime_now = datetime.now().astimezone()
+            runtime_date = runtime_now.date().isoformat()
             async def stop_after_approval(turn):
                 return any(_handoff_required(result) or (
                     getattr(args, "pause_on_approval", False) and _approval_required(result)
@@ -542,11 +558,11 @@ async def run(args: argparse.Namespace) -> None:
                     runtime_provider_config=provider_config,
                     skills_enabled=False,
                     extensions_enabled=False,
-                    append_system_prompt=(
-                        MCP_ONLY_POLICY
-                        + BUSINESS_EXECUTION_POLICY
-                        + (SOP_POLICY if sop_mode == "controlled" else "")
-                        + (DYNAMIC_TOOL_POLICY if tool_mode == "dynamic" else "")
+                    system=build_business_system_prompt(
+                        sop_mode=sop_mode,
+                        tool_mode=tool_mode,
+                        runtime_date=runtime_date,
+                        runtime_timezone=runtime_now.strftime("UTC%z"),
                     ),
                     auto_compact_enabled=not budget_enabled,
                     # 关闭的是任务结束后的自动摘要。请求前和溢出恢复由 session 管理。

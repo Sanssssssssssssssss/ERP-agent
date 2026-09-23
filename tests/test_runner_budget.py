@@ -23,6 +23,24 @@ from erp_harness.tools.dynamic_tools import BASE_TOOLS, CAPABILITY_GROUPS
 
 
 class RunnerBudgetTest(unittest.TestCase):
+    def test_business_prompt_preserves_mode_contracts_and_explicit_host_date(self):
+        for sop_mode in ("off", "controlled"):
+            for tool_mode in ("static", "dynamic"):
+                with self.subTest(sop_mode=sop_mode, tool_mode=tool_mode):
+                    prompt = pi_odoo_runner.build_business_system_prompt(
+                        sop_mode=sop_mode, tool_mode=tool_mode,
+                        runtime_date="2026-09-23", runtime_timezone="SGT (+0800)",
+                    )
+                    self.assertIn("2026-09-23; host timezone: SGT (+0800)", prompt)
+                    self.assertIn("get_current_time", prompt)
+                    self.assertIn("Be concise and respond in Simplified Chinese", prompt)
+                    for policy in (pi_odoo_runner.MCP_ONLY_POLICY, pi_odoo_runner.BUSINESS_EXECUTION_POLICY):
+                        self.assertIn(policy, prompt)
+                    self.assertEqual(pi_odoo_runner.SOP_POLICY in prompt, sop_mode == "controlled")
+                    self.assertEqual(pi_odoo_runner.DYNAMIC_TOOL_POLICY in prompt, tool_mode == "dynamic")
+                    for stale in ("coding assistant", "Pi Agent", "Available tools:", "Current working directory:"):
+                        self.assertNotIn(stale, prompt)
+
     def test_harbor_usage_receipt_boundaries(self):
         async def run_case(receipt):
             with patch.object(harbor_agent.BaseInstalledAgent, "__init__", return_value=None):
@@ -154,6 +172,13 @@ class RunnerBudgetTest(unittest.TestCase):
                     await pi_odoo_runner.run(args)
 
             self.assertEqual(len(requests), 2)
+            for payload in requests:
+                system = next(row["content"] for row in payload["messages"] if row["role"] == "system")
+                self.assertTrue(system.startswith("You are an ERP business execution assistant."))
+                self.assertIn(pi_odoo_runner.MCP_ONLY_POLICY, system)
+                self.assertNotIn("Pi Agent", system)
+                self.assertNotIn("Available tools:", system)
+                self.assertIn("execute_method", {row["function"]["name"] for row in payload["tools"]})
             resumed_usage = json.loads(args.usage_file.read_text())
             self.assertEqual(resumed_usage["modelCalls"], 1)
             self.assertEqual(resumed_usage["assistantEntries"], 1)
@@ -435,6 +460,17 @@ class RunnerBudgetTest(unittest.TestCase):
             self.assertIn("mcp_odoo_preview_write", third)
             self.assertEqual(len(fourth), 14)
             self.assertNotIn("mcp_odoo_preview_write", fourth)
+            prompts = [next(row["content"] for row in payload["messages"] if row["role"] == "system")
+                       for payload in request_payloads]
+            self.assertEqual(prompts[0], prompts[1])  # Tool publication does not restore the coding prompt.
+            for system in prompts:
+                self.assertTrue(system.startswith("You are an ERP business execution assistant."))
+                for policy in (pi_odoo_runner.MCP_ONLY_POLICY, pi_odoo_runner.BUSINESS_EXECUTION_POLICY,
+                               pi_odoo_runner.SOP_POLICY, pi_odoo_runner.DYNAMIC_TOOL_POLICY):
+                    self.assertIn(policy, system)
+                self.assertIn("host timezone:", system)
+                self.assertNotIn("Available tools:", system)
+                self.assertNotIn("Pi Agent", system)
 
     def test_corrupt_present_receipt_blocks_history_fallback(self):
         with tempfile.TemporaryDirectory() as directory:
