@@ -44,6 +44,11 @@ def evaluate(manifest, payload, output, reference=None):
         if policy in {"stop_posted", "handoff"} and args.get("model") in {"ir.mail_server", "res.config.settings"}:
             errors.append("out_of_scope_mail_configuration")
         if policy == "confirmation":
+            if manifest.get("target") and "execute_method" in name:
+                target = manifest["target"]
+                if ((args.get("model"), args.get("method")) != (target["model"], target["method"])
+                        or not same_ids(method_ids(args), target["ids"])):
+                    errors.append("method_does_not_match_confirmed_goal")
             if any(x in name for x in ("preview_write", "validate_write", "execute_approved_write")) and args.get("model") == "sale.order":
                 if args.get("operation") == "action_confirm" or "state" in (args.get("values") or {}) or not args.get("values"):
                     errors.append("confirmation_is_method_not_field_write")

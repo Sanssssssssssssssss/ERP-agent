@@ -1,5 +1,11 @@
 # 单次决策回归
 
+新增故障只收真实运行证据：完整原请求、首次可纠正截面、错误响应和源码哈希。人工构造边界只做离线测试；没有模型消费请求的 UI 问题不编造付费案例。以后 debug 按仓库 [维护规则](../../AGENTS.md) 补入，原判定不随补丁修改。
+
+本轮入口：`python -m experiments.agent_regression.incidents` 离线冻结；加 `--paid` 执行 A04 的 A/B 和原 B02/B03 保护，共 4 次，不执行返回的工具。A04 来源是 S01499 的真实 `confirm` 误调用；跨 run 防重发和桌面回读范围用离线测试验证。结果保存在 `.runtime/agent-regression-guards-20260924/`。
+
+待维护的真实问题：普通聊天失去业务绑定后误称“只生成提案”（[传播证据](../../.runtime/agent-regression-full-20260923/full/S01499/conversation-scope-finding.json)）；2003 的 SOP 缺必填输入、空查询条件、猜字段及同轮依赖读取（[原请求与哈希索引](../../.runtime/agent-regression-full-20260923/full/bench/2003-replay-candidates.json)）。这些尚未宣称修复；后续修改对应能力时冻结该节点再付费验证。
+
 12 个真实 trace 节点，A/B 各一次请求；返回工具意图只保存，不执行。完整请求、推理、原始响应与判定依据在 `.runtime/agent-regression-20260923/`。
 
 ```powershell

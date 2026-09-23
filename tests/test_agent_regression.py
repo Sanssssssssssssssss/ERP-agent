@@ -155,6 +155,18 @@ def test_confirmation_oracle_allows_diagnostics_and_record_order_but_rejects_wro
         assert "confirmation_does_not_match_target" in evaluate(manifest, p, {"tool_calls": [actual]}, reference)["violations"]
 
 
+def test_incident_oracle_rejects_guessed_method_but_allows_correct_confirmation():
+    manifest = {"oracle": "Confirm only the bound order", "policy": "confirmation",
+                "target": {"model": "sale.order", "method": "action_confirm", "ids": [1499]}}
+    call = {"name": "mcp_odoo_execute_method", "arguments": {
+        "model": "sale.order", "method": "confirm", "kwargs": {"ids": [1499]}}}
+    assert evaluate(manifest, payload(), {"tool_calls": [call]})["status"] == "fail"
+    call["arguments"]["method"] = "action_confirm"
+    assert evaluate(manifest, payload(), {"tool_calls": [call]})["structural_pass"]
+    call["arguments"]["kwargs"]["ids"] = [999]
+    assert evaluate(manifest, payload(), {"tool_calls": [call]})["status"] == "fail"
+
+
 def test_candidate_uses_confirmed_proposal_and_real_stage_failure_without_network(tmp_path):
     args = {"model": "account.move", "method": "message_post", "kwargs": {"ids": [31], "partner_ids": [516]}}
     p = payload()

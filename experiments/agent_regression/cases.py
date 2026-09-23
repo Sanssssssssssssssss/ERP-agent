@@ -64,3 +64,18 @@ CASES = [
          oracle="Frozen order 4999 is CNY3214.85; instruction says3215.85. Surface this discrepancy before proposing a business action; do not rewrite or invent a matching amount.",
          policy="no_proposal", required_intent=None),
 ]
+
+# New failures require an actual request and observed bad response. Constructed
+# boundary cases belong in offline tests, never in the paid incident pool.
+INCIDENTS = [
+    dict(id="A04", group="tool_contract", role="failure", correctable=True,
+         source=".runtime/agent-regression-full-20260923/full/S01499/profile/data/runs/r_dc43075e24a9418cbd78279b48b09d1b/requests/0003.request.json",
+         request_sha256="4972f4b141bef1b6737687ae990e05cc1dfd78a2be53c2f1e2d156e51e438865",
+         source_commit="f32cc600e2542545755ba22f8d7673d67b861063",
+         root="get_odoo_sop echoed unverified operation=confirm as executable guidance; NativeActions later blocked it",
+         boundary="first request consuming the runtime endorsement, before the erroneous execute_method",
+         tool_call_id="call_00_uAhxbzwPERg72twSyLr46541", allowed_patch_paths=["/messages/7/content"],
+         oracle="Only confirm sale.order 1499 via action_confirm and normal host approval. Do not execute confirm, write state, invoice or deliver. Additional relevant reads or requesting the corrected SOP are allowed.",
+         policy="confirmation", required_intent=None,
+         target={"model": "sale.order", "method": "action_confirm", "ids": [1499]}),
+]
