@@ -25,14 +25,14 @@ READBACK_FIELDS: dict[str, tuple[str, ...]] = {
     "account.move.line": ("id", "name", "move_id", "product_id", "quantity", "product_uom_id", "price_unit", "price_subtotal", "price_total"),
     "stock.picking": ("id", "name", "state", "sale_id", "origin", "partner_id", "scheduled_date"),
 }
-RELATION_FIELDS: dict[str, tuple[str, ...]] = {
-    "sale.order": ("partner_id", "order_line", "invoice_ids", "picking_ids"),
-    "sale.order.line": ("order_id",),
-    "purchase.order": ("partner_id", "order_line"),
-    "purchase.order.line": ("order_id", "sale_order_id", "sale_line_id"),
-    "account.move": ("partner_id", "invoice_line_ids"),
-    "account.move.line": ("move_id",),
-    "stock.picking": ("sale_id", "partner_id"),
+RELATION_FIELDS: dict[str, dict[str, str]] = {
+    "sale.order": {"partner_id": "res.partner", "order_line": "sale.order.line", "invoice_ids": "account.move", "picking_ids": "stock.picking"},
+    "sale.order.line": {"order_id": "sale.order"},
+    "purchase.order": {"partner_id": "res.partner", "order_line": "purchase.order.line"},
+    "purchase.order.line": {"order_id": "purchase.order", "sale_order_id": "sale.order", "sale_line_id": "sale.order.line"},
+    "account.move": {"partner_id": "res.partner", "invoice_line_ids": "account.move.line"},
+    "account.move.line": {"move_id": "account.move"},
+    "stock.picking": {"sale_id": "sale.order", "partner_id": "res.partner"},
 }
 
 
@@ -396,6 +396,28 @@ def _target_order_ids_for_runs(runs: list[dict[str, Any]], business_type: str) -
     return _verified_action_record_ids(runs, "purchase.order" if business_type == "purchase" else "sale.order", {"create", "write", "action_confirm", "button_confirm", "button_approve"})
 
 
+def _readback_targets(business: dict[str, Any], runs: list[dict[str, Any]]) -> set[tuple[str, int]]:
+    """Shared desktop/chat scope: explicit bindings and existing verified receipts."""
+    targets = {(r["model"], r["id"]) for r in business.get("references", [])
+               if r.get("purpose") != "source" and isinstance(r.get("model"), str)
+               and type(r.get("id")) is int and r["id"] > 0}
+    kind = business.get("type", "sale_invoice")
+    if kind in ENTERPRISE_TYPES:
+        action_targets, _ = enterprise_view.action_targets(sorted(runs, key=_run_sort_key))
+        targets.update(action_targets)
+    else:
+        for model, target_kind in (("sale.order", "sale_invoice"), ("purchase.order", "purchase")):
+            if target_kind == kind or kind == "sale_purchase_invoice":
+                targets.update((model, i) for i in _target_order_ids_for_runs(runs, target_kind))
+    return targets
+
+
+def _related_records(model: str, fields: dict[str, Any]) -> set[tuple[str, int]]:
+    return {(related_model, record_id)
+            for field, related_model in RELATION_FIELDS.get(model, {}).items()
+            for record_id in _relation_ids(fields.get(field))}
+
+
 def _select_target_document(documents: list[dict[str, Any]], target_ids: set[int]) -> dict[str, Any] | None:
     """Select only a uniquely verified and freshly observed target."""
     if target_ids:
@@ -406,6 +428,7 @@ def _select_target_document(documents: list[dict[str, Any]], target_ids: set[int
 
 def _annotate_document_scope(
     documents: list[dict[str, Any]], runs: list[dict[str, Any]], business_type: str,
+    targets: set[tuple[str, int]] | None = None,
 ) -> list[dict[str, Any]]:
     """Mark historical order documents and their explicitly linked records."""
     if business_type in ENTERPRISE_TYPES:
@@ -413,73 +436,26 @@ def _annotate_document_scope(
         if not targets:
             return documents
         return [{**doc, "document_scope": "current" if (doc.get("model"), doc.get("id")) in targets else "reference", "is_reference": (doc.get("model"), doc.get("id")) not in targets} for doc in documents]
-    target_ids = _target_order_ids_for_runs(runs, business_type)
-    target_model = "purchase.order" if business_type == "purchase" else "sale.order"
-    line_model = "purchase.order.line" if target_model == "purchase.order" else "sale.order.line"
-    child_models = {
-        "order_line": line_model,
-        "invoice_ids": "account.move",
-        "picking_ids": "stock.picking",
-    }
-    by_key = {
-        (row.get("model"), row.get("id")): row
-        for row in documents
-        if isinstance(row, dict) and isinstance(row.get("model"), str) and type(row.get("id")) is int
-    }
-    current_order_keys = {(target_model, record_id) for record_id in target_ids}
-    reference_order_keys = {
-        (target_model, row.get("id"))
-        for row in documents
-        if isinstance(row, dict) and row.get("model") == target_model
-        and bool(target_ids) and type(row.get("id")) is int and row.get("id") not in target_ids
-    }
-    current_keys = set(current_order_keys)
-    reference_keys = set(reference_order_keys)
-
-    # Propagate only relations explicitly present on the observed order or
-    # invoice. A child that is linked to both scopes remains current.
-    for order_key in current_order_keys:
-        order = by_key.get(order_key)
-        fields = order.get("fields") if isinstance(order, dict) and isinstance(order.get("fields"), dict) else {}
-        for field, child_model in child_models.items():
-            for child_id in _relation_ids(fields.get(field)):
-                current_keys.add((child_model, child_id))
-    for order_key in reference_order_keys:
-        order = by_key.get(order_key)
-        fields = order.get("fields") if isinstance(order, dict) and isinstance(order.get("fields"), dict) else {}
-        for field, child_model in child_models.items():
-            for child_id in _relation_ids(fields.get(field)):
-                reference_keys.add((child_model, child_id))
-    for scope_keys in (current_keys, reference_keys):
-        invoice_keys = {(model, record_id) for model, record_id in scope_keys if model == "account.move"}
-        for invoice_key in invoice_keys:
-            invoice = by_key.get(invoice_key)
-            fields = invoice.get("fields") if isinstance(invoice, dict) and isinstance(invoice.get("fields"), dict) else {}
-            for line_id in _relation_ids(fields.get("invoice_line_ids")):
-                scope_keys.add(("account.move.line", line_id))
-
-    result: list[dict[str, Any]] = []
-    for original in documents:
-        document = dict(original)
-        model, record_id = document.get("model"), document.get("id")
-        key = (model, record_id)
-        scope = document.get("document_scope")
-        if key in current_keys:
-            scope = "current"
-        elif key in reference_keys:
-            scope = "reference"
-        elif scope not in {"current", "reference"}:
-            is_reference = model == target_model and bool(target_ids) and record_id not in target_ids
-            fields = document.get("fields") if isinstance(document.get("fields"), dict) else {}
-            if model == line_model and target_ids:
-                linked = set(_relation_ids(fields.get("order_id")))
-                if linked and not linked & target_ids:
-                    is_reference = True
-            scope = "reference" if is_reference else "current"
-        document["document_scope"] = scope
-        document["is_reference"] = scope == "reference"
-        result.append(document)
-    return result
+    if targets and business_type != "invoice_delivery":
+        # Only trusted roots and their explicit relationships are current.
+        # Exploration remains in history, without becoming completion evidence.
+        by_key = {(doc.get("model"), doc.get("id")): doc for doc in documents}
+        current = set(targets)
+        order_targets = {model: {i for m, i in targets if m == model}
+                         for model in {m for m, _ in targets} & {"sale.order", "purchase.order"}}
+        queue = list(targets)
+        while queue:
+            model, record_id = queue.pop()
+            fields = by_key.get((model, record_id), {}).get("fields") or {}
+            related = {key for key in _related_records(model, fields) - current
+                       if key[0] not in order_targets or key[1] in order_targets[key[0]]}
+            current.update(related)
+            queue.extend(related)
+        return [{**doc, "document_scope": "current" if (doc.get("model"), doc.get("id")) in current else "reference",
+                 "is_reference": (doc.get("model"), doc.get("id")) not in current} for doc in documents]
+    # Legacy unbound businesses retain their existing observation display.
+    return [{**doc, "document_scope": doc.get("document_scope") if doc.get("document_scope") in {"current", "reference"} else "current",
+             "is_reference": doc.get("document_scope") == "reference"} for doc in documents]
 
 
 def _evidence(document: dict[str, Any], label: str) -> dict[str, Any] | None:
@@ -1086,6 +1062,12 @@ def refresh_business(
             model, record_id = document.get("model"), document.get("id")
             if model in READBACK_FIELDS and isinstance(record_id, int):
                 observations[(model, record_id)] = document
+    observed_documents = observations
+    targets = _readback_targets(business, runs)
+    if targets:
+        # Keep the old discovery fallback only for businesses without bindings.
+        observations = {key: observations.get(key, {"model": key[0], "id": key[1]})
+                        for key in sorted(targets) if key[0] in READBACK_FIELDS}
 
     queue = list(observations)
     seen = set(queue)
@@ -1100,7 +1082,7 @@ def refresh_business(
             failures[(model, record_id)] = "native read result could not be projected"
             continue
         document = projected[0]
-        previous = observations.get((model, record_id), {})
+        previous = observed_documents.get((model, record_id), {})
         for key in ("source_run_id", "source_tool_id"):
             if key in previous:
                 document[key] = previous[key]
@@ -1111,28 +1093,9 @@ def refresh_business(
         document["observed_at"], document["source"] = _now(), "refresh_native_read"
         observations[(model, record_id)] = document
         fresh.add((model, record_id))
-        for field in RELATION_FIELDS.get(model, ()):
-            for related_id in _relation_ids(row.get(field)):
-                related_model = {
-                    ("sale.order", "partner_id"): "res.partner",
-                    ("sale.order", "order_line"): "sale.order.line",
-                    ("sale.order", "invoice_ids"): "account.move",
-                    ("sale.order", "picking_ids"): "stock.picking",
-                    ("sale.order.line", "order_id"): "sale.order",
-                    ("purchase.order", "partner_id"): "res.partner",
-                    ("purchase.order", "order_line"): "purchase.order.line",
-                    ("purchase.order.line", "order_id"): "purchase.order",
-                    ("purchase.order.line", "sale_order_id"): "sale.order",
-                    ("purchase.order.line", "sale_line_id"): "sale.order.line",
-                    ("account.move", "partner_id"): "res.partner",
-                    ("account.move", "invoice_line_ids"): "account.move.line",
-                    ("account.move.line", "move_id"): "account.move",
-                    ("stock.picking", "sale_id"): "sale.order",
-                    ("stock.picking", "partner_id"): "res.partner",
-                }.get((model, field))
-                if related_model and (related_model, related_id) not in seen:
-                    seen.add((related_model, related_id))
-                    queue.append((related_model, related_id))
+        for related in sorted(_related_records(model, row) - seen):
+            seen.add(related)
+            queue.append(related)
 
     fresh_by_model: dict[str, list[dict[str, Any]]] = {}
     # 旧单据仍可展示；本次检查只使用成功刷新的记录，不能让旧值冒充当前证据。
@@ -1390,7 +1353,7 @@ def business_detail(state: dict[str, Any], business_id: str) -> dict[str, Any]:
     factual_checks = list(checks.values())
     required_checks = _required_check_names(business_type, completion_target)
     visible_checks = [row for row in factual_checks if row.get("name") in required_checks or str(row.get("name", "")).startswith(("read_", "requested_reference_"))]
-    public_documents = _annotate_document_scope(list(docs.values()), runs, business_type)
+    public_documents = _annotate_document_scope(list(docs.values()), runs, business_type, _readback_targets(business, runs))
     outcome = _outcome(factual_checks, business_type, completion_target)
     if isinstance(readback, dict) and not readback_fresh:
         outcome = {**outcome, "status": "unknown", "detail": "存在较新的运行、单据观察或不完整回读，请重新读取状态。"}

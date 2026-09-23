@@ -52,15 +52,8 @@ def build_status_context(state, business_id, session_id, connection):
         runs[key] = slim
     # Search hits only helped exploration. Re-read targets selected by the existing
     # receipt rules or explicitly bound by the user, then follow live relationships.
-    targets = {(r["model"], r["id"]) for r in selected["references"] if r.get("purpose") != "source"}
+    targets = sale_view._readback_targets(selected, list(runs.values()))
     kind = business.get("type", "sale_invoice")
-    if kind in sale_view.ENTERPRISE_TYPES:
-        action_targets, _ = sale_view.enterprise_view.action_targets(sorted(runs.values(), key=sale_view._run_sort_key))
-        targets.update(action_targets)
-    else:
-        for model, target_kind in (("sale.order", "sale_invoice"), ("purchase.order", "purchase")):
-            if target_kind == kind or kind == "sale_purchase_invoice":
-                targets.update((model, i) for i in sale_view._target_order_ids_for_runs(list(runs.values()), target_kind))
     if targets and kind != "invoice_delivery":
         if not runs:
             # An unexecuted workspace may already reference an existing document.

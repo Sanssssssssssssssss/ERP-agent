@@ -398,6 +398,63 @@ class SaleViewReadbackTests(unittest.TestCase):
         self.assertEqual(next(row for row in detail['checks'] if row['name'] == 'observed_order')['status'], 'unknown')
         self.assertEqual(detail['outcome']['status'], 'unknown')
 
+    def test_bound_target_ignores_revoked_exploratory_records_but_keeps_live_relations(self):
+        for binding in ("reference", "verified_action"):
+            with self.subTest(binding=binding):
+                state = _state()
+                business = state["businesses"]["b1"]
+                business["completion_target"] = "posted"
+                if binding == "reference":
+                    business["references"] = [{"model": "sale.order", "id": 7, "quote": "SO001", "fields": {"id": 7}}]
+                else:
+                    state["runs"]["r2"]["tools"] = [{"name": "execute_method",
+                        "arguments": {"model": "sale.order", "method": "action_confirm"},
+                        "result": {"action_status": "verified", "verification": {
+                            "status": "satisfied", "evidence": {"records": [{"id": 7}]}}}}]
+                # Like S01499: exploration read old invoice lines independently.
+                unrelated = [
+                    {"model": "sale.order", "id": 99, "fields": {}},
+                    {"model": "account.move.line", "id": 1, "fields": {"move_id": [1, "OLD"]}},
+                    {"model": "account.move", "id": 1, "fields": {"partner_id": [19, "Old customer"]}},
+                    {"model": "res.partner", "id": 19, "fields": {}},
+                ]
+                state["runs"]["r2"]["documents"].extend(unrelated)
+                state["runs"]["r2"]["documents"].append({"model": "account.move", "id": 31,
+                    "source_run_id": "r2", "source_tool_id": "read-linked-invoice", "fields": {}})
+                records = deepcopy(RECORDS)
+                records[("sale.order", 7)]["picking_ids"] = [51, 52]
+                records[("stock.picking", 52)] = {**records[("stock.picking", 51)], "id": 52, "state": "assigned"}
+                revoked = {(row["model"], row["id"]) for row in unrelated}
+                reads = NativeReadFixture(records, revoked)
+                detail = refresh_business(state, "b1", reads)
+                called = {(args["model"], args["record_id"]) for _, args in reads.calls}
+                self.assertFalse(called & revoked)
+                self.assertFalse(detail["stale"])
+                self.assertEqual(detail["outcome"]["status"], "passed")
+                docs = {(row["model"], row["id"]): row for row in detail["documents"]}
+                for key in revoked:
+                    self.assertEqual(docs[key]["document_scope"], "reference", key)
+                for key in records:
+                    self.assertIn(key, called)
+                    self.assertEqual(docs[key]["document_scope"], "current", key)
+                self.assertEqual(docs[("stock.picking", 52)]["state"], "assigned")
+                self.assertEqual(docs[("account.move", 31)]["source_tool_id"], "read-linked-invoice")
+
+    def test_bound_target_permission_failure_does_not_reuse_previous_green(self):
+        state = _state()
+        business = state["businesses"]["b1"]
+        business.update(completion_target="posted", references=[{
+            "model": "sale.order", "id": 7, "quote": "SO001", "fields": {"id": 7}}])
+        self.assertEqual(refresh_business(state, "b1", NativeReadFixture(RECORDS))["outcome"]["status"], "passed")
+        reads = NativeReadFixture(RECORDS, {("sale.order", 7)})
+        detail = refresh_business(state, "b1", reads)
+        self.assertTrue(detail["stale"])
+        self.assertEqual(detail["outcome"]["status"], "unknown")
+        checks = {row["name"]: row for row in detail["checks"]}
+        self.assertEqual(checks["observed_order"]["status"], "unknown")
+        self.assertEqual(checks["read_sale.order_7"]["status"], "unknown")
+        self.assertEqual([(args["model"], args["record_id"]) for _, args in reads.calls], [("sale.order", 7)])
+
     def test_purchase_draft_projection_uses_draft_check(self):
         state = _state()
         state['businesses']['b1'].update({'type': 'purchase', 'completion_target': 'draft'})
