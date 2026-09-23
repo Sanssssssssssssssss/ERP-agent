@@ -731,15 +731,16 @@ def business_pack_report(
         "installed_modules": present_modules,
         "expected_models": expected_models,
         "available_models": present_models,
-        "missing_models": missing_models if has_live_evidence else [],
+        "missing_models": missing_models if available_models is not None else [],
+        "model_inventory_status": "observed" if available_models is not None else "unknown",
         "safe_reports": definition["safe_reports"],
         "recommended_next_calls": [
-            {"tool": "list_models", "arguments": {"query": model.split(".")[0]}}
+            {"tool": "mcp_odoo_get_model_fields", "arguments": {"model": model}}
             for model in expected_models[:3]
         ],
         "metadata_used": {
-            "models": bool(model_set),
-            "modules": bool(module_set),
+            "models": available_models is not None,
+            "modules": installed_modules is not None,
             "source": "live_or_input" if has_live_evidence else "static_pack",
         },
     }

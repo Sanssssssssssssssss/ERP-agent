@@ -763,7 +763,9 @@ async def _prepare_tool_call(
 ) -> _PreparedToolCall | _FinalizedToolCall:
     tool = tools.get(call.name)
     if tool is None:
-        return _immediate(index, call, f"Tool {call.name} not found")
+        suggestion = f"mcp_odoo_{call.name}"
+        hint = f" Use the published tool name {suggestion}; no call was executed." if suggestion in tools else ""
+        return _immediate(index, call, f"Tool {call.name} not found{hint}")
     try:
         raw_args: Mapping[str, JSONValue] = call.arguments
         if tool.prepare_arguments is not None:

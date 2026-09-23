@@ -362,6 +362,22 @@ async def test_agent_loop_records_unknown_tool_as_canonical_error_result() -> No
 
 
 @pytest.mark.anyio
+async def test_bare_odoo_name_only_suggests_published_name_without_executing() -> None:
+    calls = []
+    async def execute(call_id, arguments, _signal=None, _update=None):
+        calls.append(call_id)
+        return AgentToolResult(content="unexpected execution")
+    call = ToolCall(id="bare-1", name="read_record", arguments={})
+    assistant = AssistantMessage(content=[call], model="fake")
+    provider = FakeProvider([[assistant_start(), tool_call_end(call), assistant_done(assistant, "toolUse")]])
+    events = await _collect(run_agent_loop(provider=provider, model="fake", system="ERP",
+        messages=[UserMessage(content="Read")], tools=[_tool("mcp_odoo_read_record", execute)], max_turns=1))
+    end = next(event for event in events if isinstance(event, ToolExecutionEndEvent))
+    assert end.is_error and "mcp_odoo_read_record" in end.result.text
+    assert calls == []
+
+
+@pytest.mark.anyio
 async def test_agent_loop_converts_provider_error_to_assistant_error_message() -> None:
     messages: list[AgentMessage] = [UserMessage(content="hello")]
     provider = FakeProvider([[assistant_error("provider failed")]])

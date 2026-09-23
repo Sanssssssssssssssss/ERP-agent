@@ -1130,7 +1130,10 @@ class NativeCapabilities:
         models = modules = None
         if use_live_metadata:
             client = self._client(instance)
-            models = client.get_models().get("model_names", [])
+            inventory = client.get_models()
+            # A denied ir.model read is not an empty, complete model inventory.
+            if not inventory.get("error") and isinstance(inventory.get("model_names"), list):
+                models = inventory["model_names"]
             modules = [
                 str(row.get("name"))
                 for row in client.get_installed_modules(200)

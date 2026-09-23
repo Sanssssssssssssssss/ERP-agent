@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import ClassVar
 from unittest.mock import patch
 
-from odoo_mcp.field_policy import FieldPolicy, ModelFieldRule
+from erp_harness.erp._odoo_core.field_policy import FieldPolicy, ModelFieldRule
 from erp_harness.runtime.tools import AgentTool, AgentToolResult
 
 from erp_harness.tools.router import route_tools
@@ -95,6 +95,27 @@ class FakeOdoo:
 
 
 class NativeCapabilitiesTest(unittest.TestCase):
+    def test_denied_model_inventory_does_not_claim_models_missing(self):
+        from erp_harness.erp._odoo_core.agent_tools import business_pack_report
+        unknown = business_pack_report(pack="sales", available_models=None, installed_modules=["sale"])
+        self.assertEqual(unknown["missing_models"], [])
+        self.assertEqual(unknown["model_inventory_status"], "unknown")
+        known = business_pack_report(pack="sales", available_models=[], installed_modules=["sale"])
+        self.assertIn("sale.order", known["missing_models"])
+        client = FakeOdoo()
+        with tempfile.TemporaryDirectory() as directory:
+            reads = NativeReads(client)
+            caps = NativeCapabilities(reads, task_path=Path(directory) / "tasks.sqlite3")
+            try:
+                with patch.object(caps, "_client", return_value=client), \
+                     patch.object(client, "get_models", return_value={"error": "403", "model_names": []}), \
+                     patch.object(client, "get_installed_modules", return_value=[{"name": "sale"}], create=True):
+                    result = caps.business_pack_report("sales")
+                self.assertEqual(result["model_inventory_status"], "unknown")
+                self.assertEqual(result["missing_models"], [])
+            finally:
+                caps.close()
+
     def test_gateway_allows_only_bounded_search_count_shape(self):
         with patch.object(OdooClient, "_connect"):
             client = Json2ReadClient(

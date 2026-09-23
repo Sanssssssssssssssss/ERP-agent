@@ -10,7 +10,7 @@ from pathlib import Path
 from erp_harness.erp.actions import ACTION_TOOLS
 from erp_harness.erp.capabilities import CAPABILITY_TOOLS
 from erp_harness.erp.reads import READ_RESPONSES, NATIVE_READ_RESPONSES
-from erp_harness.tools.sops import SOPS, SOP_TOOLS, build_sop_tools, get_sop
+from erp_harness.tools.sops import SOPS, SOP_TOOLS, build_sop_payload, build_sop_tools, get_sop
 
 
 class ControlledSopTest(unittest.TestCase):
@@ -64,9 +64,17 @@ class ControlledSopTest(unittest.TestCase):
         payload = json.loads(asyncio.run(tool.execute("sop", {
             "sop_id": "po_to_receipt", "inputs": {"purchase_order": "PO001"},
         })).text)
-        self.assertIn("find_records", payload["sop"]["required_tools"])
-        self.assertNotIn("search_records", payload["sop"]["required_tools"])
+        self.assertIn("mcp_odoo_find_records", payload["sop"]["required_tools"])
+        self.assertNotIn("mcp_odoo_search_records", payload["sop"]["required_tools"])
         self.assertIn("search_records", get_sop("po_to_receipt", {"purchase_order": "PO001"})["sop"]["required_tools"])
+
+    def test_business_method_does_not_use_field_write_pipeline(self):
+        payload = build_sop_payload("safe_write_review", {"model": "sale.order", "operation": "action_confirm"})
+        tools = payload["sop"]["required_tools"]
+        self.assertEqual(tools, ["mcp_odoo_read_record", "mcp_odoo_execute_method"])
+        self.assertIn("mcp_odoo_execute_method(model='sale.order', method='action_confirm'", " ".join(payload["sop"]["steps"]))
+        self.assertNotIn("mcp_odoo_validate_write", tools)
+        self.assertIn("mcp_odoo_validate_write", build_sop_payload("safe_write_review", {"model": "sale.order", "operation": "write"})["sop"]["required_tools"])
 
 
 if __name__ == "__main__":
