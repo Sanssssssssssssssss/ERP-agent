@@ -403,6 +403,141 @@ class WorldStoreTest(unittest.TestCase):
             {"kind": "array", "items": 1, "path": "$.nested"},
         )
 
+    @staticmethod
+    def supply_payload(count=30):
+        rows = [{
+            "id": index + 1, "production_id": [index + 100, f"Unstarted production {index:04}"],
+            "workcenter_id": [2 if index < 20 else 3, "Shared manufacturing center"],
+            "state": ("ready", "waiting", "pending")[index % 3],
+            "date_start": False, "date_finished": False,
+            "duration_expected": 50, "duration": 0,
+        } for index in range(count)]
+        return {
+            "success": True, "tool": "read_supply_context", "product_ids": [7],
+            "completeness": {"complete": True, "sources": {
+                "shared_workorders": {"complete": True, "rows": count, "scope": "readable nonterminal rows"},
+            }},
+            "result": {"products": [{"id": 7}], "supplierinfo": [{"id": 8, "price": 11}],
+                       "stock_quants": [{"product_id": [7, "Part"], "quantity": 4, "company_id": [1, "Main"]}],
+                       "manufacturing": {"shared_workorders": rows, "boms": [{"id": 9}],
+                                         "bom_lines": [{"bom_id": [9, "BOM"], "product_qty": 2}],
+                                         "workcenters": [{"id": 2}, {"id": 3}],
+                                         "workcenter_capacities": [{"workcenter_id": [3, "Alt"], "capacity": 2}]}},
+        }
+
+    def supply_message(self, world, payload, call_id="supply"):
+        text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        receipt = world.finish(world.begin(call_id, "read_supply_context", {
+            "product_ids": [7], "include_manufacturing": True,
+        }, "native"), text, evidence={"private": "never in provider view"})
+        return ToolResultMessage(tool_call_id=call_id, tool_name="mcp_odoo_read_supply_context",
+                                 content=[TextContent(text=text)]), receipt
+
+    def test_supply_first_round_externalizes_only_unstarted_rows_and_keeps_related_facts(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, ENV):
+            world = self.store(Path(directory))
+            payload = self.supply_payload()
+            rows = payload["result"]["manufacturing"]["shared_workorders"]
+            protected = [
+                {**rows[0], "id": 101, "date_start": "2026-09-10 08:00:00"},
+                {**rows[0], "id": 102, "date_finished": "2026-09-10 09:00:00"},
+                {**rows[0], "id": 103, "state": "progress"},
+                {**rows[0], "id": 104, "duration": 1},
+                {**rows[0], "id": 105, "state": "unrecognized"},
+                {**rows[0], "id": 106, "duration": None},
+                {**rows[0], "id": 107, "duration": False},
+                {**rows[0], "id": 108, "workcenter_id": False},
+                {**rows[0], "id": 109, "duration_expected": None},
+                {key: value for key, value in {**rows[0], "id": 110}.items() if key != "date_start"},
+            ]
+            rows.extend(protected)
+            payload["completeness"]["sources"]["shared_workorders"]["rows"] = len(rows)
+            message, receipt = self.supply_message(world, payload)
+            original_log = world.path.read_bytes()
+            projected = project_read_history(world, [message])[0]
+            actual = json.loads(projected.text)
+            view = actual["result"]["manufacturing"]["shared_workorders"]
+            self.assertEqual(projected.tool_call_id, message.tool_call_id)
+            self.assertEqual(view["retained_rows"], protected)
+            self.assertEqual((view["full_count"], view["omitted_count"]), (40, 30))
+            self.assertEqual(sum(row["full_count"] for row in view["workcenter_load"]), 40)
+            self.assertEqual(sum(row["known_expected_minutes"] for row in view["workcenter_load"]), 1950)
+            self.assertEqual(sum(row["unknown_expected_minutes_count"] for row in view["workcenter_load"]), 1)
+            self.assertIn("not remaining work, free capacity", view["scope_notice"])
+            self.assertIn("without deducting actual duration", view["scope_notice"])
+            self.assertEqual(view["full_rows"]["access_scope"]["identity_id"], receipt["identity"]["identity_id"])
+            self.assertEqual(view["full_rows"]["freshness"]["snapshot_at"], receipt["finished_at"])
+            self.assertFalse(view["full_rows"]["freshness"]["stale_after_write"])
+            # Only this field and the explicit projection marker change.
+            actual.pop("world_projection")
+            actual["result"]["manufacturing"]["shared_workorders"] = rows
+            self.assertEqual(actual, payload)
+            self.assertEqual(world.path.read_bytes(), original_log)
+            self.assertEqual(world.lookup(receipt["receipt_id"])["visible_payload"], payload)
+            self.assertEqual(world.lookup(receipt["receipt_id"])["evidence"], {"private": "never in provider view"})
+            self.assertNotIn("never in provider view", projected.text)
+            self.assertEqual(json.loads(message.text), payload)
+            self.assertLess(len(projected.text.encode()), len(message.text.encode()))
+
+    def test_supply_full_recall_pagination_identity_and_write_freshness(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, ENV):
+            root = Path(directory)
+            world = self.store(root)
+            payload = self.supply_payload(125)
+            message, receipt = self.supply_message(world, payload)
+            projected = json.loads(project_read_history(world, [message])[0].text)
+            view = projected["result"]["manufacturing"]["shared_workorders"]
+            ref = view["full_rows"]
+            # Recovery uses the durable full visible payload, not the provider view.
+            world = self.store(root)
+            cursor, recovered = 0, []
+            while cursor is not None:
+                page = world.read_observation(receipt["identity"], ref["observation_ref"], path=ref["path"], cursor=cursor, limit=17)
+                recovered.extend(row["value"] for row in page["result"]["items"])
+                cursor = page["result"]["next_cursor"]
+            self.assertEqual(recovered, payload["result"]["manufacturing"]["shared_workorders"])
+            with self.assertRaises(PermissionError):
+                world.read_observation({**receipt["identity"], "identity_id": "different-user"}, ref["observation_ref"], path=ref["path"])
+            world.invalidate(instance="default", reason="write", call_id="after-write")
+            stale_view = json.loads(project_read_history(world, [message])[0].text)["result"]["manufacturing"]["shared_workorders"]
+            self.assertTrue(stale_view["full_rows"]["freshness"]["stale_after_write"])
+            self.assertTrue(stale_view["full_rows"]["freshness"]["live_refresh_required_for_current_state"])
+            old = project_read_history(world, [message, *[AssistantMessage(content="used") for _ in range(3)]])
+            self.assertEqual(json.loads(old[0].text)["world_observation"]["kind"], "externalized_read")
+
+    def test_supply_projection_falls_back_without_complete_trusted_evidence(self):
+        variants = ["small", "incomplete", "failed", "missing_receipt", "hash_mismatch", "corrupt", "disabled", "projection_failure"]
+        for variant in variants:
+            with self.subTest(variant=variant), tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, ENV):
+                world = self.store(Path(directory))
+                payload = self.supply_payload(19 if variant == "small" else 30)
+                if variant == "incomplete":
+                    payload["completeness"]["complete"] = False
+                    payload["completeness"]["sources"]["shared_workorders"]["complete"] = False
+                if variant == "failed":
+                    payload["success"] = False
+                message, receipt = self.supply_message(world, payload)
+                if variant == "missing_receipt":
+                    world._by_call.pop("supply")
+                if variant == "hash_mismatch":
+                    message = message.model_copy(update={"content": [TextContent(text=message.text + " ")]})
+                if variant == "corrupt":
+                    broken = world.receipt_for_call("supply")
+                    broken["visible_payload"]["result"]["manufacturing"]["shared_workorders"][0]["id"] = -1
+                    world._by_call["supply"] = broken
+                    world._receipts[receipt["receipt_id"]] = broken
+                if variant == "disabled":
+                    world.disable_projection()
+                if variant == "projection_failure":
+                    with patch.object(world, "record_projection", side_effect=OSError("disk unavailable")):
+                        self.assertEqual(project_read_history(world, [message])[0].text, message.text)
+                    self.assertFalse(world.telemetry()["projection_enabled"])
+                else:
+                    self.assertEqual(project_read_history(world, [message])[0].text, message.text)
+                if variant == "corrupt":
+                    with self.assertRaisesRegex(ValueError, "hash does not match"):
+                        world.read_observation(receipt["identity"], receipt["receipt_id"])
+
     def test_schema_table_projection_and_heterogeneous_rows_are_safe(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, ENV):
             world = self.store(Path(directory))

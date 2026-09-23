@@ -5,6 +5,7 @@ from __future__ import annotations
 # 请求视图优化。输入原始消息，输出消息副本；会话日志和观察回执保留。
 # project_messages：相同读取保留最新全文，旧项换成可核验引用。
 # project_read_history：保留最近两次有效 assistant 响应内的观察值。
+# 供给首轮仅外置大量未排期、未开始的工单；负荷与完整回读引用仍可见。
 # 更早的大读取可外置为引用；其余结果可按列与行做无损编码。
 # 外置引用可经 read_observation / search_observations 按需回读。
 # 只处理成功且哈希匹配的读取；不外置失败工具、写入结果或模型推理。
@@ -13,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sys
 from typing import Any, Iterable
 
@@ -204,8 +206,88 @@ def project_messages(world: WorldStore, messages: Iterable[Any]) -> list[Any]:
     return output
 
 
+def _supply_workorder_projection(
+    payload: dict[str, Any], *, source_text: str, reference: dict[str, Any] | None,
+) -> str | None:
+    """Expose backlog coverage without turning omitted work into idle capacity."""
+    result = payload.get("result")
+    manufacturing = result.get("manufacturing") if isinstance(result, dict) else None
+    rows = manufacturing.get("shared_workorders") if isinstance(manufacturing, dict) else None
+    if reference is None or not isinstance(rows, list):
+        return None
+    coverage = payload.get("completeness", {}).get("sources", {}).get("shared_workorders", {})
+    if coverage.get("complete") is not True or coverage.get("rows") != len(rows):
+        return None
+
+    def relation_id(value: Any) -> int | None:
+        if isinstance(value, list) and len(value) == 2:
+            value = value[0]
+        return value if type(value) is int and value > 0 else None
+
+    def number(value: Any) -> bool:
+        return type(value) in (int, float) and math.isfinite(value) and value >= 0
+
+    retained, loads = [], {}
+    omitted = 0
+    for row in rows:
+        facts = row if isinstance(row, dict) else {}
+        center = relation_id(facts.get("workcenter_id"))
+        # Missing/ambiguous fields are retained, including false-as-number and
+        # started work with absent dates. No target MO is inferred from product IDs.
+        hide = (
+            relation_id(facts.get("id")) is not None and center is not None
+            and relation_id(facts.get("production_id")) is not None
+            and facts.get("state") in ("ready", "waiting", "pending")
+            and all(key in facts and (facts[key] is None or facts[key] is False or facts[key] == "")
+                    for key in ("date_start", "date_finished"))
+            and number(facts.get("duration")) and facts["duration"] == 0
+            and number(facts.get("duration_expected"))
+        )
+        if hide:
+            omitted += 1
+        else:
+            retained.append(row)
+        load = loads.setdefault(center, {
+            "workcenter_id": center, "full_count": 0, "omitted_count": 0,
+            "state_counts": {}, "known_expected_minutes": 0,
+            "unknown_expected_minutes_count": 0,
+        })
+        load["full_count"] += 1
+        load["omitted_count"] += int(hide)
+        state = facts.get("state") if isinstance(facts.get("state"), str) else "unknown"
+        load["state_counts"][state] = load["state_counts"].get(state, 0) + 1
+        expected = facts.get("duration_expected")
+        if number(expected):
+            load["known_expected_minutes"] += expected
+        else:
+            load["unknown_expected_minutes_count"] += 1
+    if omitted < 20:
+        return None
+    projected = {**payload, "result": {**result, "manufacturing": {
+        **manufacturing, "shared_workorders": {
+            "retained_rows": retained, "full_count": len(rows), "omitted_count": omitted,
+            "workcenter_load": list(loads.values()),
+            "scope_notice": (
+                "Complete scan of the readable nonterminal workorders in this historical observation only; "
+                "not a database transaction snapshot. Omitted rows are unstarted, undated backlog. "
+                "Known expected minutes sum the original duration_expected values, without deducting actual "
+                "duration; they are not remaining work, free capacity or a calendar/scheduling promise. "
+                "Target production scope is not inferred; use existing record reads for exact MO relations. "
+                "Refresh Odoo after writes when current state matters."
+            ),
+            "full_rows": {**reference, "path": "$.result.manufacturing.shared_workorders",
+                          "recall_tool": "read_observation"},
+        },
+    }}, "world_projection": {
+        "kind": "supply_unstarted_workorders", "receipt_id": reference["observation_ref"],
+        "result_sha256": reference["result_sha256"], "full_result_retained": True,
+    }}
+    text = json.dumps(projected, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    return text if len(text.encode()) < len(source_text.encode()) else None
+
+
 def project_read_history(world: WorldStore, messages: Iterable[Any]) -> list[Any]:
-    """Project old consumed reads while retaining two recent observation rounds."""
+    """Project consumed reads and large, unstarted supply backlog on its first use."""
     original = list(messages)
     try:
         if not world.telemetry().get("projection_enabled", True):
@@ -224,7 +306,7 @@ def project_read_history(world: WorldStore, messages: Iterable[Any]) -> list[Any
         compacted: list[str] = []
         original_bytes = projected_bytes = 0
         for index, message in enumerate(original):
-            if (not consumed_after[index] or not isinstance(message, ToolResultMessage)
+            if (not isinstance(message, ToolResultMessage)
                     or message.is_error or _native_tool_name(message.tool_name) not in READ_TOOLS):
                 continue
             # receipt/hash 确认对应原消息；引用回读时再由 WorldStore 检查身份与完整性。
@@ -240,6 +322,21 @@ def project_read_history(world: WorldStore, messages: Iterable[Any]) -> list[Any
             if not isinstance(payload, dict) or "world_projection" in payload:
                 continue
             compact = None
+            if _native_tool_name(message.tool_name) == "read_supply_context":
+                # Do not summarize partial supply facts, unverified/corrupt storage,
+                # or results from a different tool. The full receipt remains authoritative.
+                if (receipt.get("tool") != "read_supply_context"
+                        or payload.get("success") is not True
+                        or payload.get("completeness", {}).get("complete") is not True
+                        or world.observation_integrity(message.tool_call_id) != "verified"):
+                    continue
+                if consumed_after[index] <= 2:
+                    compact = _supply_workorder_projection(
+                        payload, source_text=message.text,
+                        reference=world.artifact_reference(message.tool_call_id, message.text),
+                    )
+            if not consumed_after[index] and compact is None:
+                continue
             # Keep recently consumed observations in the provider context.  Older
             # large reads can be recalled by identity-scoped reference; this is a
             # display policy, not a limit on tools or model turns.
