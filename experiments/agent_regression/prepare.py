@@ -116,9 +116,9 @@ def prepare(directory=DEFAULT):
     policy = {x["id"]: ["/messages/0/content"] for x in frozen["cases"]
               if (directory / "cases" / x["id"] / "business.json").exists()}
     # Additive approval before paid requests; original manifests/oracles stay untouched.
-    supplement = {"version": 2, "reason": "Approved production exact-tool-name contract suffix; no history changes.",
+    patch_policy = {"version": 2, "reason": "Approved production exact-tool-name contract suffix; no history changes.",
                   "additional_paths": policy, "freeze_sha256": digest((directory / "freeze.json").read_bytes())}
-    write_once(directory / "patch-policy-v2.json", supplement)
+    write_once(directory / "patch-policy-v2.json", patch_policy)
     if (directory / "prepared.json").exists():
         return verify_prepared(directory)
     rows = {}
