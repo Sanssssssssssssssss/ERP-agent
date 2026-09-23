@@ -1,4 +1,16 @@
-# 模型回归结果 · 2026-09-23
+# 模型回归结果
+
+**2026-09-24：三项局部修复通过验证，源码 `c6bc771`。** 回读只从任务绑定和已核验动作扩展；跨 run 发送先核对同发票/PDF/地址的历史回执；SOP 不再背书未核验的方法名。回退点 `runtime-guards-baseline-20260924`。
+
+- 离线：253 tests＋50 subtests 通过，覆盖撤权、旧审批、PDF/地址变化、未知发送及核对恢复。真实 Odoo 新空账本查到 S01499 已投递，新增动作和发送写入均为 0。
+- 真实模型共 4 次：A04 基线再次误调用 `confirm`；候选改查 `action_confirm` SOP，下一步纠正。既有 B02 合法发送意图、B03 SMTP 回读不重发均通过结构检查与逐条审阅。
+- 总计 **94,476 tokens**：新输入8,221、缓存85,120、输出1,135（含reasoning634）；3个工具意图、实际执行0、compaction0、重试0、用量未知0。
+
+只新增有真实故障的 A04；UI 后处理和静态发现的跨 run 边界不伪造成付费 trace。B02/B03 保留原上下文，不能据此声称验证了新 runtime 的完整业务。尚未解决跨进程同时发送竞态、其他账本中完全无 Odoo 痕迹的未知投递；付款条款空值、普通聊天范围是已登记的独立问题。
+
+[本轮汇总与审阅](../../.runtime/agent-regression-guards-20260924/summary.json) · [真实 Odoo 回执](../../.runtime/agent-regression-guards-20260924/live-odoo-final/result.json) · [离线检查](../../.runtime/agent-regression-guards-20260924/offline-tests.txt) · [案例维护规则与待修索引](README.md)
+
+**2026-09-23：完整业务记录。**
 
 **四条完整业务已运行，业务状态检查通过；整体验收待审。** 冻结源码 `f32cc60`，DeepSeek v4 Flash / high，Mem0 关闭，隔离数据库与测试 SMTP，每题一次，无整题重跑或新增运行/请求/输出时限。按业务状态、安全和效率判断，不匹配固定工具顺序。
 
