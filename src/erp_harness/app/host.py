@@ -32,7 +32,7 @@ from typing import Any, Callable
 from .sale_view import business_detail, collect_documents, refresh_business as readback_business
 from .materials import MAX_FILES_PER_SESSION, parse_material, read_material_text
 from .storage import StateStore
-from .business import default_target, valid_target
+from .business import completion_target_instruction, default_target, valid_target
 from .worker import conversation_command, conversation_environment, child_environment, worker_command
 
 _SECRET = re.compile(r"(?i)(token|secret|password|api[_-]?key|authorization|cookie)")
@@ -59,15 +59,7 @@ def build_business_instruction(business: dict[str, Any], messages=(), *, materia
         "invoice_delivery": "Send the confirmed invoice PDF to the confirmed billing contact",
     }.get(kind, "Complete the confirmed ERP business task")
     target = business.get("completion_target") or default_target(kind)
-    target_text = {
-        "read_only": "Stop after factual reads; do not create or modify records.",
-        "draft": "The completion target is draft documents; do not confirm or post them.",
-        "confirmed": "Stop at confirmed records. For sales confirmation do not invoice or deliver goods.",
-        "posted": "Stop after the requested documents are posted and verified. Invoice delivery is a separate confirmed phase; do not send mail here.",
-        "done": "Verify completed stock moves or production, source links and quantities, including partial deliveries and backorders required by the goal.",
-        "reconciled": "Verify posted balanced entries, original documents, requested residuals and bank matching. A payment_state of paid alone does not prove bank reconciliation.",
-        "sent": "Use mcp_odoo_execute_method on account.move.message_post with kwargs.ids=[invoice_id] and partner_ids=[recipient_id]. Runtime supplies the registered email and official PDF. Generate the PDF first if absent. Stop after the verified SMTP acceptance receipt; do not repeat a sent or uncertain mail action. This does not prove the recipient opened the email.",
-    }.get(target, "Verify the requested final state before reporting completion.")
+    target_text = completion_target_instruction(kind, target)
     references = [{"model": r["model"], "id": r["id"], "purpose": r.get("purpose", "target"),
                    "fields": {k: v for k, v in r["fields"].items() if k in {"id", "name", "company_id", "partner_id", "currency_id"} or (kind == "invoice_delivery" and k in {"email", "parent_id", "commercial_partner_id", "type", "function", "active", "invoice_pdf_report_id"})}}
                   for r in business.get("references", [])]

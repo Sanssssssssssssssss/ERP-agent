@@ -27,3 +27,18 @@ def default_target(kind: str) -> str:
 
 def valid_target(kind, target) -> bool:
     return isinstance(kind, str) and isinstance(target, str) and target in BUSINESS_TARGETS.get(kind, ())
+
+
+def completion_target_instruction(kind: str, target: str) -> str:
+    """One phase description for first launch and approval resumption."""
+    if target == "confirmed":
+        return ("Stop at confirmed records. For sales confirmation do not invoice or deliver goods."
+                if kind == "sale_invoice" else "Stop at confirmed records; verify the confirmed state.")
+    return {
+        "read_only": "Stop after factual reads; do not create or modify records.",
+        "draft": "The completion target is draft documents; do not confirm or post them.",
+        "posted": "Stop after the requested documents are posted and verified. Invoice delivery is a separate confirmed phase; do not send mail here.",
+        "done": "Verify completed stock moves or production, source links and quantities, including partial deliveries and backorders required by the goal.",
+        "reconciled": "Verify posted balanced entries, original documents, requested residuals and bank matching. A payment_state of paid alone does not prove bank reconciliation.",
+        "sent": "Use mcp_odoo_execute_method on account.move.message_post with kwargs.ids=[invoice_id] and partner_ids=[recipient_id]. Runtime supplies the registered email and official PDF. Generate the PDF first if absent. Stop after the verified SMTP acceptance receipt; do not repeat a sent or uncertain mail action. This does not prove the recipient opened the email.",
+    }.get(target, "Verify the requested final state before reporting completion.")

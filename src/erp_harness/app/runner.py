@@ -37,6 +37,7 @@ from erp_harness.runtime.session import HarnessSession, SessionConfig
 
 from erp_harness.tools.router import native_tool_catalog, route_tools
 from erp_harness.app.request_receipts import RequestReceipts
+from erp_harness.app.business import completion_target_instruction, valid_target
 from erp_harness.context.projection import project_messages, project_read_history
 from erp_harness.erp.actions import NativeActions
 from erp_harness.erp.capabilities import NativeCapabilities
@@ -267,6 +268,26 @@ def _tool_payload(result: object) -> dict:
 def _handoff_required(result: object) -> bool:
     failure = _tool_payload(result).get("failure")
     return isinstance(failure, dict) and failure.get("requires_user_input") is True
+
+
+def build_approval_resume_message(stage: dict | None = None) -> str:
+    """Remind the model of the bound phase; approval never changes its authority."""
+    phase = "Resume the existing business goal. "
+    if (isinstance(stage, dict) and type(stage.get("version")) is int and stage["version"] == 1
+            and valid_target(stage.get("business_type"), stage.get("completion_target"))):
+        kind, target = stage["business_type"], stage["completion_target"]
+        phase = (
+            f"Continue only the host-confirmed current phase: {kind}; completion target: {target}. "
+            + completion_target_instruction(kind, target)
+            + " Earlier source messages and assistant plans do not expand this phase. "
+            "Read-only checks remain allowed. A different phase requires an updated host-confirmed proposal. "
+        )
+    return (
+        "The desktop host has completed human approval of the pending actions. "
+        + phase
+        + "Check durable action status and execute only the approved actions; approval itself does not mean execution. "
+        "Do not repeat completed writes or request the same approval again."
+    )
 
 
 def _approval_required(result: object) -> bool:
@@ -602,10 +623,7 @@ async def run(args: argparse.Namespace) -> None:
                     # Persist the host notification in the same Pi session. The
                     # native action ledger remains the execution authority.
                     source = session.prompt(
-                        "The desktop host has completed human approval of the pending actions. "
-                        "Resume the existing business goal. Check durable action status and execute only "
-                        "the approved actions; approval itself does not mean execution. "
-                        "Do not repeat completed writes or request the same approval again.",
+                        build_approval_resume_message(getattr(getattr(actions, "task_evidence", None), "stage", None)),
                         source="extension", custom_type="odoo_approval_resume",
                     )
                 elif getattr(args, "continue_run", False):
