@@ -985,7 +985,11 @@ class NativeActions:
         method = str(payload["method"])
         ids = [int(value) for value in payload.get("kwargs", {}).get("ids") or []]
         if (model, method) == invoice_mail.METHOD:
-            return invoice_mail.verify(self.reads.instances[instance], payload, row["prestate"]["invoice_mail"])
+            # An unsent action can wait on an older delivery. A dispatch with an
+            # unknown outcome must still prove its own post-boundary message.
+            read_only = (row.get("sent_at") is None and isinstance(row.get("result"), dict)
+                         and row["result"].get("read_only") is True)
+            return invoice_mail.verify(self.reads.instances[instance], payload, row["prestate"]["invoice_mail"], historical=read_only)
         enterprise = method_verify(self.reads.instances[instance], payload, row["prestate"], result)
         if enterprise is not None:
             return enterprise
@@ -1126,6 +1130,35 @@ class NativeActions:
             "verification": verification,
         }
 
+    def _invoice_mail_readback(self, payload: dict, prestate: dict) -> dict | None:
+        """Cross-run Odoo evidence; this check never grants permission to send."""
+        try:
+            verification = invoice_mail.verify(
+                self.reads.instances[payload["instance"]], payload, prestate["invoice_mail"], historical=True
+            )
+        except Exception:
+            verification = {"status": "unconfirmed", "reason": "invoice delivery history could not be read"}
+        if verification["status"] == "no_match":
+            return None
+        if verification["status"] == "satisfied":
+            return {"success": True, "action_status": "verified", "already_satisfied": True,
+                    "read_only": True, "verification": verification}
+        return {**failure_result(TaskHandoff(
+            "发票投递历史存在排队、失败或未确认结果，或必要回执不可读。请先核对投递结果，不会自动重发。",
+            code="invoice_delivery_reconciliation_required", next_action="reconcile_delivery")),
+            "reconciliation_required": True, "verification": verification}
+
+    def _finish_unsent_mail(self, row: dict, readback: dict) -> dict:
+        claim = self.store.claim(row["action_id"])
+        if not claim["claimed"]:
+            return {"success": False, "action_id": row["action_id"], "action_status": claim["status"],
+                    "error": "Invoice action ownership changed; reconcile its ledger before continuing.", "retry_safe": False}
+        status = "verified" if readback["success"] else "needs_reconciliation"
+        stored = self.store.finish(
+            row["action_id"], status, result={"already_satisfied": readback["success"], "read_only": True},
+            verification=readback["verification"], error=readback.get("error"))
+        return {**readback, "action_id": row["action_id"], "action_status": status, "result": stored["result"]}
+
     def _execute_row(
         self, row: dict[str, Any], send: Any, prepare: Any | None = None
     ) -> dict[str, Any]:
@@ -1151,7 +1184,19 @@ class NativeActions:
             self.task_evidence.check_stage(row["kind"], row["payload"])
         if row["policy_digest"] != self._policy_snapshot(runtime)[0]:
             return {"success": False, "action_id": action_id, "error": "action policy changed; validate again"}
-        if not self._current_prestate_matches(row):
+        mail = "invoice_mail" in row["prestate"]
+        if mail:
+            current = self._prestate(row["kind"], row["payload"])
+            same_delivery = invoice_mail.same_delivery(row["prestate"]["invoice_mail"], current["invoice_mail"])
+            existing = self._invoice_mail_readback(row["payload"], current) if same_delivery else None
+            if existing is not None:
+                # The approved action did not send. Persist the observed result so the
+                # host cannot turn a completed readback into an abandoned approval.
+                return self._finish_unsent_mail(row, existing)
+            prestate_matches = current == row["prestate"]
+        else:
+            prestate_matches = self._current_prestate_matches(row)
+        if not prestate_matches:
             # 与本次动作相关的 Odoo 状态改变或证据缺失，会要求重新验证。
             return {
                 "success": False,
@@ -1159,7 +1204,7 @@ class NativeActions:
                 "action_status": row["status"],
                 "error": "Odoo state changed after validation or required evidence is unavailable; validate again",
             }
-        already = self._verify(row, None)
+        already = {"status": "unconfirmed"} if mail else self._verify(row, None)
         if already["status"] == "satisfied":
             stored = self.store.finish(
                 action_id,
@@ -1884,23 +1929,49 @@ class NativeActions:
                 "instance": name,
             }
             identity = self._identity(name)
+            prestate = None
+            if (model, method) == invoice_mail.METHOD:
+                # Bind the current host intent and role before accepting any historical receipt.
+                prestate = self._prestate("method", payload)
             if f"{model}.{method}" in ONE_SHOT_METHODS or (model, method) == invoice_mail.METHOD:
                 previous = self.store.find_sent(
                     kind="method", payload=payload, identity=identity,
                     run_id=os.environ.get("HARBOR_TRIAL_ID", os.environ.get("PI_AGENT_SESSION_ID", "local")),
                     session_id=os.environ.get("PI_AGENT_SESSION_ID", "local"),
                 )
+                if prestate is not None:
+                    if previous is not None and previous["status"] in {"sending", "needs_reconciliation"}:
+                        return self._reconcile(previous)  # A real unknown dispatch cannot be hidden by an older sent message.
+                    existing = self._invoice_mail_readback(payload, prestate)
+                    if existing is not None:
+                        # Approval may already exist when another run delivers. Reuse
+                        # this ledger's exact bound action; do not scan other runs.
+                        candidates = self.store.read_receipts(self.store.path)
+                        for prior in reversed(candidates):
+                            if (prior.get("status") == "approved"
+                                    and prior.get("kind") == "method" and prior.get("payload") == payload
+                                    and prior.get("identity") == identity
+                                    and prior.get("run_id") == os.environ.get("HARBOR_TRIAL_ID", os.environ.get("PI_AGENT_SESSION_ID", "local"))
+                                    and prior.get("session_id") == os.environ.get("PI_AGENT_SESSION_ID", "local")
+                                    and invoice_mail.same_delivery(prior["prestate"]["invoice_mail"], prestate["invoice_mail"])):
+                                return self._finish_unsent_mail(prior, existing)
+                        return existing
+                if (previous is not None and prestate is not None and previous["status"] == "verified"
+                        and not invoice_mail.same_delivery(previous["prestate"]["invoice_mail"], prestate["invoice_mail"])):
+                    previous = None  # A changed PDF/address still requires its own new approval.
                 if previous is not None:
                     # Never reinterpret changed residuals as permission to reuse a consumed wizard.
                     if previous["policy_digest"] != policy_digest:
                         return {"success": False, "action_id": previous["action_id"], "action_status": previous["status"],
                                 "error": "this wizard was already sent under a different policy; reconcile its recorded outcome before creating a new wizard"}
+                    if (model, method) == invoice_mail.METHOD:
+                        return self._reconcile(previous)  # Never replace unavailable live mail evidence with cached green.
                     return self._execute_row(previous, lambda: None)
             action = self._register(
                 "method",
                 payload,
                 identity=identity,
-                prestate=self._prestate("method", payload),
+                prestate=prestate if prestate is not None else self._prestate("method", payload),
                 policy_digest=policy_digest,
             )
             if action["status"] == "pending_approval":

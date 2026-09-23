@@ -1,7 +1,7 @@
 """Single-invoice mail contract. Odoo delivers; the ledger binds the evidence."""
 from __future__ import annotations
 
-from email.utils import parseaddr, formataddr
+from email.utils import parseaddr, formataddr, getaddresses
 import html
 import re
 
@@ -88,6 +88,14 @@ def execution_kwargs(payload, evidence):
             "context": {"mail_post_autofollow": False, "mail_notify_force_send": True}}
 
 
+def same_delivery(left, right):
+    """Content wording is not a new authorization to resend the same document."""
+    return (left["invoice"]["id"] == right["invoice"]["id"]
+            and left["email_to"].casefold() == right["email_to"].casefold()
+            and all(left["attachment"][k] == right["attachment"][k]
+                    for k in ("checksum", "file_size", "mimetype")))
+
+
 def verify(runtime, payload, evidence, *, historical=False):
     g = _Evidence(runtime, payload)
     messages = g.find("mail.message", [["model", "=", "account.move"], ["res_id", "=", evidence["invoice"]["id"]],
@@ -95,6 +103,25 @@ def verify(runtime, payload, evidence, *, historical=False):
                      ("subject", "body", "outgoing_email_to", "partner_ids", "attachment_ids", "notification_ids"))
     matches = []
     for msg in messages:
+        if historical:
+            # A prior attempt may use another template or Odoo's partner notifications.
+            # Match actual address + official PDF, never the current subject/body.
+            notifications = [g.read("mail.notification", i, ("notification_type", "notification_status", "mail_email_address", "res_partner_id")) for i in msg["notification_ids"]]
+            target = evidence["email_to"].casefold()
+            addressed = target in {address.casefold() for _, address in getaddresses([msg["outgoing_email_to"] or ""])}
+            relevant = [n for n in notifications if n["notification_type"] == "email"
+                        and str(n["mail_email_address"]).casefold() == target]
+            unresolved_partner = evidence["recipient"]["id"] in msg["partner_ids"] and (
+                not notifications or any(n["notification_type"] == "email" and not n["mail_email_address"] for n in notifications))
+            if not addressed and not relevant and not unresolved_partner:
+                continue
+            attachments = [g.read("ir.attachment", i, ("checksum", "file_size", "mimetype")) for i in msg["attachment_ids"]]
+            if not any(all(pdf[k] == evidence["attachment"][k] for k in ("checksum", "file_size", "mimetype")) for pdf in attachments):
+                continue
+            # Addressed mail without a readable matching notification is an unknown attempt.
+            matches.extend({"message_id": msg["id"], "notification": n, "attachments": attachments}
+                           for n in (relevant or [{}]))
+            continue
         if msg["subject"] != evidence["subject"] or msg["outgoing_email_to"] != evidence["email_to"] or msg["partner_ids"]:
             continue
         if html.unescape(re.sub(r"<[^>]*>", "", msg["body"])).strip() != evidence["body"]:
@@ -106,10 +133,11 @@ def verify(runtime, payload, evidence, *, historical=False):
         if len(notifications) != 1 or notifications[0]["notification_type"] != "email" or str(notifications[0]["mail_email_address"]).casefold() != evidence["email_to"].casefold() or notifications[0]["res_partner_id"]:
             continue
         matches.append({"message_id": msg["id"], "notification": notifications[0], "attachments": attachments})
-    if historical:
-        matches = [m for m in matches if m["notification"]["notification_status"] == "sent"][-1:]
-    sent = len(matches) == 1 and matches[0]["notification"]["notification_status"] == "sent"
-    return {"status": "satisfied" if sent else "unconfirmed", "evidence": {
+    sent = bool(matches) and all(m["notification"].get("notification_status") == "sent" for m in matches)
+    if not historical:
+        sent = sent and len(matches) == 1
+    return {"status": "satisfied" if sent else "no_match" if historical and not matches else "unconfirmed", "evidence": {
         "delivery": "smtp_accepted" if sent else "unconfirmed", "invoice_id": evidence["invoice"]["id"],
         "recipient_id": evidence["recipient"]["id"], "email_to": evidence["email_to"], "messages": matches,
+        **({"scope": "current_role_visible_history; no match is not proof that no delivery ever occurred"} if historical else {}),
         "notice": "SMTP acceptance does not prove recipient opening or reading."}}

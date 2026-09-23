@@ -98,7 +98,7 @@ def test_delivery_receipt_and_duplicate_are_not_inferred_from_pdf(tmp_path,monke
     prepared=send(a); a.store.approve(prepared['action_id'],'test_user')
     def smtp(model,method,**kwargs):
         w.calls.append(kwargs)
-        records['mail.message'][201]=dict(id=201,model=model,res_id=10,subject=kwargs['subject'],body=kwargs['body'],
+        records['mail.message'][201]=dict(id=201,model=model,res_id=10,message_type='comment',subject=kwargs['subject'],body=kwargs['body'],
             outgoing_email_to=kwargs['outgoing_email_to'],partner_ids=[],attachment_ids=[30],notification_ids=[301])
         records['mail.notification'][301]=dict(id=301,notification_type='email',notification_status='sent',mail_email_address='li@example.test',res_partner_id=False)
         return 201
@@ -133,3 +133,220 @@ def test_empty_sources_and_raw_mail_write_are_rejected(tmp_path,monkeypatch):
     with pytest.raises(ValueError,match='direct mail writes'):
         a._native_prestate('write',{'model':'mail.mail','operation':'create','instance':'default','values':{}})
     assert w.calls==[]
+
+
+def history(records, *, status='sent', email='li@example.test', pdf=30, partner=False):
+    records['mail.message'][201] = dict(
+        id=201, model='account.move', res_id=10, message_type='comment',
+        subject='An older template', body='<p>A different message body</p>',
+        outgoing_email_to=False if partner else email,
+        partner_ids=[8] if partner else [], attachment_ids=[pdf],
+        notification_ids=[] if status is None else [301])
+    if status is not None:
+        records['mail.notification'][301] = dict(
+            id=301, notification_type='email', notification_status=status,
+            mail_email_address=email, res_partner_id=[8, '李明'] if partner else False)
+
+
+def another_run(a, path):
+    b, writer, _ = _actions(runtime=a.reads.instances['default'], approval_mode='host', path=path)
+    b.task_evidence = TaskEvidence(b.reads, copy.deepcopy(a.task_evidence.spec), path.with_suffix('.json'))
+    return b, writer
+
+
+@pytest.mark.parametrize('partner', [False, True])
+def test_prior_delivery_in_another_run_does_not_request_approval_or_send(tmp_path, monkeypatch, partner):
+    a, _, records = setup(tmp_path, monkeypatch)
+    history(records, email='LI@example.test', partner=partner)
+    monkeypatch.setenv('PI_AGENT_SESSION_ID', 'new-session')
+    b, writer = another_run(a, tmp_path/'new-run.sqlite')
+    result = send(b)
+    assert result['success'] and result['already_satisfied'] and result['read_only'], result
+    assert result['verification']['evidence']['messages'][0]['message_id'] == 201
+    assert writer.calls == [] and b.store.summary()['actions'] == 0
+    assert not result.get('approval_required')
+    assert not send(b, body='This is a new authorization')['success']
+
+
+@pytest.mark.parametrize('status', ['ready', 'exception', 'bounce', 'canceled', 'unknown', None])
+def test_unresolved_prior_delivery_is_not_success_or_a_new_send(tmp_path, monkeypatch, status):
+    a, writer, records = setup(tmp_path, monkeypatch)
+    history(records, status=status)
+    result = send(a)
+    assert not result['success'] and result['reconciliation_required'], result
+    assert result['verification']['status'] == 'unconfirmed'
+    assert result['retry_safe'] is False and not result['approval_required']
+    assert writer.calls == [] and a.store.summary()['actions'] == 0
+
+
+@pytest.mark.parametrize('change', ['different_address', 'different_pdf'])
+def test_distinct_delivery_still_requires_human_approval(tmp_path, monkeypatch, change):
+    a, writer, records = setup(tmp_path, monkeypatch)
+    history(records, email='other@example.test' if change == 'different_address' else 'li@example.test')
+    if change == 'different_pdf':
+        records['ir.attachment'][31] = {**records['ir.attachment'][30], 'id':31, 'checksum':'new-pdf', 'file_size':100}
+        records['account.move'][10]['invoice_pdf_report_id'] = [31, 'invoice-new.pdf']
+    result = send(a)
+    assert result['approval_required'] and not result['success'], result
+    assert writer.calls == []
+
+
+@pytest.mark.parametrize('status', ['sent', 'ready', 'exception'])
+@pytest.mark.parametrize('through_public_method', [False, True])
+def test_other_sender_finishing_after_approval_prevents_dispatch(tmp_path, monkeypatch, status, through_public_method):
+    a, writer, records = setup(tmp_path, monkeypatch)
+    pending = send(a)
+    assert pending['approval_required']
+    a.store.approve(pending['action_id'], 'human')
+    row = a.store.get(pending['action_id'])
+    history(records, status=status)
+    result = send(a) if through_public_method else a._execute_row(row, lambda: writer.calls.append('duplicate'))
+    assert result['success'] is (status == 'sent')
+    assert (result.get('already_satisfied') is True) is (status == 'sent')
+    stored = a.store.get(pending['action_id'])
+    assert stored['status'] == ('verified' if status == 'sent' else 'needs_reconciliation')
+    assert result['action_id'] == pending['action_id'] and stored['sent_at'] is None
+    assert stored['result']['read_only'] is True
+    if status != 'sent':
+        assert result['failure']['requires_user_input'] is True
+    assert writer.calls == []
+
+
+@pytest.mark.parametrize('failure', ['notification_missing', 'notification_acl', 'search_failure', 'identity_changed'])
+def test_history_evidence_unavailable_never_sends_or_reuses_green(tmp_path, monkeypatch, failure):
+    from erp_harness.erp._odoo_core.field_policy import FieldPolicy, ModelFieldRule
+    a, writer, records = setup(tmp_path, monkeypatch)
+    pending = send(a); a.store.approve(pending['action_id'], 'human')
+    row = a.store.get(pending['action_id'])
+    history(records)
+    runtime = a.reads.instances['default']
+    if failure == 'notification_missing':
+        records['mail.notification'].clear()
+    elif failure == 'notification_acl':
+        runtime.policy = FieldPolicy({'default': {'mail.notification': ModelFieldRule('deny', frozenset({'notification_status'}))}})
+    elif failure == 'search_failure':
+        def unavailable(*args, **kwargs):
+            raise ConnectionError('mail history unavailable')
+        monkeypatch.setattr(runtime.client, 'search_read', unavailable)
+    else:
+        runtime.client.context = {'allowed_company_ids':[2]}
+        result = a._execute_row(row, lambda: writer.calls.append('sent'))
+        assert not result['success'] and 'identity changed' in result['error']
+        assert writer.calls == []
+        return
+    result = send(a)
+    assert not result['success'] and not result.get('already_satisfied')
+    assert writer.calls == []
+
+
+def test_sent_history_with_an_unresolved_duplicate_is_not_silently_green(tmp_path, monkeypatch):
+    a, writer, records = setup(tmp_path, monkeypatch)
+    history(records)
+    records['mail.message'][202] = {**records['mail.message'][201], 'id':202, 'notification_ids':[302]}
+    records['mail.notification'][302] = {**records['mail.notification'][301], 'id':302, 'notification_status':'ready'}
+    result = send(a)
+    assert not result['success'] and result['reconciliation_required']
+    assert len(result['verification']['evidence']['messages']) == 2
+    assert writer.calls == []
+
+
+def smtp_writer(writer, records):
+    def smtp(model, method, **kwargs):
+        writer.calls.append(kwargs)
+        mid, nid = 201 + len(writer.calls), 301 + len(writer.calls)
+        records['mail.message'][mid] = dict(
+            id=mid, model=model, res_id=10, message_type='comment', subject=kwargs['subject'], body=kwargs['body'],
+            outgoing_email_to=kwargs['outgoing_email_to'], partner_ids=[], attachment_ids=kwargs['attachment_ids'], notification_ids=[nid])
+        records['mail.notification'][nid] = dict(
+            id=nid, notification_type='email', notification_status='sent', mail_email_address=kwargs['outgoing_email_to'], res_partner_id=False)
+        return mid
+    writer.execute_method = smtp
+
+
+def test_verified_local_ledger_does_not_replace_missing_live_receipt(tmp_path, monkeypatch):
+    a, writer, records = setup(tmp_path, monkeypatch)
+    smtp_writer(writer, records)
+    pending = send(a); a.store.approve(pending['action_id'], 'human')
+    assert send(a)['action_status'] == 'verified'
+    records['mail.message'].clear(); records['mail.notification'].clear()
+    result = send(a)
+    assert not result['success'] and result['action_status'] == 'needs_reconciliation'
+    assert len(writer.calls) == 1
+
+
+def test_new_pdf_in_same_run_does_not_reuse_old_approval_or_green(tmp_path, monkeypatch):
+    a, writer, records = setup(tmp_path, monkeypatch)
+    smtp_writer(writer, records)
+    first = send(a); a.store.approve(first['action_id'], 'human')
+    assert send(a)['action_status'] == 'verified'
+    records['ir.attachment'][31] = {**records['ir.attachment'][30], 'id':31, 'checksum':'revised-pdf', 'file_size':100}
+    records['account.move'][10]['invoice_pdf_report_id'] = [31, 'invoice.pdf']
+    second = send(a)
+    assert second['approval_required'] and second['action_id'] != first['action_id']
+    assert len(writer.calls) == 1
+    a.store.approve(second['action_id'], 'human')
+    assert send(a)['action_status'] == 'verified'
+    assert len(writer.calls) == 2 and writer.calls[-1]['attachment_ids'] == [31]
+
+
+def unrelated_chatter(records):
+    records['mail.message'][500] = dict(
+        id=500, model='account.move', res_id=10, message_type='comment',
+        subject='Internal note', body='Internal note', outgoing_email_to=False,
+        partner_ids=[], attachment_ids=[], notification_ids=[])
+
+
+def test_unsent_blocked_action_reconciles_older_delivery_with_a_different_template(tmp_path, monkeypatch):
+    a, writer, records = setup(tmp_path, monkeypatch)
+    unrelated_chatter(records)
+    pending = send(a); a.store.approve(pending['action_id'], 'human')
+    row = a.store.get(pending['action_id'])
+    assert row['prestate']['invoice_mail']['last_message_id'] == 500
+    # Simulate an earlier allocated message becoming visible after approval.
+    history(records, status='ready')
+    blocked = a._execute_row(row, lambda: writer.calls.append('must not send'))
+    assert blocked['action_status'] == 'needs_reconciliation'
+    assert a.store.get(row['action_id'])['sent_at'] is None
+    records['mail.notification'][301]['notification_status'] = 'sent'
+    resolved = a.reconcile(row['action_id'])
+    assert resolved['success'] and resolved['action_status'] == 'verified', resolved
+    assert resolved['verification']['evidence']['messages'][0]['message_id'] == 201
+    assert resolved['result']['read_only'] is True and writer.calls == []
+
+
+def test_old_sent_receipt_cannot_resolve_an_actually_dispatched_unknown_action(tmp_path, monkeypatch):
+    a, writer, records = setup(tmp_path, monkeypatch)
+    unrelated_chatter(records)
+    pending = send(a); a.store.approve(pending['action_id'], 'human')
+    def unknown(*args, **kwargs):
+        writer.calls.append('attempt'); raise ConnectionError('lost after dispatch')
+    writer.execute_method = unknown
+    failed = send(a)
+    assert failed['action_status'] == 'needs_reconciliation'
+    assert a.store.get(pending['action_id'])['sent_at'] is not None
+    history(records)
+    resolved = a.reconcile(pending['action_id'])
+    assert not resolved['success'] and resolved['action_status'] == 'needs_reconciliation'
+    repeated = send(a)
+    assert not repeated['success'] and repeated['action_status'] == 'needs_reconciliation'
+    assert writer.calls == ['attempt']
+
+
+@pytest.mark.parametrize('change', ['pdf', 'email'])
+def test_changed_delivery_history_cannot_verify_the_old_approved_action(tmp_path, monkeypatch, change):
+    a, writer, records = setup(tmp_path, monkeypatch)
+    pending = send(a); a.store.approve(pending['action_id'], 'human')
+    row = a.store.get(pending['action_id'])
+    if change == 'pdf':
+        records['ir.attachment'][31] = {**records['ir.attachment'][30], 'id':31, 'checksum':'new-pdf', 'file_size':100}
+        records['account.move'][10]['invoice_pdf_report_id'] = [31, 'new.pdf']
+        history(records, pdf=31)
+    else:
+        records['res.partner'][8]['email'] = 'new@example.test'
+        # Even a refreshed host contact reference cannot transfer an old approval.
+        next(r for r in a.task_evidence.references if r.get('purpose') == 'recipient')['fields']['email'] = 'new@example.test'
+        history(records, email='new@example.test')
+    result = a._execute_row(row, lambda: writer.calls.append('must not send'))
+    assert not result['success'] and 'state changed' in result['error']
+    assert a.store.get(row['action_id'])['status'] == 'approved'
+    assert not result.get('verification') and writer.calls == []
