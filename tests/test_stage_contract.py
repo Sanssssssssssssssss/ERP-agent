@@ -213,3 +213,43 @@ def test_handoff_never_overrides_unresolved_write(host, tmp_path):
     host._finalize_run(run, "awaiting_input")
     assert run["status"] == "needs_reconciliation"
     assert item["status"] == "needs_reconciliation"
+
+
+def test_handoff_is_durable_before_stop_and_never_requests_a_second_model_turn(tmp_path):
+    import asyncio
+    from erp_harness.context.paths import RuntimePaths
+    from erp_harness.context.resources import ResourcePaths
+    from erp_harness.providers import FakeProvider
+    from erp_harness.runtime import AgentTool, AgentToolResult, AssistantMessage, TextContent, ToolCall
+    from erp_harness.runtime.session import HarnessSession, SessionConfig
+    from erp_harness.runtime.storage import JsonlSessionStorage
+    from tests.runtime.pi_event_helpers import assistant_done
+
+    async def check():
+        path = tmp_path / "session.jsonl"
+        payload = failure_result(TaskHandoff("当前阶段不发送邮件。请确认发票、公司和收件人。"))
+        async def execute(*args, **kwargs):
+            return AgentToolResult(content=[TextContent(text=json.dumps(payload, ensure_ascii=False))],
+                                   details={"structuredContent": payload})
+        tool = AgentTool(name="send_invoice", label="Send", description="Test handoff", parameters={"type": "object"}, execute_fn=execute)
+        provider = FakeProvider([[assistant_done(AssistantMessage(model="fake", stop_reason="toolUse",
+                                content=[ToolCall(id="send-1", name=tool.name, arguments={})]))],
+                                [assistant_done(AssistantMessage(model="fake", content="This turn must not run."))]])
+        def stop(turn):
+            # Reopen the real transcript at the stopping boundary, not after close.
+            messages = [json.loads(line).get("message", {}) for line in path.read_text(encoding="utf8").splitlines()]
+            assert any(m.get("role") == "toolResult" and m.get("toolCallId") == "send-1"
+                       and m.get("details", {}).get("structuredContent") == payload for m in messages)
+            return any(_handoff_required(result) for result in turn.tool_results)
+        session = await HarnessSession.load(SessionConfig(
+            provider=provider, model="fake", system="Test", tools=[tool], cwd=tmp_path,
+            storage=JsonlSessionStorage(path), should_stop_after_turn=stop,
+            skills_enabled=False, extensions_enabled=False,
+            resource_paths=ResourcePaths(root=tmp_path, paths=RuntimePaths(home=tmp_path / "home", agents_home=tmp_path / "agents"),
+                                         agents_root=tmp_path / "agents", project_resources_enabled=False)))
+        try:
+            _ = [event async for event in session.prompt("Send the invoice")]
+            assert len(provider.calls) == 1
+        finally:
+            await session.aclose()
+    asyncio.run(check())
