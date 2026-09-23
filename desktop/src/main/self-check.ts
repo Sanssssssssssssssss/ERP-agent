@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { app } from "electron";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { publicSettings, saveSettings, secretEnvironment } from "./settings";
 import { assertRequest, businessScope, canChangeSettings, configuredOdooUrl, observedRecordUrl, recordedArtifactPath, safeMaterialName, strictBase64 } from "./ipc-security";
 import { safeErrorMessage } from "./host";
+import { openSessionSnapshot, snapshotPath } from "./session-snapshot";
 
 export async function runSelfCheck(): Promise<void> {
   // Even a manually invoked packaged --self-check must not overwrite settings.
@@ -70,6 +71,8 @@ export async function runSelfCheck(): Promise<void> {
   assert.throws(() => assertRequest({ method: "shell_exec" }), /METHOD_NOT_ALLOWED/);
   assert.throws(() => assertRequest({ method: "health", params: [] }), /INVALID_PARAMS/);
   assert.doesNotThrow(() => assertRequest({ method: "export_business_report", params: { session_id: "s_a", business_id: "b_a" } }));
+  assert.doesNotThrow(() => assertRequest({ method: "open_session_snapshot", params: { session_id: "s_a", business_id: "b_a" } }));
+  assert.throws(() => assertRequest({ method: "_prepare_session_snapshot", params: { business_id: "b_a" } }), /METHOD_NOT_ALLOWED/);
   assert.deepEqual(businessScope({ session_id: "s_a", business_id: "b_a", path: "ignored" }), { session_id: "s_a", business_id: "b_a" });
   assert.throws(() => businessScope({ session_id: "s_a", business_id: "../b" }), /INVALID_BUSINESS_SCOPE/);
   assert.throws(() => businessScope({ session_id: "s_a", business_id: "b_a", run_id: null }), /INVALID_BUSINESS_SCOPE/);
@@ -110,7 +113,27 @@ export async function runSelfCheck(): Promise<void> {
   const generic = safeErrorMessage("business_validation_failed", "Authorization: Bearer sk_actual_123 Cookie: a=abc; b=xyz");
   assert.equal(generic, "[BUSINESS_VALIDATION_FAILED] 请求失败，请检查当前操作状态后重试。");
   assert.doesNotMatch(generic, /sk_actual_123|a=abc|b=xyz/);
-  console.log("desktop self-check: PASS (settings, secrets, busy guard, IPC allowlist)");
+  const snapshotDir = join(isolated, "exports", "session-snapshots");
+  await mkdir(snapshotDir, { recursive: true });
+  const htmlPath = join(snapshotDir, "b_a.html");
+  await writeFile(htmlPath, '<!doctype html><html><body><a id="jump" href="#entry-one">jump</a><p id="entry-one">公开内容</p></body></html>');
+  const receipt = { path: htmlPath, name: "b_a.html", scope: "business_session" };
+  assert.equal(await snapshotPath(receipt, "b_a", isolated), htmlPath);
+  await assert.rejects(() => snapshotPath(receipt, "b_other", isolated), /SCOPE_INVALID/);
+  await assert.rejects(() => snapshotPath({ ...receipt, path: join(isolated, "settings.json") }, "b_a", isolated), /SCOPE_INVALID/);
+  const preview = await openSessionSnapshot(htmlPath, false);
+  try {
+    const exposure = await preview.webContents.executeJavaScript('[typeof window.workbench, typeof require, typeof process, typeof window.electron]');
+    assert.deepEqual(exposure, ["undefined", "undefined", "undefined", "undefined"]);
+    assert.equal(await preview.webContents.executeJavaScript('fetch("https://snapshot.invalid/blocked").then(() => "allowed", () => "blocked")'), "blocked");
+    await preview.webContents.executeJavaScript('document.getElementById("jump").click()');
+    assert.ok(preview.webContents.getURL().endsWith("#entry-one"));
+    await preview.webContents.executeJavaScript('location.href="https://snapshot.invalid/navigation"');
+    await new Promise(resolve => setTimeout(resolve, 60));
+    assert.ok(preview.webContents.getURL().endsWith("#entry-one"));
+    assert.equal(await preview.webContents.executeJavaScript('window.open("https://snapshot.invalid/popup") === null'), true);
+  } finally { preview.destroy(); }
+  console.log("desktop self-check: PASS (settings, secrets, busy guard, IPC allowlist, isolated snapshot window)");
   } finally {
     if (previousMemoryMode === undefined) delete process.env.ERP_MEMORY_MODE;
     else process.env.ERP_MEMORY_MODE = previousMemoryMode;

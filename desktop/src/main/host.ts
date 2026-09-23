@@ -225,6 +225,9 @@ const SAFE_ERROR_MESSAGES: Record<string, string> = {
 };
 
 const SAFE_LOCAL_ERROR_MESSAGES: Record<string, string> = {
+  "VALUEERROR\u0000当前业务尚无已保存的会话记录。": "当前业务尚无已保存的会话记录。",
+  "VALUEERROR\u0000会话记录不完整或格式无效，未生成快照；请保留原始日志。": "会话记录不完整或格式无效，未生成快照；请保留原始日志。",
+  "VALUEERROR\u0000业务会话快照路径不在当前业务目录。": "快照路径归属不符，无法打开。",
   "KEYERROR\u0000'unknown proposal'": "未找到可处理的业务提案，可能已处理或已过期。",
   "KEYERROR\u0000'unknown session'": "未找到当前会话，请重新选择会话。",
   "KEYERROR\u0000'business does not belong to session'": "业务不属于当前会话，请重新选择会话。",

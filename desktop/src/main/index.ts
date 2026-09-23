@@ -7,6 +7,7 @@ import { HostClient } from "./host";
 import { publicSettings, saveSettings } from "./settings";
 import { assertRequest, businessScope, canChangeSettings, configuredOdooUrl, METHODS, materialSessionId, observedRecordUrl, recordedArtifactPath, safeMaterialName, strictBase64 } from "./ipc-security";
 import { runSelfCheck } from "./self-check";
+import { openSessionSnapshot, snapshotPath } from "./session-snapshot";
 import type { BusinessDetail, SettingsInput, WorkbenchMethod } from "../shared/protocol";
 
 const host = new HostClient();
@@ -121,11 +122,21 @@ function registerIpc(): void {
         session_id, name, content_base64: content.toString("base64"),
       });
     }
-    if (["download_document", "export_business_report", "open_odoo_record", "open_business_artifact", "reveal_business_artifact"].includes(request.method)) {
+    if (["download_document", "export_business_report", "open_session_snapshot", "open_odoo_record", "open_business_artifact", "reveal_business_artifact"].includes(request.method)) {
       const params = request.params ?? {};
       const scope = businessScope(params);
       const detail = await host.call("get_business", scope) as BusinessDetail;
       if (detail.business.id !== scope.business_id || detail.business.session_id !== scope.session_id) throw new Error("BUSINESS_SCOPE_MISMATCH");
+      if (request.method === "open_session_snapshot") {
+        if (exportInProgress) throw new Error("EXPORT_BUSY");
+        exportInProgress = true;
+        try {
+          const receipt = await host.call("_prepare_session_snapshot" as WorkbenchMethod, { session_id: scope.session_id, business_id: scope.business_id });
+          const path = await snapshotPath(receipt, scope.business_id, join(app.getPath("userData"), "data"));
+          await openSessionSnapshot(path);
+          return { opened: true, scope: "business_session" };
+        } finally { exportInProgress = false; }
+      }
       let validatedEndpoint: string | undefined;
       let validatedDatabase: string | undefined;
       if (request.method === "open_odoo_record") {

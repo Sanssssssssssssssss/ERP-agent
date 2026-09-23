@@ -95,6 +95,8 @@ export default function App() {
     saveSettings,
     retryHealth,
     exportBusiness,
+    openSessionSnapshot,
+    snapshotOpening,
     openOdooRecord,
     openOdoo,
     openArtifact,
@@ -170,6 +172,8 @@ export default function App() {
           onToggleConversation={toggleConversation}
           conversationOpen={conversationOpen}
           onExport={(runId) => void exportBusiness(runId)}
+          onSnapshot={() => void openSessionSnapshot()}
+          snapshotOpening={snapshotOpening}
           exporting={exporting}
           exportPath={exportPath}
           onOpenDocument={(document) => void openOdooRecord(document)}

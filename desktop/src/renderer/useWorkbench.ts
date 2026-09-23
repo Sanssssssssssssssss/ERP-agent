@@ -66,6 +66,8 @@ export function useWorkbench() {
   })
   const [railCollapsed, setRailCollapsed] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [snapshotOpening, setSnapshotOpening] = useState(false)
+  const snapshotInFlightRef = useRef(false)
   const [openingOdoo, setOpeningOdoo] = useState(false)
   const [exportPath, setExportPath] = useState('')
   const [pendingMaterials, setPendingMaterials] = useState<MaterialRecord[]>([])
@@ -284,6 +286,7 @@ export function useWorkbench() {
   }, [call])
 
   const refreshBusinessQuiet = useCallback(async (sessionId: string, businessId: string) => {
+    if (!sessionId || !businessId || sessionIdRef.current !== sessionId || businessIdRef.current !== businessId) return
     const requestId = ++quietBusinessRequestRef.current
     try {
       const result = await call<BusinessDetailProjection>('get_business', { session_id: sessionId, business_id: businessId })
@@ -428,7 +431,7 @@ export function useWorkbench() {
       }
       if (event.event === 'run_trace' || event.event === 'trace') {
         const eventRun = String(data.run_id || '')
-        if (eventBusiness === businessIdRef.current && eventSession === sessionIdRef.current) {
+        if (eventBusiness && eventBusiness === businessIdRef.current && eventSession === sessionIdRef.current) {
           if (businessRefreshTimerRef.current) clearTimeout(businessRefreshTimerRef.current)
           businessRefreshTimerRef.current = setTimeout(() => { void refreshBusinessQuiet(eventSession, eventBusiness) }, 120)
         }
@@ -929,6 +932,22 @@ export function useWorkbench() {
     }
   }
 
+  const openSessionSnapshot = async () => {
+    if (!selectedSessionId || !selectedBusinessId || snapshotInFlightRef.current) return
+    const requestSessionId = selectedSessionId
+    const requestBusinessId = selectedBusinessId
+    snapshotInFlightRef.current = true
+    setSnapshotOpening(true)
+    try {
+      await call('open_session_snapshot', { session_id: requestSessionId, business_id: requestBusinessId })
+    } catch (reason) {
+      if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) setError(messageForError(reason))
+    } finally {
+      snapshotInFlightRef.current = false
+      setSnapshotOpening(false)
+    }
+  }
+
   const openOdoo = async () => {
     if (openingOdoo) return
     setOpeningOdoo(true)
@@ -1101,6 +1120,8 @@ export function useWorkbench() {
     saveSettings,
     retryHealth,
     exportBusiness,
+    openSessionSnapshot,
+    snapshotOpening,
     openOdooRecord,
     openOdoo,
     openArtifact,

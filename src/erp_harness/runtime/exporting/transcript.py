@@ -89,6 +89,7 @@ def export_session_html(
     title: str = "Pi Agent Session Export",
     source: str | None = None,
     system_prompt: str | None = None,
+    usage_notice: str | None = None,
 ) -> Path:
     """Write a self-contained HTML session export and return its path."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -98,6 +99,7 @@ def export_session_html(
             title=title,
             source=source,
             system_prompt=system_prompt,
+            usage_notice=usage_notice,
         ),
         encoding="utf-8",
     )
@@ -178,6 +180,7 @@ def render_session_html(
     title: str = "Pi Agent Session Export",
     source: str | None = None,
     system_prompt: str | None = None,
+    usage_notice: str | None = None,
 ) -> str:
     """Render a session transcript/tree as standalone HTML."""
     entry_list = list(entries)
@@ -193,7 +196,7 @@ def render_session_html(
     jsonl_filename = _jsonl_filename(title, source)
     tool_count = sum(1 for entry in visible_entries if _entry_filter_kind(entry) == "tool")
     event_count = sum(1 for entry in visible_entries if _entry_filter_kind(entry) == "event")
-    usage_html = render_usage_dashboard(
+    usage_html = f"<p>{_escape(usage_notice)}</p>" if usage_notice is not None else render_usage_dashboard(
         collect_session_usage(
             [entry for entry in visible_entries if entry.id in active_path_ids]
             or list(visible_entries)

@@ -2,7 +2,7 @@ import { basename, extname, isAbsolute } from "node:path";
 import type { Document, WorkbenchMethod } from "../shared/protocol";
 import { validateEndpoint } from "./settings";
 
-const LOCAL_METHODS = new Set(["get_settings", "save_settings", "import_material", "download_document", "export_business_report", "open_odoo", "open_odoo_record", "open_business_artifact", "reveal_business_artifact"]);
+const LOCAL_METHODS = new Set(["get_settings", "save_settings", "import_material", "download_document", "export_business_report", "open_session_snapshot", "open_odoo", "open_odoo_record", "open_business_artifact", "reveal_business_artifact"]);
 
 export const METHODS = new Set<WorkbenchMethod>([
   "list_sessions", "create_session", "rename_session", "archive_session", "get_session",

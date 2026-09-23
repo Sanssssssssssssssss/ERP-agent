@@ -131,6 +131,7 @@ const bridgeScript = String.raw`
             result.business = { ...b4, readback: { latest_run_id: 'business-b4-run', stale: false } }
             result.outcome = { status: 'passed', label: '销售订单已确认', detail: '已核对当前订单状态。', scope: 'sale_invoice_confirmed_checks' }
             if (window.__resultScenario === 'failed') { result.runs[1].status = 'failed'; result.runs[1].verification_status = 'unknown' }
+            if (window.__resultScenario === 'awaiting_input') { result.runs[1].status = 'awaiting_input'; result.runs[1].handoff = { code: 'business_choice_required', next_action: 'revise_proposal', message: '请确认预付款比例，再调整业务方案。' }; result.business.status = 'awaiting_input'; result.business.active_run_id = null }
             if (window.__resultScenario === 'running') { result.runs[1].status = 'running'; result.runs[1].verification_status = 'unknown'; delete result.runs[1].summary; result.outcome = { status: 'unknown', label: '执行中', detail: '完成后核验。', scope: '' } }
             if (window.__resultScenario === 'stale') result.business.readback.latest_run_id = 'business-b4-old-run'
             if (window.__resultScenario === 'missing') { delete result.runs[1].summary; result.summary = '旧轮次总结，不能显示' }
@@ -138,6 +139,8 @@ const bridgeScript = String.raw`
           if (id === 'business-b2' && window.__revisionAccepted) { result.runs[1].status = 'cancelled'; result.business.status = 'cancelled'; result.approvals = result.approvals.map(row => ({ ...row, status: 'rejected' })); result.activity = { phase: 'idle', label: '等待更新后的业务方案', detail: '旧审批已撤销。' } }
           if (id === 'business-b2' && showAcceptedProjection) { result.approvals = []; result.business.status = 'running'; result.runs[1].status = 'running'; result.activity = { phase: 'model', label: '等待模型响应', detail: '审批已完成，模型正在继续处理。' } }
           if (id === 'business-b4' && window.__activityScenario) { result.runs[1].status = 'running'; result.business.status = 'running'; result.activity = window.__activityScenario; result.outcome = { status: 'unknown', label: '执行中', detail: '完成后核验。' } }
+          // The host returns newest first when no active_run_id selects a row.
+          if (id === 'business-b4' && window.__resultScenario === 'awaiting_input') result.runs.reverse()
           return result
         }
         if (method === 'get_trace_detail') {
@@ -195,6 +198,7 @@ const bridgeScript = String.raw`
           return { model: 'deepseek/deepseek-v4-flash/high', base_url: 'http://model.invalid', odoo_url: 'http://odoo.invalid', odoo_db: 'demo', odoo_username: 'admin', long_term_memory: longTermMemory, has_model_key: false, has_odoo_key: false, environment: 'demo' }
         }
         if (method === 'export_business_report') return { cancelled: false, path: 'C:\\runtime\\business-b2-receipt.json', artifact: { id: 'artifact-b2', name: 'Business B2 回执.json', path: 'C:\\runtime\\business-b2-receipt.json', kind: 'business_receipt' } }
+        if (method === 'open_session_snapshot') { await wait(40); return { opened: true, scope: 'business_session' } }
         if (method === 'open_business_artifact' || method === 'reveal_business_artifact') return { opened: true }
         if (method === 'open_odoo_record') return { opened: true }
         if (method === 'open_odoo') { if (Object.keys(params).length) throw new Error('INVALID_PARAMS'); if (window.__odooUnconfigured) throw new Error('ODOO_NOT_CONFIGURED'); return { opened: true } }
@@ -262,6 +266,11 @@ assert.deepEqual(await page.evaluate(() => window.__bridgeCalls.find(({ method }
 await page.getByRole('button', { name: /Session A/ }).click()
 await page.getByRole('heading', { name: 'Session A' }).waitFor()
 await page.getByText('处理业务', { exact: true }).waitFor()
+// A conversation trace without a business must never issue get_business('', ...).
+const emptyBusinessCallsBefore = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'get_business' && !params.business_id).length)
+await page.evaluate(() => window.__emitWorkbench({ event: 'trace', data: { session_id: 'session-a', business_id: null, run_id: 'conversation-only' } }))
+await page.waitForTimeout(160)
+assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'get_business' && !params.business_id).length), emptyBusinessCallsBefore)
 await page.getByRole('button', { name: /^采购 / }).click()
 assert.equal(await page.getByRole('textbox', { name: '会话消息' }).inputValue(), '帮我整理采购需求，先核对供应商和产品。')
 
@@ -1234,10 +1243,21 @@ await page.getByLabel('执行回执与留档').getByText('邮件：无发送记�
 assert.equal(await page.locator('.business-content .spin').count(), 0)
 await page.getByRole('tab', { name: /^运行详情/ }).click()
 await page.locator('.trace-toolbar select').selectOption('business-b4-old-run')
+await page.getByRole('button', { name: '业务会话快照', exact: true }).click()
+await page.getByRole('button', { name: '业务会话快照', exact: true }).waitFor()
+assert.deepEqual(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'open_session_snapshot').at(-1)?.params), { session_id: 'session-b', business_id: 'business-b4' })
 await page.getByRole('tab', { name: /^执行台/ }).click()
 await page.getByRole('button', { name: '导出业务回执', exact: true }).click()
 await page.getByText('业务回执已导出。', { exact: true }).waitFor()
 assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'export_business_report').at(-1)?.params.run_id), 'business-b4-run')
+await page.evaluate(() => { window.__setRunState(false); window.__resultScenario = 'awaiting_input'; window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b4' } }) })
+await page.getByText('请确认预付款比例，再调整业务方案。', { exact: true }).waitFor()
+assert.equal(await page.getByRole('button', { name: '等待补充条件', exact: true }).isDisabled(), true)
+const startCallsBeforeClarification = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'start_run').length)
+await page.getByRole('textbox', { name: '会话消息' }).fill('按 30% 预付款调整方案，先给我确认。')
+await page.getByRole('button', { name: '发送', exact: true }).click()
+await page.waitForFunction(() => window.__bridgeCalls.some(({ method, params }) => method === 'send_message' && params.text === '按 30% 预付款调整方案，先给我确认。'))
+assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'start_run').length), startCallsBeforeClarification)
 await page.evaluate(() => { window.__odooUnconfigured = true })
 await page.getByRole('button', { name: '打开 Odoo', exact: true }).click()
 await page.getByRole('dialog', { name: '连接设置' }).waitFor()

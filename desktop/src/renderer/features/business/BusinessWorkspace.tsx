@@ -34,7 +34,7 @@ export const tabs: Array<{ id: BusinessTab; label: string }> = [
   { id: 'trace', label: '运行详情' }
 ]
 
-export function BusinessWorkspace({ session, activeBusiness, detail, liveMessages = [], tab, trace, traceTarget, traceLoading, onLoadTraceDetail, businessLoading, loading, selectedRunId, onBusinessSelect, onTabChange, onRunSelect, onRefresh, onStart, onCancel, onApproval, onRequestRevision, onReconcile, onTraceTarget, onToggleConversation, conversationOpen, onExport, exporting, exportPath, onOpenDocument, onDownloadDocument, documentDownloads, selectedDocumentKey, onSelectedDocumentKey, onOpenArtifact, onRevealArtifact, approvalProgress, onOpenApprovals }: {
+export function BusinessWorkspace({ session, activeBusiness, detail, liveMessages = [], tab, trace, traceTarget, traceLoading, onLoadTraceDetail, businessLoading, loading, selectedRunId, onBusinessSelect, onTabChange, onRunSelect, onRefresh, onStart, onCancel, onApproval, onRequestRevision, onReconcile, onTraceTarget, onToggleConversation, conversationOpen, onExport, exporting, onSnapshot, snapshotOpening, exportPath, onOpenDocument, onDownloadDocument, documentDownloads, selectedDocumentKey, onSelectedDocumentKey, onOpenArtifact, onRevealArtifact, approvalProgress, onOpenApprovals }: {
   session: SessionDetail | null
   activeBusiness: Business | null
   detail: BusinessDetailProjection | null
@@ -61,6 +61,8 @@ export function BusinessWorkspace({ session, activeBusiness, detail, liveMessage
   conversationOpen: boolean
   onExport: (runId?: string) => void
   exporting: boolean
+  onSnapshot?: () => void
+  snapshotOpening?: boolean
   exportPath: string
   onOpenDocument: (document: Document) => void
   onDownloadDocument: (document: Document, format: 'pdf' | 'csv') => void
@@ -111,7 +113,7 @@ export function BusinessWorkspace({ session, activeBusiness, detail, liveMessage
           <RadixTabs.Content value="execution">{!businessLoading && <ExecutionPage detail={detail} activeRun={activeRun} liveMessages={businessMessages.filter((message) => message.run_id === activeRun?.id)} pendingApprovals={pendingApprovals} onOpenApprovals={onOpenApprovals} onRefresh={onRefresh} onStart={onStart} onCancel={onCancel} onEvidence={onTraceTarget} onExport={() => onExport(activeRun?.id)} exporting={exporting} exportPath={exportPath} />}</RadixTabs.Content>
            <RadixTabs.Content value="documents">{!businessLoading && <DocumentsPage documents={detail?.documents ?? []} materials={(detail as DetailWithMaterials | null)?.materials ?? []} artifacts={detail?.artifacts ?? []} goal={activeBusiness.goal} stale={detail?.stale ?? false} onExport={() => onExport()} exporting={exporting} exportPath={exportPath} onOpenDocument={onOpenDocument} onDownloadDocument={onDownloadDocument} documentDownloads={documentDownloads} selectedDocumentKey={selectedDocumentKey} onSelectedDocumentKey={onSelectedDocumentKey} onOpenArtifact={onOpenArtifact} onRevealArtifact={onRevealArtifact} onTraceTarget={onTraceTarget} />}</RadixTabs.Content>
           <RadixTabs.Content value="approvals">{!businessLoading && <ApprovalsPage approvals={detail?.approvals ?? []} documents={detail?.documents ?? []} disabled={loading || businessLoading} onDecision={onApproval} onRequestRevision={onRequestRevision} onReconcile={onReconcile} onTraceTarget={onTraceTarget} />}</RadixTabs.Content>
-          <RadixTabs.Content value="trace">{!businessLoading && <TracePage trace={trace} liveMessages={businessMessages} runs={detail?.runs ?? []} readback={detail?.business.readback} selectedRunId={selectedRunId} loading={traceLoading} target={traceTarget} onRunSelect={onRunSelect} onLoadDetail={onLoadTraceDetail} />}</RadixTabs.Content>
+          <RadixTabs.Content value="trace">{!businessLoading && <TracePage trace={trace} liveMessages={businessMessages} runs={detail?.runs ?? []} readback={detail?.business.readback} selectedRunId={selectedRunId} loading={traceLoading} target={traceTarget} onRunSelect={onRunSelect} onLoadDetail={onLoadTraceDetail} onSnapshot={onSnapshot} snapshotOpening={snapshotOpening} />}</RadixTabs.Content>
           </div>
         </RadixTabs.Root>
       </>}
@@ -121,8 +123,9 @@ export function BusinessWorkspace({ session, activeBusiness, detail, liveMessage
 
 export function ExecutionPage({ detail, activeRun, liveMessages = [], pendingApprovals, onOpenApprovals, onRefresh, onStart, onCancel, onEvidence, onExport, exporting, exportPath }: { detail: BusinessDetailProjection | null; activeRun?: Run; liveMessages?: LiveMessage[]; pendingApprovals: Approval[]; onOpenApprovals: () => void; onRefresh: () => void; onStart: () => void; onCancel: (run: Run) => void; onEvidence: (evidence: BusinessEvidence) => void; onExport: () => void; exporting: boolean; exportPath: string }) {
   const hasUnknownWrite = Boolean(detail?.approvals?.some((approval) => approval.status === 'needs_reconciliation') || detail?.runs?.some((run) => run.status === 'needs_reconciliation') || detail?.business.status === 'blocked')
-  const canStart = !hasUnknownWrite && (!activeRun || !['running', 'awaiting_approval', 'cancel_requested'].includes(activeRun.status))
-  const runActionLabel = activeRun?.status === 'completed' ? '继续执行' : activeRun?.status === 'failed' ? '重新执行' : '开始执行'
+  const waitingForInput = activeRun?.status === 'awaiting_input'
+  const canStart = !hasUnknownWrite && !waitingForInput && (!activeRun || !['running', 'awaiting_approval', 'cancel_requested'].includes(activeRun.status))
+  const runActionLabel = waitingForInput ? '等待补充条件' : activeRun?.status === 'completed' ? '继续执行' : activeRun?.status === 'failed' ? '重新执行' : '开始执行'
   const ended = Boolean(activeRun && ['completed', 'failed', 'cancelled', 'interrupted', 'needs_reconciliation'].includes(activeRun.status))
   const oldReadback = Boolean(detail?.stale || (detail?.business.readback?.latest_run_id && detail.business.readback.latest_run_id !== activeRun?.id))
   const unverifiedFailure = ended && activeRun?.status !== 'completed' && activeRun?.verification_status !== 'passed'
@@ -145,6 +148,7 @@ export function ExecutionPage({ detail, activeRun, liveMessages = [], pendingApp
           : <RadixButton className="primary-button" disabled={!canStart} title={hasUnknownWrite ? '存在待核对写入，请先在变更与审批中核对' : undefined} onClick={onStart}><Play size={15} />{hasUnknownWrite ? '先核对写入' : runActionLabel}</RadixButton>}
       </div>
       {pendingApprovals.length > 0 && <section className="approval-execution-cta" role="status"><div><strong>运行已暂停，等待人工审批</strong><span>{pendingApprovals.length} 项动作需要确认后才会继续。</span></div><RadixButton className="primary-button" onClick={onOpenApprovals}><CheckIcon size={15} />查看并审批</RadixButton></section>}
+      {waitingForInput && <section className="approval-execution-cta" role="status"><div><strong>等待补充条件</strong><span>{activeRun.handoff?.message || '请在会话中补充业务条件，再确认调整后的方案。'}</span><span>可在会话中说明调整；新的写入仍需审批。</span></div></section>}
       {ended && result}
       {ended && <ExecutionReceipts receipts={detail?.receipts ?? []} onEvidence={onEvidence} onExport={onExport} exporting={exporting} exportPath={exportPath} />}
       {detail?.activity && activeRun?.status !== 'completed' && <ActivityCard key={activeRun?.id} activity={detail.activity} run={activeRun} liveMessages={liveMessages} />}

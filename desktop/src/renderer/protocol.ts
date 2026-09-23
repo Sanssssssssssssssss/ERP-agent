@@ -90,6 +90,7 @@ export interface TraceBundle {
 export type HostEvent = WorkbenchEvent
 
 export const runStatusLabel: Record<string, string> = {
+  awaiting_input: '等待补充条件',
   idle: '空闲',
   ready: '待执行',
   blocked: '需核对',
@@ -104,6 +105,7 @@ export const runStatusLabel: Record<string, string> = {
 }
 
 export const businessStatusLabel: Record<string, string> = {
+  awaiting_input: '等待补充条件',
   idle: '待执行',
   ready: '待执行',
   blocked: '需核对',

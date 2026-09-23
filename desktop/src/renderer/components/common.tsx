@@ -13,7 +13,7 @@ export function MessageText({ text, collapsible = true }: { text: string; collap
 
 export function StatusBadge({ status, label }: { status?: string; label: string }) {
   const neutral = label === '—（不适用）'
-  const icon = neutral ? <Minus size={13} /> : status === 'running' || status === 'awaiting_approval' || status === 'pending' || status === 'pending_approval'
+  const icon = neutral ? <Minus size={13} /> : status === 'running' || status === 'awaiting_approval' || status === 'awaiting_input' || status === 'pending' || status === 'pending_approval'
     ? <Clock3 size={13} />
     : status === 'failed' || status === 'rejected' || status === 'expired' || status === 'known_failed'
       ? <CircleAlert size={13} />

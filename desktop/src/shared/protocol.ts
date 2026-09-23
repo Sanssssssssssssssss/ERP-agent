@@ -99,6 +99,7 @@ export interface Run {
   ended_at?: string;
   error?: string;
   error_detail?: string;
+  handoff?: { code: string; next_action: string; message: string };
   usage?: Usage;
   tool_count?: number;
   model_rounds?: number;
@@ -366,6 +367,7 @@ export type WorkbenchMethod =
   | "get_trace_detail"
   | "refresh_business"
   | "export_business_report"
+  | "open_session_snapshot"
   | "open_odoo"
   | "open_odoo_record"
   | "open_business_artifact"
