@@ -67,6 +67,7 @@ from erp_harness.erp._odoo_core.schemas import (
     ReadSupplyContextResponse,
     SchemaCatalogResponse,
     SearchRecordsResponse,
+    ToolResponse,
 )
 from erp_harness.erp._odoo_core.tool_helpers import (
     SearchEmployeeResponse,
@@ -107,6 +108,7 @@ NATIVE_READ_RESPONSES = {
     "health_check": HealthCheckResponse,
     "find_records": FindRecordsResponse,
     "read_supply_context": ReadSupplyContextResponse,
+    "read_invoice_eligibility": ToolResponse,
 }
 
 _FIELD_SUMMARY_KEYS = (
@@ -276,6 +278,15 @@ class NativeReads:
                            for entry in runtime._single_reads.report()["busiest"] if entry["calls_in_window"] >= 10],
             "rate_limits": rate_report(),
         }
+
+    def read_invoice_eligibility(self, order_ids: list[int], final: bool = True) -> dict[str, Any]:
+        """Read current invoice prerequisites; a blocked order needs a business choice."""
+        from datetime import UTC, datetime
+        from .invoice_eligibility import inspect_invoice_eligibility
+
+        result = inspect_invoice_eligibility(self, order_ids, instance=self.instance, final=final)
+        return {"success": True, "tool": "read_invoice_eligibility",
+                "observed_at": datetime.now(UTC).isoformat(), **result}
 
     def health_check(self) -> dict[str, Any]:
         """Report the native runtime boundary without opening Odoo."""

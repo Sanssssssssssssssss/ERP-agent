@@ -12,6 +12,14 @@ from pathlib import Path
 from erp_harness.erp.business_operations import ENTERPRISE_METHODS
 
 
+def _field_policy_environment() -> dict[str, str]:
+    from erp_harness.erp._odoo_core.field_policy import field_policy_file_path
+
+    path = field_policy_file_path()
+    # 只继承字段约束。共享配置中的写方法授权不扩大到 worker。
+    return {"ODOO_MCP_FIELD_POLICY_FILE": str(Path(path).resolve())} if path else {}
+
+
 def worker_command(repo: Path, instruction: Path, usage: Path, session: Path, *, continue_run: bool) -> list[str]:
     command = [sys.executable, "-m", "erp_harness.app.runner",
                "--instruction-file", str(instruction), "--usage-file", str(usage),
@@ -66,6 +74,7 @@ def child_environment(session_id: str, run_id: str) -> dict[str, str]:
     # The shared parser uses legacy completeness detection before honoring API_KEY.
     if env.get("ODOO_API_KEY") and not env.get("ODOO_PASSWORD"):
         env["ODOO_PASSWORD"] = env["ODOO_API_KEY"]
+    env.update(_field_policy_environment())
     return env
 
 
@@ -79,4 +88,5 @@ def conversation_environment(session_id: str, run_id: str) -> dict[str, str]:
     env = {key: os.environ[key] for key in allowed if key in os.environ}
     env["PI_AGENT_SESSION_ID"] = session_id
     env["HARBOR_TRIAL_ID"] = run_id
+    env.update(_field_policy_environment())
     return env

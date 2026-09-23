@@ -57,6 +57,7 @@ from erp_harness.erp.reads import NativeReads
 from erp_harness.erp.store import ActionStore
 from erp_harness.erp.write_guards import business_write_prestate, manufacturing_confirm_prestate
 from erp_harness.erp import invoice_mail
+from erp_harness.erp.invoice_eligibility import InvoiceEligibilityError, inspect_invoice_eligibility
 
 ACTION_TOOLS = frozenset(
     {
@@ -659,7 +660,11 @@ class NativeActions:
             "sale.advance.payment.inv",
             "create_invoices",
         ):
-            wizard = self._read_rows(instance, model, ids, ["id", "sale_order_ids", "advance_payment_method"])
+            wizard_fields = ["id", "sale_order_ids", "advance_payment_method", "deduct_down_payments", "amount", "fixed_amount"]
+            policy = getattr(self.reads.instances[instance], "policy", None)
+            if policy is not None and policy.restricted_fields(instance, model, set(wizard_fields)):
+                raise ValueError("invoice wizard evidence is unavailable under the current field policy")
+            wizard = self._read_rows(instance, model, ids, wizard_fields)
             requested_wizard_ids = {int(value) for value in ids}
             returned_wizard_ids = {int(row["id"]) for row in wizard if type(row.get("id")) is int}
             if returned_wizard_ids != requested_wizard_ids:
@@ -681,7 +686,28 @@ class NativeActions:
                     "create_invoices wizard references missing sale order(s); "
                     f"read/create the correct wizard before create_invoices: {missing_ids}"
                 )
-            return {"wizard": wizard, "orders": orders}
+            eligibility = []
+            for item in wizard:
+                method = item.get("advance_payment_method")
+                if method == "delivered":
+                    if type(item.get("deduct_down_payments")) is not bool:
+                        raise ValueError("invoice wizard deduction setting is unavailable; read the wizard again")
+                    reports = [inspect_invoice_eligibility(
+                        self.reads.instances[instance], item["sale_order_ids"][offset:offset + 20],
+                        instance=instance, final=item["deduct_down_payments"],
+                    ) for offset in range(0, len(item["sale_order_ids"]), 20)]
+                    if not any(report["status"] == "eligible" for report in reports):
+                        report = reports[0]
+                        if len(reports) > 1:
+                            report = {**report, "order_count": len(item["sale_order_ids"]),
+                                      "order_samples_complete": False,
+                                      "reason_code": "no_invoiceable_lines",
+                                      "next_step": "No selected sale order has invoiceable lines. Explain the order conditions; do not retry another API or choose a down payment without the user's business decision."}
+                        raise InvoiceEligibilityError(report)
+                    eligibility.extend(reports)
+                elif method not in {"percentage", "fixed"}:
+                    raise ValueError("invoice wizard method is unavailable; read the wizard again")
+            return {"wizard": wizard, "orders": orders, "invoice_eligibility": eligibility}
         raise ValueError(f"native action has no verifier for {model}.{payload.get('method')}")
 
     def _current_prestate_matches(self, row: dict[str, Any]) -> bool:
@@ -1883,6 +1909,8 @@ class NativeActions:
                     "action_id": action["action_id"],
                     "action_status": action["status"],
                     "error": "trusted host approval is required; repeating the call does not authorize it",
+                    "resume": {"tool": "execute_method", "arguments": payload,
+                               "when": "After trusted host approval, repeat this same execute_method call. Do not use execute_approved_write for method actions."},
                     "classification": safety,
                 }
 
@@ -1907,6 +1935,9 @@ class NativeActions:
                 detail=result.get("error"),
             )
             return {**result, "classification": safety}
+        except InvoiceEligibilityError as exc:
+            return {"success": False, "error": str(exc), "business_condition": exc.report,
+                    "approval_required": False, "retry_safe": False}
         except Exception as exc:  # noqa: BLE001 - tool boundary returns structured errors
             return {"success": False, "error": str(exc)}
 

@@ -1045,6 +1045,18 @@ class WorkbenchHostTests(unittest.TestCase):
         self.assertNotIn("proposal", self.host.store.data["messages"][self.sid][-1])
         self.assertEqual(self.host.store.data["sessions"][self.sid]["active_run_id"], run["id"])
 
+    def test_status_context_drops_stale_facts_and_rejects_changed_connection(self):
+        business, run = self._run("read current status")
+        run["documents"] = [{"model": "sale.order", "id": 7, "name": "PRIVATE_OLD_NAME", "state": "sale"}]
+        query = {"context_business_id": business["id"], "session_id": self.sid}
+        context = self.host._conversation_status_context(query)
+        self.assertNotIn("PRIVATE_OLD_NAME", json.dumps(context))
+        self.assertNotIn("PRIVATE_OLD_NAME", self.host._conversation_prompt(self.sid, "状态呢", business["id"]))
+        with patch.dict(os.environ, {"ODOO_USERNAME": "another-role"}):
+            result = self.host._conversation_status_context(query)
+        self.assertEqual(result["status"], "scope_mismatch")
+        self.assertNotIn("state", result)
+
     def test_confirm_business_is_idempotent_but_cannot_reverse_a_decision(self):
         business = self._business("one workspace")
         proposal_id = self.host.store.data["messages"][self.sid][-1]["proposal"]["id"]

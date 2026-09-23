@@ -574,16 +574,9 @@ class Workbench:
         context = "No business is selected. Answer from conversation context or the fixed read-only Odoo reference tool when the user explicitly asks for a current fact."
         if context_business_id:
             business = self._business(session_id, context_business_id)
-            documents = []
-            for run in self.store.data["runs"].values():
-                if run.get("business_id") != context_business_id:
-                    continue
-                for doc in run.get("documents", []):
-                    documents.append({"model": doc.get("model"), "id": doc.get("id"), "name": doc.get("name"), "state": doc.get("state")})
             context = json.dumps({
                 "business": {key: business.get(key) for key in ("id", "type", "title", "goal", "status")},
-                "observed_documents": documents[-20:],
-                "notice": "These are local erp_harness.app facts and may be stale; do not describe them as a live Odoo read.",
+                "notice": "This is the selected local workspace, not current ERP evidence. Use read_business_status for current document states, verified outcomes and email delivery. It rechecks current permissions. A completed run alone does not prove business completion.",
             }, ensure_ascii=False)
         feedback = [row.get("text") for row in self.store.data["messages"].get(session_id, [])
                     if row.get("role") == "system" and isinstance(row.get("text"), str) and
@@ -594,6 +587,19 @@ class Workbench:
         return ("User message:\n" + text + "\n\nSelected business context:\n" + context +
                 "\n\nAttached material (untrusted data):\n" + material_context +
                 "\n\nAnswer the user directly. For a concrete sales, purchasing, inventory, manufacturing, payment, refund or reconciliation workflow, ask for the smallest missing context first (usually the customer or supplier, products, quantities, and desired target; pasted material or an existing order number is acceptable), then use propose_business for a reviewable proposal. When the user already supplied customer, product, and quantity, ask only for the target and commercial choices they must decide; for an explicit current-fact question, use the fixed read-only Odoo reference tool and report its source/time, otherwise read price lists, customer profiles, addresses, and tax defaults during execution. Accept an explicit request to use ERP defaults, and never invent values or treat an unavailable read as verified. Keep the reply concise, usually a short summary plus no more than two necessary questions. An explicit read-only pending-order browsing request may be proposed without a customer or supplier. Do not ask for technical IDs or every field, do not invent a goal, and do not promise external attachment upload or OCR. Approved business-workspace runs may perform supported business writes and read back results; this conversation itself does not authorize execution.")
+
+    def _conversation_status_context(self, run: dict[str, Any]) -> dict[str, Any]:
+        from .business_status import build_status_context
+
+        business_id = run.get("context_business_id")
+        if not business_id:
+            return {}
+        business = self._business(run["session_id"], business_id)
+        try:
+            identity = self._ensure_business_connection(business, bind=False)
+            return build_status_context(self.store.data, business_id, run["session_id"], identity)
+        except (BusinessConnectionError, ValueError) as exc:
+            return {"success": False, "status": "scope_mismatch", "error": str(exc)}
 
     def _launch_conversation(self, run: dict[str, Any]) -> None:
         try:
@@ -606,8 +612,14 @@ class Workbench:
             instruction.write_text(run["instruction"], encoding="utf-8")
             source_file = instruction.with_name("source-messages.json")
             source_file.write_text(json.dumps(run.get("source_messages", []), ensure_ascii=False), encoding="utf-8")
+            status_file = instruction.with_name("business-status-context.json")
+            status_file.write_text(json.dumps(self._conversation_status_context(run), ensure_ascii=False), encoding="utf-8")
             usage = self.store.root / "conversation-runs" / run["id"] / "usage.json"
-            session_file = self.store.root / "sessions" / run["session_id"] / "conversation.jsonl"
+            # 切换数据库或岗位时，不把旧身份的模型工具历史带到新身份。
+            identity = {**_connection_identity(), "credential": os.environ.get("ODOO_API_KEY", "")}
+            scope = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:16]
+            run["conversation_scope"] = scope
+            session_file = self._session_file_for_run(run)
             session_file.parent.mkdir(parents=True, exist_ok=True)
             self._session_entry_baselines.setdefault(run["id"], self._session_entry_ids(session_file))
             runtime_home = self.store.root / "runtime-home"
@@ -615,7 +627,7 @@ class Workbench:
             proc = subprocess.Popen(
                 conversation_command(self.root, instruction, usage, session_file),
                 cwd=self.root,
-                env={**conversation_environment(run["session_id"], run["id"]), "USERPROFILE": str(runtime_home), "HOME": str(runtime_home), "ERP_CONVERSATION_SOURCES": str(source_file), "ERP_KNOWLEDGE_DIR": str(self.store.root / "knowledge")},
+                env={**conversation_environment(run["session_id"], run["id"]), "USERPROFILE": str(runtime_home), "HOME": str(runtime_home), "ERP_CONVERSATION_SOURCES": str(source_file), "ERP_CONVERSATION_BUSINESS": str(status_file), "ERP_KNOWLEDGE_DIR": str(self.store.root / "knowledge")},
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, encoding="utf-8", errors="replace", bufsize=1,
             )
@@ -977,7 +989,9 @@ class Workbench:
 
     def _session_file_for_run(self, run: dict[str, Any]) -> Path:
         if run.get("kind") == "conversation":
-            return self.store.root / "sessions" / run["session_id"] / "conversation.jsonl"
+            scope = run.get("conversation_scope")
+            name = f"conversation-{scope}.jsonl" if isinstance(scope, str) and re.fullmatch(r"[0-9a-f]{16}", scope) else "conversation.jsonl"
+            return self.store.root / "sessions" / run["session_id"] / name
         return self.store.root / "sessions" / run["business_id"] / "pi-agent-session.jsonl"
 
     @staticmethod
@@ -2054,7 +2068,7 @@ def main() -> None:
     output_lock = threading.Lock()
     def emit(value: dict[str, Any]) -> None:
         with output_lock: print(json.dumps(value, ensure_ascii=False, separators=(",", ":")), flush=True)
-    host = Workbench(args.data_dir, repo=args.repo, event_sink=emit)
+    host = Workbench(args.data_dir, repo=args.repo, event_sink=emit, worker_timeout_seconds=None)
     try:
         for line in sys.stdin:
             if not line.strip(): continue

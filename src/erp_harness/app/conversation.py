@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 # 普通对话链路：用户文本 → HarnessSession → 只读查询 / 业务提案。
-# 固定两个工具：read_odoo_reference、propose_business。没有写工具。
+# 固定只读工具和业务提案。业务状态按宿主选中的业务隔离，没有写工具。
 # 查询只能选择预设资源和字段。结果带来源、时间及截断标记。
 # 提案交给 host 确认。提案成功既不表示 Odoo 已写入，也不授予后续写权限。
 # 会话、请求回执、用量分别落盘；未报告的用量桶保留未知。
@@ -80,6 +80,11 @@ CONVERSATION_POLICY = (
     "a business is complete before the workspace has verified it. Payment and refund "
     "goals require the original document, amount, currency and company; bank reconciliation "
     "requires matching journal entries, not merely an invoice marked paid. "
+    "For the selected business's completion, document state or email delivery, use read_business_status. "
+    "It rechecks evidence with your current Odoo permissions; report unknown or denied reads explicitly. "
+    "smtp_accepted does not prove recipient delivery or reading. A status question never authorizes a resend. "
+    "Before proposing sales-order invoicing, resolve the order and use read_invoice_eligibility. "
+    "A blocked prerequisite requires the user's commercial choice, not another API or changed invoice policy. "
     "Ordinary discussion must not create a proposal. After a successful proposal "
     "tool call, tell the user briefly to click the card button '创建业务工作区', "
     "then click '开始执行'. Do not ask the user to reply with confirmation and do "
@@ -96,7 +101,7 @@ _REFERENCE_SPECS = {
     "purchase_order": ("purchase.order", ["id", "name", "state", "partner_id", "company_id", "date_order", "partner_ref", "amount_total", "currency_id"]),
     "company": ("res.company", ["id", "name", "currency_id"]),
     "tax": ("account.tax", ["id", "name", "amount", "amount_type", "type_tax_use", "company_id"]),
-    "sale_line": ("sale.order.line", ["id", "order_id", "product_id", "product_uom_qty", "price_unit", "tax_ids"]),
+    "sale_line": ("sale.order.line", ["id", "order_id", "product_id", "product_uom_qty", "price_unit", "tax_ids", "qty_delivered", "qty_invoiced", "qty_to_invoice"]),
     "purchase_line": ("purchase.order.line", ["id", "order_id", "product_id", "product_qty", "price_unit", "tax_ids"]),
     "invoice": ("account.move", ["id", "name", "state", "move_type", "company_id", "partner_id", "commercial_partner_id", "amount_total", "currency_id", "payment_state", "invoice_origin", "invoice_line_ids", "invoice_pdf_report_id"]),
     "transfer": ("stock.picking", ["id", "name", "state", "partner_id", "origin", "scheduled_date"]),
@@ -107,6 +112,7 @@ _ODOO_READS = None
 _KNOWLEDGE = None
 _SOURCE_MESSAGES = []
 _TASK_ENTITIES = None
+_BUSINESS_CONTEXT = None
 
 
 def _task_entities(reads, source_text, knowledge):
@@ -390,6 +396,56 @@ async def _read_odoo_reference(_call_id, arguments, _signal=None, _on_update=Non
     return AgentToolResult(content=json.dumps(payload, ensure_ascii=False), details=payload)
 
 
+async def _read_business_status(_call_id, arguments, _signal=None, _on_update=None):
+    from .business_status import read_business_status
+    from .host import _connection_identity
+
+    if arguments:
+        payload = {"success": False, "status": "invalid", "error": "This tool only reads the host-selected business; it takes no arguments."}
+    elif _BUSINESS_CONTEXT and _BUSINESS_CONTEXT.get("success") is False:
+        payload = _BUSINESS_CONTEXT
+    elif not _BUSINESS_CONTEXT or not _BUSINESS_CONTEXT.get("business_id"):
+        payload = {"success": False, "status": "unavailable", "error": "Select the relevant business workspace before checking its execution evidence."}
+    else:
+        try:
+            payload = await asyncio.to_thread(
+                read_business_status, _BUSINESS_CONTEXT, _odoo_reads(),
+                session_id=os.environ.get("PI_AGENT_SESSION_ID"), connection=_connection_identity(),
+            )
+        except Exception:  # noqa: BLE001 - read failures never expose credentials or cached success.
+            payload = {"success": False, "status": "unavailable", "error": "Current business evidence could not be read; no completion or delivery is verified."}
+    return AgentToolResult(content=json.dumps(payload, ensure_ascii=False), details=payload)
+
+
+async def _read_invoice_eligibility(_call_id, arguments, _signal=None, _on_update=None):
+    values = dict(arguments or {})
+    if set(values) - {"order_ids", "final"}:
+        payload = {"success": False, "status": "invalid", "error": "Only resolved order_ids and final are accepted."}
+    else:
+        try:
+            payload = await asyncio.to_thread(_odoo_reads().call, "read_invoice_eligibility", values)
+        except Exception:  # noqa: BLE001 - read failures never authorize a business action.
+            payload = {"success": False, "status": "unavailable", "error": "Current invoice prerequisites could not be read."}
+    return AgentToolResult(content=json.dumps(payload, ensure_ascii=False), details=payload)
+
+
+READ_BUSINESS_STATUS = AgentTool(
+    name="read_business_status", label="Read business status",
+    description="Recheck the host-selected business's document states, completion checks and email/PDF delivery evidence under current permissions. No arguments, writes or resending. Unknown is not failure or success. SMTP acceptance is not recipient delivery/read proof.",
+    parameters={"type": "object", "properties": {}, "additionalProperties": False},
+    execute_fn=_read_business_status,
+)
+READ_INVOICE_ELIGIBILITY = AgentTool(
+    name="read_invoice_eligibility", label="Read invoice prerequisites",
+    description="Before invoicing resolved sales orders, read current invoiceable quantities and blocking reasons. A blocked order needs an explicit business choice; never assume a down-payment amount or change delivery/invoice policy. final=true includes final adjustments. Read-only with current role permissions.",
+    parameters={"type": "object", "properties": {
+        "order_ids": {"type": "array", "items": {"type": "integer", "minimum": 1}, "minItems": 1, "maxItems": 20},
+        "final": {"type": "boolean", "default": True},
+    }, "required": ["order_ids"], "additionalProperties": False},
+    execute_fn=_read_invoice_eligibility,
+)
+
+
 READ_ODOO_REFERENCE = AgentTool(
     name="read_odoo_reference",
     label="Read Odoo reference",
@@ -575,10 +631,12 @@ def arguments() -> argparse.Namespace:
 
 
 async def run(args: argparse.Namespace) -> None:
-    global _SOURCE_MESSAGES, _TASK_ENTITIES
+    global _SOURCE_MESSAGES, _TASK_ENTITIES, _BUSINESS_CONTEXT
     _TASK_ENTITIES = None
     source_file = os.environ.get("ERP_CONVERSATION_SOURCES")
     _SOURCE_MESSAGES = json.loads(Path(source_file).read_text(encoding="utf-8")) if source_file else []
+    status_file = os.environ.get("ERP_CONVERSATION_BUSINESS")
+    _BUSINESS_CONTEXT = json.loads(Path(status_file).read_text(encoding="utf-8")) if status_file else None
     api_key = os.environ.get("LLM_API_KEY")
     base_url = os.environ.get("LLM_BASE_URL", "").rstrip("/")
     model = os.environ.get("LLM_MODEL")
@@ -628,7 +686,7 @@ async def run(args: argparse.Namespace) -> None:
             model=model,
             storage=JsonlSessionStorage(args.session_file),
             cwd=Path.cwd(),
-            tools=[READ_ODOO_REFERENCE, PROPOSE_BUSINESS],
+            tools=[READ_ODOO_REFERENCE, READ_BUSINESS_STATUS, READ_INVOICE_ELIGIBILITY, PROPOSE_BUSINESS],
             max_turns=None,
             resource_paths=ResourcePaths(
                 root=args.receipt_dir / ".pi-agent",
@@ -648,8 +706,8 @@ async def run(args: argparse.Namespace) -> None:
     try:
         print(json.dumps({
             "type": "run_metadata", "kind": "conversation", "model": model,
-            "runtime": "HarnessSession", "toolNames": [READ_ODOO_REFERENCE.name, PROPOSE_BUSINESS.name],
-            "toolMode": "proposal_plus_readonly", "odooToolCount": 1,
+            "runtime": "HarnessSession", "toolNames": [READ_ODOO_REFERENCE.name, READ_BUSINESS_STATUS.name, READ_INVOICE_ELIGIBILITY.name, PROPOSE_BUSINESS.name],
+            "toolMode": "proposal_plus_readonly", "odooToolCount": 3,
         }, ensure_ascii=False), flush=True)
         # Use append-only journal entries rather than session.messages.  A
         # compaction replaces old context in the latter and would make a

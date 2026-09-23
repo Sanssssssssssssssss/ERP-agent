@@ -36,14 +36,21 @@ class _Reader:
         self.transport = "json2"
         self.records = {
             "res.partner": {7: {"id": 7, "name": "Before"}, 8: {"id": 8, "name": "Before"}},
-            "sale.order": {7: {"id": 7, "state": "draft"}},
+            "sale.order": {7: {"id": 7, "state": "draft", "name": "S00007", "order_line": [71], "invoice_ids": [],
+                               "partner_id": [7, "Customer"], "company_id": [1, "Company"], "currency_id": [1, "CNY"]}},
+            "sale.order.line": {71: {"id": 71, "order_id": [7, "S00007"], "name": "Item", "display_type": False,
+                                     "is_downpayment": False, "product_id": [5, "Item"], "product_uom_qty": 3,
+                                     "qty_delivered": 2, "qty_invoiced": 0, "qty_to_invoice": 2}},
+            "product.product": {5: {"id": 5, "invoice_policy": "delivery"}},
             "purchase.order": {8: {"id": 8, "state": "draft"}},
             "account.move": {10: {"id": 10, "state": "draft", "move_type": "out_invoice"}},
-            "sale.advance.payment.inv": {9: {"id": 9, "sale_order_ids": [7]}},
+            "sale.advance.payment.inv": {9: {"id": 9, "sale_order_ids": [7], "advance_payment_method": "delivered",
+                                            "deduct_down_payments": True, "amount": 0.0, "fixed_amount": 0.0}},
             "mail.message": {},
             "ir.attachment": {},
         }
         self.metadata = {
+            "qty_to_invoice": {"type": "float", "digits": [16, 2]},
             "id": {"type": "integer", "readonly": True},
             "name": {"type": "char", "readonly": False},
             "datas": {"type": "binary", "readonly": False},
@@ -53,6 +60,10 @@ class _Reader:
 
     def get_model_fields(self, _model: str) -> dict:
         return copy.deepcopy(self.metadata)
+
+    def execute_method(self, model, method, **kwargs):
+        assert model == "sale.order.line" and method == "fields_get"
+        return {key: copy.deepcopy(self.metadata[key]) for key in kwargs["allfields"] if key in self.metadata}
 
     def read_records(self, model: str, ids: list[int], fields=None) -> list[dict]:
         rows = []
@@ -74,7 +85,7 @@ class _Reader:
             elif operator == "in":
                 rows = [row for row in rows if row.get(field) in value]
         rows.sort(key=lambda row: row["id"], reverse=order == "id DESC")
-        if limit is not None:
+        if limit:
             rows = rows[:limit]
         return [
             {key: copy.deepcopy(value) for key, value in row.items() if fields is None or key in fields}
@@ -1023,6 +1034,7 @@ class NativeActionCheckpointTests(unittest.TestCase):
 
         runtime = _Runtime()
         runtime.client.records["sale.advance.payment.inv"][11] = {
+            **runtime.client.records["sale.advance.payment.inv"][9],
             "id": 11,
             "sale_order_ids": [7],
         }
@@ -1341,7 +1353,7 @@ class NativeActionCheckpointTests(unittest.TestCase):
             self.assertEqual(row["prestate"]["orders"][0]["partner_id"][0], 516)
             self.assertEqual(row["prestate"]["orders"][0]["amount_total"], 5159.58)
             self.assertEqual(row["prestate"]["wizard"][0]["advance_payment_method"], "delivered")
-            self.assertEqual(read.call_count, 2)
+            self.assertEqual(read.call_count, 3)
             self.assertTrue(actions.store.approve(pending["action_id"], "desktop_host"))
             runtime.client.records["sale.order"][7]["amount_total"] = 9999
             # Approved source amount is part of the digest; changing it needs a fresh review.

@@ -210,7 +210,7 @@ class WorkbenchConversationTests(unittest.TestCase):
         self.assertEqual(len(requests), 1)
         self.assertEqual(
             [row["function"]["name"] for row in requests[0]["tools"]],
-            ["read_odoo_reference", "propose_business"],
+            ["read_odoo_reference", "read_business_status", "read_invoice_eligibility", "propose_business"],
         )
         self.assertEqual("".join(event.get("text", "") for event in events if event.get("type") == "message_delta"), "可以先回答问题，再在你确认后建立业务。")
         self.assertNotIn("mcp_odoo_read", json.dumps(requests[0]))
@@ -268,6 +268,29 @@ class WorkbenchConversationTests(unittest.TestCase):
         self.assertFalse(result.details["success"])
         self.assertEqual(result.details["status"], "unavailable")
         self.assertFalse(result.details["verified"])
+
+    def test_business_status_tool_does_not_accept_model_scope_or_missing_context(self):
+        with patch.object(conversation, "_BUSINESS_CONTEXT", None), patch.object(
+                conversation, "_odoo_reads", side_effect=AssertionError("must not connect")):
+            for arguments, expected in [({}, "unavailable"), ({"business_id": "other"}, "invalid")]:
+                result = asyncio.run(conversation._read_business_status("call", arguments))
+                self.assertEqual(result.details["status"], expected)
+        with patch.object(conversation, "_BUSINESS_CONTEXT", {"success": False, "status": "scope_mismatch"}):
+            result = asyncio.run(conversation._read_business_status("call", {}))
+            self.assertEqual(result.details["status"], "scope_mismatch")
+
+    def test_business_status_tool_returns_fresh_verified_receipt(self):
+        from tests.test_business_status import mail_state, CONNECTION
+        from erp_harness.app.business_status import build_status_context
+
+        state, reads = mail_state()
+        context = build_status_context(state, "b1", "s1", CONNECTION)
+        with patch.object(conversation, "_BUSINESS_CONTEXT", context), patch.object(conversation, "_ODOO_READS", reads), \
+                patch("erp_harness.app.host._connection_identity", return_value=CONNECTION), \
+                patch.dict(os.environ, {"PI_AGENT_SESSION_ID": "s1"}):
+            result = asyncio.run(conversation._read_business_status("call", {}))
+        self.assertEqual(result.details["delivery_receipts"][0]["delivery"], "smtp_accepted")
+        self.assertEqual(json.loads(result.text), result.details)
 
     def test_read_odoo_reference_rejects_bad_shapes_and_caps_large_rows(self):
         for arguments in (
