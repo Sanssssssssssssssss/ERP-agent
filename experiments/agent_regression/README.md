@@ -4,7 +4,9 @@
 
 本轮入口：`python -m experiments.agent_regression.incidents` 离线冻结；加 `--paid` 执行 A04 的 A/B 和原 B02/B03 保护，共 4 次，不执行返回的工具。A04 来源是 S01499 的真实 `confirm` 误调用；跨 run 防重发和桌面回读范围用离线测试验证。结果保存在 `.runtime/agent-regression-guards-20260924/`。
 
-待维护的真实问题：普通聊天失去业务绑定后误称“只生成提案”（[传播证据](../../.runtime/agent-regression-full-20260923/full/S01499/conversation-scope-finding.json)）；2003 的 SOP 缺必填输入、空查询条件、猜字段及同轮依赖读取（[原请求与哈希索引](../../.runtime/agent-regression-full-20260923/full/bench/2003-replay-candidates.json)）。这些尚未宣称修复；后续修改对应能力时冻结该节点再付费验证。
+D04 来自明确选择“整个会话”后，模型把无绑定状态误判为“只生成提案”的真实请求。只替换生产状态回包和工具定义，不注入业务绑定或改写旧历史。冻结：`python -m experiments.agent_regression.incidents --directory .runtime/agent-regression-scope-20260924 --case D04`；同目录加 `--paid`（不带 `--case`）执行 A/B 共 2 次。[原始传播证据](../../.runtime/agent-regression-full-20260923/full/S01499/conversation-scope-finding.json)。
+
+待维护：2003 的 SOP 缺必填输入、空查询条件、猜字段及同轮依赖读取（[原请求与哈希索引](../../.runtime/agent-regression-full-20260923/full/bench/2003-replay-candidates.json)）。后续修改对应能力时冻结该节点再验证。
 
 12 个真实 trace 节点，A/B 各一次请求；返回工具意图只保存，不执行。完整请求、推理、原始响应与判定依据在 `.runtime/agent-regression-20260923/`。
 
