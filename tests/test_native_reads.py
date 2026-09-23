@@ -623,7 +623,10 @@ print('MCP_FREE_CORE_IMPORT_OK')
             self.assertEqual(json.loads(request.data), {"ids": [1], "fields": ["name"]})
             raw = path.read_text()
             self.assertNotIn("test-secret", raw)
-            self.assertEqual(json.loads(raw)["backend"], "native")
+            rows = [json.loads(line) for line in raw.splitlines()]
+            self.assertEqual([r["event"] for r in rows], ["start", "end"])
+            self.assertEqual(rows[0]["rpc_request_id"], rows[1]["rpc_request_id"])
+            self.assertEqual(rows[1]["backend"], "native")
 
     def test_agenttool_wire_parity_and_real_backend_receipts(self):
         async def check(directory):

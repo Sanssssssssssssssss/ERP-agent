@@ -17,6 +17,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import xmlrpc.client
+from uuid import uuid4
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, cast
@@ -305,6 +306,13 @@ class OdooClient:
         started = time.monotonic()
         status = None
         error_type = None
+        receipt = {
+            "rpc_request_id": "rpc_" + uuid4().hex,
+            "model": model, "method": method,
+            "backend": os.environ.get("ODOO_REQUEST_BACKEND", "mcp"),
+            "tool_call_id": READ_CALL_ID.get(),
+        }
+        self._request_receipt({**receipt, "event": "start", "at": time.time()})
         try:
             result = self._json2_call_once(model, method, payload)
             status = 200
@@ -314,21 +322,20 @@ class OdooClient:
             error_type = type(exc).__name__
             raise
         finally:
-            path = os.environ.get("ODOO_REQUEST_LOG")
-            if path:
-                receipt = {
-                    "model": model, "method": method, "status": status,
-                    "backend": os.environ.get("ODOO_REQUEST_BACKEND", "mcp"),
-                    "tool_call_id": READ_CALL_ID.get(), "error_type": error_type,
-                    "elapsed_seconds": time.monotonic() - started,
-                }
-                try:
-                    # Each process uses its own file; one append per bounded row.
-                    with Path(path).open("a", encoding="utf-8") as stream:
-                        stream.write(json.dumps(receipt) + "\n")
-                except OSError:
-                    # Never turn a committed remote write into a retryable failure.
-                    print("Odoo request receipt could not be saved", file=sys.stderr)
+            self._request_receipt({**receipt, "event": "end", "at": time.time(),
+                                   "status": status, "error_type": error_type,
+                                   "elapsed_seconds": time.monotonic() - started})
+
+    @staticmethod
+    def _request_receipt(receipt: dict[str, Any]) -> None:
+        path = os.environ.get("ODOO_REQUEST_LOG")
+        if path:
+            try:
+                with Path(path).open("a", encoding="utf-8") as stream:
+                    stream.write(json.dumps(receipt) + "\n")
+            except OSError:
+                # Logging failure must never make a committed write retryable.
+                print("Odoo request receipt could not be saved", file=sys.stderr)
 
     def _json2_call_once(self, model: str, method: str, payload: dict[str, Any]) -> Any:
         """POST a JSON-2 request and return the decoded JSON result."""

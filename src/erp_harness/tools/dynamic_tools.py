@@ -40,6 +40,7 @@ BASE_TOOLS = frozenset(
 # this optional preserves MCP-only inventories that predate the native helper.
 OPTIONAL_NATIVE_BASE_TOOLS = frozenset({
     "read_supply_context", "read_invoice_eligibility", "search_observations", "read_observation",
+    "diagnose_current_run",
 })
 _FIND_BASE_TOOLS = frozenset((BASE_TOOLS - {"search_records"}) | {"find_records"})
 

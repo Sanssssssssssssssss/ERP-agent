@@ -407,7 +407,8 @@ class NativeReads:
                     if line.strip()]
         except (OSError, UnicodeError, json.JSONDecodeError):
             return {"status": "log_unavailable", "refs": []}
-        matches = [row for row in rows if row.get("tool_call_id") == call_id]
+        matches = [row for row in rows if row.get("tool_call_id") == call_id
+                   and row.get("event", "end") == "end"]
         if not matches:
             return {"status": "no_completed_attempt", "refs": []}
         last = matches[-1]

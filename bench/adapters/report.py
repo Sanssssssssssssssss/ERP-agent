@@ -909,9 +909,13 @@ def report_trial(trial: Path, destination: Path) -> dict:
     rpc_logs = list((trial / "agent").glob("odoo-*-requests.jsonl"))
     if rpc_logs:
         rpc_events = [json.loads(line) for path in rpc_logs for line in path.read_text().splitlines() if line.strip()]
-        summary["actions"]["odoo_json2_attempts"] = len(rpc_events)
-        summary["actions"]["odoo_json2_errors"] = sum(event["error_type"] is not None for event in rpc_events)
-        summary["actions"]["odoo_json2_note"] = "Completed attempt receipts only; in-flight attempts at interruption are unknown. Version probes are not included."
+        completed = [event for event in rpc_events if event.get("event", "end") == "end"]
+        summary["actions"]["odoo_json2_attempts"] = len(completed)
+        summary["actions"]["odoo_json2_errors"] = sum(event.get("error_type") is not None for event in completed)
+        started_ids = {event["rpc_request_id"] for event in rpc_events if event.get("event") == "start"}
+        ended_ids = {event.get("rpc_request_id") for event in completed}
+        summary["actions"]["odoo_json2_incomplete_attempts"] = len(started_ids - ended_ids)
+        summary["actions"]["odoo_json2_note"] = "Completed attempts and observed starts without ends are separate. Missing historical logs remain unknown. HTTP success does not prove business success."
         summary["receipts"]["odoo_requests"] = [str(path.resolve()) for path in rpc_logs]
         write_json(destination / "odoo_requests.json", rpc_events)
     summary["usage"].update(
