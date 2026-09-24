@@ -14,7 +14,7 @@ import asyncio
 import json
 import string
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
-from contextlib import suppress
+from contextlib import aclosing, suppress
 from dataclasses import dataclass, replace
 from inspect import isawaitable
 from pathlib import Path
@@ -3384,10 +3384,6 @@ class HarnessSession:
         self._persisted_message_ids.clear()
         events: AsyncIterator[AgentEvent] | None = None
         settled_event: AgentSettledEvent | None = None
-        auto_name_attempted = False
-        overflow_message: AssistantMessage | None = None
-        route_failure_message: AssistantMessage | None = None
-        transient_failure_message: AssistantMessage | None = None
         try:
             prompt_message: AgentMessage
             if custom_type is not None:
@@ -3409,75 +3405,11 @@ class HarnessSession:
                 system=before_start.system_prompt,
             )
             self._invalidate_context_usage_cache()
-            async for event in events:
-                auto_name_message: str | None = None
-                if (
-                    isinstance(event, MessageEndEvent)
-                    and not auto_name_attempted
-                    and isinstance(event.message, UserMessage)
-                ):
-                    auto_name_attempted = True
-                    auto_name_message = event.message.text
-                if isinstance(event, ToolExecutionEndEvent):
-                    self._invalidate_context_usage_cache()
-                if isinstance(event, MessageEndEvent) and isinstance(
-                    event.message, AssistantMessage
-                ):
-                    if event.message.stop_reason == "error":
-                        self._last_diagnostic_log_path = (
-                            self._diagnostic_logger.log_assistant_error(
-                                context=context,
-                                phase="agent_loop",
-                                message=event.message,
-                            )
-                        )
-                    if self._is_recoverable_overflow(event.message):
-                        overflow_message = event.message
-                    elif (
-                        event.message.stop_reason == "error"
-                        and self._should_auto_failover_huggingface_route(event.message)
-                    ):
-                        route_failure_message = event.message
-                    elif (
-                        event.message.stop_reason == "error"
-                        and self._config.retry_enabled
-                        and self._config.retry_max_retries > 0
-                        and self._is_transient_retryable(event.message)
-                    ):
-                        transient_failure_message = event.message
-                if isinstance(event, AgentEndEvent):
-                    yield SessionAgentEndEvent(
-                        messages=event.messages,
-                        will_retry=(
-                            overflow_message is not None
-                            or route_failure_message is not None
-                            or transient_failure_message is not None
-                        ),
-                    )
-                else:
+            async with aclosing(
+                self._run_agent_events(events, context=context, from_prompt=True)
+            ) as output:
+                async for event in output:
                     yield event
-                # Let frontends render the confirmed, expanded prompt before
-                # session naming performs its separate provider request.
-                if auto_name_message is not None:
-                    await self._try_auto_name_session(auto_name_message, context=context)
-            if overflow_message is not None:
-                async for recovery_event in self._run_overflow_recovery(
-                    overflow_message,
-                    context=context,
-                ):
-                    yield recovery_event
-            elif route_failure_message is not None:
-                async for failover_event in self._run_huggingface_route_failover(context=context):
-                    yield failover_event
-            elif transient_failure_message is not None:
-                async for transient_event in self._run_transient_retries(
-                    transient_failure_message,
-                    context=context,
-                ):
-                    yield transient_event
-                await self._try_auto_compact(context=context, phase="auto_compact_after_prompt")
-            else:
-                await self._try_auto_compact(context=context, phase="auto_compact_after_prompt")
         except Exception as exc:
             self._last_diagnostic_log_path = self._diagnostic_logger.log_exception(
                 context=context,
@@ -3510,64 +3442,14 @@ class HarnessSession:
         self._persisted_message_ids.clear()
         events: AsyncIterator[AgentEvent] | None = None
         settled_event: AgentSettledEvent | None = None
-        overflow_message: AssistantMessage | None = None
-        route_failure_message: AssistantMessage | None = None
-        transient_failure_message: AssistantMessage | None = None
         try:
             events = self._harness.continue_()
             self._invalidate_context_usage_cache()
-            async for event in events:
-                if isinstance(event, ToolExecutionEndEvent):
-                    self._invalidate_context_usage_cache()
-                if isinstance(event, MessageEndEvent) and isinstance(
-                    event.message, AssistantMessage
-                ):
-                    message = event.message
-                    if self._is_recoverable_overflow(message):
-                        overflow_message = message
-                    elif message.stop_reason == "error":
-                        self._last_diagnostic_log_path = (
-                            self._diagnostic_logger.log_assistant_error(
-                                context=context,
-                                phase="agent_loop",
-                                message=message,
-                            )
-                        )
-                        if self._should_auto_failover_huggingface_route(message):
-                            route_failure_message = message
-                        elif (
-                            self._config.retry_enabled
-                            and self._config.retry_max_retries > 0
-                            and self._is_transient_retryable(message)
-                        ):
-                            transient_failure_message = message
-                if isinstance(event, AgentEndEvent):
-                    yield SessionAgentEndEvent(
-                        messages=event.messages,
-                        will_retry=(
-                            overflow_message is not None
-                            or route_failure_message is not None
-                            or transient_failure_message is not None
-                        ),
-                    )
-                else:
+            async with aclosing(
+                self._run_agent_events(events, context=context, from_prompt=False)
+            ) as output:
+                async for event in output:
                     yield event
-            if overflow_message is not None:
-                async for recovery_event in self._run_overflow_recovery(
-                    overflow_message,
-                    context=context,
-                ):
-                    yield recovery_event
-            elif route_failure_message is not None:
-                async for failover_event in self._run_huggingface_route_failover(context=context):
-                    yield failover_event
-            elif transient_failure_message is not None:
-                async for retry_event in self._run_transient_retries(
-                    transient_failure_message,
-                    context=context,
-                ):
-                    yield retry_event
-            await self._try_auto_compact(context=context, phase="auto_compact_after_continue")
         except Exception as exc:
             self._last_diagnostic_log_path = self._diagnostic_logger.log_exception(
                 context=context,
@@ -3583,6 +3465,80 @@ class HarnessSession:
                     settled_event = await self._dispatch_agent_settled()
         if settled_event is not None:
             yield settled_event
+
+    async def _run_agent_events(
+        self,
+        events: AsyncIterator[AgentEvent],
+        *,
+        context: AgentCallDiagnosticContext,
+        from_prompt: bool,
+    ) -> AsyncIterator[CodingSessionEvent]:
+        """Share recovery dispatch while retaining prompt/continue timing policies."""
+        auto_name_attempted = False
+        overflow_message: AssistantMessage | None = None
+        route_failure_message: AssistantMessage | None = None
+        transient_failure_message: AssistantMessage | None = None
+        async for event in events:
+            auto_name_message: str | None = None
+            if (
+                from_prompt and isinstance(event, MessageEndEvent)
+                and not auto_name_attempted and isinstance(event.message, UserMessage)
+            ):
+                auto_name_attempted = True
+                auto_name_message = event.message.text
+            if isinstance(event, ToolExecutionEndEvent):
+                self._invalidate_context_usage_cache()
+            if isinstance(event, MessageEndEvent) and isinstance(event.message, AssistantMessage):
+                message = event.message
+                # Prompt logs overflow errors before classifying them. Continue
+                # leaves overflow diagnostics to recovery; preserve that boundary.
+                if from_prompt and message.stop_reason == "error":
+                    self._last_diagnostic_log_path = self._diagnostic_logger.log_assistant_error(
+                        context=context, phase="agent_loop", message=message,
+                    )
+                if self._is_recoverable_overflow(message):
+                    overflow_message = message
+                elif message.stop_reason == "error":
+                    if not from_prompt:
+                        self._last_diagnostic_log_path = (
+                            self._diagnostic_logger.log_assistant_error(
+                                context=context, phase="agent_loop", message=message,
+                            )
+                        )
+                    if self._should_auto_failover_huggingface_route(message):
+                        route_failure_message = message
+                    elif (
+                        self._config.retry_enabled and self._config.retry_max_retries > 0
+                        and self._is_transient_retryable(message)
+                    ):
+                        transient_failure_message = message
+            if isinstance(event, AgentEndEvent):
+                yield SessionAgentEndEvent(
+                    messages=event.messages,
+                    will_retry=(
+                        overflow_message is not None or route_failure_message is not None
+                        or transient_failure_message is not None
+                    ),
+                )
+            else:
+                yield event
+            # Render the confirmed prompt before naming makes its provider call.
+            if auto_name_message is not None:
+                await self._try_auto_name_session(auto_name_message, context=context)
+        recovery = None
+        if overflow_message is not None:
+            recovery = self._run_overflow_recovery(overflow_message, context=context)
+        elif route_failure_message is not None:
+            recovery = self._run_huggingface_route_failover(context=context)
+        elif transient_failure_message is not None:
+            recovery = self._run_transient_retries(transient_failure_message, context=context)
+        if recovery is not None:
+            async with aclosing(recovery):
+                async for event in recovery:
+                    yield event
+        if not from_prompt or (overflow_message is None and route_failure_message is None):
+            phase = "auto_compact_after_prompt" if from_prompt else "auto_compact_after_continue"
+            await self._try_auto_compact(context=context, phase=phase)
 
     async def _dispatch_agent_settled(self) -> AgentSettledEvent:
         """Dispatch and return the final session event for one started run."""

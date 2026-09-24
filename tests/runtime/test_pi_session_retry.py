@@ -5,7 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from erp_harness.runtime import AgentTool, AgentToolResult, AssistantMessage, JsonlSessionStorage, ToolCall
+from erp_harness.runtime import (
+    AgentTool, AgentToolResult, AssistantMessage, JsonlSessionStorage, ToolCall, UserMessage,
+)
+from erp_harness.runtime.storage import MessageEntry
 from erp_harness.runtime.types import JSONValue
 from erp_harness.providers import CancellationToken, FakeProvider
 from erp_harness.providers.retry import is_retryable_assistant_error
@@ -71,16 +74,21 @@ def test_pi_provider_retry_classifier_requires_error_stop_reason() -> None:
 
 
 @pytest.mark.anyio
-async def test_transient_error_retries_and_succeeds(tmp_path: Path) -> None:
+@pytest.mark.parametrize("resume", [False, True])
+async def test_transient_error_retries_and_succeeds(tmp_path: Path, resume: bool) -> None:
     provider = FakeProvider(
         [
             [assistant_start(), assistant_error("overloaded_error")],
             [assistant_start(), assistant_done(AssistantMessage(content="Success"))],
         ]
     )
+    if resume:
+        await JsonlSessionStorage(tmp_path / "session.jsonl").append(
+            MessageEntry(message=UserMessage(content="Test"))
+        )
     session = await _session(tmp_path, provider)
 
-    events = await _collect(session.prompt("Test"))
+    events = await _collect(session.continue_() if resume else session.prompt("Test"))
 
     retry_events = [
         event for event in events if isinstance(event, (AutoRetryStartEvent, AutoRetryEndEvent))
@@ -93,6 +101,52 @@ async def test_transient_error_retries_and_succeeds(tmp_path: Path) -> None:
     assert isinstance(retry_events[-1], AutoRetryEndEvent)
     assert retry_events[-1].success is True
     assert session.is_retrying is False
+    assert events[-1].type == "agent_settled"
+    entries = await session.session_entries()
+    messages = [entry.message for entry in entries if isinstance(entry, MessageEntry)]
+    assert sum(isinstance(message, UserMessage) for message in messages) == 1
+    assert any(message.text == "Success" for message in messages)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("resume", [False, True])
+async def test_close_during_retry_releases_run_before_settled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, resume: bool,
+) -> None:
+    provider = FakeProvider([
+        [assistant_start(), assistant_error("overloaded_error")],
+        [assistant_start(), assistant_done(AssistantMessage(content="Must not run"))],
+    ])
+    storage = JsonlSessionStorage(tmp_path / "session.jsonl")
+    if resume:
+        await storage.append(MessageEntry(message=UserMessage(content="Test")))
+    session = await _session(tmp_path, provider)
+    settled = []
+    emit = session.extension_runtime.emit_event
+
+    async def observe(event):
+        if event.type == "agent_settled":
+            settled.append((session.is_running, session.retry_attempt))
+        await emit(event)
+
+    monkeypatch.setattr(session.extension_runtime, "emit_event", observe)
+    stream = session.continue_() if resume else session.prompt("Test")
+    retry_started = False
+    async for event in stream:
+        retry_started |= event.type == "auto_retry_start"
+        if retry_started and event.type == "agent_start":
+            break
+    assert retry_started and session.is_running and session.retry_attempt == 1
+    await stream.aclose()
+    assert not session.is_running and not session.is_retrying and session.retry_attempt == 0
+    assert settled == [(False, 0)]
+    assert len(provider.calls) == 1
+    messages = [entry.message for entry in await storage.read_all() if isinstance(entry, MessageEntry)]
+    assert sum(isinstance(message, UserMessage) for message in messages) == 1
+    assert any(isinstance(message, AssistantMessage) and message.stop_reason == "error"
+               for message in messages)
+    assert not any(message.text == "Must not run" for message in messages)
+    await session.aclose()
 
 
 @pytest.mark.anyio
