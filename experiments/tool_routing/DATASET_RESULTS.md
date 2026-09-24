@@ -18,6 +18,8 @@
 
 验证：21 项离线检查、3 个子检查通过。281 个冻结投射输入与重新生成结果一致；开发/测试分歧没有按模型成绩删题。ML 环境仅解析源码中的工具合同，未引入生产依赖。
 
+训练期间另做本地提问契约对照：同一批训练节点、同一预训练权重，原问法 31/64，明确“下一轮发布能力”并给出工具名后 34/64。64 次判断来自 16 个节点/能力组合的四种标签与顺序；12 次改善、9 次退步，不足以说明仅改问法即可解决。没有新增付费调用；[对照结果](../../.runtime/capability-routing-20260925/publication-probe-v1/paired-summary.json)。
+
 入口：`python -m experiments.tool_routing.collect_dataset freeze|paid|export --help`。`paid` 跳过所有已启动请求，包括状态不明的请求；不能用续跑隐式补费。`export` 只隔离训练分歧，开发/测试保留；超长评测输入直接报错。
 
 证据：[标注输入与回包](../../.runtime/capability-routing-20260925/collection-v3/)、[类别覆盖](../../.runtime/capability-routing-20260925/dataset-v3/coverage.json)、[隔离清单](../../.runtime/capability-routing-20260925/dataset-v3/quarantine.json)、[训练日志](../../.runtime/capability-routing-20260925/head-v8b.log)。失败的首次 ML 启动发生在模型加载前，原因是隔离环境缺少生产包；输入等价修复后启动 `head-v8b`，保留原错误日志。
