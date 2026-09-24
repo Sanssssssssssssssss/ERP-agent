@@ -697,16 +697,9 @@ class Workbench:
             scope = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:16]
             run["conversation_scope"] = scope
             session_file = self._session_file_for_run(run)
-            session_file.parent.mkdir(parents=True, exist_ok=True)
-            self._session_entry_baselines.setdefault(run["id"], self._session_entry_ids(session_file))
-            runtime_home = self.store.root / "runtime-home"
-            runtime_home.mkdir(exist_ok=True)
-            proc = subprocess.Popen(
+            proc = self._open_worker(run, session_file,
                 conversation_command(self.root, instruction, usage, session_file),
-                cwd=self.root,
-                env={**conversation_environment(run["session_id"], run["id"]), "USERPROFILE": str(runtime_home), "HOME": str(runtime_home), "ERP_CONVERSATION_SOURCES": str(source_file), "ERP_CONVERSATION_BUSINESS": str(status_file), "ERP_KNOWLEDGE_DIR": str(self.store.root / "knowledge")},
-                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, encoding="utf-8", errors="replace", bufsize=1,
+                {**conversation_environment(run["session_id"], run["id"]), "ERP_CONVERSATION_SOURCES": str(source_file), "ERP_CONVERSATION_BUSINESS": str(status_file)},
             )
         except Exception as exc:
             self._finalize_conversation(run, "failed", f"worker_launch_{type(exc).__name__}")
@@ -953,15 +946,11 @@ class Workbench:
             instruction = self._instruction(self._business(run["session_id"], run["business_id"]), run["id"])
             usage = self.store.root / "runs" / run["id"] / ("usage-%d.json" % len(run["events"]))
             session_file = self.store.root / "sessions" / run["business_id"] / "pi-agent-session.jsonl"
-            session_file.parent.mkdir(parents=True, exist_ok=True)
-            self._session_entry_baselines.setdefault(run["id"], self._session_entry_ids(session_file))
-            runtime_home = self.store.root / "runtime-home"
-            runtime_home.mkdir(exist_ok=True)
             evidence_file = instruction.with_name("task-sources.json")
             evidence_env = {"ODOO_TASK_EVIDENCE_FILE": str(evidence_file)} if evidence_file.exists() else {}
-            proc = subprocess.Popen(worker_command(self.root, instruction, usage, session_file, continue_run=continue_run), cwd=self.root,
-                                    env={**child_environment(run["session_id"], run["id"]), **evidence_env, "USERPROFILE": str(runtime_home), "HOME": str(runtime_home), "ERP_MEMORY_DIR": str(self.store.root / "memory"), "ERP_KNOWLEDGE_DIR": str(self.store.root / "knowledge")}, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", bufsize=1)
+            proc = self._open_worker(run, session_file,
+                worker_command(self.root, instruction, usage, session_file, continue_run=continue_run),
+                {**child_environment(run["session_id"], run["id"]), **evidence_env, "ERP_MEMORY_DIR": str(self.store.root / "memory")})
         except Exception as exc:
             self._finalize_run(run, "failed", f"worker_launch_{type(exc).__name__}")
             self._event("run_changed", {"run_id": run["id"], "status": run["status"]})
@@ -976,6 +965,17 @@ class Workbench:
         thread = threading.Thread(target=self._consume_worker, args=(run["id"], proc, usage), daemon=True)
         self._threads[run["id"]] = thread
         thread.start()
+
+    def _open_worker(self, run, session_file, command, environment):
+        session_file.parent.mkdir(parents=True, exist_ok=True)
+        self._session_entry_baselines.setdefault(run["id"], self._session_entry_ids(session_file))
+        runtime_home = self.store.root / "runtime-home"
+        runtime_home.mkdir(exist_ok=True)
+        return subprocess.Popen(command, cwd=self.root,
+            env={**environment, "USERPROFILE": str(runtime_home), "HOME": str(runtime_home),
+                 "ERP_KNOWLEDGE_DIR": str(self.store.root / "knowledge")},
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace", bufsize=1)
 
     @staticmethod
     def _session_entry_ids(path: Path) -> set[str]:
