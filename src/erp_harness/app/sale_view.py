@@ -34,6 +34,7 @@ RELATION_FIELDS: dict[str, dict[str, str]] = {
     "account.move.line": {"move_id": "account.move"},
     "stock.picking": {"sale_id": "sale.order", "partner_id": "res.partner"},
 }
+DOCUMENT_ROOT_MODELS = frozenset({"sale.order", "purchase.order", "account.move"})
 
 
 def _text(value: Any) -> str:
@@ -438,6 +439,11 @@ def _related_records(model: str, fields: dict[str, Any]) -> set[tuple[str, int]]
             for record_id in _relation_ids(fields.get(field))}
 
 
+def _has_document_target(targets: set[tuple[str, int]] | None) -> bool:
+    # A customer/company reference constrains a document; it does not identify one.
+    return any(model in DOCUMENT_ROOT_MODELS for model, _ in targets or ())
+
+
 def _select_target_document(documents: list[dict[str, Any]], target_ids: set[int]) -> dict[str, Any] | None:
     """Select only a uniquely verified and freshly observed target."""
     if target_ids:
@@ -456,7 +462,7 @@ def _annotate_document_scope(
         if not targets:
             return documents
         return [{**doc, "document_scope": "current" if (doc.get("model"), doc.get("id")) in targets else "reference", "is_reference": (doc.get("model"), doc.get("id")) not in targets} for doc in documents]
-    if targets and business_type != "invoice_delivery":
+    if _has_document_target(targets) and business_type != "invoice_delivery":
         # Only trusted roots and their explicit relationships are current.
         # Exploration remains in history, without becoming completion evidence.
         by_key = {(doc.get("model"), doc.get("id")): doc for doc in documents}
@@ -538,7 +544,7 @@ def _tool_stage(tool: dict[str, Any]) -> str | None:
     tool_name = str(tool.get("name") or "").lower().removeprefix("mcp_odoo_")
     if tool_name in {"read_record", "search_records", "find_records"} and isinstance(model, str) and model:
         return "read"
-    return "read" if model in {"sale.order", "purchase.order", "account.move"} and operation in {None, "read_record", "search_records", "find_records"} else None
+    return "read" if model in DOCUMENT_ROOT_MODELS and operation in {None, "read_record", "search_records", "find_records"} else None
 
 
 def _tool_action_fields(tool: dict[str, Any]) -> tuple[Any, Any]:
@@ -650,7 +656,7 @@ def _execution_projection(
         item = _evidence(document, label)
         model = document.get("model")
         fields = document.get("fields") if isinstance(document.get("fields"), dict) else {}
-        relevant = model in {"sale.order", "purchase.order", "account.move"} or (business_type in ENTERPRISE_TYPES and model in enterprise_view.FIELDS)
+        relevant = model in DOCUMENT_ROOT_MODELS or (business_type in ENTERPRISE_TYPES and model in enterprise_view.FIELDS)
         if relevant:
             observed_by_stage["read"] = True
         if item is None:
@@ -1084,8 +1090,8 @@ def refresh_business(
                 observations[(model, record_id)] = document
     observed_documents = observations
     targets = _readback_targets(business, runs)
-    if targets:
-        # Keep the old discovery fallback only for businesses without bindings.
+    if _has_document_target(targets):
+        # Party-only references retain legacy document discovery and relation checks.
         observations = {key: observations.get(key, {"model": key[0], "id": key[1]})
                         for key in sorted(targets) if key[0] in READBACK_FIELDS}
 

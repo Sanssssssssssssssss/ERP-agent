@@ -455,6 +455,26 @@ class SaleViewReadbackTests(unittest.TestCase):
         self.assertEqual(checks["read_sale.order_7"]["status"], "unknown")
         self.assertEqual([(args["model"], args["record_id"]) for _, args in reads.calls], [("sale.order", 7)])
 
+    def test_non_document_references_preserve_legacy_order_discovery_without_selecting_a_target(self):
+        for model, record_id in (("res.partner", 10), ("res.company", 1), ("sale.order.line", 21), ("product.product", 99)):
+            for multiple in (False, True):
+                with self.subTest(model=model, multiple=multiple):
+                    state, records = _state(), deepcopy(RECORDS)
+                    state["businesses"]["b1"].update(completion_target="confirmed", references=[{
+                        "model": model, "id": record_id, "quote": "原始引用", "fields": {"id": record_id}}])
+                    if multiple:
+                        state["runs"]["r2"]["documents"].append({"model": "sale.order", "id": 8, "fields": {}})
+                        records[("sale.order", 8)] = {**records[("sale.order", 7)], "id": 8, "name": "SO002"}
+                    reads = NativeReadFixture(records)
+                    detail = refresh_business(state, "b1", reads)
+                    checks = {row["name"]: row for row in detail["checks"]}
+                    self.assertIn(("sale.order", 7), {(args["model"], args["record_id"]) for _, args in reads.calls})
+                    self.assertEqual(checks["observed_order"]["status"], "unknown" if multiple else "passed")
+                    order = next(row for row in detail["documents"] if row["model"] == "sale.order" and row["id"] == 7)
+                    self.assertEqual(order["document_scope"], "current")
+                    if multiple:
+                        self.assertEqual(detail["outcome"]["status"], "unknown")
+
     def test_purchase_draft_projection_uses_draft_check(self):
         state = _state()
         state['businesses']['b1'].update({'type': 'purchase', 'completion_target': 'draft'})

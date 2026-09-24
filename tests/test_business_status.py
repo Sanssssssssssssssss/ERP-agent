@@ -148,6 +148,19 @@ def test_generic_order_reads_current_facts_and_drops_failed_history():
     assert len(json.dumps(result).encode()) < 16_384
 
 
+def test_customer_reference_does_not_restore_exploratory_orders_to_chat_scope():
+    state = _state()
+    state["businesses"]["b1"].update(odoo_connection=CONNECTION, completion_target="confirmed",
+        references=[{"model": "res.partner", "id": 10, "fields": {"id": 10}}])
+    context = build_status_context(state, "b1", "s1", CONNECTION)
+    assert all(d["model"] == "res.partner" for r in context["state"]["runs"].values() for d in r["documents"])
+    native = NativeReadFixture(copy.deepcopy(RECORDS))
+    result = read(context, SimpleNamespace(call=native))
+    assert result["success"] and result["verification_status"] == "unknown", result
+    assert {(args["model"], args["record_id"]) for _, args in native.calls} == {("res.partner", 10)}
+    assert not any(d["model"] == "sale.order" for d in result["documents"])
+
+
 def test_business_status_bounds_large_read_results():
     state = _state()
     state["businesses"]["b1"].update(odoo_connection=CONNECTION, completion_target="posted",
