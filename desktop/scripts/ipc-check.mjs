@@ -1,4 +1,4 @@
-// Local scripted endpoints, real packaged Electron/preload/Python/worker chain.
+// Local endpoints, real Electron/preload/Python/worker chain. CI uses the package.
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { _electron as electron } from "playwright";
 
 const desktop = resolve(import.meta.dirname, "..");
+const development = process.argv.includes("--development");
 const output = resolve(desktop, "../.runtime/ipc-check", `run-${process.pid}`);
 const profile = join(output, "profile");
 await mkdir(output, { recursive: true });
@@ -13,6 +14,35 @@ const log = [];
 let writes = 0;
 let comment = "Original fixture comment";
 let calls = 0;
+function partnerRows(body) {
+  const row = { id: 10, name: "Fixture vendor", display_name: "Fixture vendor", ref: "FIXTURE", comment,
+    email: false, city: false, company_id: false, parent_id: false, commercial_partner_id: [10, "Fixture vendor"],
+    type: "contact", function: false, active: true, property_payment_term_id: false, write_date: "2026-09-21 00:00:00" };
+  const terms = [...(body.domain ?? [])];
+  function term() {
+    const item = terms.shift();
+    if (item === "|" || item === "&") {
+      const left = term(), right = term();
+      return item === "|" ? left || right : left && right;
+    }
+    if (item === "!") return !term();
+    const [field, operator, expected] = item;
+    assert.ok(Object.hasOwn(row, field), `Unsupported fixture field ${field}`);
+    if (operator === "=") return row[field] === expected;
+    if (operator === "in") return expected.includes(row[field]);
+    if (operator === "ilike") return String(row[field]).toLowerCase().includes(String(expected).toLowerCase());
+    throw new Error(`Unsupported fixture operator ${operator}`);
+  }
+  let matched = !body.ids || body.ids.includes(row.id);
+  while (terms.length) matched = term() && matched;
+  if (!matched) return [];
+  return [Object.fromEntries(["id", ...(body.fields ?? Object.keys(row))].map(field => {
+    assert.ok(Object.hasOwn(row, field), `Unsupported fixture field ${field}`);
+    return [field, row[field]];
+  }))];
+}
+assert.equal(partnerRows({ domain: [["name", "=", "Other vendor"]] }).length, 0);
+assert.equal(partnerRows({ domain: ["|", ["name", "=", "Fixture vendor"], ["email", "=", "Fixture vendor"]] }).length, 1);
 const server = createServer(async (request, response) => {
   try {
     const buffers = [];
@@ -28,7 +58,8 @@ const server = createServer(async (request, response) => {
       if (catalog.includes("propose_business")) {
         if (!used.includes("propose_business")) {
           tool = "propose_business";
-          args = { type: "purchase", title: "IPC fixture", goal: "Update the observed vendor comment after approval.", completion_target: "draft" };
+          args = { type: "purchase", title: "IPC fixture", goal: "Set Fixture vendor's comment to Approved fixture comment after approval.", completion_target: "draft",
+            references: [{ resource: "contact", id: 10, quote: "Fixture vendor" }] };
         }
       } else if (!used.includes("configure_odoo_tools")) {
         tool = "configure_odoo_tools";
@@ -56,6 +87,11 @@ const server = createServer(async (request, response) => {
       id: { type: "integer", string: "ID", readonly: true },
       name: { type: "char", string: "Name" },
       ref: { type: "char", string: "Reference" },
+      display_name: { type: "char", string: "Display name", readonly: true },
+      email: { type: "char" }, city: { type: "char" }, type: { type: "selection" }, function: { type: "char" }, active: { type: "boolean" },
+      company_id: { type: "many2one", relation: "res.company" }, parent_id: { type: "many2one", relation: "res.partner" },
+      commercial_partner_id: { type: "many2one", relation: "res.partner", readonly: true },
+      property_payment_term_id: { type: "many2one", relation: "account.payment.term" },
       comment: { type: "html", string: "Comment" },
       write_date: { type: "datetime", string: "Updated" },
     };
@@ -66,9 +102,9 @@ const server = createServer(async (request, response) => {
       writes++;
       comment = body.vals.comment;
       result = true;
-    } else if (method === "search_count") result = model === "res.partner" ? 1 : 0;
-    else if (method === "search") result = model === "res.partner" ? [10] : [];
-    else if (["read", "search_read"].includes(method)) result = model === "res.partner" ? [{ id: 10, name: "Fixture vendor", ref: "FIXTURE", comment, write_date: "2026-09-21 00:00:00" }] : [];
+    } else if (method === "search_count") result = model === "res.partner" ? partnerRows(body).length : 0;
+    else if (method === "search") result = model === "res.partner" ? partnerRows(body).map(row => row.id) : [];
+    else if (["read", "search_read"].includes(method)) result = model === "res.partner" ? partnerRows(body) : [];
     else throw new Error(`Unexpected fixture operation ${model}.${method}`);
     response.writeHead(200, { "Content-Type": "application/json" });
     response.end(JSON.stringify(result));
@@ -84,9 +120,16 @@ const environment = { ...process.env };
 for (const name of ["ELECTRON_RUN_AS_NODE", "WORKBENCH_HOST_ROOT", "WORKBENCH_PYTHON", "WORKBENCH_SITE_PACKAGES", "PYTHONPATH"]) delete environment[name];
 const initialExe = process.env.WORKBENCH_PACKAGED_EXE || join(desktop, "dist/win-unpacked/Odoo Workbench.exe");
 const upgradeExe = process.env.WORKBENCH_UPGRADE_EXE || initialExe;
+if (development) {
+  environment.WORKBENCH_HOST_ROOT = resolve(desktop, "..");
+  environment.WORKBENCH_PYTHON = join(environment.WORKBENCH_HOST_ROOT, ".venv/Scripts/python.exe");
+}
 let app, page;
 async function launch(executablePath, userData) {
-  app = await electron.launch({ executablePath, args: [`--user-data-dir=${userData}`], env: environment, timeout: 30_000 });
+  app = await electron.launch({
+    executablePath: development ? join(desktop, "node_modules/electron/dist/electron.exe") : executablePath,
+    args: [`--user-data-dir=${userData}`, ...(development ? [desktop] : [])], env: environment, timeout: 30_000,
+  });
   page = await app.firstWindow();
   await page.getByRole("button", { name: /连接设置/ }).waitFor();
 }
@@ -106,7 +149,7 @@ async function prepareApproval() {
   const session = await call("create_session", { title: "Migration fixture" });
   const scope = { session_id: session.id };
   const material = await call("import_material", { ...scope, name: "fixture.csv", content_base64: Buffer.from("vendor,note\nFixture vendor,review\n").toString("base64") });
-  await call("send_message", { ...scope, text: "Prepare the vendor comment change.", material_ids: [material.id] });
+  await call("send_message", { ...scope, text: "Set Fixture vendor's comment to Approved fixture comment after approval.", material_ids: [material.id] });
   const detail = await until(() => call("get_session", scope), d => d.conversation_runs?.some(r => r.status === "completed") && d.messages.some(m => m.proposal));
   const proposal = detail.messages.find(m => m.proposal).proposal;
   const business = await call("confirm_business", { ...scope, proposal_id: proposal.id, confirmed: true });
@@ -166,8 +209,8 @@ try {
   const conversation = active.conversation_runs.find(r => r.status === "running");
   await call("cancel_conversation", { session_id: session.id, run_id: conversation.id });
   await until(() => call("get_session", { session_id: session.id }), d => !d.conversation_runs.some(r => r.status === "running"));
-  await writeFile(join(output, "result.json"), JSON.stringify({ passed: true, real_ipc: true, paid_api_calls: 0, writes, model_fixture_calls: calls, upgraded: initialExe !== upgradeExe, scope }, null, 2));
-  console.log(JSON.stringify({ passed: true, real_ipc: true, paid_api_calls: 0, writes, output }));
+  await writeFile(join(output, "result.json"), JSON.stringify({ passed: true, real_ipc: true, mode: development ? "development" : "packaged", paid_api_calls: 0, writes, model_fixture_calls: calls, upgraded: !development && initialExe !== upgradeExe, scope }, null, 2));
+  console.log(JSON.stringify({ passed: true, real_ipc: true, mode: development ? "development" : "packaged", paid_api_calls: 0, writes, output }));
 } finally {
   if (app) await app.close();
   server.closeAllConnections();
