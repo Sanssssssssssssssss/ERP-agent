@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Literal
 
 from erp_harness.context.resources import ResourcePaths, ResourceDiagnostic
+from erp_harness.context.resources import _dedupe_paths as _dedupe
 
 EXTENSION_ENTRY_ATTRIBUTE = "setup"
 _MODULE_NAME_PREFIX = "pi_extension"
@@ -391,15 +392,3 @@ def _error_diagnostic(entry: DiscoveredExtension, message: str) -> ResourceDiagn
 
 def _slugify(name: str) -> str:
     return "".join(char if char.isalnum() else "_" for char in name).lower()
-
-
-def _dedupe(paths: list[Path]) -> list[Path]:
-    seen: set[Path] = set()
-    deduped: list[Path] = []
-    for path in paths:
-        resolved = path.expanduser()
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        deduped.append(resolved)
-    return deduped
