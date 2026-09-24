@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { app } from "electron";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { publicSettings, saveSettings, secretEnvironment } from "./settings";
@@ -11,7 +11,8 @@ import { openSessionSnapshot, snapshotPath } from "./session-snapshot";
 export async function runSelfCheck(): Promise<void> {
   // Even a manually invoked packaged --self-check must not overwrite settings.
   const previous = app.getPath("userData");
-  const isolated = await mkdtemp(join(tmpdir(), "odoo-workbench-self-check-"));
+  // Match the host exporter's resolved root, including Windows temp aliases.
+  const isolated = await realpath(await mkdtemp(join(tmpdir(), "odoo-workbench-self-check-")));
   const previousMemoryMode = process.env.ERP_MEMORY_MODE;
   delete process.env.ERP_MEMORY_MODE;
   app.setPath("userData", isolated);
