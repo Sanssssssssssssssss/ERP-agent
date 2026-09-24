@@ -2,13 +2,20 @@
 
 历史池已扩展至 1,944 个响应。最新对照采用具体选项、完整决策头和历史计划输入：[论坛调优结果](FORUM_TUNING.md)。此前结果：[scorer 微调](TUNING.md)、[原始模板](RESULTS.md)；[测试入口](../../tests/fixtures/capability_routing/README.md)。
 
-最新维护：竞争式选择仍未胜过简单对照；复核发现历史下一调用不适合作为唯一训练标签。已增加训练侧语义种子与冻结导出，旧训练器默认拒绝弱标签，显式复现才使用 `--allow-reference-labels`。原链路的统计来自历史 trace，本轮没有重新调用主模型或跑完整业务。
+最新维护：复核池扩到 62 个节点，增加原始完整请求与同摘要能力选择的 24 次真实 API 对照，以及修正标签后的本地训练。见 [本轮审查与结果](REVIEWED_RESULTS.md)。旧训练器默认拒绝弱标签，显式复现才使用 `--allow-reference-labels`。
 
 当前主模型会自己调用 list/configure，再在下一轮拿到工具。Laya 可以前置能力选择，但包含业务读取的混合轮不能直接删掉。首轮用本地多语言 checkpoint，每个 capability 一个 `noul` 问题；一次 `system_one(state, questions)` 批量输出十组概率。0.5 只是固定实验阈值，不代表已校准。
 
 运行入口：
 
 ```powershell
+# 冻结本轮复核池；输出目录必须不存在
+.venv/Scripts/python.exe -m experiments.tool_routing.model_comparison freeze --output .runtime/routing-reviewed-new
+# 已授权后运行 12 节点 × 2 分支；每分支一次 POST，返回工具不执行
+.venv/Scripts/python.exe -m experiments.tool_routing.model_comparison paid --output .runtime/routing-reviewed-new
+# 修正标签后的独立本地训练；不调用付费 API
+.runtime/laya-routing-20260924/venv/Scripts/python.exe -m experiments.tool_routing.train_reviewed --source .runtime/routing-reviewed-new --output .runtime/routing-head-new
+.venv/Scripts/python.exe -m experiments.tool_routing.model_comparison summary --output .runtime/routing-reviewed-new --laya .runtime/routing-head-new
 # 原项目 Python：从真实 trace 构建；不调用 API/Odoo
 .venv/Scripts/python.exe -m experiments.tool_routing.build_cases --self-check
 .venv/Scripts/python.exe -m experiments.tool_routing.laya_probe --self-check

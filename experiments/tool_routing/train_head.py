@@ -35,6 +35,39 @@ def chosen(answer, positive):
     return answer['noul'] >= .5 if positive == 'noul' else answer['choice'] == positive
 
 
+def fit_epoch(agent, items, optimizer, params, step=0):
+    """Exact 16-example accumulation (last batch may be smaller), official forward."""
+    import torch
+    from laya.common import collate_items
+    assert not any(p.requires_grad for p in agent.model.encoder.parameters()), 'Encoder must remain frozen.'
+    agent.model.train(); agent.model.encoder.eval()
+    total=tokens=0
+    for start in range(0,len(items),16):
+        batch_items=items[start:start+16]
+        optimizer.zero_grad(set_to_none=True)
+        offset=0
+        while offset<len(batch_items):
+            chunk=[];width=0
+            while offset<len(batch_items) and len(chunk)<4:
+                item=batch_items[offset];needed=max(width,len(item['ids']))
+                if chunk and needed*(len(chunk)+1)>4096:break
+                chunk.append(item);width=needed;offset+=1
+            batch=collate_items([chunk],agent.tok.pad_token_id)
+            inputs={k:batch[k].to(agent.device) for k in ['input_ids','attention_mask','marker_pos','marker_mask','qtype']}
+            target=batch['label'].to(agent.device)
+            weight=torch.tensor([c.get('weight',1.) for c in chunk],device=agent.device)
+            with torch.autocast(agent.device.type,dtype=torch.bfloat16):
+                logits,_=agent.model(**inputs)
+                loss=(torch.nn.functional.cross_entropy(logits,target,reduction='none')*weight).sum()
+            assert torch.isfinite(loss), 'Non-finite training loss.'
+            (loss/len(batch_items)).backward()
+            total+=loss.item();tokens+=int(batch['attention_mask'].sum())
+        step+=1
+        for group in optimizer.param_groups:group['lr']=3e-5*min(1.,step/20)
+        torch.nn.utils.clip_grad_norm_(params,1.);optimizer.step()
+    return step,total/len(items),tokens
+
+
 def main(args):
     require_reference_opt_in(args.allow_reference_labels)
     os.environ['HF_HOME'] = str(WORK/'hf-cache')
@@ -42,7 +75,6 @@ def main(args):
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
     import laya
     import torch
-    from laya.common import collate_items
 
     seed = 20260924
     random.seed(seed); torch.manual_seed(seed); torch.set_num_threads(4)
@@ -149,35 +181,10 @@ def main(args):
                 items.append({**encoded[c['id']][variant][group_index], 'label':label,
                               'weight':float(positive_weights[group_index]) if g in c['target_groups'] else 1.})
         rng.shuffle(items)
-        # ponytail: recompute the frozen encoder; cache only if measured training time warrants it.
-        agent.model.train(); agent.model.encoder.eval()
-        total=0.;batches=0;offset=0;accumulated=0
-        optimizer.zero_grad(set_to_none=True)
-        while offset<len(items):
-            chunk=[];width=0
-            while offset<len(items) and len(chunk)<4:
-                item=items[offset];needed=max(width,len(item['ids']))
-                if chunk and needed*(len(chunk)+1)>4096:break
-                chunk.append(item);width=needed;offset+=1
-            batch=collate_items([chunk],agent.tok.pad_token_id)
-            inputs={k:batch[k].cuda() for k in ['input_ids','attention_mask','marker_pos','marker_mask','qtype']}
-            target=batch['label'].cuda();weight=torch.tensor([c['weight'] for c in chunk],device='cuda')
-            with torch.autocast('cuda',dtype=torch.bfloat16):
-                logits,_=agent.model(**inputs)
-                loss=(torch.nn.functional.cross_entropy(logits,target,reduction='none')*weight).sum()
-            assert torch.isfinite(loss), 'Non-finite training loss.'
-            (loss/16).backward();accumulated+=len(chunk)
-            if accumulated>=16 or offset==len(items):
-                for p in params:
-                    if p.grad is not None:p.grad.mul_(16/accumulated)
-                step+=1
-                for group in optimizer.param_groups:group['lr']=3e-5*min(1.,step/20)
-                torch.nn.utils.clip_grad_norm_(params,1.);optimizer.step()
-                optimizer.zero_grad(set_to_none=True);accumulated=0
-            total+=loss.item();batches+=1;training_tokens+=int(batch['attention_mask'].sum())
-            if batches%100==0:print(json.dumps({'epoch':epoch+1,'training_rows':offset,'total_rows':len(items)}),flush=True)
+        step,mean_loss,used_tokens=fit_epoch(agent,items,optimizer,params,step)
+        training_tokens+=used_tokens
         _,score=evaluate(dev,f'epoch-{epoch+1}-dev')
-        row={'epoch':epoch+1,'mean_example_loss':total/len(items),'optimizer_steps':step,'dev':score};summary['epochs'].append(row)
+        row={'epoch':epoch+1,'mean_example_loss':mean_loss,'optimizer_steps':step,'dev':score};summary['epochs'].append(row)
         if score['macro_f1_observed_groups']>best:
             best=score['macro_f1_observed_groups'];summary['selected_epoch']=epoch+1
             torch.save({k:v.detach().cpu() for k,v in agent.model.state_dict().items() if k.split('.')[0] in parts},args.output/'decision_head.pt')

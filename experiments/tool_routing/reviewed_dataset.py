@@ -15,7 +15,11 @@ def require_reference_opt_in(allowed):
                          'Use --allow-reference-labels only to reproduce the legacy weak-label experiment.')
 
 
-def validate(train, evaluation, groups):
+def validate(train, evaluation, groups, dev=()):
+    if dev:
+        # Reuse the same checks for dev while keeping all business families disjoint.
+        validate(train, [{**r, 'split':'test'} for r in dev], groups)
+        validate([{**r, 'split':'train'} for r in dev], evaluation, groups)
     train_families = {r['business_group'] for r in train}
     evaluation_families = {r['business_group'] for r in evaluation}
     if train_families & evaluation_families:
@@ -52,6 +56,21 @@ def inclusion_labels(row, groups):
     permitted = {g for alt in row['allowed_injection_sets'] for g in alt}
     return {g: None if g in row['uncertain_groups'] else
             1 if g in permitted else 0 if g in row['unrelated_groups'] else None for g in groups}
+
+
+def training_labels(row, groups):
+    # Optional preloads are valid alternatives, not forced positive targets.
+    return {g: 1 if g in row['required_groups'] else 0 if g in row['unrelated_groups'] else None for g in groups}
+
+
+def expanded_reviewed():
+    train, evaluation, groups = load_reviewed()
+    extra = read(FIXTURES/'reviewed_expansion.json')['cases']
+    train = train + [r for r in extra if r['split'] == 'train']
+    evaluation = evaluation + [r for r in extra if r['split'] == 'test']
+    dev = [r for r in extra if r['split'] == 'dev']
+    validate(train, evaluation, groups, dev)
+    return train, dev, evaluation, groups
 
 
 def load_reviewed():

@@ -14,6 +14,38 @@ from experiments.tool_routing.train_decider import main as train_scorer
 from experiments.tool_routing.intent_probe import with_prior_intent
 from experiments.tool_routing.competitive_probe import selected
 from experiments.tool_routing.reviewed_dataset import inclusion_labels, load_reviewed, validate
+from experiments.tool_routing.reviewed_dataset import expanded_reviewed, training_labels
+from experiments.tool_routing.routing_state import routing_state
+from experiments.tool_routing.model_comparison import parse_selector, verdict
+
+
+def test_expanded_labels_do_not_force_optional_preloads_or_leak_families():
+    train, dev, evaluation, groups = expanded_reviewed()
+    assert len(train)>6 and dev and len(evaluation)>9
+    optional = next(r for r in train if r['id']=='2003:agent:0003')
+    assert training_labels(optional,groups)['actions'] is None
+    assert training_labels(optional,groups)['migration']==0
+    with pytest.raises(ValueError,match='business family'):
+        validate(train,evaluation,groups,[{**dev[0],'business_group':train[0]['business_group']}])
+    assert parse_selector({'tool_calls':[{'name':'select_capabilities','arguments':{'capabilities':['missing']}}]},groups) is None
+    assert verdict([],{'required_groups':[],'unrelated_groups':['migration'],'allowed_injection_sets':[[],['actions']]})['status']=='pass'
+
+
+def test_projection_keeps_pre_approval_observations_and_publication_without_future():
+    request={'messages':[
+        {'role':'user','content':'Confirm PO\n# Odoo Environment\npassword=SECRET\nStage 6 knowledge probe: search first'},
+        {'role':'assistant','tool_calls':[{'id':'a','function':{'name':'mcp_odoo_validate_write','arguments':'{"model":"purchase.order"}'}}]},
+        {'role':'tool','tool_call_id':'a','content':'{"action_status":"pending_approval"}'},
+        {'role':'assistant','content':'Waiting for approval.'},
+        {'role':'user','content':'The host approved action a.'}],
+        'tools':[{'function':{'name':'mcp_odoo_execute_approved_write'}}],
+        'response':{'secret_future':'NEVER'}}
+    text=routing_state(request);state=json.loads(text)
+    assert 'SECRET' not in text and 'NEVER' not in text and 'Stage 6' in state['goal']
+    assert state['published_capabilities']==['actions']
+    assert state['recent_observations'][0]['tool_call_id']=='a'
+    assert state['recent_observations'][0]['observation']['action_status']=='pending_approval'
+    assert state['recent_observations'][0]['arguments']['model']=='purchase.order'
 
 
 def test_competitive_choice_maps_labels_without_probability_threshold():
