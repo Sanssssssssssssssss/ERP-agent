@@ -40,13 +40,18 @@ _HIDDEN = {"reasoning_content", "reasoningContent", "thinking", "thought_signatu
 
 
 def build_business_instruction(business: dict[str, Any], messages=(), *, material_text: str = "") -> str:
-    """Build the current confirmed phase; raw authorization remains in source receipts."""
+    """Build the current phase; preserve original wording for an initial read-only query."""
+    kind = business.get("type", "sale_invoice")
+    target = business.get("completion_target") or default_target(kind)
     queued = []
     if not business.get("goal_submitted") and str(business.get("goal", "")).strip():
-        queued.append(business["goal"].strip())
+        goal = business["goal"].strip()
+        if target == "read_only":
+            # 查询原话保留身份与范围；摘要不能把姓名中的编号改成 ID。
+            goal = "\n".join(m["text"] for m in business.get("source_messages", [])).strip() or goal
+        queued.append(goal)
     queued.extend(m["text"] for m in messages if m.get("text") not in queued)
     text = "\n".join(queued) or "Continue the existing confirmed phase. Re-read state; do not repeat completed writes."
-    kind = business.get("type", "sale_invoice")
     task_label = {
         "sale_invoice": "Complete the confirmed sales and invoicing business task",
         "purchase": "Complete the confirmed purchasing business task",
@@ -58,7 +63,6 @@ def build_business_instruction(business: dict[str, Any], messages=(), *, materia
         "reconciliation": "Complete the confirmed bank and ledger reconciliation task",
         "invoice_delivery": "Send the confirmed invoice PDF to the confirmed billing contact",
     }.get(kind, "Complete the confirmed ERP business task")
-    target = business.get("completion_target") or default_target(kind)
     target_text = completion_target_instruction(kind, target)
     references = [{"model": r["model"], "id": r["id"], "purpose": r.get("purpose", "target"),
                    "fields": {k: v for k, v in r["fields"].items() if k in {"id", "name", "company_id", "partner_id", "currency_id"} or (kind == "invoice_delivery" and k in {"email", "parent_id", "commercial_partner_id", "type", "function", "active", "invoice_pdf_report_id"})}}

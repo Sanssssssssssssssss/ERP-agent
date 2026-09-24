@@ -157,6 +157,26 @@ def test_actual_host_instruction_separates_current_goal_and_authorization(host):
     assert text == build_business_instruction({**item, "goal_submitted": False}, material_text=host._material_context(sid, []))
 
 
+@pytest.mark.parametrize("sources", [False, True])
+def test_read_only_initial_sources_or_goal_are_submitted_once(host, sources):
+    sid, item = business(host)
+    original, goal = "列出华东客户249全部订单", "查询已确认客户的订单"
+    item.update(completion_target="read_only", goal=goal,
+                source_messages=[{"id": "u-query", "text": original}] if sources else [])
+    first = host._instruction(item, "r_query").read_text(encoding="utf-8")
+    assert (original if sources else goal) in first
+    assert (goal if sources else original) not in first
+    assert item["goal_submitted"]
+    followup = {"id": "u-next", "role": "user", "business_id": item["id"], "text": "继续查询下一页"}
+    host.store.data["messages"][sid].append(followup)
+    second = host._instruction(item, "r_next").read_text(encoding="utf-8")
+    assert original not in second and goal not in second
+    assert followup["text"] in second and followup["submitted_run_id"] == "r_next"
+    third = host._instruction(item, "r_resume").read_text(encoding="utf-8")
+    assert original not in third and goal not in third and followup["text"] not in third
+    assert "Continue the existing confirmed phase" in third
+
+
 def test_worker_handoff_is_idle_and_requires_new_proposal(host, tmp_path):
     sid, item = business(host)
     run = host.start_run(sid, item["id"])
