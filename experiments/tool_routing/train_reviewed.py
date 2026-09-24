@@ -30,19 +30,24 @@ def training_items(cases, names, specs, encoded):
     """Every judged pair appears in all formats; unknowns never become negatives."""
     labels={r['id']:training_labels(r,names) for r in cases}
     frequencies=Counter(r['business_group'] for r in cases)
-    known=Counter(g for r in cases for g,v in labels[r['id']].items() if v is not None)
-    positive=Counter(g for r in cases for g,v in labels[r['id']].items() if v==1)
     items=[]
     for r in cases:
         for gi,g in enumerate(names):
             target=labels[r['id']][g]
             if target is None:continue
             weight=len(cases)/(len(frequencies)*frequencies[r['business_group']])
-            if target:weight*=min(8.,max(1.,((known[g]-positive[g])/max(1,positive[g]))**.5))
             for variant,spec in enumerate(specs):
                 slot=list(spec[g]['criteria']).index('A' if variant<2 else 'B')
                 items.append({**encoded[r['id']][variant][gi], 'label':slot if target else 1-slot,
                               'weight':weight,'case_id':r['id'],'group':g,'variant':variant,'semantic_target':target})
+    # Match the validation objective: equal capability mass, then equal observed
+    # class mass. Family weights remain meaningful within each class.
+    mass=Counter()
+    for item in items:mass[item['group'],item['semantic_target']]+=item['weight']
+    classes=Counter(g for g,_ in mass)
+    for item in items:
+        key=item['group'],item['semantic_target']
+        item['weight']*=len(items)/(len(classes)*classes[item['group']]*mass[key])
     return items
 
 
@@ -127,7 +132,7 @@ def main(args):
         'selection':'Lowest dev capability/class-balanced CE over all four formats, including epoch 0. Test evaluated after selection.',
         'early_stop':'After minimum epochs, stop after patience consecutive epochs without dev CE improvement of at least 0.001.',
         'limits':['Existing reviewed pool, not a blind benchmark. Missing positive classes cannot be accepted.',
-                  'Same family/positive weights as prior run; full format coverage and training duration are changed.',
+                  'Loss balanced by capability and observed class; family weights apply within each class.',
                   'No state truncation. Single-row encoder cache preserves dtype and the official head forward.'],
         'versions':{'torch':torch.__version__,'device':torch.cuda.get_device_name(),'amp':str(agent.dtype)}}
     cache_dir=args.output/'encoder-cache'
