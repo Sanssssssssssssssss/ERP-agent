@@ -1573,39 +1573,43 @@ class Workbench:
                 ).start()
 
     def get_business(self, session_id: str, business_id: str) -> dict[str, Any]:
-        self._business(session_id, business_id)
-        for run in self.store.data["runs"].values():
-            if run.get("business_id") != business_id:
-                continue
+        from erp_harness.erp.store import ActionStore
+
+        business = self._business(session_id, business_id)
+        runs = {key: row for key, row in self.store.data["runs"].items() if row.get("business_id") == business_id}
+        archives = {}
+        for run in runs.values():
             self._stamp_usage_projection(run)
+            path = self.store.root / "runs" / run["id"] / "odoo-actions.sqlite3"
+            rows, archive = [], {"available": False, "rows": []}
+            if path.is_file():
+                try:
+                    rows = ActionStore.read_receipts(path)
+                    if any(row.get("run_id") != run["id"] or row.get("session_id") != session_id for row in rows):
+                        raise ValueError("receipt scope mismatch")
+                    archive = {"available": True, "rows": _safe(rows)}
+                except Exception:
+                    rows = []  # Unknown or out-of-scope evidence cannot update the public state.
+            archives[run["id"]] = archive
+            by_action = {row["action_id"]: row for row in rows}
             for action_id, approval in self.store.data["approvals"].items():
                 if approval.get("run_id") != run.get("id"):
                     continue
-                row = self._action_row(run, action_id)
+                row = by_action.get(action_id)
                 if row and row.get("status") in {"verified", "known_failed", "needs_reconciliation"}:
                     if approval.get("status") in {"pending_approval", "approved"}:
                         approval["status"] = row["status"]
                     approval["result"], approval["verification"] = _safe(row.get("result")), _safe(row.get("verification"))
                     self._apply_action_readback(run, approval, row)
-        public_state = copy.deepcopy(self.store.data)
-        public_state["receipt_ledger"] = {}
-        for receipt_run in (row for row in public_state["runs"].values() if row.get("business_id") == business_id):
-            from erp_harness.erp.store import ActionStore
-            path = self.store.root / "runs" / receipt_run["id"] / "odoo-actions.sqlite3"
-            archive = {"available": False, "rows": []}
-            if path.is_file():
-                try:
-                    rows = ActionStore.read_receipts(path)
-                    if any(row.get("run_id") != receipt_run["id"] or row.get("session_id") != session_id for row in rows):
-                        raise ValueError("receipt scope mismatch")
-                    archive = {"available": True, "rows": _safe(rows)}
-                except Exception:
-                    pass  # Missing or unreadable evidence stays unknown in the receipt projection.
-            public_state["receipt_ledger"][receipt_run["id"]] = archive
+        material_ids = business.get("material_ids")
+        material_ids = material_ids if isinstance(material_ids, list) else []
+        public_state = copy.deepcopy({
+            "businesses": {business_id: business}, "runs": runs,
+            "approvals": {key: row for key, row in self.store.data["approvals"].items() if row.get("business_id") == business_id},
+            "materials": {key: row for key, row in self.store.data.get("materials", {}).items() if key in material_ids},
+        })
+        public_state["receipt_ledger"] = archives
         for row in public_state["runs"].values():
-            if row.get("business_id") != business_id:
-                continue
-            self._stamp_usage_projection(row)
             row["usage"] = self._public_usage(row)
         return business_detail(public_state, business_id)
 
