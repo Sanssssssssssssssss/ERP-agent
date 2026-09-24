@@ -5,6 +5,7 @@
 - Treat an Odoo readback as evidence for the current run, not as an ERP-Bench score.
 - Report fresh input, cache reads, output/reasoning, and compaction separately; unknown usage stays unknown.
 - Mock and renderer checks support mechanism coverage. They do not prove a real Odoo business transaction.
+- Cleanup-only changes preserve existing features and compatibility entry points. Share equivalent implementation; unused product capabilities are not permission to remove them.
 
 # Model regression maintenance
 

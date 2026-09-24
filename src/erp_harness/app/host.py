@@ -194,6 +194,29 @@ def _connection_identity() -> dict[str, str]:
             "principal": (os.environ.get("ODOO_USERNAME") or "").strip()}
 
 
+def _finalize_output(run: dict[str, Any], status: str, error: str | None) -> None:
+    run["error"] = error
+    run.pop("_stop_status", None)
+    if run.get("assistant_text"):
+        run["summary"] = run["assistant_text"]
+    for tool in run.get("tools", []):
+        if tool.get("status") == "running":
+            tool["status"] = "interrupted"
+    if status in {"failed", "cancelled", "interrupted"}:
+        partial_status = "failed" if status == "failed" else "interrupted"
+        for message in run.get("live_messages", []):
+            message["status"] = partial_status
+
+
+def _finish_run_timing(run: dict[str, Any], status: str) -> None:
+    run["status"] = status
+    run["ended_at"] = run.get("ended_at") or now()
+    try:
+        run["elapsed_seconds"] = max(0.0, (datetime.fromisoformat(run["ended_at"].replace("Z", "+00:00")) - datetime.fromisoformat(run["started_at"].replace("Z", "+00:00"))).total_seconds())
+    except (KeyError, ValueError, TypeError):
+        run["elapsed_seconds"] = None
+
+
 class Workbench:
     def __init__(self, data_dir: str | Path, repo: str | Path | None = None,
                  event_sink: Callable[[dict[str, Any]], None] | None = None,
@@ -300,17 +323,7 @@ class Workbench:
                             approval["status"] = "not_executed" if status == "completed" else status
         except Exception:
             status, error = "needs_reconciliation", "action_ledger_unreadable"
-        run["error"] = error
-        run.pop("_stop_status", None)
-        if run.get("assistant_text"):
-            run["summary"] = run["assistant_text"]
-        for tool in run.get("tools", []):
-            if tool.get("status") == "running":
-                tool["status"] = "interrupted"
-        if status in {"failed", "cancelled", "interrupted"}:
-            partial_status = "failed" if status == "failed" else "interrupted"
-            for message in run.get("live_messages", []):
-                message["status"] = partial_status
+        _finalize_output(run, status, error)
         pending_ids = list(run.get("pending_approval_action_ids", []))
         if pending_ids and status in {"completed", "failed", "cancelled", "interrupted", "awaiting_input"}:
             # Only hide the pending list after every corresponding ledger row
@@ -1840,39 +1853,20 @@ class Workbench:
             store.close()
 
     def _clear_active(self, run: dict[str, Any], status: str) -> None:
-        run["status"] = status
-        run["ended_at"] = run.get("ended_at") or now()
-        try:
-            run["elapsed_seconds"] = max(0.0, (datetime.fromisoformat(run["ended_at"].replace("Z", "+00:00")) - datetime.fromisoformat(run["started_at"].replace("Z", "+00:00"))).total_seconds())
-        except (KeyError, ValueError, TypeError):
-            run["elapsed_seconds"] = None
+        _finish_run_timing(run, status)
         session = self.store.data["sessions"].get(run["session_id"])
         business = self.store.data["businesses"].get(run["business_id"])
         if session: session["active_run_id"], session["status"] = None, status
         if business: business["active_run_id"], business["status"] = None, status
 
     def _clear_conversation_active(self, run: dict[str, Any], status: str) -> None:
-        run["status"] = status
-        run["ended_at"] = run.get("ended_at") or now()
-        try:
-            run["elapsed_seconds"] = max(0.0, (datetime.fromisoformat(run["ended_at"].replace("Z", "+00:00")) - datetime.fromisoformat(run["started_at"].replace("Z", "+00:00"))).total_seconds())
-        except (KeyError, ValueError, TypeError):
-            run["elapsed_seconds"] = None
+        _finish_run_timing(run, status)
         session = self.store.data["sessions"].get(run["session_id"])
         if session and session.get("active_run_id") == run["id"]:
             session["active_run_id"], session["status"], session["updated_at"] = None, status, now()
 
     def _finalize_conversation(self, run: dict[str, Any], status: str, error: str | None = None) -> None:
-        run["error"] = error
-        run.pop("_stop_status", None)
-        if run.get("assistant_text"):
-            run["summary"] = run["assistant_text"]
-        for tool in run.get("tools", []):
-            if tool.get("status") == "running":
-                tool["status"] = "interrupted"
-        if status in {"failed", "cancelled", "interrupted"}:
-            for message in run.get("live_messages", []):
-                message["status"] = "failed" if status == "failed" else "interrupted"
+        _finalize_output(run, status, error)
         self._clear_conversation_active(run, status)
 
     def _approval_prestate_matches(self, row, store) -> bool:

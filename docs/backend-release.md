@@ -22,6 +22,10 @@ After an administrator tightens field ACLs, start a new business session. Re-run
 
 ## Validation
 
+2026-09-24: [PR #5](https://github.com/Sanssssssssssssssss/ERP-agent/pull/5) merged at `3a4ce45`; rollback tag: `backend-main-baseline-20260924`. All required CI checks passed, including historical MCP comparisons and the packaged desktop.
+
+The following cleanup shares usage aggregation and run finalization, and computes each readback outcome once. All feature entry points remain; production Python decreases by 17 lines. Model instructions, tool schemas, approval and ledger paths retain their behavior. Local checks: 1,148 passed, 4 skipped, 179 subtests; current-source desktop IPC passed with one mock write. Independent equivalence review found no blocking differences. Paid model calls: 0; no new real ERP business score is claimed. Evidence: `.runtime/duplicate-cleanup-20260924/` and `.runtime/ipc-check/run-57688/`.
+
 Frozen source checkpoint `backend-baseline-20260922-memory-off`: optional Mem0 and the persistent demo are included; both desktop and direct host default to memory off. Existing learning receipts do not establish a business-score or cost improvement. Local validation: 900 passed, 4 skipped, 119 subtests; the subsequent host-default check passed all 8 memory tests. Desktop typecheck, build, self-check and renderer checks passed. Older SQLite test cleanup emits Windows file-lock warnings after the successful test run. Full receipts remain in `.runtime/enterprise-validation-20260922/baseline/` and `.runtime/memory-integration-20260921/`.
 
 [CI](../.github/workflows/checks.yml) runs existing desktop, approval, native-read, write-guard, evidence, and provider-recovery checks offline. Historical MCP comparisons run in their own environment. Sidecar preparation imports the packaged runtime and reads its native tool catalog and model-rename resource before replacing the prior bundle.
