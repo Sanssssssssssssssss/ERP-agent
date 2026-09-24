@@ -7,6 +7,23 @@ import json
 from experiments.tool_routing.decision_dataset import FIXTURES, split_family, state_from_request
 from erp_harness.tools.dynamic_tools import CAPABILITY_GROUPS, DynamicToolController
 from tests.test_dynamic_tools import fake_tools
+from experiments.tool_routing.train_head import chosen
+from experiments.tool_routing.intent_probe import with_prior_intent
+
+
+def test_router_reads_choice_before_rounded_probability():
+    answer = {'type':'choice','choice':'B','probabilities':{'A':.5,'B':.5}}
+    assert not chosen(answer,'A') and chosen(answer,'B')
+
+
+def test_prior_intent_cannot_read_future_response_or_replace_observations():
+    state=json.dumps({'goal':'Confirm the order','recent_observations':[{'state':'sale'}]})
+    request={'messages':[{'role':'assistant','content':'First read the order.'}],
+             'response':{'content':'FORBIDDEN_FUTURE'}}
+    value=json.loads(with_prior_intent(state,request))
+    hint=value.pop('previous_assistant_intent')
+    assert value==json.loads(state) and hint['content']=='First read the order.'
+    assert 'FORBIDDEN_FUTURE' not in json.dumps(hint)
 
 
 def test_state_uses_only_prefix_and_keeps_parallel_observations():
