@@ -56,7 +56,7 @@ def _same(rows: list[dict], field: str, expected: int | None = None) -> int:
 
 class _Evidence(_Guard):
     def many(self, model: str, ids: list[int], fields: tuple[str, ...]) -> list[dict]:
-        return [self.read(model, item, fields) for item in sorted(set(ids))]
+        return self._read_many(model, ids, fields)
 
     def find(self, model: str, domain: list, fields: tuple[str, ...]) -> list[dict]:
         policy = getattr(self.runtime, "policy", None)

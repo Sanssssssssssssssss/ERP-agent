@@ -39,22 +39,29 @@ class _Guard:
         self.rows: dict[tuple, dict] = {}
 
     def read(self, model: str, record_id: int, fields: tuple[str, ...]) -> dict:
+        return self._read_many(model, [record_id], fields)[0]
+
+    def _read_many(self, model: str, ids: list[int], fields: tuple[str, ...]) -> list[dict]:
         fields = tuple(sorted({"id", *fields}))
-        key = (model, record_id, fields)
-        if key not in self.rows:
+        ids = sorted(set(ids))
+        missing = [record_id for record_id in ids if (model, record_id, fields) not in self.rows]
+        if missing:
             error = f"business guard evidence unavailable for {model}; validate again"
             policy = getattr(self.runtime, "policy", None)
             if policy is not None and policy.restricted_fields(self.payload["instance"], model, set(fields)):
                 raise ValueError(error)
             try:
-                rows = self.client.read_records(model, [record_id], fields=list(fields))
+                rows = self.client.read_records(model, missing, fields=list(fields))
             except Exception:
                 raise ValueError(error) from None
-            if (not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict)
-                    or _id(rows[0].get("id")) != record_id or any(field not in rows[0] for field in fields)):
+            if (not isinstance(rows, list) or len(rows) != len(missing)
+                    or any(not isinstance(row, dict) or _id(row.get("id")) is None
+                           or any(field not in row for field in fields) for row in rows)
+                    or {_id(row["id"]) for row in rows} != set(missing)):
                 raise ValueError(error)
-            self.rows[key] = rows[0]
-        return self.rows[key]
+            # Cache only a complete response. Each safety phase constructs its own guard.
+            self.rows.update({(model, _id(row["id"]), fields): row for row in rows})
+        return [self.rows[(model, record_id, fields)] for record_id in ids]
 
     def window(self, row: dict) -> None:
         # 日期精度由原始值决定。提前期取 BOM 的 produce_delay，不由模型估算。
