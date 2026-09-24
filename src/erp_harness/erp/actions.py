@@ -23,6 +23,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from erp_harness.erp._odoo_core.agent_tools import (
+    _write_execute_method_args,
     build_approval_token,
     build_write_preview_report,
     canonical_json,
@@ -1682,20 +1683,12 @@ class NativeActions:
                 )
 
             def send() -> Any:
-                values = prepared["values"]
-                values_list = prepared["values_list"]
-                ids = [int(value) for value in record["payload"].get("record_ids") or []]
-                context = dict(record["payload"].get("context") or {})
-                kwargs = {"context": context} if context else {}
-                if operation == "create" and values_list is not None:
-                    args = [values_list]
-                elif operation == "create":
-                    args = [values]
-                elif operation == "write":
-                    args = [ids, values]
-                else:
-                    args = [ids]
-                return self._send(name, model, operation, *args, **kwargs)
+                call = _write_execute_method_args({
+                    **record["payload"], **prepared, "operation": operation,
+                    "record_ids": [int(value) for value in record["payload"].get("record_ids") or []],
+                    "context": dict(record["payload"].get("context") or {}),
+                })
+                return self._send(name, model, operation, *call["args"], **call["kwargs"])
 
             result = self._execute_row(record, send, prepare)
             return {
