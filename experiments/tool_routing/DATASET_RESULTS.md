@@ -1,4 +1,18 @@
-2026-09-25：补齐八类 capability 的基础正负例覆盖，员工、请假按用户要求排除。当前在独立 ML 环境训练，尚未验收或接入生产。
+2026-09-25：**未通过替换验收，未接入生产。** 员工、请假按用户要求排除；八类 capability 已补齐基础覆盖，但数据和训练尚不足以交付可用的 Laya 编排器。
+
+完成 12 轮决策头训练、10,776 次完整更新，按开发集规则选中第 6 轮。编码器冻结，训练参数约 1,477 万；这不是全参数微调。测试集 51 个节点，每个使用四种标签/顺序，结果如下：
+
+| 同一冻结输入 | 默认格式通过 | 四格式合计通过 |
+|---|---:|---:|
+| 未微调 Laya | 2/51 | 47/204 |
+| 训练后 Laya | 1/51 | 38/204 |
+| 不注入可选能力 | 24/51 | 不适用 |
+
+候选默认格式有 10 个节点漏选必要能力、47 个误选无关能力；四格式全部通过的节点为 0/51。历史业务测试节点四格式合计从 28/84 降到 23/84，新探针从 19/120 降到 15/120。简单对照也会漏掉 27 个节点的必要能力，不能作为可用替代方案。这些是能力发布判断，不能换算成 ERP 业务成绩。
+
+已确认的问题：后期训练误差下降、开发误差上升；选项标签/顺序敏感；稀缺能力的独立意图仍少。SDK 未缓存回放与评测结果 **204/204 一致**，概率最大差异约 0.00005，未发现本次缓存路径改变判断。尚未定位所有误选的单一根因，也不能据此判定 Laya 本身不适合。
+
+具体错误：要求预检 BOM 用量修改时，候选漏掉 `actions`，选择附件、跨实例；供应商账龄查询时额外选择异步、附件、跨实例、诊断和知识。见[逐项结果与样例](../../.runtime/capability-routing-20260925/evaluation-audit.json)、[训练与 SDK 核对](../../.runtime/capability-routing-20260925/head-v8c/summary.json)。
 
 | 数据 | 数量与边界 |
 |---|---|
@@ -8,7 +22,7 @@
 | 新采集 | 60 个契约意图×3 个上下文＝180 个节点；同意图不跨集合 |
 | 最终输入 | 训练 185、开发 45、测试 51；另隔离 1 个模型标注分歧 |
 
-必要能力、推荐预加载、合法替代路径分别记录。新意图是 Agent 编写的契约探针；真实读取材料来自隔离企业库。它们不代表已完成业务，也不是独立人工金标。稀缺能力每类训练正例来自四个意图，开发和测试各一个，仍需真实业务节点持续补充。
+必要能力、推荐预加载、合法替代路径分别记录。新意图是 Agent 编写的契约探针；真实读取材料来自隔离企业库。它们不代表已完成业务，也不是独立人工金标。多数稀缺能力只有四个训练意图，开发和测试各一个，仍需真实业务节点持续补充。
 
 四个超长输入主要被预检、写入计划和字段提示占据，历史观察合计 1.6–3 万字符。原文见 [输入体积分解](../../.runtime/capability-routing-20260925/oversized-breakdown.json)；本轮未把裁剪后的内容冒充完整上下文，也未验证这四个节点的路由能力。
 
@@ -18,14 +32,16 @@
 
 验证：21 项离线检查、3 个子检查通过。281 个冻结投射输入与重新生成结果一致；开发/测试分歧没有按模型成绩删题。ML 环境仅解析源码中的工具合同，未引入生产依赖。
 
-训练期间另做本地提问契约对照：同一批训练节点、同一预训练权重，原问法 31/64，明确“下一轮发布能力”并给出工具名后 34/64。64 次判断来自 16 个节点/能力组合的四种标签与顺序；12 次改善、9 次退步，不足以说明仅改问法即可解决。没有新增付费调用；[对照结果](../../.runtime/capability-routing-20260925/publication-probe-v1/paired-summary.json)。
+另查出任务定义差异：教师问“下一轮发布哪些能力”，当前 Laya 问“下一步做什么”。本地对照保持训练节点和预训练权重相同，对齐问法并给出工具名后从 31/64 到 34/64。64 次判断来自 16 个节点/能力组合的四种格式；12 次改善、9 次退步。它没有验证对齐后的重新训练效果，不能声称此问题已解决；[对照结果](../../.runtime/capability-routing-20260925/publication-probe-v1/paired-summary.json)。
+
+修复了一个训练资源问题：使用缓存时，冻结编码器仍占 GPU。移到 CPU 后，同一检查点分配显存从 1.43 GB 到 0.19 GB，预测数值一致。第 9 轮变慢后保留前 8 轮并恢复，丢弃未完成的第 9 轮；旧 checkpoint 缺随机数状态，恢复时固定新种子并记录，不能冒充不中断的逐位复现。后续 checkpoint 保存随机数状态。[中断记录](../../.runtime/capability-routing-20260925/head-v8b/interruption.json)。
 
 入口：`python -m experiments.tool_routing.collect_dataset freeze|paid|export --help`。`paid` 跳过所有已启动请求，包括状态不明的请求；不能用续跑隐式补费。`export` 只隔离训练分歧，开发/测试保留；超长评测输入直接报错。
 
-证据：[标注输入与回包](../../.runtime/capability-routing-20260925/collection-v3/)、[类别覆盖](../../.runtime/capability-routing-20260925/dataset-v3/coverage.json)、[隔离清单](../../.runtime/capability-routing-20260925/dataset-v3/quarantine.json)、[训练日志](../../.runtime/capability-routing-20260925/head-v8b.log)。失败的首次 ML 启动发生在模型加载前，原因是隔离环境缺少生产包；输入等价修复后启动 `head-v8b`，保留原错误日志。
+证据：[标注输入与回包](../../.runtime/capability-routing-20260925/collection-v3/)、[类别覆盖](../../.runtime/capability-routing-20260925/dataset-v3/coverage.json)、[隔离清单](../../.runtime/capability-routing-20260925/dataset-v3/quarantine.json)、[原训练日志](../../.runtime/capability-routing-20260925/head-v8b.log)、[恢复训练日志](../../.runtime/capability-routing-20260925/head-v8c.log)。首次 ML 启动在模型加载前因缺少生产包失败；输入等价修复后重启，保留原错误日志。
 
-训练复现：
+本次恢复运行的复现（需保留原 checkpoint）：
 
 ```powershell
-.runtime/laya-routing-20260924/venv/Scripts/python.exe -m experiments.tool_routing.train_reviewed --source .runtime/capability-routing-20260925/dataset-v3 --output .runtime/routing-head-repeat --epochs 24 --min-epochs 8 --patience 6
+.runtime/laya-routing-20260924/venv/Scripts/python.exe -m experiments.tool_routing.train_reviewed --source .runtime/capability-routing-20260925/dataset-v3 --output .runtime/routing-head-repeat --resume-from .runtime/capability-routing-20260925/head-v8b --epochs 24 --min-epochs 8 --patience 6
 ```
