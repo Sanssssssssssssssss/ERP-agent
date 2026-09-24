@@ -24,11 +24,8 @@ from erp_harness.runtime.messages import AssistantMessage, ToolResultMessage
 from erp_harness.runtime.storage import JsonlSessionStorage
 from erp_harness.runtime.storage.entries import CompactionEntry, MessageEntry
 from erp_harness.runtime.tools import AgentTool, AgentToolResult
-from erp_harness.providers.env import OpenAICompatibleConfig
 from erp_harness.providers.openai_compatible import OpenAICompatibleProvider
 from erp_harness.providers.config import (
-    OpenAICompatibleProviderConfig,
-    ProviderModelMetadata,
     ProviderSettings,
 )
 from erp_harness.context.paths import RuntimePaths
@@ -37,6 +34,7 @@ from erp_harness.runtime.session import HarnessSession, SessionConfig
 
 from erp_harness.tools.router import native_tool_catalog, route_tools
 from erp_harness.app.request_receipts import RequestReceipts, _message_usage, _sum_usage_bucket
+from erp_harness.app.model_config import CONTEXT_WINDOW, MODEL_COMPAT, provider_config as _provider_config, transport_config
 from erp_harness.app.business import completion_target_instruction, valid_target
 from erp_harness.context.projection import project_messages, project_read_history
 from erp_harness.erp.actions import NativeActions
@@ -50,11 +48,6 @@ from erp_harness.erp.task_evidence import TaskEvidence
 from erp_harness.context.world import WorldStore
 from erp_harness.context.world_tools import build_world_tools
 
-CONTEXT_WINDOW = 128_000
-MODEL_COMPAT = {
-    "supportsReasoningEffort": True,
-    "requiresReasoningContentOnAssistantMessages": True,
-}
 MCP_ONLY_POLICY = (
     "Use mcp_odoo tools for every Odoo operation. Do not access Odoo through "
     "shell commands, direct HTTP, XML-RPC, JSON-2, PostgreSQL, or Python libraries."
@@ -377,19 +370,7 @@ async def run(args: argparse.Namespace) -> None:
     )
     receipt_start_number = receipts.number
     provider = OpenAICompatibleProvider(
-        OpenAICompatibleConfig(
-            api_key=api_key,
-            base_url=base_url,
-            reasoning_effort=thinking,
-            thinking_format="openai",
-            compat=MODEL_COMPAT,
-            provider_name=provider_name,
-            timeout_seconds=None,
-            max_retries=0,
-            max_tokens=max_output_tokens,
-            infer_api_from_model=False,
-            provider_hooks=receipts,
-        )
+        transport_config(api_key, base_url, provider_name, thinking, receipts, max_tokens=max_output_tokens)
     )
     world = None
     actions = None
@@ -476,28 +457,7 @@ async def run(args: argparse.Namespace) -> None:
             else:
                 session_tools = full_tools
             cwd = Path.cwd()
-            provider_config = OpenAICompatibleProviderConfig(
-                name=provider_name,
-                base_url=base_url,
-                api_key_env="LLM_API_KEY",
-                models=(model,),
-                default_model=model,
-                context_windows={model: CONTEXT_WINDOW},
-                compat=MODEL_COMPAT,
-                model_metadata={
-                    model: ProviderModelMetadata(
-                        reasoning=True,
-                        context_window=CONTEXT_WINDOW,
-                    )
-                },
-                timeout_seconds=None,
-                max_retries=0,
-                thinking_levels=(thinking,),
-                thinking_models=(model,),
-                thinking_default=thinking,
-                thinking_parameter="reasoning_effort",
-                thinking_defaults={model: thinking},
-            )
+            provider_config = _provider_config(base_url, model, provider_name, thinking)
             runtime_now = datetime.now().astimezone()
             runtime_date = runtime_now.date().isoformat()
             async def stop_after_approval(turn):
