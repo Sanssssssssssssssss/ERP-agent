@@ -663,13 +663,7 @@ async def run(args: argparse.Namespace) -> None:
         entry_ids_before = {entry.id for entry in entries_before}
         source = session.prompt(args.instruction_file.read_text(encoding="utf-8"))
         async for event in receipts.events(source):
-            if hasattr(event, "model_dump_json"):
-                line = event.model_dump_json(by_alias=True)
-            elif isinstance(event, dict):
-                line = json.dumps(event, ensure_ascii=False)
-            else:
-                continue
-            print(line, flush=True)
+            print(json.dumps(event, ensure_ascii=False), flush=True)
         entries_after = await session.session_entries()
         new_entries = [entry for entry in entries_after if entry.id not in entry_ids_before]
         assistant = [entry.message for entry in new_entries
