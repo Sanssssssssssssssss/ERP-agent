@@ -10,6 +10,7 @@ import time
 
 from .decision_dataset import OUTPUT
 from .laya_probe import WORK, questions, read, sha
+from .reviewed_dataset import require_reference_opt_in
 
 
 def metrics(probabilities, targets, names):
@@ -43,6 +44,7 @@ def sample(cases, names, cap=64):
 
 
 def main(args):
+    require_reference_opt_in(args.allow_reference_labels)
     os.environ['HF_HOME'] = str(WORK/'hf-cache')
     os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
@@ -165,4 +167,5 @@ if __name__=='__main__':
     p.add_argument('--per-group',type=int,default=64)
     p.add_argument('--epochs',type=int,default=60)
     p.add_argument('--max-len',type=int,default=1024)
+    p.add_argument('--allow-reference-labels',action='store_true',help='Explicitly reproduce training on unreviewed historical next-call labels.')
     main(p.parse_args())

@@ -3,12 +3,45 @@ import asyncio
 import copy
 from itertools import count
 import json
+import pytest
+from types import SimpleNamespace
 
 from experiments.tool_routing.decision_dataset import FIXTURES, split_family, state_from_request
 from erp_harness.tools.dynamic_tools import CAPABILITY_GROUPS, DynamicToolController
 from tests.test_dynamic_tools import fake_tools
-from experiments.tool_routing.train_head import chosen
+from experiments.tool_routing.train_head import chosen, main as train_head
+from experiments.tool_routing.train_decider import main as train_scorer
 from experiments.tool_routing.intent_probe import with_prior_intent
+from experiments.tool_routing.competitive_probe import selected
+from experiments.tool_routing.reviewed_dataset import inclusion_labels, load_reviewed, validate
+
+
+def test_competitive_choice_maps_labels_without_probability_threshold():
+    assert selected({'choice':'K'}, {'K':'base_only', 'A':'actions'}) == []
+    assert selected({'choice':'A'}, {'K':'base_only', 'A':'actions'}) == ['actions']
+    with pytest.raises(KeyError):
+        selected({'choice':'missing'}, {'A':'actions'})
+
+
+def test_reviewed_labels_preserve_preloads_unknowns_and_evaluation_boundary():
+    train, evaluation, groups = load_reviewed()
+    example = next(r for r in train if r['id'] == '2003:agent:0003')
+    assert inclusion_labels(example, groups)['actions'] == 1
+    assert inclusion_labels(example, groups)['diagnostics'] is None
+    assert inclusion_labels(example, groups)['migration'] == 0
+    with pytest.raises(ValueError, match='business family'):
+        validate([{**train[0], 'business_group':evaluation[0]['business_group']}], evaluation, groups)
+    with pytest.raises(ValueError, match='alias'):
+        validate([{**train[0], 'request_sha256':evaluation[0]['request_sha256']}], evaluation, groups)
+    bad = copy.deepcopy(train)
+    bad[0]['unrelated_groups'].append('actions')
+    with pytest.raises(ValueError, match='Contradictory'):
+        validate(bad, evaluation, groups)
+    with pytest.raises(ValueError, match='not complete'):
+        validate([{**train[0], 'review_status':'pending'}], evaluation, groups)
+    for entrypoint in [train_head, train_scorer]:
+        with pytest.raises(ValueError, match='not reviewed'):
+            entrypoint(SimpleNamespace(allow_reference_labels=False))
 
 
 def test_router_reads_choice_before_rounded_probability():

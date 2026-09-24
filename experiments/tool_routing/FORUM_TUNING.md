@@ -29,3 +29,11 @@
 入口：[完整决策头](train_head.py)、[历史计划对照](intent_probe.py)。后者支持 `--source`、`--output`、`--empty-control`；前者支持 `--output`、`--baseline-from`。结果目录拒绝覆盖，基线复用校验冻结输入与模型哈希。
 
 证据：[主结果](../../.runtime/capability-routing-20260924/full-head-accum-v1/summary.json)、[工具数与延迟](../../.runtime/capability-routing-20260924/full-head-accum-v1/audit.json)、[计划输入](../../.runtime/capability-routing-20260924/prior-intent-v1/summary.json)、[空计划对照](../../.runtime/capability-routing-20260924/prior-intent-control-v1/summary.json)、[成对检查与用量](../../.runtime/capability-routing-20260924/forum-tuning-audit.json)。各目录保留逐节点响应、冻结输入和实际运行脚本；中断材料见 `full-head-v1/partial-summary.json`、`full-head-v2/partial-summary.json`。
+
+**后续核对：原链路没有做新鲜主模型 A/B。** 上表“历史 active”只证明当时发布了下一步使用的工具，不是原模型的新调用成绩或业务通过率。原逻辑由主模型按需调用 configure，runtime 保持集合到下次更改。79 个历史配置响应中，29 个只有控制工具、50 个混有业务调用；29 也只是待验证的省轮机会。[原响应核对](../../.runtime/capability-routing-20260924/competitive-v1/original-route-audit.json)
+
+新增竞争式选择实验保持同样状态，改为 11 选 1（十组能力＋基础工具），与旧二元 Top-1/Top-2、固定 actions 对比。69 个 dev＋9 个已审阅节点，具体描述及中性标签分别做正反顺序。四个预设格式的审阅允许集合命中为 **1/9、1/9、1/9、4/9**；固定 actions 同样是 4/9，且没有无关组。竞争式每种格式均漏掉 2 个必要能力节点；不能把工具数量下降当成路由提升。单选还无法表达复合能力，所以仍不晋级。[竞争式结果](../../.runtime/capability-routing-20260924/competitive-v1/summary.json)
+
+此次 313 次本地 SDK 调用、344,498 encoder 输入 token，单选 SDK P50/P95 约 39/83 ms；付费 API/Odoo/新鲜主模型调用均为 0。当前接口问题包括独立二元选择容易全开、格式与顺序敏感、投射未保留完整历史；这些不等于已证明模型上限。更明确的监督问题是：2003 一次读取被标成空集合，遗漏合理保留的 actions；普通采购开票中的迁移绕路被标成 migration 正例。
+
+训练数据现按前缀证据审阅：允许集合、必要能力、明确无关、尚不确定分开保存。先维护 6 个训练侧种子，9 个评测案例继续保留；不确定标签导出为 null，不补造稀有正例。种子仅覆盖 actions/knowledge/diagnostics 的正例，尚不足以重训。旧训练器默认拒绝弱标签；`--allow-reference-labels` 仅用于复现旧实验。17 项离线测试＋3 个 subtest 通过。[数据维护与冻结入口](../../tests/fixtures/capability_routing/README.md)

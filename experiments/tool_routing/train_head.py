@@ -14,6 +14,7 @@ from .build_cases import read as read_request
 from .decision_dataset import FIXTURES, OUTPUT, state_from_request
 from .laya_probe import WORK, questions, read, sha
 from .train_decider import metrics
+from .reviewed_dataset import require_reference_opt_in
 
 
 def concrete_questions(groups, true_label='A', true_first=False):
@@ -35,6 +36,7 @@ def chosen(answer, positive):
 
 
 def main(args):
+    require_reference_opt_in(args.allow_reference_labels)
     os.environ['HF_HOME'] = str(WORK/'hf-cache')
     os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
@@ -210,4 +212,5 @@ if __name__=='__main__':
     p.add_argument('--output',type=Path,default=OUTPUT/'full-head-accum-v1')
     p.add_argument('--epochs',type=int,default=4)
     p.add_argument('--baseline-from',type=Path)
+    p.add_argument('--allow-reference-labels',action='store_true',help='Explicitly reproduce training on unreviewed historical next-call labels.')
     main(p.parse_args())

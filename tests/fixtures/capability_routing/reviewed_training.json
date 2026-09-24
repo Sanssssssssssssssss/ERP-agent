@@ -1,0 +1,300 @@
+{
+  "schema_version": 1,
+  "label_revision": 1,
+  "purpose": "Reviewed training seed; never mix with evaluation families.",
+  "label_scope": "next_turn_optional_publication",
+  "selection": "Fixed train-prefix audit. Historical targets visible as weak references; candidate predictions for these train nodes were not inspected.",
+  "limits": "Agent-reviewed seed, not human-approved gold. Allowed alternatives are not claimed exhaustive.",
+  "cases": [
+    {
+      "id": "E03:r_923977c281284ce0bf648c2ae0e83948:0001",
+      "business_group": "enterprise:E03",
+      "split": "train",
+      "request_path": "E:\\GPTProject2\\erp-harness-refactor\\.runtime\\enterprise-validation-20260922\\live\\E03\\profile\\data\\runs\\r_923977c281284ce0bf648c2ae0e83948\\requests\\0001.request.json",
+      "request_sha256": "bc6d7758b6f6e4d3d31b8df4800332afb8fc164dd27f67aaa5a75f4d33c26f8c",
+      "review_status": "prefix_reviewed",
+      "reviewer": "codex-main",
+      "source_kind": "historical_business",
+      "phase": "Initial customer payment and reconciliation",
+      "allowed_injection_sets": [
+        [],
+        [
+          "actions"
+        ]
+      ],
+      "required_groups": [],
+      "uncertain_groups": [
+        "accounting",
+        "diagnostics"
+      ],
+      "unrelated_groups": [
+        "async_reads",
+        "attachments",
+        "cross_instance",
+        "employee",
+        "knowledge",
+        "migration",
+        "time_off"
+      ],
+      "rationale": "User requests two receipts and exact bank matching. Base reads may establish invoice and statement facts first; preloading actions is also justified. An accounting document alone does not require aging tools.",
+      "source_pointers": [
+        {
+          "purpose": "Inspected prefix evidence",
+          "json_pointers": [
+            "/messages/0",
+            "/messages/1"
+          ]
+        }
+      ],
+      "information_limits": [
+        "Both initial messages inspected. Current balances and write approval still need runtime evidence."
+      ]
+    },
+    {
+      "id": "E05:r_c60fb73ae99f47dbb868c77f0b46f840:0001",
+      "business_group": "enterprise:E05",
+      "split": "train",
+      "request_path": "E:\\GPTProject2\\erp-harness-refactor\\.runtime\\enterprise-validation-20260922\\live\\E05\\profile\\data\\runs\\r_c60fb73ae99f47dbb868c77f0b46f840\\requests\\0001.request.json",
+      "request_sha256": "e781e4dfc32f1cfe645272d5c7824f064da2b13833af867ab6008c4894f087e2",
+      "review_status": "prefix_reviewed",
+      "reviewer": "codex-main",
+      "source_kind": "historical_business",
+      "phase": "Initial partial return, credit note and refund",
+      "allowed_injection_sets": [
+        [],
+        [
+          "actions"
+        ]
+      ],
+      "required_groups": [],
+      "uncertain_groups": [
+        "accounting",
+        "diagnostics"
+      ],
+      "unrelated_groups": [
+        "async_reads",
+        "attachments",
+        "cross_instance",
+        "employee",
+        "knowledge",
+        "migration",
+        "time_off"
+      ],
+      "rationale": "User requests return of two units, a linked credit and a specific refund. Native reads can establish lineage; actions is a reasonable preload. Publishing it does not grant approval.",
+      "source_pointers": [
+        {
+          "purpose": "Inspected prefix evidence",
+          "json_pointers": [
+            "/messages/0",
+            "/messages/1"
+          ]
+        }
+      ],
+      "information_limits": [
+        "Both initial messages inspected. Stock moves, residual and bank relation remain unverified."
+      ]
+    },
+    {
+      "id": "2003:agent:0003",
+      "business_group": "erpbench:2003",
+      "split": "train",
+      "request_path": "E:\\GPTProject2\\erp-harness-refactor\\.runtime\\agent-regression-full-20260923\\full\\bench\\jobs\\2003\\agent-regression-full-2003\\2003_easy_01_buy_only_baseline__Y6yEeK5\\agent\\requests\\0003.request.json",
+      "request_sha256": "2111f57e3babdbf898eaea330cf78aa7bdf110b1c3088a032866c9f331a0fbe9",
+      "review_status": "prefix_reviewed",
+      "reviewer": "codex-main",
+      "source_kind": "historical_business",
+      "phase": "Repair SOP arguments after enabling actions",
+      "allowed_injection_sets": [
+        [],
+        [
+          "actions"
+        ]
+      ],
+      "required_groups": [],
+      "uncertain_groups": [
+        "diagnostics"
+      ],
+      "unrelated_groups": [
+        "accounting",
+        "async_reads",
+        "attachments",
+        "cross_instance",
+        "employee",
+        "knowledge",
+        "migration",
+        "time_off"
+      ],
+      "rationale": "SOP failures identify missing parameters. Base tools can repair those calls. The task still explicitly requires sales and purchasing writes, and actions has just been published; the following read does not make actions an incorrect preload.",
+      "source_pointers": [
+        {
+          "purpose": "Inspected prefix evidence",
+          "json_pointers": [
+            "/messages/0",
+            "/messages/1",
+            "/messages/9",
+            "/messages/10",
+            "/messages/11",
+            "/messages/12"
+          ]
+        }
+      ],
+      "information_limits": [
+        "Goal, SOP failures and publication receipt inspected; earlier discovery results not re-audited as business acceptance."
+      ]
+    },
+    {
+      "id": "history:0282e2fb879c97b36f78",
+      "business_group": "erpbench:2008",
+      "split": "train",
+      "request_path": "E:\\GPTProject2\\pi-odoo-harness-lab\\.runtime\\jobs\\stage6-knowledge-invoicing-ab-20260907-r5\\2008_easy_02_buy_only_immediate__vtQqdAH\\agent\\requests\\0002.request.json",
+      "request_sha256": "25de5238166b3e42d80c29584c3dad2518ea1e350ab17e4cf9689fa0d3925b1a",
+      "review_status": "prefix_reviewed",
+      "reviewer": "codex-main",
+      "source_kind": "historical_probe",
+      "phase": "Continue an explicitly ordered knowledge probe",
+      "allowed_injection_sets": [
+        [
+          "knowledge"
+        ],
+        [
+          "actions",
+          "knowledge"
+        ]
+      ],
+      "required_groups": [
+        "knowledge"
+      ],
+      "uncertain_groups": [
+        "diagnostics"
+      ],
+      "unrelated_groups": [
+        "accounting",
+        "async_reads",
+        "attachments",
+        "cross_instance",
+        "employee",
+        "migration",
+        "time_off"
+      ],
+      "rationale": "The user prefix explicitly requires index, search and stats before the ERP task. Indexing has returned; knowledge remains needed for the ordered probe. Its results are leads, not write authorization.",
+      "source_pointers": [
+        {
+          "purpose": "Inspected prefix evidence",
+          "json_pointers": [
+            "/messages/0",
+            "/messages/1",
+            "/messages/3",
+            "/messages/4",
+            "/messages/5",
+            "/messages/6"
+          ]
+        }
+      ],
+      "information_limits": [
+        "This is a real historical capability probe, not organic business demand. The ordered instruction is in message 1 after environment setup."
+      ]
+    },
+    {
+      "id": "history:91c0cd8b656be658dceb",
+      "business_group": "erpbench:2008",
+      "split": "train",
+      "request_path": "E:\\GPTProject2\\pi-odoo-harness-lab\\.runtime\\jobs\\stage5-dynamic-tools-invoicing-ab-20260905-r1\\2008_easy_02_buy_only_immediate__ZnDfxzd\\agent\\requests\\0012.request.json",
+      "request_sha256": "761e29c100adbaddc4bc7dd39edeab784281e49b6f638c2acc39c74654d06d6f",
+      "review_status": "prefix_reviewed",
+      "reviewer": "codex-main",
+      "source_kind": "historical_business",
+      "phase": "Continue single-instance procurement discovery",
+      "allowed_injection_sets": [
+        [],
+        [
+          "actions"
+        ]
+      ],
+      "required_groups": [],
+      "uncertain_groups": [
+        "accounting",
+        "attachments",
+        "async_reads",
+        "diagnostics",
+        "knowledge"
+      ],
+      "unrelated_groups": [
+        "cross_instance",
+        "employee",
+        "migration",
+        "time_off"
+      ],
+      "rationale": "The user asks for supply, orders and linked invoices in the stated instance. The inspected reads do not establish a cross-instance task. The historical cross-instance call is not accepted as a positive label.",
+      "source_pointers": [
+        {
+          "purpose": "Inspected prefix evidence",
+          "json_pointers": [
+            "/messages/0",
+            "/messages/1",
+            "/messages/44",
+            "/messages/45",
+            "/messages/46",
+            "/messages/47"
+          ]
+        }
+      ],
+      "information_limits": [
+        "Full user goal and latest four reads inspected; earlier assistant plans not independently established as valid business requirements."
+      ]
+    },
+    {
+      "id": "history:5bd78203342a7e99ff86",
+      "business_group": "erpbench:2008",
+      "split": "train",
+      "request_path": "E:\\GPTProject2\\pi-odoo-harness-lab\\.runtime\\jobs\\stage5-dynamic-tools-invoicing-ab-20260905-r1\\2008_easy_02_buy_only_immediate__ZnDfxzd\\agent\\requests\\0021.request.json",
+      "request_sha256": "8769db0e527d313b67b3b3f6ddb222b090531e16ac1e0e925277baf34f75e81e",
+      "review_status": "prefix_reviewed",
+      "reviewer": "codex-main",
+      "source_kind": "historical_business",
+      "phase": "Recover metadata discovery during procurement",
+      "allowed_injection_sets": [
+        [],
+        [
+          "actions"
+        ],
+        [
+          "diagnostics"
+        ],
+        [
+          "actions",
+          "diagnostics"
+        ]
+      ],
+      "required_groups": [],
+      "uncertain_groups": [
+        "accounting",
+        "async_reads",
+        "knowledge"
+      ],
+      "unrelated_groups": [
+        "attachments",
+        "cross_instance",
+        "employee",
+        "migration",
+        "time_off"
+      ],
+      "rationale": "The task requests ordinary procurement and invoicing. Empty metadata queries justify base repair or diagnostics; health and sales-pack readbacks show usable sales models. No migration or upgrade objective is established.",
+      "source_pointers": [
+        {
+          "purpose": "Inspected prefix evidence",
+          "json_pointers": [
+            "/messages/0",
+            "/messages/1",
+            "/messages/95",
+            "/messages/96",
+            "/messages/97",
+            "/messages/98"
+          ]
+        }
+      ],
+      "information_limits": [
+        "Full user goal and latest four observations inspected. Historical generation of JSON-2 payloads does not authorize or require a migration."
+      ]
+    }
+  ]
+}
