@@ -112,6 +112,7 @@ def encoder_cache(agent, directory):
         if path.exists():
             h=torch.load(path,map_location=agent.device,weights_only=True);stats['hits']+=1
         else:
+            assert next(agent.model.encoder.parameters()).device==input_ids.device, 'Frozen encoder cache missing; rewarm required.'
             with torch.no_grad():h=original(input_ids=input_ids,attention_mask=attention_mask).last_hidden_state.detach()
             torch.save(h.cpu(),path);stats['misses']+=1;stats['bytes']+=path.stat().st_size
             stats['encoder_tokens']+=int(attention_mask.sum())
@@ -168,11 +169,23 @@ def main(args):
                   'Existing rows repeated across capabilities/formats, with equal positive/negative mass within positive states. Negative-only states retained. Repetition adds no independent data.',
                   'No state truncation. Single-row encoder cache preserves dtype and the official head forward.'],
         'versions':{'torch':torch.__version__,'device':torch.cuda.get_device_name(),'amp':str(agent.dtype)}}
+    if args.resume_from:
+        previous=read(args.resume_from/'frozen.json')
+        for key in ['source_sha256','model_lock','questions','max_len_by_case','train_items_per_epoch','versions',
+                    'seed','lr','batch','microbatch','epochs_max','epochs_min','patience','selection','early_stop']:
+            assert previous[key]==frozen[key], f'Resume contract changed: {key}'
+        for helper in [fit_epoch,training_labels,verdict]:
+            path=Path(helper.__code__.co_filename)
+            assert previous['sources'][path.name]==sha(path), f'Resume helper changed: {path.name}'
+        args.cache_from=args.cache_from or args.resume_from
+        frozen['resume_from']={'path':str(args.resume_from.resolve()),'checkpoint_sha256':sha(args.resume_from/'latest.pt'),
+            'manifest_sha256':sha(args.resume_from/'frozen.json'),
+            'note':'Resume completed epochs only; interrupted partial epoch is discarded. Legacy checkpoints lack RNG state; seed reset is recorded.'}
     cache_dir=args.output/'encoder-cache'
     if args.cache_from:
         prior=read(args.cache_from/'frozen.json')
         assert prior['model_lock']==lock and prior['versions']==frozen['versions'], 'Cache model/runtime changed.'
-        cache_dir=args.cache_from/'encoder-cache'
+        cache_dir=Path(prior.get('encoder_cache_source',{}).get('path',args.cache_from/'encoder-cache'))
         assert cache_dir.is_dir()
         frozen['encoder_cache_source']={'path':str(cache_dir.resolve()),'manifest_sha256':sha(args.cache_from/'frozen.json')}
     (args.output/'sources').mkdir()
@@ -221,13 +234,52 @@ def main(args):
 
     summary={'paid_calls':0,'odoo_calls':0,'epochs':[],'selected_epoch':0,'trainable_parameters':sum(p.numel() for p in params)}
     with encoder_cache(agent,cache_dir) as cache_stats:
-        _,base_train=evaluate(splits['train'],'base-train')
-        _,base_dev=evaluate(splits['dev'],'base-dev')
-        summary['baseline']={'train':base_train,'dev':base_dev}
-        best=selection_rank(base_dev);save('decision_head.pt');save('base_head.pt')
         optimizer=torch.optim.AdamW(params,lr=3e-5,weight_decay=.01)
-        step=stale=0
-        for epoch in range(1,args.epochs+1):
+        step=stale=start_epoch=0
+        if args.resume_from:
+            checkpoint=torch.load(args.resume_from/'latest.pt',map_location='cpu',weights_only=True)
+            summary=read(args.resume_from/'training.json')
+            start_epoch=checkpoint['epoch'];step=checkpoint['step']
+            assert start_epoch==len(summary['epochs']) and step==summary['epochs'][-1]['optimizer_steps']
+            assert start_epoch<args.epochs
+            agent.model.load_state_dict(checkpoint['head'],strict=False)
+            optimizer.load_state_dict(checkpoint['optimizer'])
+            for name in ['decision_head.pt','base_head.pt']:
+                (args.output/name).write_bytes((args.resume_from/name).read_bytes())
+            base_dev=summary['baseline']['dev'];best=selection_rank(base_dev)
+            for row in summary['epochs']:
+                rank=selection_rank(row['dev'])
+                meaningful=rank[:2]<best[:2] or (rank[:2]==best[:2] and best[2]-rank[2]>=.001)
+                stale=0 if meaningful else stale+1
+                best=min(best,rank)
+            if 'torch_rng_state' in checkpoint:
+                torch.set_rng_state(checkpoint['torch_rng_state'])
+                torch.cuda.set_rng_state_all(checkpoint['cuda_rng_states'])
+                summary['resume_rng_reset']=False
+            else:
+                torch.manual_seed(seed+start_epoch);summary['resume_rng_reset']=seed+start_epoch
+            summary['resumed_completed_epochs']=start_epoch
+            summary['usage_scope']='Current process only; previous completed epochs retained in training history.'
+            del checkpoint
+        else:
+            _,base_train=evaluate(splits['train'],'base-train')
+            _,base_dev=evaluate(splits['dev'],'base-dev')
+            summary['baseline']={'train':base_train,'dev':base_dev}
+            best=selection_rank(base_dev);save('decision_head.pt');save('base_head.pt')
+        # Training/dev features are already frozen on disk. Free their unused encoder
+        # weights on GPU; restore them before evaluating uncached test nodes and SDK parity.
+        agent.model.eval()
+        probe=collate_items([[encoded[splits['dev'][0]['id']][0][0]]],agent.tok.pad_token_id)
+        with torch.no_grad():before,_=agent._infer(probe)
+        allocated_before=torch.cuda.memory_allocated()
+        agent.model.encoder.cpu();torch.cuda.empty_cache()
+        with torch.no_grad():after,_=agent._infer(probe)
+        assert agent.device.type=='cuda' and torch.equal(before,after), 'Encoder offload changed cached inference.'
+        summary['encoder_offload_check']={'identical_logits':True,'gpu_bytes_before':allocated_before,
+            'gpu_bytes_after':torch.cuda.memory_allocated()}
+        print(json.dumps({'stage':'training','resume_epoch':start_epoch,'encoder_device':'cpu',
+                          'gpu_allocated_bytes':torch.cuda.memory_allocated()}),flush=True)
+        for epoch in range(start_epoch+1,args.epochs+1):
             shuffled=list(items);random.Random(seed+epoch).shuffle(shuffled);norms=[]
             step,loss,tokens=fit_epoch(agent,shuffled,optimizer,params,step,microbatch=1,diagnostics=norms)
             usage['training_token_presentations']+=tokens
@@ -244,10 +296,12 @@ def main(args):
             summary['epochs'].append(row)
             (args.output/'training.json').write_text(json.dumps(summary,indent=2),encoding='utf8')
             torch.save({'epoch':epoch,'step':step,'optimizer':optimizer.state_dict(),
+                'torch_rng_state':torch.get_rng_state(),'cuda_rng_states':torch.cuda.get_rng_state_all(),
                 'head':{k:v.detach().cpu() for k,v in agent.model.state_dict().items() if k.split('.')[0] in parts}},args.output/'latest.pt')
             if epoch>=args.min_epochs and stale>=args.patience:
                 summary['stop_reason']='dev_plateau';break
         else:summary['stop_reason']='epoch_ceiling; inspect train convergence before attributing errors to generalization'
+        torch.cuda.empty_cache();agent.model.encoder.to(agent.device)
         agent.model.load_state_dict(torch.load(args.output/'decision_head.pt',weights_only=True),strict=False)
         summary['candidate']={}
         candidate_routes={}
@@ -289,6 +343,7 @@ if __name__=='__main__':
     parser.add_argument('--epochs',type=int,default=24);parser.add_argument('--min-epochs',type=int,default=12)
     parser.add_argument('--patience',type=int,default=6)
     parser.add_argument('--cache-from',type=Path,help='Reuse only encoder features from an identical locked model/runtime.')
+    parser.add_argument('--resume-from',type=Path,help='Continue completed epochs from a matching frozen checkpoint; preserve original selection history.')
     args=parser.parse_args()
     if not 1<=args.min_epochs<=args.epochs or args.patience<1:parser.error('Invalid epoch/patience settings.')
     main(args)
