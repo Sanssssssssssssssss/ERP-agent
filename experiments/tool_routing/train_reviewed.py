@@ -4,6 +4,7 @@ from collections import Counter, defaultdict
 from contextlib import contextmanager
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import random
@@ -40,15 +41,26 @@ def training_items(cases, names, specs, encoded):
                 slot=list(spec[g]['criteria']).index('A' if variant<2 else 'B')
                 items.append({**encoded[r['id']][variant][gi], 'label':slot if target else 1-slot,
                               'weight':weight,'case_id':r['id'],'group':g,'variant':variant,'semantic_target':target})
-    # Match the validation objective: equal capability mass, then equal observed
-    # class mass. Family weights remain meaningful within each class.
-    mass=Counter()
-    for item in items:mass[item['group'],item['semantic_target']]+=item['weight']
-    classes=Counter(g for g,_ in mass)
-    for item in items:
-        key=item['group'],item['semantic_target']
-        item['weight']*=len(items)/(len(classes)*classes[item['group']]*mass[key])
-    return items
+    # Sparse huge weights are clipped in mostly-negative batches. Instead repeat
+    # existing rows: equal target mass, equal groups within target, all formats.
+    buckets=defaultdict(list)
+    for item in items:buckets[item['semantic_target'],item['group'],item['variant']].append(item)
+    counts={t:len({g for target,g,_ in buckets if target==t}) for t in [0,1]}
+    assert all(counts.values()), 'Need reviewed positive and negative examples.'
+    quota=math.lcm(*counts.values())*max(len(b) for b in buckets.values())
+    balanced=[]
+    for (target,_,_),bucket in buckets.items():
+        size=quota//counts[target]
+        repeated=[dict(bucket[i%len(bucket)]) for i in range(size)]
+        mass=sum(i['weight'] for i in repeated)
+        for item in repeated:item['weight']*=size/mass
+        balanced.extend(repeated)
+    return balanced
+
+
+def selection_rank(result):
+    # A lower CE cannot compensate for losing a required capability.
+    return result['missing_required'],result['unrelated'],result['balanced_ce']
 
 
 def decision_metrics(decisions):
@@ -124,15 +136,17 @@ def main(args):
     # Exercise the real SDK collator before any expensive forward. `target` is reserved
     # for soft-label vectors; experiment metadata must not shadow its input fields.
     collate_items([items[:16]],agent.tok.pad_token_id)
-    positives=Counter(i['group'] for i in items if i['semantic_target']==1 and i['variant']==0)
+    positives=Counter(g for r in splits['train'] for g,t in training_labels(r,names).items() if t==1)
     frozen={'source_sha256':sha(args.source/'frozen.json'),'model_lock':lock,'seed':seed,
         'epochs_max':args.epochs,'epochs_min':args.min_epochs,'patience':args.patience,'lr':3e-5,'batch':16,'microbatch':1,
         'questions':specs,'max_len_by_case':lengths,'train_items_per_epoch':len(items),
+        'unique_judged_pairs':len({(i['case_id'],i['group']) for i in items}),
+        'training_class_exposures':dict(Counter(str(i['semantic_target']) for i in items)),
         'train_positive':dict(positives),'zero_positive_groups':[g for g in names if not positives[g]],
-        'selection':'Lowest dev capability/class-balanced CE over all four formats, including epoch 0. Test evaluated after selection.',
-        'early_stop':'After minimum epochs, stop after patience consecutive epochs without dev CE improvement of at least 0.001.',
+        'selection':'Dev required misses, then unrelated selections, then balanced CE; all four formats and epoch 0. Test only after selection.',
+        'early_stop':'After minimum epochs, patience without better miss/extra counts or CE improvement of at least 0.001 at the same counts.',
         'limits':['Existing reviewed pool, not a blind benchmark. Missing positive classes cannot be accepted.',
-                  'Loss balanced by capability and observed class; family weights apply within each class.',
+                  'Existing rows repeated to balance targets, then capabilities and formats. Repetition adds no independent data.',
                   'No state truncation. Single-row encoder cache preserves dtype and the official head forward.'],
         'versions':{'torch':torch.__version__,'device':torch.cuda.get_device_name(),'amp':str(agent.dtype)}}
     cache_dir=args.output/'encoder-cache'
@@ -187,7 +201,7 @@ def main(args):
         _,base_train=evaluate(splits['train'],'base-train')
         _,base_dev=evaluate(splits['dev'],'base-dev')
         summary['baseline']={'train':base_train,'dev':base_dev}
-        best=base_dev['balanced_ce'];save('decision_head.pt');save('base_head.pt')
+        best=selection_rank(base_dev);save('decision_head.pt');save('base_head.pt')
         optimizer=torch.optim.AdamW(params,lr=3e-5,weight_decay=.01)
         step=stale=0
         for epoch in range(1,args.epochs+1):
@@ -199,10 +213,11 @@ def main(args):
             if epoch%2==0:_,train=evaluate(splits['train'],f'epoch-{epoch}-train')
             row={'epoch':epoch,'optimizer_steps':step,'training_loss':loss,'dev':dev,'train':train,
                  'gradient_norm_mean':sum(norms)/len(norms),'gradient_norm_max':max(norms)}
-            improvement=best-dev['balanced_ce']
-            stale=0 if improvement>=.001 else stale+1
-            if improvement>0:
-                best=dev['balanced_ce'];summary['selected_epoch']=epoch;save('decision_head.pt')
+            rank=selection_rank(dev)
+            meaningful=rank[:2]<best[:2] or (rank[:2]==best[:2] and best[2]-rank[2]>=.001)
+            stale=0 if meaningful else stale+1
+            if rank<best:
+                best=rank;summary['selected_epoch']=epoch;save('decision_head.pt')
             summary['epochs'].append(row)
             (args.output/'training.json').write_text(json.dumps(summary,indent=2),encoding='utf8')
             torch.save({'epoch':epoch,'step':step,'optimizer':optimizer.state_dict(),
@@ -239,7 +254,7 @@ def main(args):
                 parity.append(row);log.write(json.dumps(row)+'\n');log.flush()
     summary.update(optimizer_steps=step,cache=cache_stats,usage=dict(usage),elapsed_seconds=time.perf_counter()-start,
         sdk_parity={'same_sets':sum(r['same_set'] for r in parity),'cases':len(parity),'max_probability_delta':max(r['max_probability_delta'] for r in parity)},
-        dev_improved=best<base_dev['balanced_ce'],head_sha256=sha(args.output/'decision_head.pt'))
+        dev_improved=best<selection_rank(base_dev),head_sha256=sha(args.output/'decision_head.pt'))
     (args.output/'summary.json').write_text(json.dumps(summary,indent=2),encoding='utf8')
     assert all(r['same_set'] and r['max_probability_delta']<.001 for r in parity), 'Inspect cached/live inference mismatch.'
     print(json.dumps({'stage':'done','selected_epoch':summary['selected_epoch'],'test':summary['candidate']['test'],'parity':summary['sdk_parity']}),flush=True)

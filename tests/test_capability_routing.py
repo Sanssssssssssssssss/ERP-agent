@@ -18,7 +18,7 @@ from experiments.tool_routing.reviewed_dataset import expanded_reviewed, trainin
 from experiments.tool_routing.routing_state import routing_state
 from experiments.tool_routing.model_comparison import parse_selector, verdict
 from experiments.tool_routing.train_head import concrete_questions
-from experiments.tool_routing.train_reviewed import training_items, decision_metrics
+from experiments.tool_routing.train_reviewed import training_items, decision_metrics, selection_rank
 
 
 def test_reviewed_training_covers_every_judged_format_and_masks_unknowns():
@@ -31,25 +31,27 @@ def test_reviewed_training_covers_every_judged_format_and_masks_unknowns():
     for item in items:
         key=item['group'],item['semantic_target']
         class_mass[key]=class_mass.get(key,0)+item['weight']
-    assert class_mass['actions',0]==pytest.approx(class_mass['actions',1])
-    assert class_mass['knowledge',0]==pytest.approx(class_mass['knowledge',1])
-    assert class_mass['actions',0]+class_mass['actions',1]==pytest.approx(class_mass['migration',0])
+    assert sum(v for (_,t),v in class_mass.items() if t==0)==pytest.approx(sum(v for (_,t),v in class_mass.items() if t==1))
+    assert class_mass['knowledge',1]==pytest.approx(class_mass['actions',1])
+    assert class_mass['actions',0]==pytest.approx(class_mass['migration',0])
     assert sum(i['weight'] for i in items)==pytest.approx(len(items))
-    assert len(items)==4*sum(v is not None for r in train for v in training_labels(r,groups).values())
+    assert len({(i['case_id'],i['group'],i['variant']) for i in items})==4*sum(v is not None for r in train for v in training_labels(r,groups).values())
     for r in train:
         for g,target in training_labels(r,groups).items():
             matched = [i for i in items if i['case_id']==r['id'] and i['group']==g]
             if target is None:
                 assert matched==[]
             else:
-                assert [i['variant'] for i in matched]==[0,1,2,3]
-                assert [i['label'] for i in matched]==([1,0,1,0] if target else [0,1,0,1])
-                assert len({i['weight'] for i in matched})==1
+                assert {i['variant'] for i in matched}=={0,1,2,3}
+                assert all(i['label']==([1,0,1,0] if target else [0,1,0,1])[i['variant']] for i in matched)
+                assert max(i['weight'] for i in matched)==pytest.approx(min(i['weight'] for i in matched))
     # Duplicating common negatives must not hide failure on the scarce positive class.
     positive={'group':'actions','target':1,'selected':False,'ce':2.}
     negative={'group':'actions','target':0,'selected':False,'ce':0.}
     assert decision_metrics([positive,negative])['balanced_ce']==1.
     assert decision_metrics([positive,*([negative]*100)])['balanced_ce']==1.
+    assert selection_rank({'missing_required':0,'unrelated':1,'balanced_ce':.5}) < selection_rank(
+        {'missing_required':1,'unrelated':0,'balanced_ce':.01})
 
 
 def test_expanded_labels_do_not_force_optional_preloads_or_leak_families():
