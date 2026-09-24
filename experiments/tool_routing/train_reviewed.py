@@ -55,7 +55,25 @@ def training_items(cases, names, specs, encoded):
         mass=sum(i['weight'] for i in repeated)
         for item in repeated:item['weight']*=size/mass
         balanced.extend(repeated)
-    return balanced
+    # Pair each oversampled positive state with its reviewed wrong capabilities.
+    # Otherwise rare positive states become an almost unconditional 'include'.
+    states=defaultdict(lambda:defaultdict(list))
+    for item in balanced:states[item['case_id'],item['variant']][item['semantic_target']].append(item)
+    paired=[]
+    for targets in states.values():
+        if set(targets)!={0,1}:
+            paired.extend(i for bucket in targets.values() for i in bucket)
+            continue
+        size=max(map(len,targets.values()))
+        positive_mass=sum(i['weight'] for i in targets[1])
+        for bucket in targets.values():
+            repeated=[dict(bucket[i%len(bucket)]) for i in range(size)]
+            mass=sum(i['weight'] for i in repeated)
+            for item in repeated:item['weight']*=positive_mass/mass
+            paired.extend(repeated)
+    scale=len(paired)/sum(i['weight'] for i in paired)
+    for item in paired:item['weight']*=scale
+    return paired
 
 
 def selection_rank(result):
@@ -146,7 +164,7 @@ def main(args):
         'selection':'Dev required misses, then unrelated selections, then balanced CE; all four formats and epoch 0. Test only after selection.',
         'early_stop':'After minimum epochs, patience without better miss/extra counts or CE improvement of at least 0.001 at the same counts.',
         'limits':['Existing reviewed pool, not a blind benchmark. Missing positive classes cannot be accepted.',
-                  'Existing rows repeated to balance targets, then capabilities and formats. Repetition adds no independent data.',
+                  'Existing rows repeated across capabilities/formats, with equal positive/negative mass within positive states. Negative-only states retained. Repetition adds no independent data.',
                   'No state truncation. Single-row encoder cache preserves dtype and the official head forward.'],
         'versions':{'torch':torch.__version__,'device':torch.cuda.get_device_name(),'amp':str(agent.dtype)}}
     cache_dir=args.output/'encoder-cache'

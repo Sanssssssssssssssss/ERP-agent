@@ -31,9 +31,11 @@ def test_reviewed_training_covers_every_judged_format_and_masks_unknowns():
     for item in items:
         key=item['group'],item['semantic_target']
         class_mass[key]=class_mass.get(key,0)+item['weight']
-    assert sum(v for (_,t),v in class_mass.items() if t==0)==pytest.approx(sum(v for (_,t),v in class_mass.items() if t==1))
     assert class_mass['knowledge',1]==pytest.approx(class_mass['actions',1])
-    assert class_mass['actions',0]==pytest.approx(class_mass['migration',0])
+    for r in train:
+        for variant in range(4):
+            masses={t:sum(i['weight'] for i in items if i['case_id']==r['id'] and i['variant']==variant and i['semantic_target']==t) for t in [0,1]}
+            if masses[1]:assert masses[0]==pytest.approx(masses[1])
     assert sum(i['weight'] for i in items)==pytest.approx(len(items))
     assert len({(i['case_id'],i['group'],i['variant']) for i in items})==4*sum(v is not None for r in train for v in training_labels(r,groups).values())
     for r in train:
