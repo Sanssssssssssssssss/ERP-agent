@@ -36,7 +36,7 @@ from erp_harness.context.resources import ResourcePaths
 from erp_harness.runtime.session import HarnessSession, SessionConfig
 
 from erp_harness.tools.router import native_tool_catalog, route_tools
-from erp_harness.app.request_receipts import RequestReceipts
+from erp_harness.app.request_receipts import RequestReceipts, _message_usage, _sum_usage_bucket
 from erp_harness.app.business import completion_target_instruction, valid_target
 from erp_harness.context.projection import project_messages, project_read_history
 from erp_harness.erp.actions import NativeActions
@@ -102,31 +102,17 @@ def build_business_system_prompt(*, sop_mode: str, tool_mode: str,
 
 
 def _usage_message_value(message: AssistantMessage, field: str) -> int | None:
-    usage = getattr(message, "usage", None)
-    if getattr(message, "stop_reason", None) in {"error", "aborted"}:
-        fields = ("input", "cache_read", "cache_write", "output", "total_tokens", "reasoning")
-        if usage is None or not any(getattr(usage, name, None) not in (None, 0) for name in fields):
-            return None
+    usage = _message_usage(message)
     return getattr(usage, field, None) if usage is not None else None
 
 
 def _nullable_usage_sum(messages: list[AssistantMessage], field: str) -> int | None:
     """Sum a reported usage bucket while preserving zero and missing values."""
-    if not messages:
-        return None
-    values = [_usage_message_value(message, field) for message in messages]
-    if any(value is None for value in values):
-        return None
-    return sum(values)
+    return _sum_usage_bucket([_message_usage(message) for message in messages], field)
 
 
 def _nullable_entry_usage_sum(entries: list[CompactionEntry], field: str) -> int | None:
-    if not entries:
-        return 0
-    values = [getattr(entry.usage, field, None) if entry.usage is not None else None for entry in entries]
-    if any(value is None for value in values):
-        return None
-    return sum(values)
+    return _sum_usage_bucket([entry.usage for entry in entries], field, empty=0)
 
 
 def _validated_dynamic_selection(active: object) -> tuple[str, ...] | None:

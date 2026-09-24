@@ -31,7 +31,9 @@ from erp_harness.providers.config import (
 from erp_harness.context.resources import ResourcePaths
 from erp_harness.runtime.session import HarnessSession, SessionConfig
 
-from erp_harness.app.request_receipts import RequestReceipts as _RequestReceipts
+from erp_harness.app.request_receipts import (
+    RequestReceipts as _RequestReceipts, _message_usage, _sum_usage_bucket,
+)
 from erp_harness.app.business import BUSINESS_TARGETS, COMPLETION_TARGETS, default_target, valid_target
 
 CONTEXT_WINDOW = 128_000
@@ -483,29 +485,6 @@ READ_ODOO_REFERENCE = AgentTool(
     },
     execute_fn=_read_odoo_reference,
 )
-
-
-def _sum_usage_bucket(usages: list[object], name: str, *, empty: int | None = None) -> int | None:
-    """Sum a bucket only when every participating receipt reported it.
-
-    A provider-reported zero is meaningful.  A missing bucket remains unknown
-    instead of being silently treated as zero and presented as a complete sum.
-    """
-    if not usages:
-        return empty
-    values = [getattr(usage, name, None) if usage is not None else None for usage in usages]
-    if any(value is None for value in values):
-        return None
-    return sum(values)
-
-
-def _message_usage(message: AssistantMessage) -> object | None:
-    usage = getattr(message, "usage", None)
-    if getattr(message, "stop_reason", None) in {"error", "aborted"}:
-        fields = ("input", "cache_read", "cache_write", "output", "total_tokens", "reasoning")
-        if usage is None or not any(getattr(usage, field, None) not in (None, 0) for field in fields):
-            return None
-    return usage
 
 
 def _aggregate_usage(assistant: list[AssistantMessage], compactions: list[CompactionEntry]) -> dict[str, int | None]:

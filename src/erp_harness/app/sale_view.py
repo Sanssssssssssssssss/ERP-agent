@@ -919,11 +919,11 @@ def _finish_readback(state: dict[str, Any], business: dict[str, Any], runs: list
                              "核对用户原始引用与本次回读关系；不代表自由文本的全部业务条件已验证。"))
     for (model, record_id), failure in failures.items():
         checks.append(_check(f"read_{model}_{record_id}", f"读取 {model} {record_id}", "unknown", f"读取失败：{failure}"))
+    outcome = _outcome(checks, business_type, target)
     business["readback"] = {
         "documents": list(observations.values()), "checks": checks, "observed_at": _now(),
         "stale": bool(failures), "latest_run_id": runs[-1].get("id") if runs else None,
-        "verification_status": _outcome(checks, business_type, target)["status"],
-        "outcome": _outcome(checks, business_type, target),
+        "verification_status": outcome["status"], "outcome": outcome,
     }
     return business_detail(state, business["id"])
 
