@@ -24,6 +24,11 @@ import type {
 
 export type {
   Approval,
+  TraceRequest,
+  TraceAction,
+  TraceDetail,
+  TraceDetailKind,
+  BusinessReceipt,
   BusinessArtifact,
   Business,
   BusinessDetail,
@@ -76,11 +81,16 @@ export interface TraceBundle {
   rounds: Round[]
   tools: ToolReceipt[]
   events?: Array<Record<string, unknown>>
+  requests?: import('../shared/protocol').TraceRequest[]
+  actions?: import('../shared/protocol').TraceAction[]
+  diagnostics?: Record<string, unknown>
+  summary_only?: boolean
 }
 
 export type HostEvent = WorkbenchEvent
 
 export const runStatusLabel: Record<string, string> = {
+  awaiting_input: '等待补充条件',
   idle: '空闲',
   ready: '待执行',
   blocked: '需核对',
@@ -95,6 +105,7 @@ export const runStatusLabel: Record<string, string> = {
 }
 
 export const businessStatusLabel: Record<string, string> = {
+  awaiting_input: '等待补充条件',
   idle: '待执行',
   ready: '待执行',
   blocked: '需核对',

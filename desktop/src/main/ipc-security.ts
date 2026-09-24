@@ -2,12 +2,12 @@ import { basename, extname, isAbsolute } from "node:path";
 import type { Document, WorkbenchMethod } from "../shared/protocol";
 import { validateEndpoint } from "./settings";
 
-const LOCAL_METHODS = new Set(["get_settings", "save_settings", "import_material", "download_document", "export_business_report", "open_odoo_record", "open_business_artifact", "reveal_business_artifact"]);
+const LOCAL_METHODS = new Set(["get_settings", "save_settings", "import_material", "download_document", "export_business_report", "open_session_snapshot", "open_odoo", "open_odoo_record", "open_business_artifact", "reveal_business_artifact"]);
 
 export const METHODS = new Set<WorkbenchMethod>([
   "list_sessions", "create_session", "rename_session", "archive_session", "get_session",
-  "send_message", "confirm_business", "get_business", "check_business_connection", "start_run", "decide_approval",
-  "cancel_run", "cancel_conversation", "get_trace", "refresh_business", "reconcile_action", "health", "check_connection",
+  "send_message", "confirm_business", "get_business", "check_business_connection", "start_run", "decide_approval", "request_approval_revision",
+  "cancel_run", "cancel_conversation", "get_trace", "get_trace_detail", "refresh_business", "reconcile_action", "health", "check_connection",
 ]);
 
 export interface ValidIpcRequest {
@@ -31,6 +31,7 @@ export function assertRequest(request: unknown): asserts request is ValidIpcRequ
       (!candidate.params || typeof candidate.params !== "object" || Array.isArray(candidate.params))) {
     throw new Error("INVALID_PARAMS");
   }
+  if (candidate.method === "open_odoo" && Object.keys(candidate.params ?? {}).length) throw new Error("INVALID_PARAMS");
 }
 
 export function businessScope(params: Record<string, unknown>): { session_id: string; business_id: string; run_id?: string } {
@@ -41,18 +42,24 @@ export function businessScope(params: Record<string, unknown>): { session_id: st
     ...(params.run_id === undefined ? {} : { run_id: params.run_id as string }) };
 }
 
-export function observedRecordUrl(endpoint: string, database: string, documents: Document[], model: unknown, recordId: unknown): string {
+export function configuredOdooUrl(endpoint: string, database: string): string {
   if (!endpoint) throw new Error("ODOO_NOT_CONFIGURED");
   if (!database || !/^[\w.-]{1,128}$/.test(database)) throw new Error("ODOO_NOT_CONFIGURED");
   validateEndpoint("odoo_url", endpoint);
+  const url = new URL(endpoint);
+  url.pathname = `${url.pathname.replace(/\/$/, "")}/web`;
+  url.search = new URLSearchParams({ db: database }).toString();
+  url.hash = "";
+  return url.href;
+}
+
+export function observedRecordUrl(endpoint: string, database: string, documents: Document[], model: unknown, recordId: unknown): string {
+  const url = new URL(configuredOdooUrl(endpoint, database));
   if (typeof model !== "string" || !/^[a-z][a-z0-9_.]*$/.test(model) ||
       typeof recordId !== "number" || !Number.isSafeInteger(recordId) || recordId <= 0 ||
       !documents.some(document => document.model === model && String(document.id) === String(recordId))) {
     throw new Error("RECORD_NOT_OBSERVED");
   }
-  const url = new URL(endpoint);
-  url.pathname = `${url.pathname.replace(/\/$/, "")}/web`;
-  url.search = new URLSearchParams({ db: database }).toString();
   url.hash = new URLSearchParams({ id: String(recordId), model, view_type: "form" }).toString();
   return url.href;
 }

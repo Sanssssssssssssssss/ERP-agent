@@ -13,15 +13,34 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-from integration import harbor_agent, pi_odoo_runner
-from pi_agent.messages import AssistantMessage, ToolResultMessage, UserMessage
-from pi_agent.tools import AgentTool, AgentToolResult
-from pi_coding.session import CodingSession
-from pi_ai.openai_compatible import OpenAICompatibleProvider
-from odoo_runtime.dynamic_tools import BASE_TOOLS, CAPABILITY_GROUPS
+from bench.adapters import harbor_agent
+from erp_harness.app import runner as pi_odoo_runner
+from erp_harness.runtime.messages import AssistantMessage, ToolResultMessage, UserMessage
+from erp_harness.runtime.tools import AgentTool, AgentToolResult
+from erp_harness.runtime.session import HarnessSession
+from erp_harness.providers.openai_compatible import OpenAICompatibleProvider
+from erp_harness.tools.dynamic_tools import BASE_TOOLS, CAPABILITY_GROUPS
 
 
 class RunnerBudgetTest(unittest.TestCase):
+    def test_business_prompt_preserves_mode_contracts_and_explicit_host_date(self):
+        for sop_mode in ("off", "controlled"):
+            for tool_mode in ("static", "dynamic"):
+                with self.subTest(sop_mode=sop_mode, tool_mode=tool_mode):
+                    prompt = pi_odoo_runner.build_business_system_prompt(
+                        sop_mode=sop_mode, tool_mode=tool_mode,
+                        runtime_date="2026-09-23", runtime_timezone="SGT (+0800)",
+                    )
+                    self.assertIn("2026-09-23; host timezone: SGT (+0800)", prompt)
+                    self.assertIn("get_current_time", prompt)
+                    self.assertIn("Be concise and respond in Simplified Chinese", prompt)
+                    for policy in (pi_odoo_runner.MCP_ONLY_POLICY, pi_odoo_runner.BUSINESS_EXECUTION_POLICY):
+                        self.assertIn(policy, prompt)
+                    self.assertEqual(pi_odoo_runner.SOP_POLICY in prompt, sop_mode == "controlled")
+                    self.assertEqual(pi_odoo_runner.DYNAMIC_TOOL_POLICY in prompt, tool_mode == "dynamic")
+                    for stale in ("coding assistant", "Pi Agent", "Available tools:", "Current working directory:"):
+                        self.assertNotIn(stale, prompt)
+
     def test_harbor_usage_receipt_boundaries(self):
         async def run_case(receipt):
             with patch.object(harbor_agent.BaseInstalledAgent, "__init__", return_value=None):
@@ -75,7 +94,7 @@ class RunnerBudgetTest(unittest.TestCase):
             [compact, SimpleNamespace(usage=None)], "total_tokens"
         ))
 
-    def test_pause_on_approval_stops_after_needs_reconciliation_before_next_model_request(self):
+    def test_pause_on_approval_and_resume_keep_requests_and_usage_scoped(self):
         async def check(root: Path):
             requests = []
 
@@ -100,15 +119,19 @@ class RunnerBudgetTest(unittest.TestCase):
 
             def handler(request):
                 requests.append(json.loads(request.content))
-                if len(requests) > 1:
-                    raise AssertionError("pause_on_approval requested a second model turn")
-                body = {
-                    "choices": [{"delta": {"tool_calls": [{
-                        "index": 0, "id": "write-1", "type": "function",
-                        "function": {"name": "execute_method", "arguments": "{}"},
-                    }]}, "finish_reason": "tool_calls"}],
-                    "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
-                }
+                if len(requests) == 1:
+                    body = {
+                        "choices": [{"delta": {"tool_calls": [{
+                            "index": 0, "id": "write-1", "type": "function",
+                            "function": {"name": "execute_method", "arguments": "{}"},
+                        }]}, "finish_reason": "tool_calls"}],
+                        "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+                    }
+                else:
+                    body = {
+                        "choices": [{"delta": {"content": "done"}, "finish_reason": "stop"}],
+                        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                    }
                 return httpx.Response(
                     200, text="data: " + json.dumps(body) + "\n\ndata: [DONE]\n\n",
                     headers={"content-type": "text/event-stream"},
@@ -139,8 +162,32 @@ class RunnerBudgetTest(unittest.TestCase):
                     }),
                 ):
                     await pi_odoo_runner.run(args)
+                    self.assertEqual(len(requests), 1)
+                    initial_usage = json.loads(args.usage_file.read_text())
+                    self.assertEqual(initial_usage["modelCalls"], 1)
+                    self.assertEqual(initial_usage["input"], 10)
+                    self.assertEqual(initial_usage["output"], 2)
+                    args.continue_run = True
+                    args.usage_file = root / "resumed-usage.json"
+                    await pi_odoo_runner.run(args)
 
-            self.assertEqual(len(requests), 1)
+            self.assertEqual(len(requests), 2)
+            for payload in requests:
+                system = next(row["content"] for row in payload["messages"] if row["role"] == "system")
+                self.assertTrue(system.startswith("You are an ERP business execution assistant."))
+                self.assertIn(pi_odoo_runner.MCP_ONLY_POLICY, system)
+                self.assertNotIn("Pi Agent", system)
+                self.assertNotIn("Available tools:", system)
+                self.assertIn("execute_method", {row["function"]["name"] for row in payload["tools"]})
+            resumed_usage = json.loads(args.usage_file.read_text())
+            self.assertEqual(resumed_usage["modelCalls"], 1)
+            self.assertEqual(resumed_usage["assistantEntries"], 1)
+            self.assertEqual(resumed_usage["input"], 0)
+            self.assertEqual(resumed_usage["output"], 0)
+            self.assertEqual(resumed_usage["compactionCalls"], 0)
+            self.assertEqual(resumed_usage["unreportedUsageRequests"], 0)
+            self.assertEqual(json.loads((args.receipt_dir / "requests" / "0001.request.json").read_text()), requests[0])
+            self.assertTrue((args.receipt_dir / "requests" / "0002.request.json").is_file())
             rows = [json.loads(line) for line in args.session_file.read_text().splitlines()]
             self.assertTrue(any(
                 row.get("type") == "message"
@@ -163,6 +210,63 @@ class RunnerBudgetTest(unittest.TestCase):
         )
         self.assertTrue(pi_odoo_runner._approval_required(nested))
         self.assertFalse(pi_odoo_runner._approval_required(malformed))
+
+    def test_current_action_state_overrides_legacy_approval_flag(self):
+        for status, expected in (("verified", False), ("known_failed", False), ("approved", False),
+                                 ("pending_approval", True), ("needs_reconciliation", True), ("sending", True), ("executing", True)):
+            for nested in (False, True):
+                payload = {"approval_required": True, "action_status": {"status": status} if nested else status,
+                           "approval_status": {"status": "pending_approval"}}
+                with self.subTest(status=status, nested=nested):
+                    self.assertEqual(pi_odoo_runner._approval_required({"details": {"structuredContent": payload}}), expected)
+        self.assertTrue(pi_odoo_runner._approval_required({"approval_required": True}))
+        self.assertTrue(pi_odoo_runner._approval_required({"status": "success", "approval_required": True}))
+
+    def test_verified_chatter_receipt_continues_to_final_summary_without_another_approval(self):
+        async def check(root):
+            requests = []
+            # Actual failing trace envelope: the obsolete flag remains true after verification.
+            receipt = {"approval_required": True, "success": True, "action_id": "chatter-verified",
+                       "action_status": "verified", "result": [7433], "verification": {"status": "satisfied"}}
+            async def execute(*_args, **_kwargs):
+                return AgentToolResult(content=json.dumps(receipt), details=receipt)
+            class ToolSet:
+                def __init__(self, _url):
+                    self.tools = [AgentTool(name="chatter_post", label="Chatter", description="Post a note",
+                                           parameters={"type": "object", "properties": {}}, execute_fn=execute)]
+                async def __aenter__(self): return self
+                async def __aexit__(self, *args): return None
+            def handler(request):
+                requests.append(json.loads(request.content))
+                delta = ({"tool_calls": [{"index": 0, "id": "chatter-call", "type": "function",
+                                          "function": {"name": "chatter_post", "arguments": "{}"}}]}
+                         if len(requests) == 1 else {"content": "留言已核验，业务处理完成。"})
+                body = {"choices": [{"delta": delta, "finish_reason": "tool_calls" if len(requests) == 1 else "stop"}],
+                        "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}}
+                return httpx.Response(200, text="data: " + json.dumps(body) + "\n\ndata: [DONE]\n\n",
+                                      headers={"content-type": "text/event-stream"})
+            instruction = root / "instruction.txt"
+            instruction.write_text("Post the approved note, then summarize.", encoding="utf-8")
+            args = SimpleNamespace(instruction_file=instruction, session_file=root / "session.jsonl",
+                                   usage_file=root / "usage.json", receipt_dir=root / "run", mcp_url="http://unused.invalid",
+                                   max_turns=3, max_model_requests=3, max_output_tokens=None, pause_on_approval=True)
+            stdout = io.StringIO()
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                with (patch.object(pi_odoo_runner, "McpToolSet", ToolSet),
+                      patch.object(pi_odoo_runner, "OpenAICompatibleProvider", side_effect=lambda config: OpenAICompatibleProvider(config, client=client)),
+                      patch.dict(os.environ, {"LLM_API_KEY": "test-only", "LLM_BASE_URL": "https://unused.invalid/v1",
+                                             "LLM_MODEL": "deepseek/test", "LLM_PROVIDER": "openai-compatible", "LLM_THINKING_TYPE": "high"}),
+                      contextlib.redirect_stdout(stdout)):
+                    await pi_odoo_runner.run(args)
+            self.assertEqual(len(requests), 2)
+            self.assertEqual(json.loads(args.usage_file.read_text())["modelCalls"], 2)
+            rows = [json.loads(line) for line in args.session_file.read_text(encoding="utf-8").splitlines()]
+            assistant = [row["message"] for row in rows if row.get("type") == "message" and row.get("message", {}).get("role") == "assistant"]
+            self.assertEqual(assistant[-1]["stopReason"], "stop")
+            self.assertIn("留言已核验", json.dumps(assistant[-1], ensure_ascii=False))
+            self.assertEqual(sum(row.get("message", {}).get("role") == "toolResult" for row in rows), 1)
+        with tempfile.TemporaryDirectory() as directory:
+            asyncio.run(check(Path(directory)))
 
     def test_dynamic_history_recovery_is_typed_fail_closed_and_latest(self):
         def result(payload, *, is_error=False):
@@ -356,6 +460,17 @@ class RunnerBudgetTest(unittest.TestCase):
             self.assertIn("mcp_odoo_preview_write", third)
             self.assertEqual(len(fourth), 14)
             self.assertNotIn("mcp_odoo_preview_write", fourth)
+            prompts = [next(row["content"] for row in payload["messages"] if row["role"] == "system")
+                       for payload in request_payloads]
+            self.assertEqual(prompts[0], prompts[1])  # Tool publication does not restore the coding prompt.
+            for system in prompts:
+                self.assertTrue(system.startswith("You are an ERP business execution assistant."))
+                for policy in (pi_odoo_runner.MCP_ONLY_POLICY, pi_odoo_runner.BUSINESS_EXECUTION_POLICY,
+                               pi_odoo_runner.SOP_POLICY, pi_odoo_runner.DYNAMIC_TOOL_POLICY):
+                    self.assertIn(policy, system)
+                self.assertIn("host timezone:", system)
+                self.assertNotIn("Available tools:", system)
+                self.assertNotIn("Pi Agent", system)
 
     def test_corrupt_present_receipt_blocks_history_fallback(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -449,7 +564,8 @@ class RunnerBudgetTest(unittest.TestCase):
         context = SimpleNamespace()
         with patch.object(harbor_agent, "_start_task_mcp", new=AsyncMock()):
             asyncio.run(agent._run("do work", object(), context))
-        command = agent.exec_as_agent.await_args_list[0].kwargs["command"]
+        command = next(call.kwargs["command"] for call in agent.exec_as_agent.await_args_list
+                       if "--max-model-requests" in call.kwargs["command"])
         self.assertIn("--max-model-requests 2", command)
         self.assertIn("--max-output-tokens 64", command)
         self.assertEqual(context.metadata["max_model_requests"], 2)
@@ -521,7 +637,7 @@ class RunnerBudgetTest(unittest.TestCase):
             )
             captured_configs = []
             captured_session_configs = []
-            original_load = CodingSession.load
+            original_load = HarnessSession.load
 
             async def capture_load(cls, config):
                 captured_session_configs.append(config)
@@ -536,7 +652,7 @@ class RunnerBudgetTest(unittest.TestCase):
                 with (
                     patch.object(pi_odoo_runner, "McpToolSet", ToolSet),
                     patch.object(pi_odoo_runner, "OpenAICompatibleProvider", side_effect=make_provider),
-                    patch.object(CodingSession, "load", classmethod(capture_load)),
+                    patch.object(HarnessSession, "load", classmethod(capture_load)),
                     patch.dict(
                         os.environ,
                         {

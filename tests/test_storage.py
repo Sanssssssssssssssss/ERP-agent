@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from workbench.storage import StateStore
+from erp_harness.app.storage import StateStore
 
 
 class StateStoreTest(unittest.TestCase):

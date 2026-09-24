@@ -8,10 +8,10 @@ from pathlib import Path
 
 import tomllib
 
-from integration.odoo_tools import native_tool_catalog
-from integration.pi_odoo_runner import CURRENT_TIME_TOOL
-from integration.reward_adapter import adapt_erp_bench_reward
-from odoo_runtime.sops import build_sop_tools
+from erp_harness.tools.router import native_tool_catalog
+from erp_harness.app.runner import CURRENT_TIME_TOOL
+from bench.adapters.reward_adapter import adapt_erp_bench_reward
+from erp_harness.tools.sops import build_sop_tools
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -20,17 +20,17 @@ class CleanHarnessTest(unittest.TestCase):
     def test_pinned_layout_and_mcp_only_boundary(self) -> None:
         lock = json.loads((ROOT / "sources.lock.json").read_text(encoding="utf-8"))
         tasks = [path for path in (ROOT / "bench" / "tasks").iterdir() if path.is_dir()]
-        runner = (ROOT / "integration" / "pi_odoo_runner.py").read_text(
+        runner = (ROOT / "src" / "erp_harness" / "app" / "runner.py").read_text(
             encoding="utf-8"
         )
-        patch = (ROOT / "patches" / "erp-bench-odoo19.patch").read_text(
+        patch = (ROOT / "bench" / "patches" / "erp-bench-odoo19.patch").read_text(
             encoding="utf-8"
         )
 
         self.assertEqual(len(tasks), 300)
         self.assertFalse((ROOT / "bench" / "tasks_ui").exists())
-        self.assertFalse((ROOT / "integration" / "native_reads.py").exists())
-        self.assertTrue((ROOT / "odoo_runtime" / "reads.py").is_file())
+        self.assertFalse((ROOT / "bench" / "adapters" / "native_reads.py").exists())
+        self.assertTrue((ROOT / "src" / "erp_harness" / "erp" / "reads.py").is_file())
         self.assertEqual(patch.count("diff --git "), 3)
         self.assertNotIn("create_coding_tools", runner)
         self.assertIn("tools=list(session_tools)", runner)
@@ -64,11 +64,11 @@ class CleanHarnessTest(unittest.TestCase):
 
     def test_stage5_capability_inventory_is_complete_and_compiler_free(self) -> None:
         inventory = json.loads(
-            (ROOT / "configs" / "capabilities.json").read_text(encoding="utf-8")
+            (ROOT / "bench" / "configs" / "capabilities.json").read_text(encoding="utf-8")
         )
         self.assertEqual(inventory["compiler"], "out_of_scope")
-        self.assertEqual(len(inventory["tools"]), 41)
-        self.assertEqual(len({row["name"] for row in inventory["tools"]}), 41)
+        self.assertEqual(len(inventory["tools"]), 43)
+        self.assertEqual(len({row["name"] for row in inventory["tools"]}), 43)
         self.assertEqual(len(inventory["prompts"]), 11)
         self.assertEqual(len(inventory["resources"]), 4)
         self.assertEqual(
@@ -78,12 +78,12 @@ class CleanHarnessTest(unittest.TestCase):
 
     def test_stage7_native_surface_has_no_mcp_runtime_dependency(self) -> None:
         stage6 = json.loads(
-            (ROOT / "configs" / "stage6-knowledge-native-b.json").read_text(
+            (ROOT / "bench" / "configs" / "stage6-knowledge-native-b.json").read_text(
                 encoding="utf-8"
             )
         )
         stage7 = json.loads(
-            (ROOT / "configs" / "stage7-odoo-native-b.json").read_text(
+            (ROOT / "bench" / "configs" / "stage7-odoo-native-b.json").read_text(
                 encoding="utf-8"
             )
         )
@@ -109,10 +109,10 @@ class CleanHarnessTest(unittest.TestCase):
                 stage6["agents"][0]["kwargs"][key],
             )
         inventory = json.loads(
-            (ROOT / "configs" / "capabilities.json").read_text(encoding="utf-8")
+            (ROOT / "bench" / "configs" / "capabilities.json").read_text(encoding="utf-8")
         )
         catalog = json.loads(
-            (ROOT / "integration" / "native_tool_catalog.json").read_text(
+            (ROOT / "src" / "erp_harness" / "tools" / "native_tool_catalog.json").read_text(
                 encoding="utf-8"
             )
         )
@@ -127,18 +127,15 @@ class CleanHarnessTest(unittest.TestCase):
         self.assertTrue(all(tool["status"].startswith("native") for tool in inventory["tools"]))
         runtime = "\n".join(
             path.read_text(encoding="utf-8")
-            for path in (ROOT / "odoo_runtime").rglob("*.py")
+            for path in (ROOT / "src" / "erp_harness" / "erp").rglob("*.py")
         )
         self.assertNotIn("from odoo_mcp", runtime)
         self.assertNotIn("import odoo_mcp", runtime)
         project = tomllib.loads(
-            (ROOT / "agent" / "pyproject.toml").read_text(encoding="utf-8")
+            (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         )["project"]
         self.assertNotIn("mcp==2.0.0", project["dependencies"])
-        self.assertEqual(project["optional-dependencies"]["mcp"], [
-            "mcp==2.0.0",
-            "mcp-types==2.0.0",
-        ])
+        self.assertNotIn("pi-agent-python", " ".join(project["dependencies"]))
 
         with tempfile.TemporaryDirectory() as directory:
             tools = [
@@ -157,10 +154,10 @@ class CleanHarnessTest(unittest.TestCase):
             }
             for tool in tools
         ]
-        self.assertEqual(len(tools), 44)
+        self.assertEqual(len(tools), 46)
         self.assertEqual(
             hashlib.sha256(json.dumps(contract, sort_keys=True).encode()).hexdigest(),
-            "4bd3b3ede1755d68c81b1914f12637d8550fa494541f2a06ccb61e88d43e9081",
+            "9f8a9aae7f771685f87ba069bc6230c4182c12c8c5dba038ab42c344e51e7ac4",
         )
 
 

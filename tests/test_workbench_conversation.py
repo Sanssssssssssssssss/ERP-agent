@@ -13,10 +13,10 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-from pi_ai.openai_compatible import OpenAICompatibleProvider
-from pi_agent.messages import AssistantMessage, Usage
-from pi_agent.session.entries import CompactionEntry, MessageEntry
-from workbench import conversation
+from erp_harness.providers.openai_compatible import OpenAICompatibleProvider
+from erp_harness.runtime.messages import AssistantMessage, Usage
+from erp_harness.runtime.storage.entries import CompactionEntry, MessageEntry
+from erp_harness.app import conversation
 
 
 class WorkbenchConversationTests(unittest.TestCase):
@@ -132,6 +132,9 @@ class WorkbenchConversationTests(unittest.TestCase):
         self.assertEqual(usage["compaction_total"], 0)
         self.assertEqual(usage["total_scope"], "assistant_responses_only")
         self.assertEqual(usage["input_semantics"], "uncached")
+        linked = next(event for event in _events if event["type"] == "request_linked")
+        terminal = next(event for event in _events if event["type"] == "message_end" and event.get("message_id") == linked["message_id"])
+        self.assertEqual((terminal["request_id"], terminal["round_id"]), (linked["request_id"], linked["round_id"]))
 
     def test_run_uses_new_journal_entries_after_compaction(self):
         old = MessageEntry(message=AssistantMessage(
@@ -180,7 +183,7 @@ class WorkbenchConversationTests(unittest.TestCase):
 
             async def run():
                 with (
-                    patch.object(conversation.CodingSession, "load", new=AsyncMock(return_value=fake)),
+                    patch.object(conversation.HarnessSession, "load", new=AsyncMock(return_value=fake)),
                     patch.dict(
                         os.environ,
                         {"LLM_API_KEY": "test-only", "LLM_BASE_URL": "https://unused.invalid/v1", "LLM_MODEL": "test/model"},
@@ -207,7 +210,7 @@ class WorkbenchConversationTests(unittest.TestCase):
         self.assertEqual(len(requests), 1)
         self.assertEqual(
             [row["function"]["name"] for row in requests[0]["tools"]],
-            ["read_odoo_reference", "propose_business"],
+            ["read_odoo_reference", "read_business_status", "read_invoice_eligibility", "propose_business"],
         )
         self.assertEqual("".join(event.get("text", "") for event in events if event.get("type") == "message_delta"), "可以先回答问题，再在你确认后建立业务。")
         self.assertNotIn("mcp_odoo_read", json.dumps(requests[0]))
@@ -232,6 +235,9 @@ class WorkbenchConversationTests(unittest.TestCase):
     def test_read_odoo_reference_is_bounded_and_source_stamped(self):
         class FakeReads:
             def call(self, name, arguments):
+                if arguments["model"] == "res.company":
+                    assert arguments["domain"] == [["partner_id", "in", [0, 1, 2, 3, 4]]]
+                    return {"success": True, "result": [{"id": 2, "name": "内部公司", "partner_id": [1, "联系人"]}]}
                 self.name, self.arguments = name, arguments
                 return {"success": True, "result": [{"id": i, "name": "客户" + str(i)} for i in range(20)]}
 
@@ -241,8 +247,13 @@ class WorkbenchConversationTests(unittest.TestCase):
         details = result.details
         self.assertEqual(fake.name, "search_records")
         self.assertEqual(fake.arguments["model"], "res.partner")
-        self.assertEqual(fake.arguments["fields"], conversation._REFERENCE_SPECS["customer"][1])
+        self.assertEqual(fake.arguments["fields"], conversation._REFERENCE_SPECS["contact"][1])
+        self.assertEqual(details["resource"], "contact")
+        self.assertNotIn("customer", conversation.READ_ODOO_REFERENCE.parameters["properties"]["resource"]["enum"])
         self.assertEqual(len(details["records"]), 5)
+        self.assertEqual(details["records"][1]["entity_kind"], "internal_company_contact")
+        self.assertEqual(details["records"][1]["internal_company"], [2, "内部公司"])
+        self.assertEqual(details["records"][2]["entity_kind"], "contact")
         self.assertTrue(details["truncated"])
         self.assertEqual(details["source"], "native_odoo_read")
         self.assertTrue(details["observed_at"].endswith("Z"))
@@ -258,13 +269,41 @@ class WorkbenchConversationTests(unittest.TestCase):
         self.assertEqual(result.details["status"], "unavailable")
         self.assertFalse(result.details["verified"])
 
+    def test_business_status_tool_does_not_accept_model_scope_or_missing_context(self):
+        with patch.object(conversation, "_BUSINESS_CONTEXT", None), patch.object(
+                conversation, "_odoo_reads", side_effect=AssertionError("must not connect")):
+            for arguments, expected in [({}, "unavailable"), ({"business_id": "other"}, "invalid")]:
+                result = asyncio.run(conversation._read_business_status("call", arguments))
+                self.assertEqual(result.details["status"], expected)
+                if not arguments:
+                    self.assertEqual(result.details["reason_code"], "business_scope_required")
+                    self.assertEqual(result.details["business_status"], "unknown")
+                    self.assertEqual(result.details["next_action"], "select_business")
+                    self.assertEqual(json.loads(result.text), result.details)
+        with patch.object(conversation, "_BUSINESS_CONTEXT", {"success": False, "status": "scope_mismatch"}):
+            result = asyncio.run(conversation._read_business_status("call", {}))
+            self.assertEqual(result.details["status"], "scope_mismatch")
+
+    def test_business_status_tool_returns_fresh_verified_receipt(self):
+        from tests.test_business_status import mail_state, CONNECTION
+        from erp_harness.app.business_status import build_status_context
+
+        state, reads = mail_state()
+        context = build_status_context(state, "b1", "s1", CONNECTION)
+        with patch.object(conversation, "_BUSINESS_CONTEXT", context), patch.object(conversation, "_ODOO_READS", reads), \
+                patch("erp_harness.app.host._connection_identity", return_value=CONNECTION), \
+                patch.dict(os.environ, {"PI_AGENT_SESSION_ID": "s1"}):
+            result = asyncio.run(conversation._read_business_status("call", {}))
+        self.assertEqual(result.details["delivery_receipts"][0]["delivery"], "smtp_accepted")
+        self.assertEqual(json.loads(result.text), result.details)
+
     def test_read_odoo_reference_rejects_bad_shapes_and_caps_large_rows(self):
         for arguments in (
             {"resource": "not_a_resource"},
             {"resource": []},
             {"resource": "customer", "unexpected": True},
             {"resource": "customer", "limit": True},
-            {"resource": "customer", "limit": 6},
+            {"resource": "customer", "limit": 21},
         ):
             with self.subTest(arguments=arguments):
                 result = asyncio.run(conversation._read_odoo_reference("call", arguments))

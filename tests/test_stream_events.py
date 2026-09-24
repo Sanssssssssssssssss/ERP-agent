@@ -11,12 +11,12 @@ ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "agent" / "src"))
 
-from integration.stream_events import public_events
-from pi_agent.session import JsonlSessionStorage
-from pi_ai.env import OpenAICompatibleConfig
-from pi_ai.openai_compatible import OpenAICompatibleProvider
-from pi_coding.provider_config import OpenAICompatibleProviderConfig, ProviderSettings
-from pi_coding.session import CodingSession, CodingSessionConfig
+from erp_harness.app.stream_events import public_events
+from erp_harness.runtime.storage import JsonlSessionStorage
+from erp_harness.providers.env import OpenAICompatibleConfig
+from erp_harness.providers.openai_compatible import OpenAICompatibleProvider
+from erp_harness.providers.config import OpenAICompatibleProviderConfig, ProviderSettings
+from erp_harness.runtime.session import HarnessSession, SessionConfig
 
 
 def run(events):
@@ -84,7 +84,7 @@ class StreamEventsTest(unittest.TestCase):
             OpenAICompatibleConfig(api_key="test-key", base_url="https://example.test/v1"),
             client=client,
           )
-          session = await CodingSession.load(CodingSessionConfig(
+          session = await HarnessSession.load(SessionConfig(
             provider=provider,
             model="test-model",
             system="You are Pi.",

@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from integration import harbor_agent, snapshot
+from bench.adapters import harbor_agent, snapshot
 
 
 class SnapshotTest(unittest.TestCase):

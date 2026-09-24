@@ -1,5 +1,5 @@
-export type BusinessType = "sale_invoice" | "sale_purchase_invoice" | "purchase";
-export type CompletionTarget = "read_only" | "draft" | "confirmed" | "posted";
+export type BusinessType = "sale_invoice" | "sale_purchase_invoice" | "purchase" | "inventory" | "manufacturing" | "payment" | "refund" | "reconciliation" | "invoice_delivery";
+export type CompletionTarget = "read_only" | "draft" | "confirmed" | "posted" | "done" | "reconciled" | "sent";
 export type Role = "user" | "assistant" | "system";
 export type ApprovalDecision = "approve" | "reject";
 
@@ -49,6 +49,7 @@ export interface ConversationRun {
   ended_at?: string;
   error?: string;
   error_detail?: string;
+  proposal_ids?: string[];
 }
 
 export interface LiveMessage {
@@ -68,6 +69,8 @@ export interface BusinessProposal {
   type: BusinessType;
   title: string;
   goal: string;
+  source_messages?: { id: string; text: string }[];
+  resolved_references?: { resource: string; id: number; quote: string; model: string }[];
   status: "pending" | "confirmed" | "rejected";
   completion_target?: CompletionTarget;
   material_ids?: string[];
@@ -96,11 +99,13 @@ export interface Run {
   ended_at?: string;
   error?: string;
   error_detail?: string;
+  handoff?: { code: string; next_action: string; message: string };
   usage?: Usage;
   tool_count?: number;
   model_rounds?: number;
   elapsed_seconds?: number;
   verification_status?: string;
+  summary?: string;
 }
 
 export interface Approval {
@@ -209,6 +214,10 @@ export interface Round {
   usage?: Usage;
   elapsed_seconds?: number;
   tool_ids: string[];
+  started_at?: string;
+  ended_at?: string;
+  stop_reason?: string;
+  error?: string;
 }
 
 export interface Tool {
@@ -216,17 +225,54 @@ export interface Tool {
   name: string;
   round?: number;
   status: string;
-  arguments: Record<string, unknown>;
+  arguments?: Record<string, unknown>;
   result?: unknown;
   elapsed_seconds?: number;
   action_id?: string;
+  started_at?: string;
+  ended_at?: string;
+  search_text?: string;
 }
+
+export interface TraceRequest {
+  id: string;
+  status: string;
+  kind: string;
+  association: 'linked' | 'unlinked';
+  round?: number;
+  started_at?: string;
+  ended_at?: string;
+  duration_ms?: number;
+  http_status?: number;
+  request_bytes?: number;
+  error?: string;
+  usage?: Usage;
+}
+
+export interface TraceAction {
+  id: string;
+  status: string;
+  kind: string;
+  model: string;
+  operation: string;
+  tool_ids: string[];
+  record_ids?: number[];
+  started_at?: string;
+  ended_at?: string;
+  created_at?: number | string;
+  sent_at?: number | string;
+  finished_at?: number | string;
+}
+
+export type TraceDetailKind = 'run' | 'request' | 'tool' | 'action' | 'round' | 'event';
+export interface TraceDetail { kind: TraceDetailKind; id: string; data: Record<string, unknown>; redaction?: { hidden_chars?: number; redacted_values?: number }; }
 
 export interface BusinessDetail {
   business: Business;
   runs: Run[];
   live_messages?: LiveMessage[];
   approvals: Approval[];
+  receipts?: BusinessReceipt[];
   documents: Document[];
   artifacts?: BusinessArtifact[];
   checks: Check[];
@@ -242,12 +288,28 @@ export interface BusinessDetail {
     intent?: string;
     at?: string;
     tool_name?: string;
+    tool_status?: string;
+    tool_id?: string;
     round?: number;
     tool_count?: number;
     model_rounds?: number;
     last_event?: string;
   };
   materials?: Material[];
+}
+
+export interface BusinessReceipt {
+  id: string;
+  title: string;
+  status: "verified" | "unknown" | "not_observed" | "pending" | "not_executed" | "failed";
+  detail: string;
+  kind: "action" | "email" | "archive";
+  run_id?: string;
+  action_id?: string;
+  tool_id?: string;
+  observed_at?: string;
+  model?: string;
+  record_ids?: number[];
 }
 
 export interface Health {
@@ -274,6 +336,7 @@ export interface Settings {
   odoo_url: string;
   odoo_db: string;
   odoo_username: string;
+  long_term_memory: boolean;
   has_model_key: boolean;
   has_odoo_key: boolean;
   environment: "demo" | "configured";
@@ -297,11 +360,15 @@ export type WorkbenchMethod =
   | "check_business_connection"
   | "start_run"
   | "decide_approval"
+  | "request_approval_revision"
   | "cancel_run"
   | "reconcile_action"
   | "get_trace"
+  | "get_trace_detail"
   | "refresh_business"
   | "export_business_report"
+  | "open_session_snapshot"
+  | "open_odoo"
   | "open_odoo_record"
   | "open_business_artifact"
   | "reveal_business_artifact"

@@ -1,21 +1,37 @@
 import assert from "node:assert/strict";
 import { app } from "electron";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { publicSettings, saveSettings } from "./settings";
-import { assertRequest, businessScope, canChangeSettings, observedRecordUrl, recordedArtifactPath, safeMaterialName, strictBase64 } from "./ipc-security";
+import { publicSettings, saveSettings, secretEnvironment } from "./settings";
+import { assertRequest, businessScope, canChangeSettings, configuredOdooUrl, observedRecordUrl, recordedArtifactPath, safeMaterialName, strictBase64 } from "./ipc-security";
 import { safeErrorMessage } from "./host";
+import { openSessionSnapshot, snapshotPath } from "./session-snapshot";
 
 export async function runSelfCheck(): Promise<void> {
   // Even a manually invoked packaged --self-check must not overwrite settings.
   const previous = app.getPath("userData");
-  const isolated = await mkdtemp(join(tmpdir(), "odoo-workbench-self-check-"));
+  // Match the host exporter's resolved root, including Windows temp aliases.
+  const isolated = await realpath(await mkdtemp(join(tmpdir(), "odoo-workbench-self-check-")));
+  const previousMemoryMode = process.env.ERP_MEMORY_MODE;
+  delete process.env.ERP_MEMORY_MODE;
   app.setPath("userData", isolated);
   try {
   const initial = await publicSettings();
   assert.equal("model_key" in initial, false);
   assert.equal("odoo_key" in initial, false);
+  assert.equal(initial.long_term_memory, false);
+  assert.equal((await secretEnvironment()).ERP_MEMORY_MODE, "off");
+  await assert.rejects(() => saveSettings({ long_term_memory: "false" } as never), /CONFIG_INPUT_INVALID/);
+  assert.equal((await saveSettings({ long_term_memory: true })).long_term_memory, true);
+  assert.equal((await publicSettings()).long_term_memory, true);
+  assert.equal((await secretEnvironment()).ERP_MEMORY_MODE, "on");
+  process.env.ERP_MEMORY_MODE = "off";
+  assert.equal((await publicSettings()).long_term_memory, false);
+  assert.equal((await secretEnvironment()).ERP_MEMORY_MODE, "off");
+  delete process.env.ERP_MEMORY_MODE;
+  await saveSettings({ long_term_memory: false });
+  assert.equal((await secretEnvironment()).ERP_MEMORY_MODE, "off");
 
   await assert.rejects(
     () => saveSettings({ base_url: "http://example.com" }),
@@ -51,13 +67,23 @@ export async function runSelfCheck(): Promise<void> {
   assert.doesNotThrow(() => assertRequest({ method: "health", params: {} }));
   assert.doesNotThrow(() => assertRequest({ method: "check_connection", params: {} }));
   assert.doesNotThrow(() => assertRequest({ method: "get_settings" }));
+  assert.doesNotThrow(() => assertRequest({ method: "open_odoo" }));
+  assert.throws(() => assertRequest({ method: "open_odoo", params: { url: "https://other.example" } }), /INVALID_PARAMS/);
   assert.throws(() => assertRequest({ method: "shell_exec" }), /METHOD_NOT_ALLOWED/);
   assert.throws(() => assertRequest({ method: "health", params: [] }), /INVALID_PARAMS/);
   assert.doesNotThrow(() => assertRequest({ method: "export_business_report", params: { session_id: "s_a", business_id: "b_a" } }));
+  assert.doesNotThrow(() => assertRequest({ method: "open_session_snapshot", params: { session_id: "s_a", business_id: "b_a" } }));
+  assert.throws(() => assertRequest({ method: "_prepare_session_snapshot", params: { business_id: "b_a" } }), /METHOD_NOT_ALLOWED/);
   assert.deepEqual(businessScope({ session_id: "s_a", business_id: "b_a", path: "ignored" }), { session_id: "s_a", business_id: "b_a" });
   assert.throws(() => businessScope({ session_id: "s_a", business_id: "../b" }), /INVALID_BUSINESS_SCOPE/);
   assert.throws(() => businessScope({ session_id: "s_a", business_id: "b_a", run_id: null }), /INVALID_BUSINESS_SCOPE/);
   const documents = [{ id: "42", model: "sale.order", name: "SO42", state: "sale", fields: {}, source: "native_read_receipt" }];
+  assert.equal(configuredOdooUrl("http://127.0.0.1:18079", "enterprise"), "http://127.0.0.1:18079/web?db=enterprise");
+  assert.equal(configuredOdooUrl("https://odoo.example/erp/", "demo"), "https://odoo.example/erp/web?db=demo");
+  assert.throws(() => configuredOdooUrl("", "demo"), /ODOO_NOT_CONFIGURED/);
+  assert.throws(() => configuredOdooUrl("https://odoo.example", "demo&other=yes"), /ODOO_NOT_CONFIGURED/);
+  for (const endpoint of ["file:///C:/Windows", "javascript:alert(1)", "http://remote.example"]) assert.throws(() => configuredOdooUrl(endpoint, "demo"), /PROTOCOL_INVALID/);
+  for (const endpoint of ["https://user:secret@odoo.example", "https://odoo.example?key=secret", "https://odoo.example#secret"]) assert.throws(() => configuredOdooUrl(endpoint, "demo"), /CREDENTIALS_INVALID/);
   assert.equal(observedRecordUrl("http://127.0.0.1:18069", "demo", documents, "sale.order", 42), "http://127.0.0.1:18069/web?db=demo#id=42&model=sale.order&view_type=form");
   assert.throws(() => observedRecordUrl("https://odoo.example", "demo", documents, "account.move", 42), /RECORD_NOT_OBSERVED/);
   assert.throws(() => observedRecordUrl("https://odoo.example", "demo", documents, "sale.order", 43), /RECORD_NOT_OBSERVED/);
@@ -88,8 +114,30 @@ export async function runSelfCheck(): Promise<void> {
   const generic = safeErrorMessage("business_validation_failed", "Authorization: Bearer sk_actual_123 Cookie: a=abc; b=xyz");
   assert.equal(generic, "[BUSINESS_VALIDATION_FAILED] 请求失败，请检查当前操作状态后重试。");
   assert.doesNotMatch(generic, /sk_actual_123|a=abc|b=xyz/);
-  console.log("desktop self-check: PASS (settings, secrets, busy guard, IPC allowlist)");
+  const snapshotDir = join(isolated, "exports", "session-snapshots");
+  await mkdir(snapshotDir, { recursive: true });
+  const htmlPath = join(snapshotDir, "b_a.html");
+  await writeFile(htmlPath, '<!doctype html><html><body><a id="jump" href="#entry-one">jump</a><p id="entry-one">公开内容</p></body></html>');
+  const receipt = { path: htmlPath, name: "b_a.html", scope: "business_session" };
+  assert.equal(await snapshotPath(receipt, "b_a", isolated), htmlPath);
+  await assert.rejects(() => snapshotPath(receipt, "b_other", isolated), /SCOPE_INVALID/);
+  await assert.rejects(() => snapshotPath({ ...receipt, path: join(isolated, "settings.json") }, "b_a", isolated), /SCOPE_INVALID/);
+  const preview = await openSessionSnapshot(htmlPath, false);
+  try {
+    const exposure = await preview.webContents.executeJavaScript('[typeof window.workbench, typeof require, typeof process, typeof window.electron]');
+    assert.deepEqual(exposure, ["undefined", "undefined", "undefined", "undefined"]);
+    assert.equal(await preview.webContents.executeJavaScript('fetch("https://snapshot.invalid/blocked").then(() => "allowed", () => "blocked")'), "blocked");
+    await preview.webContents.executeJavaScript('document.getElementById("jump").click()');
+    assert.ok(preview.webContents.getURL().endsWith("#entry-one"));
+    await preview.webContents.executeJavaScript('location.href="https://snapshot.invalid/navigation"');
+    await new Promise(resolve => setTimeout(resolve, 60));
+    assert.ok(preview.webContents.getURL().endsWith("#entry-one"));
+    assert.equal(await preview.webContents.executeJavaScript('window.open("https://snapshot.invalid/popup") === null'), true);
+  } finally { preview.destroy(); }
+  console.log("desktop self-check: PASS (settings, secrets, busy guard, IPC allowlist, isolated snapshot window)");
   } finally {
+    if (previousMemoryMode === undefined) delete process.env.ERP_MEMORY_MODE;
+    else process.env.ERP_MEMORY_MODE = previousMemoryMode;
     app.setPath("userData", previous);
     await rm(isolated, { recursive: true, force: true });
   }

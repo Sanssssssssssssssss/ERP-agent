@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from copy import deepcopy
 
-from workbench.sale_view import _run_has_relevant_evidence, _tool_stage, _verified_action_record_ids, business_detail, collect_documents, refresh_business
+from erp_harness.app.sale_view import _run_has_relevant_evidence, _tool_stage, _verified_action_record_ids, business_detail, collect_documents, refresh_business
 
 
 def _state() -> dict:
@@ -42,6 +42,107 @@ RECORDS = {
 
 
 class SaleViewReadbackTests(unittest.TestCase):
+    def test_malformed_receipt_is_unknown_without_hiding_valid_siblings(self):
+        valid = {"action_id": "valid", "status": "verified", "payload": {"model": "sale.order", "method": "action_confirm"},
+                 "prestate": {}, "verification": {"status": "satisfied"}}
+        for field in ("payload", "prestate", "verification"):
+            with self.subTest(field=field):
+                state = _state()
+                state["runs"]["r2"]["events"] = [{"type": "run_finished"}]
+                state["receipt_ledger"] = {"r2": {"available": True, "rows": [
+                    {**valid, "action_id": "broken", field: [1]}, valid,
+                ]}}
+                receipts = business_detail(state, "b1")["receipts"]
+                self.assertEqual(next(r for r in receipts if r["id"] == "broken")["status"], "unknown")
+                self.assertEqual(next(r for r in receipts if r["id"] == "valid")["status"], "verified")
+                self.assertEqual(next(r for r in receipts if r["kind"] == "archive")["status"], "unknown")
+
+    def test_receipt_ignores_invalid_timestamp_and_preserves_unsent_expiry(self):
+        state = _state()
+        state["receipt_ledger"] = {"r2": {"available": True, "rows": [
+            {"action_id": "valid", "status": "verified", "payload": {}, "verification": {"status": "satisfied"}, "finished_at": 1e100},
+            {"action_id": "expired", "status": "expired", "payload": {}, "sent_at": None},
+        ]}}
+        receipts = business_detail(state, "b1")["receipts"]
+        valid = next(r for r in receipts if r["id"] == "valid")
+        self.assertEqual(valid["status"], "verified")
+        self.assertNotIn("observed_at", valid)
+        expired = next(r for r in receipts if r["id"] == "expired")
+        self.assertEqual(expired["status"], "not_executed")
+        self.assertIn("审批已过期", expired["detail"])
+
+    def test_invalid_tool_arguments_do_not_become_mail_evidence(self):
+        state = _state()
+        state["runs"]["r2"]["tools"] = [{"id": "bad-arguments", "name": "execute_method", "arguments": [1],
+                                            "result": {"success": False, "error": "invalid arguments"}}]
+        mail = next(r for r in business_detail(state, "b1")["receipts"] if r["kind"] == "email")
+        self.assertEqual(mail["status"], "not_observed")
+
+    def test_failed_run_keeps_pdf_and_comment_receipts_but_never_claims_email(self):
+        state = _state()
+        state["runs"]["r2"].update(status="failed", summary="邮件已经发送", tools=[{
+            "id": "blocked-email", "name": "mcp_odoo_execute_method", "status": "error",
+            "arguments": {"model": "account.move.send.wizard", "method": "action_send_and_print"},
+            "result": {"success": False, "error": "official invoice PDF requires sending_methods=false or []; email sending is blocked"},
+        }])
+        state["receipt_ledger"] = {"r2": {"available": True, "rows": [
+            {"action_id": "pdf", "kind": "method", "status": "verified", "payload": {"model": "account.move.send.wizard", "method": "action_send_and_print"},
+             "verification": {"status": "satisfied", "evidence": {"invoice_records": [{"id": 31, "is_move_sent": True}]}}},
+            {"action_id": "comment", "kind": "chatter", "status": "verified", "payload": {"model": "account.move", "method": "message_post", "record_ids": [31]},
+             "verification": {"status": "satisfied", "evidence": {"message_ids": [7433]}}},
+        ]}}
+        receipts = business_detail(state, "b1")["receipts"]
+        self.assertEqual({r["id"] for r in receipts if r["kind"] == "action" and r["status"] == "verified"}, {"pdf", "comment"})
+        mail = [r for r in receipts if r["kind"] == "email"]
+        self.assertEqual([(r["status"], r["tool_id"]) for r in mail], [("failed", "blocked-email")])
+        self.assertIn("不证明邮件", next(r for r in receipts if r["id"] == "pdf")["detail"])
+        self.assertEqual(next(r for r in receipts if r["kind"] == "archive")["status"], "verified")
+
+    def test_prior_sent_receipt_does_not_become_a_new_run_delivery(self):
+        state = _state()
+        state["receipt_ledger"] = {"r1": {"available": True, "rows": [{
+            "action_id": "old-mail", "kind": "method", "status": "verified", "payload": {"model": "account.move", "method": "message_post"},
+            "prestate": {"invoice_mail": {"email_to": "billing@example.test", "attachment": {"name": "INV.pdf"}}},
+            "verification": {"status": "satisfied", "evidence": {"delivery": "smtp_accepted"}},
+        }]}, "r2": {"available": True, "rows": []}}
+        receipts = business_detail(state, "b1")["receipts"]
+        previous = next(r for r in receipts if r["id"] == "old-mail")
+        self.assertEqual((previous["status"], previous["run_id"]), ("verified", "r1"))
+        self.assertIn("不能证明收件人", previous["detail"])
+        latest = next(r for r in receipts if r["kind"] == "email" and r["run_id"] == "r2")
+        self.assertEqual(latest["status"], "not_observed")
+        self.assertIn("本轮没有", latest["detail"])
+
+    def test_missing_ledger_does_not_promote_saved_approval_or_summary(self):
+        state = _state()
+        state["approvals"] = {"a1": {"action_id": "a1", "business_id": "b1", "run_id": "r2", "status": "verified"}}
+        state["runs"]["r2"]["summary"] = "已发送邮件，一切完成。"
+        receipts = business_detail(state, "b1")["receipts"]
+        self.assertEqual(next(r for r in receipts if r["id"] == "a1")["status"], "unknown")
+        self.assertEqual(next(r for r in receipts if r["kind"] == "archive")["status"], "unknown")
+        self.assertEqual(next(r for r in receipts if r["kind"] == "email")["status"], "not_observed")
+
+    def test_live_delivery_readback_is_scoped_and_does_not_claim_a_resend(self):
+        state = _state()
+        state["businesses"]["b1"].update(delivery_receipts_run_id="r2", delivery_receipts=[{
+            "status": "satisfied", "evidence": {"delivery": "smtp_accepted", "invoice_id": 31, "email_to": "billing@example.test"},
+        }])
+        mail = next(r for r in business_detail(state, "b1")["receipts"] if r["kind"] == "email" and r["run_id"] == "r2")
+        self.assertEqual(mail["status"], "verified")
+        self.assertIn("不代表本轮重新发送", mail["detail"])
+        state["businesses"]["b1"]["delivery_receipts_run_id"] = "r1"
+        mail = next(r for r in business_detail(state, "b1")["receipts"] if r["kind"] == "email" and r["run_id"] == "r2")
+        self.assertEqual(mail["status"], "not_observed")
+
+    def test_activity_keeps_running_parallel_tool_visible_after_later_tool_finishes(self):
+        state = _state()
+        state["runs"]["r2"].update(status="running", tools=[
+            {"id": "slow", "name": "read_record", "status": "running", "round": 3},
+            {"id": "fast", "name": "find_records", "status": "completed", "round": 3},
+        ])
+        activity = business_detail(state, "b1")["activity"]
+        self.assertEqual((activity["phase"], activity["tool_id"], activity["tool_status"], activity["round"]), ("tool", "slow", "running", 3))
+
     def test_verified_method_receipt_uses_argument_identity_and_evidence_records(self):
         runs = [{
             "id": "r-confirm", "started_at": "2026-01-02T00:00:00Z",
@@ -297,6 +398,83 @@ class SaleViewReadbackTests(unittest.TestCase):
         self.assertEqual(next(row for row in detail['checks'] if row['name'] == 'observed_order')['status'], 'unknown')
         self.assertEqual(detail['outcome']['status'], 'unknown')
 
+    def test_bound_target_ignores_revoked_exploratory_records_but_keeps_live_relations(self):
+        for binding in ("reference", "verified_action"):
+            with self.subTest(binding=binding):
+                state = _state()
+                business = state["businesses"]["b1"]
+                business["completion_target"] = "posted"
+                if binding == "reference":
+                    business["references"] = [{"model": "sale.order", "id": 7, "quote": "SO001", "fields": {"id": 7}}]
+                else:
+                    state["runs"]["r2"]["tools"] = [{"name": "execute_method",
+                        "arguments": {"model": "sale.order", "method": "action_confirm"},
+                        "result": {"action_status": "verified", "verification": {
+                            "status": "satisfied", "evidence": {"records": [{"id": 7}]}}}}]
+                # Like S01499: exploration read old invoice lines independently.
+                unrelated = [
+                    {"model": "sale.order", "id": 99, "fields": {}},
+                    {"model": "account.move.line", "id": 1, "fields": {"move_id": [1, "OLD"]}},
+                    {"model": "account.move", "id": 1, "fields": {"partner_id": [19, "Old customer"]}},
+                    {"model": "res.partner", "id": 19, "fields": {}},
+                ]
+                state["runs"]["r2"]["documents"].extend(unrelated)
+                state["runs"]["r2"]["documents"].append({"model": "account.move", "id": 31,
+                    "source_run_id": "r2", "source_tool_id": "read-linked-invoice", "fields": {}})
+                records = deepcopy(RECORDS)
+                records[("sale.order", 7)]["picking_ids"] = [51, 52]
+                records[("stock.picking", 52)] = {**records[("stock.picking", 51)], "id": 52, "state": "assigned"}
+                revoked = {(row["model"], row["id"]) for row in unrelated}
+                reads = NativeReadFixture(records, revoked)
+                detail = refresh_business(state, "b1", reads)
+                called = {(args["model"], args["record_id"]) for _, args in reads.calls}
+                self.assertFalse(called & revoked)
+                self.assertFalse(detail["stale"])
+                self.assertEqual(detail["outcome"]["status"], "passed")
+                docs = {(row["model"], row["id"]): row for row in detail["documents"]}
+                for key in revoked:
+                    self.assertEqual(docs[key]["document_scope"], "reference", key)
+                for key in records:
+                    self.assertIn(key, called)
+                    self.assertEqual(docs[key]["document_scope"], "current", key)
+                self.assertEqual(docs[("stock.picking", 52)]["state"], "assigned")
+                self.assertEqual(docs[("account.move", 31)]["source_tool_id"], "read-linked-invoice")
+
+    def test_bound_target_permission_failure_does_not_reuse_previous_green(self):
+        state = _state()
+        business = state["businesses"]["b1"]
+        business.update(completion_target="posted", references=[{
+            "model": "sale.order", "id": 7, "quote": "SO001", "fields": {"id": 7}}])
+        self.assertEqual(refresh_business(state, "b1", NativeReadFixture(RECORDS))["outcome"]["status"], "passed")
+        reads = NativeReadFixture(RECORDS, {("sale.order", 7)})
+        detail = refresh_business(state, "b1", reads)
+        self.assertTrue(detail["stale"])
+        self.assertEqual(detail["outcome"]["status"], "unknown")
+        checks = {row["name"]: row for row in detail["checks"]}
+        self.assertEqual(checks["observed_order"]["status"], "unknown")
+        self.assertEqual(checks["read_sale.order_7"]["status"], "unknown")
+        self.assertEqual([(args["model"], args["record_id"]) for _, args in reads.calls], [("sale.order", 7)])
+
+    def test_non_document_references_preserve_legacy_order_discovery_without_selecting_a_target(self):
+        for model, record_id in (("res.partner", 10), ("res.company", 1), ("sale.order.line", 21), ("product.product", 99)):
+            for multiple in (False, True):
+                with self.subTest(model=model, multiple=multiple):
+                    state, records = _state(), deepcopy(RECORDS)
+                    state["businesses"]["b1"].update(completion_target="confirmed", references=[{
+                        "model": model, "id": record_id, "quote": "原始引用", "fields": {"id": record_id}}])
+                    if multiple:
+                        state["runs"]["r2"]["documents"].append({"model": "sale.order", "id": 8, "fields": {}})
+                        records[("sale.order", 8)] = {**records[("sale.order", 7)], "id": 8, "name": "SO002"}
+                    reads = NativeReadFixture(records)
+                    detail = refresh_business(state, "b1", reads)
+                    checks = {row["name"]: row for row in detail["checks"]}
+                    self.assertIn(("sale.order", 7), {(args["model"], args["record_id"]) for _, args in reads.calls})
+                    self.assertEqual(checks["observed_order"]["status"], "unknown" if multiple else "passed")
+                    order = next(row for row in detail["documents"] if row["model"] == "sale.order" and row["id"] == 7)
+                    self.assertEqual(order["document_scope"], "current")
+                    if multiple:
+                        self.assertEqual(detail["outcome"]["status"], "unknown")
+
     def test_purchase_draft_projection_uses_draft_check(self):
         state = _state()
         state['businesses']['b1'].update({'type': 'purchase', 'completion_target': 'draft'})
@@ -540,6 +718,7 @@ class SaleViewReadbackTests(unittest.TestCase):
     def test_explicit_native_read_tools_and_purchase_writes_map_to_stages(self):
         self.assertEqual(_tool_stage({"name": "mcp_odoo_read_record", "arguments": {"model": "res.partner", "record_id": 9}}), "read")
         self.assertEqual(_tool_stage({"name": "mcp_odoo_search_records", "arguments": {"model": "purchase.order.line", "domain": []}}), "read")
+        self.assertEqual(_tool_stage({"name": "mcp_odoo_find_records", "arguments": {"model": "purchase.order.line", "domain": [["id", "=", 9]]}}), "read")
         self.assertEqual(_tool_stage({"name": "execute_method", "arguments": {"model": "purchase.order", "operation": "create"}}), "purchase")
         self.assertEqual(_tool_stage({"name": "execute_method", "arguments": {"model": "purchase.order.line", "operation": "write"}}), "purchase")
 
@@ -583,6 +762,55 @@ class SaleViewReadbackTests(unittest.TestCase):
         self.assertEqual(checks["read_account.move_31"]["status"], "unknown")
         self.assertEqual(checks["invoice_posted"]["status"], "unknown")
         self.assertNotEqual(checks["invoice_posted"]["status"], "passed")
+
+    def test_nullable_payment_terms_are_observed_in_both_business_paths(self):
+        for kind in ("sale_invoice", "sale_purchase_invoice"):
+            for order_term, invoice_term in ((False, False), (False, [5, "30 Days"]), ([5, "30 Days"], False)):
+                with self.subTest(kind=kind, order_term=order_term, invoice_term=invoice_term):
+                    state, records = _state(), deepcopy(RECORDS)
+                    state["businesses"]["b1"].update(type=kind, completion_target="posted")
+                    records[("sale.order", 7)]["payment_term_id"] = order_term
+                    records[("account.move", 31)]["invoice_payment_term_id"] = invoice_term
+                    if kind == "sale_purchase_invoice":
+                        state["runs"]["r2"]["documents"].append({"model": "purchase.order", "id": 9, "fields": {}})
+                        records[("purchase.order", 9)] = {"id": 9, "name": "PO9", "state": "purchase", "origin": "SO001",
+                            "partner_id": [10, "Acme"], "order_line": [22]}
+                        records[("purchase.order.line", 22)] = {"id": 22, "name": "Line", "order_id": [9, "PO9"],
+                            "product_id": [99, "Widget"], "product_qty": 3}
+                    detail = refresh_business(state, "b1", NativeReadFixture(records))
+                    check = next(c for c in detail["checks"] if c["name"] == "observed_payment_term")
+                    self.assertEqual(check["status"], "passed")
+                    self.assertIn("未设置付款条款", check["detail"])
+                    self.assertIn("不表示符合指定付款条件", check["detail"])
+                    self.assertEqual(detail["outcome"]["status"], "passed")
+
+    def test_missing_masked_or_unreadable_payment_term_cannot_use_other_document_as_fallback(self):
+        for model, record_id, field in (("sale.order", 7, "payment_term_id"), ("account.move", 31, "invoice_payment_term_id")):
+            for failure in ("missing", "null", "masked", "denied"):
+                with self.subTest(model=model, failure=failure):
+                    records = deepcopy(RECORDS)
+                    if failure == "missing":
+                        records[(model, record_id)].pop(field)
+                    elif failure == "null":
+                        records[(model, record_id)][field] = None
+                    elif failure == "masked":
+                        records[(model, record_id)][field] = False
+                    native = NativeReadFixture(records)
+                    def read(name, args):
+                        payload = native(name, args)
+                        if (args["model"], args["record_id"]) == (model, record_id):
+                            if failure == "masked":
+                                payload["redacted_fields"] = [field]
+                            elif failure == "denied":
+                                return {"success": False, "error": "AccessError: permission denied"}
+                        return payload
+                    detail = refresh_business(_state(), "b1", read)
+                    self.assertEqual(detail["outcome"]["status"], "unknown")
+                    check = next(c for c in detail["checks"] if c["name"] == "observed_payment_term")
+                    self.assertEqual(check["status"], "unknown")
+                    if failure == "masked":
+                        document = next(d for d in detail["documents"] if (d["model"], d["id"]) == (model, record_id))
+                        self.assertNotIn(field, document["fields"])
 
     def test_readback_failure_recovers_and_current_checks_replace_old(self):
         state = _state()

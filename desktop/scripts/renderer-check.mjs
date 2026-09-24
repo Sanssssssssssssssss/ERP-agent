@@ -33,17 +33,19 @@ const bridgeScript = String.raw`
     let materialVersion = 0
     const importedMaterials = new Map()
     let saveBlocked = true
+    let longTermMemory = false
     let failInitialConnectionCheck = true
     let delayedPurchaseDecision = true
     let showAcceptedProjection = false
     let showCompactionUsage = false
+    const traceSnapshots = new Map()
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
     const session = (id, title, businesses) => ({ id, title, created_at: '2026-09-08T08:00:00Z', updated_at: '2026-09-08T09:00:00Z', archived: false, status: 'idle', businesses })
     const business = (id, session_id, title, status = 'idle', goal = '处理订单与发票') => ({ id, session_id, type: id === 'business-b2' ? 'sale_purchase_invoice' : 'sale_invoice', title, goal, status, created_at: '2026-09-08T08:00:00Z', updated_at: '2026-09-08T09:00:00Z', active_run_id: id + '-run' })
     const b1 = business('business-b1', 'session-b', 'Business B1')
-    const b2 = { ...business('business-b2', 'session-b', 'Business B2', 'awaiting_approval'), material_ids: ['material-b2'] }
+    const b2 = { ...business('business-b2', 'session-b', 'Business B2', 'completed'), material_ids: ['material-b2'] }
     const b3 = business('business-b3', 'session-b', 'Business B3｜这是一个很长的企业业务标题用于窄面板换行检查', 'needs_reconciliation', '核对中断写入是否已经落库，并保留当前运行与历史单据证据。')
-    const b4 = business('business-b4', 'session-b', 'Business B4', 'completed')
+    const b4 = business('business-b4', 'session-b', 'Business B4', 'completed', '你好，能做什么？\n确认订单，暂不发货。')
     const sessions = [session('session-a', 'Session A', [business('business-a1', 'session-a', 'Business A1')]), session('session-b', 'Session B', [b1, b2, b3, b4])]
     const details = (b) => ({
       business: b.id === 'business-b2' ? { ...b, readback: { latest_run_id: 'business-b2-run', observed_at: '2026-09-08T08:49:00Z', stale: false, checks: [{ name: 'invoice_readback', label: '客户发票回读', status: 'passed', detail: '当前运行后的 Odoo 快照已返回。', source: 'odoo' }] } } : b,
@@ -73,18 +75,25 @@ const bridgeScript = String.raw`
         { id: 'purchase-line-1', model: 'purchase.order.line', name: 'P00001 明细 1', source: 'native_read_receipt', observed_at: '2026-09-08T08:46:16Z', fields: { product_name: '服务项目', product_qty: 3, price_unit: 12 } },
         { id: 'product-variant-1', model: 'product.product', name: '服务项目变体', source: 'native_read_receipt', observed_at: '2026-09-08T08:46:17Z', fields: { name: '服务项目变体' } },
         { id: 'attachment-1', model: 'ir.attachment', name: 'INV-B2 PDF', source: 'native_read_receipt', observed_at: '2026-09-08T08:46:18Z', fields: { name: 'INV-B2 PDF' } },
-        { id: 'send-wizard-1', model: 'account.move.send.wizard', name: '发票PDF向导', source: 'native_read_receipt', observed_at: '2026-09-08T08:46:19Z', fields: { name: '发票PDF向导' } },
+        { id: 'send-wizard-1', model: 'account.move.send.wizard', name: '发票文件向导', source: 'native_read_receipt', observed_at: '2026-09-08T08:46:19Z', fields: { name: '发票文件向导' } },
         ...Array.from({ length: 7 }, (_, index) => ({ id: 'mail-' + (index + 1), model: 'mail.message', name: '业务留言 ' + (index + 1), source: 'refresh_native_read', observed_at: '2026-09-08T08:47:0' + index + 'Z', fields: { subject: '订单沟通', body: '客户留言 ' + (index + 1), author_name: 'Nimbus Bureau' } }))
       ] : b.id === 'business-b3' ? [{ id: '7', model: 'sale.order', name: 'SO-B3-HISTORY', state: 'sale', source: 'odoo', observed_at: '2026-09-08T08:40:00Z', fields: { partner_name: 'Nimbus Bureau', amount_total: 99, currency: 'USD', invoice_status: 'to invoice' } }] : [],
       checks: b.id === 'business-b3' ? [{ name: 'invoice_write', label: '客户发票写入状态', status: 'unknown', detail: '未观察到可确认的 Odoo 写入结果；需要人工核对。', source: 'odoo' }] : [], stale: false, observed_at: '2026-09-08T08:46:00Z', summary: b.id === 'business-b3' ? '写入结果待核对，系统不会自动重试' : '主机已返回业务回执', activity: b.id === 'business-b3' ? { phase: 'reconciliation', label: '写入结果待核对', detail: '主机中断后无法确认写入是否落库；请核对 Odoo 后再决定。', tool_name: 'execute_approved_write', round: 2, tool_count: 2, model_rounds: 2, at: '2026-09-08T08:46:00Z' } : b.id === 'business-b2' ? { phase: 'approval', label: '等待确认', detail: '客户发票写入动作等待人工审批。', tool_name: 'mcp_odoo_validate_write', round: 2, tool_count: 2, model_rounds: 2, at: '2026-09-08T08:46:00Z' } : { phase: 'idle', label: '待执行', detail: '尚未开始。' }, execution: b.id === 'business-b2' ? { run_id: 'business-b2-run', current_stage_id: 'approval', stages: [{ id: 'plan', label: '读取订单', status: 'completed', detail: '已读取 Odoo 销售订单。', evidence: [{ run_id: 'business-b2-old-run', kind: 'readback', label: '查看独立回读快照', observed_at: '2026-09-08T08:45:00Z' }, { run_id: 'business-b2-run', tool_id: 'tool-b2', label: '查看订单读取回执', observed_at: '2026-09-08T08:45:00Z' }] }, { id: 'approval', label: '等待审批', status: 'awaiting_approval', detail: '客户发票写入等待人工确认。', evidence: [{ run_id: 'business-b2-run', tool_id: 'tool-b2', action_id: 'action-b2', label: '查看审批前回执', observed_at: '2026-09-08T08:46:00Z' }] }] } : b.id === 'business-b3' ? { run_id: 'business-b3-run', current_stage_id: 'reconcile', stages: [{ id: 'reconcile', label: '写入结果待核对', status: 'unknown', detail: '没有确认写入是否落库。', evidence: [{ run_id: 'business-b3-run', tool_id: 'tool-b3-unknown-write', action_id: 'action-b3', label: '查看未知写入回执', observed_at: '2026-09-08T08:46:00Z' }] }] } : { run_id: b.id + '-run', current_stage_id: 'start', stages: [{ id: 'start', label: '待执行', status: 'pending', detail: '尚未开始。' }] }, outcome: b.id === 'business-b3' ? { status: 'unknown', label: '结果待核对', detail: '写入结果未知，系统不会自动重试。', scope: '客户发票' } : b.id === 'business-b2' ? { status: 'awaiting_approval', label: '等待审批', detail: '批准只允许恢复本轮流程，不代表写入已经执行。', scope: 'sale_purchase_invoice_posted_checks' } : { status: 'unknown', label: '尚未执行', detail: '没有业务结果。', scope: '销售发票' }
     })
     const sessionDetails = {
       'session-a': { session: sessions[0], messages: [], businesses: sessions[0].businesses, conversation_runs: [], live_messages: [] },
-      'session-b': { session: sessions[1], messages: [{ id: 'm1', role: 'assistant', text: '已识别两个业务工作区。', created_at: '2026-09-08T08:01:00Z' }, { id: 'm-user', role: 'user', text: '我想查看订单', created_at: '2026-09-08T08:01:30Z' }, { id: 'proposal-1', role: 'assistant', text: '主机合成的提案正文不应重复显示', created_at: '2026-09-08T08:02:00Z', proposal: { id: 'proposal-1', title: '新业务意图', goal: '处理一笔新的销售业务', type: 'sale_invoice', completion_target: 'posted', status: 'pending' } }], businesses: sessions[1].businesses, conversation_runs: [{ id: 'conversation-run-b', session_id: 'session-b', business_id: null, kind: 'conversation', status: 'running' }], live_messages: [] }
+      'session-b': { session: sessions[1], messages: [{ id: 'm1', role: 'assistant', text: '已识别两个业务工作区。', created_at: '2026-09-08T08:01:00Z' }, { id: 'm-user', role: 'user', text: '我想查看订单', created_at: '2026-09-08T08:01:30Z' }, { id: 'proposal-1', run_id: 'proposal-run-b', role: 'assistant', text: '主机合成的提案正文不应重复显示', created_at: '2026-09-08T08:02:00Z', proposal: { id: 'proposal-1', title: '新业务意图', goal: '处理一笔新的销售业务', type: 'sale_invoice', completion_target: 'posted', status: 'pending' } }], businesses: sessions[1].businesses, conversation_runs: [{ id: 'proposal-run-b', session_id: 'session-b', business_id: null, kind: 'conversation', status: 'completed' }], live_messages: [] }
     }
+    sessionDetails['session-b'].messages.unshift({ id: 'superseded-proposal', role: 'assistant', text: '早期未完成的提案', created_at: '2026-09-08T08:01:45Z', proposal: { id: 'superseded-proposal', title: '不能创建的旧提案', goal: '旧目标', type: 'sale_invoice', status: 'pending' } })
+    sessionDetails['session-b'].messages.push({ id: 'b4-confirmed-proposal', business_id: b4.id, role: 'assistant', text: '已确认业务说明', created_at: '2026-09-08T08:02:30Z', proposal: { id: 'b4-proposal', title: b4.title, goal: '确认订单，暂不发货。', type: b4.type, status: 'confirmed' } }, { id: 'b4-pending-update', business_id: b4.id, role: 'assistant', text: '未确认更新', created_at: '2026-09-08T08:02:31Z', proposal: { id: 'b4-pending', title: b4.title, goal: '尚未批准的改动', type: b4.type, status: 'rejected' } })
     sessionDetails['session-b'].materials = [{ id: 'material-b2', session_id: 'session-b', name: '订单材料.csv', size: 42, sha256: 'sha-b2', created_at: '2026-09-08T08:44:00Z', row_count: 5, preview: '客户,产品,数量\\nNimbus,服务,2', media_type: 'text/csv' }]
     window.__bridgeCalls = calls
     window.__traceVersion = 0
+    window.__businessBusy = false
+    window.__setRunState = (busy, conversation = 'completed') => { window.__businessBusy = busy; b2.status = busy ? 'awaiting_approval' : 'completed'; sessionDetails['session-b'].conversation_runs[0].status = conversation }
+    window.__updateProposal = (id, patch) => { const row = sessionDetails['session-b'].messages.find(message => message.proposal?.id === id); if (row) Object.assign(row.proposal, patch) }
+    window.__setProducerProposals = (ids) => { sessionDetails['session-b'].conversation_runs[0].proposal_ids = ids }
+    window.__setProposalStatus = (id, status) => { const row = sessionDetails['session-b'].messages.find(message => message.proposal?.id === id); if (row) row.proposal.status = status }
     window.__persistConversationMessage = (message) => sessionDetails['session-b'].messages.push(message)
     window.__setSessionMessages = (id, messages) => { sessionDetails[id].messages = messages }
     window.__removeConversationMessage = (id) => { sessionDetails['session-b'].messages = sessionDetails['session-b'].messages.filter((message) => message.id !== id) }
@@ -110,8 +119,36 @@ const bridgeScript = String.raw`
           const id = params.business_id
           await wait(id === 'business-b1' ? 180 : 12)
           const result = details(sessions.flatMap((item) => item.businesses).find((item) => item.id === id))
+          if (id === 'business-b2' && !window.__businessBusy) { result.runs[1].status = 'completed'; result.approvals = []; result.business = { ...result.business, status: 'completed' } }
+          if (id === 'business-b4') {
+            result.receipts = [
+              { id: 'receipt-posted', kind: 'action', title: '此前运行 · 发票已过账', status: 'verified', detail: '发票 INV-TEST 已通过落库回读。', run_id: 'business-b4-old-run', action_id: 'action-previous' },
+              { id: 'receipt-pdf', kind: 'action', title: 'PDF 已生成', status: 'verified', detail: '正式 PDF 已生成，附件已登记。', run_id: 'business-b4-run', action_id: 'action-pdf' },
+              { id: 'receipt-email', kind: 'email', title: '邮件：无发送记录', status: 'not_observed', detail: '单据留言不代表邮件发送，没有邮件发送回执。', run_id: 'business-b4-run' },
+              { id: 'receipt-archive', kind: 'archive', title: '运行记录已留存', status: 'verified', detail: '动作账本和运行详情可查。', run_id: 'business-b4-run' }
+            ]
+            result.runs[1].summary = '本轮已确认订单，尚未发货。'; result.runs[1].verification_status = 'passed'
+            result.business = { ...b4, readback: { latest_run_id: 'business-b4-run', stale: false } }
+            result.outcome = { status: 'passed', label: '销售订单已确认', detail: '已核对当前订单状态。', scope: 'sale_invoice_confirmed_checks' }
+            if (window.__resultScenario === 'failed') { result.runs[1].status = 'failed'; result.runs[1].verification_status = 'unknown' }
+            if (window.__resultScenario === 'awaiting_input') { result.runs[1].status = 'awaiting_input'; result.runs[1].handoff = { code: 'business_choice_required', next_action: 'revise_proposal', message: '请确认预付款比例，再调整业务方案。' }; result.business.status = 'awaiting_input'; result.business.active_run_id = null }
+            if (window.__resultScenario === 'running') { result.runs[1].status = 'running'; result.runs[1].verification_status = 'unknown'; delete result.runs[1].summary; result.outcome = { status: 'unknown', label: '执行中', detail: '完成后核验。', scope: '' } }
+            if (window.__resultScenario === 'stale') result.business.readback.latest_run_id = 'business-b4-old-run'
+            if (window.__resultScenario === 'missing') { delete result.runs[1].summary; result.summary = '旧轮次总结，不能显示' }
+          }
+          if (id === 'business-b2' && window.__revisionAccepted) { result.runs[1].status = 'cancelled'; result.business.status = 'cancelled'; result.approvals = result.approvals.map(row => ({ ...row, status: 'rejected' })); result.activity = { phase: 'idle', label: '等待更新后的业务方案', detail: '旧审批已撤销。' } }
           if (id === 'business-b2' && showAcceptedProjection) { result.approvals = []; result.business.status = 'running'; result.runs[1].status = 'running'; result.activity = { phase: 'model', label: '等待模型响应', detail: '审批已完成，模型正在继续处理。' } }
+          if (id === 'business-b4' && window.__activityScenario) { result.runs[1].status = 'running'; result.business.status = 'running'; result.activity = window.__activityScenario; result.outcome = { status: 'unknown', label: '执行中', detail: '完成后核验。' } }
+          // The host returns newest first when no active_run_id selects a row.
+          if (id === 'business-b4' && window.__resultScenario === 'awaiting_input') result.runs.reverse()
           return result
+        }
+        if (method === 'get_trace_detail') {
+          const saved = traceSnapshots.get(params.session_id + ':' + params.business_id + ':' + params.run_id)
+          if (params.kind === 'run') return { kind: 'run', id: params.id, data: { instruction: '核对订单后开票。', business: { title: params.business_id } } }
+          const data = params.kind === 'tool' ? saved?.tools.find(tool => tool.id === params.id) : params.kind === 'round' ? saved?.rounds.find(round => String(round.index) === params.id) : null
+          if (!data) throw new Error('TRACE_DETAIL_NOT_FOUND')
+          return { kind: params.kind, id: params.id, data }
         }
         if (method === 'get_trace') {
           await wait(params.business_id === 'business-b1' ? 12 : 220)
@@ -138,6 +175,13 @@ const bridgeScript = String.raw`
           if (params.format === 'pdf') return { cancelled: true }
           return { cancelled: false, path: 'C:\\runtime\\SO-B2.csv', artifact: { id: 'artifact-doc-csv', name: 'SO-B2.csv', path: 'C:\\runtime\\SO-B2.csv', kind: 'document_csv', available: true } }
         }
+        if (method === 'request_approval_revision') {
+          await wait(80)
+          if (params.text === '测试预检失败') throw new Error('修改预检失败，原审批仍保留。')
+          window.__revisionAccepted = true; window.__businessBusy = false; b2.status = 'cancelled'
+          sessionDetails['session-b'].conversation_runs = [{ id: 'revision-conversation', session_id: 'session-b', kind: 'conversation', business_id: null, context_business_id: 'business-b2', status: 'running' }]
+          return { ok: true, run_id: 'revision-conversation' }
+        }
         if (method === 'decide_approval') {
           if (params.action_id === 'action-b2-purchase' && params.decision === 'approve') {
             if (delayedPurchaseDecision) { delayedPurchaseDecision = false; await wait(4300) }
@@ -146,16 +190,21 @@ const bridgeScript = String.raw`
           if (params.action_id === 'action-b2-send-file' && params.decision === 'approve') throw new Error('DECISION_NETWORK_DOWN')
           return { ok: true }
         }
-        if (method === 'get_settings') return { model: 'deepseek/deepseek-v4-flash/high', base_url: 'http://model.invalid', odoo_url: 'http://odoo.invalid', odoo_db: 'demo', odoo_username: 'admin', has_model_key: false, has_odoo_key: false, environment: 'demo' }
+        if (method === 'get_settings') return { model: 'deepseek/deepseek-v4-flash/high', base_url: 'http://model.invalid', odoo_url: 'http://odoo.invalid', odoo_db: 'demo', odoo_username: 'admin', long_term_memory: longTermMemory, has_model_key: false, has_odoo_key: false, environment: 'demo' }
         if (method === 'save_settings') {
           if (saveBlocked) { saveBlocked = false; throw new Error("Error invoking remote method 'workbench:call': Error: CONFIG_BUSY") }
-          return { model: 'deepseek/deepseek-v4-flash/high', base_url: 'http://model.invalid', odoo_url: 'http://odoo.invalid', odoo_db: 'demo', odoo_username: 'admin', has_model_key: false, has_odoo_key: false, environment: 'demo' }
+          if (typeof params.long_term_memory !== 'boolean') throw new Error('CONFIG_INPUT_INVALID')
+          longTermMemory = params.long_term_memory
+          return { model: 'deepseek/deepseek-v4-flash/high', base_url: 'http://model.invalid', odoo_url: 'http://odoo.invalid', odoo_db: 'demo', odoo_username: 'admin', long_term_memory: longTermMemory, has_model_key: false, has_odoo_key: false, environment: 'demo' }
         }
         if (method === 'export_business_report') return { cancelled: false, path: 'C:\\runtime\\business-b2-receipt.json', artifact: { id: 'artifact-b2', name: 'Business B2 回执.json', path: 'C:\\runtime\\business-b2-receipt.json', kind: 'business_receipt' } }
+        if (method === 'open_session_snapshot') { await wait(40); return { opened: true, scope: 'business_session' } }
         if (method === 'open_business_artifact' || method === 'reveal_business_artifact') return { opened: true }
         if (method === 'open_odoo_record') return { opened: true }
+        if (method === 'open_odoo') { if (Object.keys(params).length) throw new Error('INVALID_PARAMS'); if (window.__odooUnconfigured) throw new Error('ODOO_NOT_CONFIGURED'); return { opened: true } }
         if (method === 'reconcile_action') return details(b3)
         if (method === 'send_message') {
+          if (params.session_id === 'session-b') { sessionDetails['session-b'].conversation_runs[0].id = 'conversation-run-b'; sessionDetails['session-b'].conversation_runs[0].status = 'running' }
           if (params.text === 'delayed mutation' || params.text === 'thinking hold') await wait(180)
           if (params.text === 'snapshot public') {
             sessionDetails['session-b'].messages.push({ id: 'snapshot-public', role: 'assistant', text: '快照中的公开回答', run_id: 'conversation-run-b', created_at: '2026-09-08T09:02:00Z' })
@@ -182,9 +231,18 @@ const bridgeScript = String.raw`
           sessionDetails['session-b'].live_messages = [{ id: 'cancel-live', session_id: 'session-b', business_id: null, run_id: params.run_id, sequence: 0, text: '取消前已经收到的片段', role: 'assistant', status: 'interrupted' }]
           return { ok: true, run_id: params.run_id, status: 'cancelled' }
         }
-        if (method === 'cancel_run' || method === 'confirm_business' || method === 'rename_session' || method === 'archive_session') return null
+        if (method === 'confirm_business') { const row = sessionDetails[params.session_id].messages.find(message => message.proposal?.id === params.proposal_id); if (row) { for (const message of sessionDetails[params.session_id].messages) if (message.proposal?.status === 'pending' && message !== row) message.proposal.status = 'rejected'; row.proposal.status = params.confirmed ? 'confirmed' : 'rejected'; row.business_id = params.confirmed ? 'business-b1' : null }; return params.confirmed ? b1 : null }
+        if (method === 'cancel_run' || method === 'rename_session' || method === 'archive_session') return null
         throw new Error('unexpected bridge method: ' + method)
       }
+    }
+    const originalTraceCall = window.workbench.call.bind(window.workbench)
+    window.workbench.call = async (method, params = {}) => {
+      const result = await originalTraceCall(method, params)
+      if (method !== 'get_trace') return result
+      traceSnapshots.set(params.session_id + ':' + params.business_id + ':' + params.run_id, result)
+      if (!params.summary_only) throw new Error('TRACE_LIST_MUST_BE_SUMMARY')
+      return { ...result, summary_only: true, rounds: result.rounds.map(({ text, ...round }) => round), tools: result.tools.map(({ arguments: args, result: receipt, ...tool }) => ({ ...tool, search_text: JSON.stringify(args) })) }
     }
   })()
 `
@@ -199,14 +257,24 @@ page.on('console', (message) => { if (message.type() === 'error') console.error(
 await page.goto(`http://127.0.0.1:${serverAddress.port}/`)
 await page.getByRole('button', { name: /Session A/ }).waitFor()
 await page.getByText('主机已连接').waitFor()
+await page.getByRole('button', { name: '打开 Odoo', exact: true }).click()
+await page.getByText('已请求在浏览器打开已配置的 Odoo。', { exact: true }).waitFor()
+assert.deepEqual(await page.evaluate(() => window.__bridgeCalls.find(({ method }) => method === 'open_odoo')?.params), {})
 
 // A new or empty session explains the three supported business entry points;
 // choosing one only fills natural language into the composer.
 await page.getByRole('button', { name: /Session A/ }).click()
 await page.getByRole('heading', { name: 'Session A' }).waitFor()
-await page.getByText('你想先处理哪类业务？').waitFor()
+await page.getByText('处理业务', { exact: true }).waitFor()
+assert.equal(await page.getByLabel('讨论范围').inputValue(), '')
+assert.equal(await page.getByLabel('讨论范围').locator('option:checked').textContent(), '跟随当前业务：Business A1')
+// A conversation trace without a business must never issue get_business('', ...).
+const emptyBusinessCallsBefore = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'get_business' && !params.business_id).length)
+await page.evaluate(() => window.__emitWorkbench({ event: 'trace', data: { session_id: 'session-a', business_id: null, run_id: 'conversation-only' } }))
+await page.waitForTimeout(160)
+assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'get_business' && !params.business_id).length), emptyBusinessCallsBefore)
 await page.getByRole('button', { name: /^采购 / }).click()
-assert.equal(await page.getByRole('textbox', { name: '会话消息' }).inputValue(), '我想整理一笔采购需求，请先告诉我需要补充哪些信息。')
+assert.equal(await page.getByRole('textbox', { name: '会话消息' }).inputValue(), '帮我整理采购需求，先核对供应商和产品。')
 
 // Materials are imported through the bridge, appear with parsing metadata, and
 // travel with the same-session message. A delayed old-session import is ignored.
@@ -219,8 +287,11 @@ const materialSend = await page.evaluate(() => window.__bridgeCalls.find(({ meth
 assert.deepEqual(materialSend?.params.material_ids, ['material-1'])
 await page.getByRole('button', { name: /Session B/ }).click()
 await page.getByRole('heading', { name: 'Session B' }).waitFor()
+assert.equal(await page.getByLabel('讨论范围').inputValue(), '')
+await page.getByLabel('讨论范围').selectOption('__conversation__')
 await page.getByRole('button', { name: /Session A/ }).click()
 await page.getByRole('heading', { name: 'Session A' }).waitFor()
+assert.equal(await page.getByLabel('讨论范围').inputValue(), '')
 await page.locator('input[type="file"]').first().setInputFiles({ name: 'cross.csv', mimeType: 'text/csv', buffer: Buffer.from('客户,产品\nA,B') })
 await page.getByRole('button', { name: /Session B/ }).click()
 await page.getByRole('heading', { name: 'Session B' }).waitFor()
@@ -242,6 +313,23 @@ await page.getByRole('button', { name: '打开会话', exact: true }).click()
 await page.locator('.conversation-pane').waitFor()
 const proposalButton = page.getByRole('button', { name: '创建业务工作区' })
 await proposalButton.waitFor()
+assert.equal(await page.locator('.proposal-card').count(), 1)
+assert.equal(await page.locator('.proposal-card h3').textContent(), '新业务意图')
+await page.evaluate(() => { window.__setRunState(false, 'running'); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
+await page.getByText('正在完善提案，回复结束后可确认。', { exact: true }).waitFor()
+assert.equal(await proposalButton.isDisabled(), true)
+await page.evaluate(() => { window.__setRunState(false); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
+await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent === '创建业务工作区' && !button.disabled))
+for (const status of ['failed', 'interrupted']) {
+  await page.evaluate((value) => { window.__setRunState(false, value); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) }, status)
+  await page.getByText('本轮回复未完成，请重新说明业务要求。', { exact: true }).waitFor()
+  assert.equal(await proposalButton.isDisabled(), true)
+}
+await page.evaluate(() => { window.__setRunState(false); window.__updateProposal('proposal-1', { source_messages: [{ id: 'old-request', text: '旧要求' }] }); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
+await page.getByText('已有新的业务要求，请等待更新后的提案。', { exact: true }).waitFor()
+assert.equal(await proposalButton.isDisabled(), true)
+await page.evaluate(() => { window.__updateProposal('proposal-1', { source_messages: [{ id: 'm-user', text: '我想查看订单' }] }); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
+await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent === '创建业务工作区' && !button.disabled))
 assert.equal(await page.getByText('主机合成的提案正文不应重复显示', { exact: true }).count(), 0)
 assert.equal(await page.locator('.message.assistant:not(.thinking-message):not(.live-message)').count(), 1)
 await page.getByText('完成目标：发票已过账', { exact: true }).waitFor()
@@ -253,6 +341,17 @@ await page.evaluate(() => {
 await page.waitForTimeout(25)
 const proposalCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'confirm_business'))
 assert.equal(proposalCalls.length, 1)
+assert.equal(proposalCalls[0].params.proposal_id, 'proposal-1')
+const createdProposal = page.locator('.proposal-receipt').filter({ hasText: '新业务意图' })
+await createdProposal.getByRole('button', { name: '打开业务' }).waitFor()
+await createdProposal.getByRole('button', { name: '打开业务' }).click()
+assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'confirm_business').length), 1)
+assert.equal(await page.getByRole('button', { name: '创建业务工作区' }).count(), 0)
+await page.evaluate(() => { window.__setProposalStatus('superseded-proposal', 'pending'); window.__setProducerProposals(['superseded-proposal', 'proposal-1']); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
+await page.getByText('该提案已被更新，请使用最新业务说明。', { exact: true }).waitFor()
+assert.equal(await page.getByRole('button', { name: '创建业务工作区' }).isDisabled(), true)
+await page.evaluate(() => { window.__setProposalStatus('superseded-proposal', 'rejected'); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
+await page.getByRole('button', { name: '创建业务工作区' }).waitFor({ state: 'hidden' })
 await page.getByRole('button', { name: /Session B/ }).click()
 await page.waitForTimeout(30)
 assert.equal(await page.locator('.conversation-header h2').textContent(), 'Session B')
@@ -270,7 +369,7 @@ await page.evaluate(() => {
 })
 await page.getByRole('button', { name: /Session A/ }).click()
 await page.getByRole('heading', { name: 'Session A' }).waitFor()
-await page.getByText('你想先处理哪类业务？').waitFor()
+await page.getByText('处理业务', { exact: true }).waitFor()
 assert.equal(await page.locator('.welcome-card').count(), 3)
 assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'send_message').length), sendCallsBeforeProposalOnly)
 await page.evaluate(() => { window.__setSessionMessages('session-a', []); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-a', status: 'idle' } }) })
@@ -315,14 +414,42 @@ for (let index = 0; index < 20; index += 1) {
 await page.getByRole('heading', { name: 'Business B2' }).waitFor()
 const sequentialBusinessElapsed = Date.now() - sequentialBusinessStarted
 
-// Composer target is explicit: current-business followups carry context_business_id; ordinary discussion omits business scope.
+// Default follows the selected business; explicit whole-conversation scope survives refresh.
 const messageTarget = page.getByLabel('讨论范围')
 const composer = page.getByRole('textbox', { name: '会话消息' })
-await messageTarget.selectOption('business-b2')
+async function readyComposer() {
+  await page.evaluate(() => { window.__setRunState(false); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
+  await page.waitForTimeout(60)
+}
+const sendsBeforeBusy = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'send_message').length)
+for (const scope of ['approval', 'execution', 'conversation']) {
+  await page.evaluate((value) => { window.__showAcceptedProjection(value === 'execution'); window.__setRunState(value !== 'conversation', value === 'conversation' ? 'running' : 'completed'); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) }, scope)
+  await page.waitForTimeout(60)
+  await messageTarget.selectOption('__conversation__')
+  await composer.fill('执行中暂存的修改要求')
+  await composer.press('Enter')
+  assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'send_message').length), sendsBeforeBusy)
+  await page.getByRole('button', { name: '发送', exact: true }).click()
+  const blockedDialog = page.getByRole('alertdialog', { name: '当前运行尚未结束' })
+  await blockedDialog.waitFor()
+  assert.equal((await page.locator('.composer textarea').inputValue()).trim(), '执行中暂存的修改要求')
+  assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'send_message').length), sendsBeforeBusy)
+  await blockedDialog.getByRole('button', { name: '知道了' }).click()
+}
+await page.evaluate(() => window.__showAcceptedProjection(false))
+await page.getByRole('tab', { name: /Business B2/ }).click()
+assert.equal(await messageTarget.inputValue(), 'business-b2')
+await messageTarget.selectOption('')
+await readyComposer()
+assert.equal(await messageTarget.inputValue(), '')
+assert.equal(await messageTarget.locator('option:checked').textContent(), '跟随当前业务：Business B2')
+assert.ok((await page.locator('.material-reuse-tray').textContent()).includes('订单材料.csv'))
 await composer.fill('继续处理当前业务')
 await page.getByRole('button', { name: '发送' }).click()
 await page.waitForTimeout(25)
 await messageTarget.selectOption('__conversation__')
+await readyComposer()
+assert.equal(await messageTarget.inputValue(), '__conversation__')
 await composer.fill('开始一个新的业务意图')
 await page.getByRole('button', { name: '发送' }).click()
 await page.waitForTimeout(25)
@@ -332,6 +459,7 @@ assert.deepEqual(sentMessages.map(({ params }) => params), [
   { session_id: 'session-b', text: '开始一个新的业务意图' }
 ])
 await messageTarget.selectOption('__conversation__')
+await readyComposer()
 await composer.fill('thinking hold')
 await page.getByRole('button', { name: '发送' }).click()
 await page.locator('.thinking-message').waitFor()
@@ -345,6 +473,7 @@ await page.waitForTimeout(220)
 await page.getByRole('tab', { name: /Business B2/ }).click()
 await page.getByRole('heading', { name: 'Business B2' }).waitFor()
 await messageTarget.selectOption('business-b2')
+await readyComposer()
 await composer.fill('dedupe send')
 await page.evaluate(() => {
   const button = [...document.querySelectorAll('button')].find((item) => item.textContent?.includes('发送'))
@@ -353,7 +482,10 @@ await page.evaluate(() => {
 await page.waitForTimeout(25)
 const dedupeSendCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'send_message' && params.text === 'dedupe send'))
 assert.equal(dedupeSendCalls.length, 1)
+assert.equal(await page.getByRole('alertdialog', { name: '当前运行尚未结束' }).count(), 0)
 
+await page.evaluate(() => { window.__setRunState(true, 'running'); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b2' } }) })
+await page.waitForTimeout(60)
 // Stream events are scoped by session, business, run and message. Duplicate
 // chunks are ignored, the terminal text is authoritative, and a business stream
 // remains visible beside ordinary conversation output.
@@ -372,7 +504,7 @@ await page.getByText('最终回答：当前能力与业务范围已确认。', {
 assert.equal(await page.locator('.thinking-message').count(), 0)
 assert.equal(await page.getByText('重复片段', { exact: true }).count(), 0)
 assert.equal(await page.getByText('终态后不应追加', { exact: true }).count(), 0)
-await page.getByText('业务流公开进度', { exact: true }).waitFor()
+await page.locator('.activity-card').getByText('业务流公开进度', { exact: true }).waitFor()
 await page.getByText('取消前已经收到的片段', { exact: true }).waitFor()
 await page.evaluate(() => {
   window.__persistConversationMessage({ id: 'conversation-live-1', role: 'assistant', text: '最终回答：当前能力与业务范围已确认。\n\n| 项目 | 状态 |\n| --- | --- |\n| 能力 | 已确认 |', created_at: '2026-09-08T09:01:00Z', context_business_id: null })
@@ -398,12 +530,14 @@ const conversationCancelCalls = await page.evaluate(() => window.__bridgeCalls.f
 assert.deepEqual(conversationCancelCalls.map(({ params }) => params), [{ session_id: 'session-b', run_id: 'conversation-run-b' }])
 await page.getByText('已停止 · 回复未完成', { exact: true }).waitFor()
 assert.equal(await page.locator('.thinking-message').count(), 0)
+await readyComposer()
 await composer.fill('failed conversation')
 await page.getByRole('button', { name: '发送' }).click()
 await page.getByText('对话失败，可继续输入', { exact: true }).waitFor()
 await page.getByText('查看错误详情', { exact: true }).click()
 await page.getByText('CONVERSATION_TOOL_FAILED', { exact: true }).waitFor()
 assert.ok((await page.locator('.conversation-run-status').textContent())?.includes('当前回复未完成'))
+await readyComposer()
 await composer.fill('completed retry')
 await page.getByRole('button', { name: '发送' }).click()
 await page.locator('.thinking-message').waitFor()
@@ -414,6 +548,7 @@ assert.equal(await page.locator('.thinking-message').count(), 0)
 
 // A persisted assistant message for the active run is public output, so a
 // reload snapshot must clear the thinking placeholder instead of duplicating it.
+await readyComposer()
 await composer.fill('snapshot public')
 await page.getByRole('button', { name: '发送' }).click()
 await page.getByText('快照中的公开回答', { exact: true }).waitFor()
@@ -422,6 +557,7 @@ await page.evaluate(() => window.__removeConversationMessage('snapshot-public'))
 
 // A delayed send response from the old session must not reload that session over a newer selection.
 await messageTarget.selectOption('business-b2')
+await readyComposer()
 await composer.fill('delayed mutation')
 await page.getByRole('button', { name: '发送' }).click()
 await page.getByRole('button', { name: /Session A/ }).click()
@@ -441,6 +577,8 @@ await page.getByRole('alertdialog', { name: '归档会话' }).waitFor()
 await page.getByRole('alertdialog', { name: '归档会话' }).getByRole('button', { name: '取消' }).click()
 await page.getByRole('alertdialog', { name: '归档会话' }).waitFor({ state: 'hidden' })
 
+await page.evaluate(() => { window.__setRunState(true); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
+await page.waitForTimeout(60)
 // B1 is deliberately slow. B2 must win the business detail race.
 await page.getByRole('tab', { name: /Business B2/ }).click()
 await page.getByRole('tab', { name: /Business B1/ }).click()
@@ -464,7 +602,7 @@ assert.ok((await page.locator('.business-facts').textContent()).includes('已确
 assert.ok((await page.locator('.business-facts').textContent()).includes('已过账'))
 assert.ok((await page.locator('.business-facts').textContent()).includes('2 张'))
 assert.ok((await page.locator('.business-facts').textContent()).includes('SO-B2-SECOND'))
-await page.getByText('范围：销售、采购与开票基础核验', { exact: true }).waitFor()
+await page.getByText('核验范围：销售、采购与开票基础核验', { exact: true }).waitFor()
 await page.getByRole('tab', { name: /^单据/ }).click()
 const businessReadsBeforeExport = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'get_business' && params.business_id === 'business-b2').length)
 await page.getByRole('button', { name: '导出业务回执' }).click()
@@ -529,30 +667,31 @@ assert.equal(await page.locator('.resource-preview h3').textContent(), 'S00001')
 await page.evaluate(() => window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b2', type: 'artifact_created' } }))
 await page.waitForTimeout(80)
 assert.equal(await page.locator('.resource-preview h3').textContent(), 'S00001')
-assert.ok((await page.getByRole('button', { name: /Alpine Supplier/ }).textContent())?.includes('往来单位 · —（不适用）'))
-assert.ok((await page.getByRole('button', { name: /Alpine 供货信息/ }).textContent())?.includes('—（不适用）'))
-assert.ok((await page.getByRole('button', { name: /销售税/ }).textContent())?.includes('—（不适用）'))
+assert.ok((await page.getByRole('button', { name: /Alpine Supplier/ }).textContent())?.includes('往来单位'))
+assert.equal((await page.getByRole('button', { name: /Alpine 供货信息/ }).textContent())?.includes('—（不适用）'), false)
+assert.equal((await page.getByRole('button', { name: /销售税/ }).textContent())?.includes('—（不适用）'), false)
 assert.equal(await page.locator('.resource-row').filter({ hasText: '产品' }).count(), 1)
 assert.equal(await page.locator('.resource-row').filter({ hasText: '会计日记账' }).count(), 1)
 assert.equal(await page.locator('.resource-row').filter({ hasText: '开票向导' }).count(), 1)
-assert.ok((await page.getByRole('button', { name: /P00001 明细 1/ }).textContent())?.includes('采购明细 · —（不适用）'))
-assert.ok((await page.getByRole('button', { name: /服务项目变体/ }).textContent())?.includes('商品 · —（不适用）'))
-assert.ok((await page.getByRole('button', { name: /INV-B2 PDF/ }).textContent())?.includes('附件 · —（不适用）'))
-assert.ok((await page.getByRole('button', { name: /发票PDF向导/ }).textContent())?.includes('发票PDF向导 · —（不适用）'))
-assert.ok((await page.locator('.resource-row').filter({ hasText: '业务留言 1' }).textContent())?.includes('独立回读'))
+assert.ok((await page.getByRole('button', { name: /P00001 明细 1/ }).textContent())?.includes('采购明细'))
+assert.ok((await page.getByRole('button', { name: /服务项目变体/ }).textContent())?.includes('商品'))
+assert.ok((await page.getByRole('button', { name: /INV-B2 PDF/ }).textContent())?.includes('附件'))
+assert.ok((await page.getByRole('button', { name: /发票文件向导/ }).textContent())?.includes('发票文件向导'))
+assert.ok(!(await page.locator('.resource-row').filter({ hasText: '业务留言 1' }).textContent())?.includes('独立回读'))
 await page.getByRole('button', { name: /服务产品 产品/ }).click()
-await page.locator('.resource-preview .state-neutral').waitFor()
+assert.equal(await page.locator('.resource-preview .state-neutral').count(), 0)
 assert.equal(await page.getByRole('button', { name: /下载 服务产品 的 PDF/ }).count(), 0)
 assert.equal(await page.getByRole('button', { name: /导出 服务产品 的 CSV/ }).count(), 0)
 await page.getByRole('button', { name: /SO-B2-SECOND/ }).click()
 const secondOrderText = await page.locator('.resource-preview').textContent()
-assert.ok(secondOrderText?.includes('开票:待开票'))
+assert.ok(secondOrderText?.includes('待开票'))
 assert.ok(!secondOrderText?.includes('付款'))
-await page.getByRole('button', { name: /^INV-B2 客户发票/ }).click()
+await page.getByRole('button', { name: /^INV-B2 发票与贷项/ }).click()
 await page.getByRole('heading', { name: 'INV-B2' }).waitFor()
 const invoiceText = await page.locator('.resource-preview').textContent()
-assert.ok(invoiceText?.includes('付款:未付款'))
-assert.ok(invoiceText?.includes('正式 PDF:待生成'))
+assert.ok(invoiceText?.includes('未付款'))
+assert.equal(await page.locator('.preview-meta dt').filter({ hasText: /^正式 PDF$/ }).textContent(), '正式 PDF')
+assert.equal(await page.locator('.preview-meta dt').filter({ hasText: /^正式 PDF$/ }).locator('+ dd').textContent(), '待生成')
 await page.getByRole('tab', { name: /Business B2/ }).click()
 await page.waitForTimeout(30)
 assert.equal(await page.locator('.business-header h2').textContent(), 'Business B2')
@@ -572,8 +711,8 @@ assert.equal(await page.locator('.business-header h2').textContent(), 'Business 
 
 // Verify both approval decisions carry the currently selected business and its run.
 await page.getByRole('tab', { name: /^变更与审批/ }).click()
-await page.getByText('创建客户发票', { exact: true }).waitFor()
-const invoiceApproval = page.locator('.approval-row').filter({ hasText: '创建客户发票' })
+await page.getByText('创建发票与贷项', { exact: true }).waitFor()
+const invoiceApproval = page.locator('.approval-row').filter({ hasText: '创建发票与贷项' })
 await invoiceApproval.getByText('查看拟提交值与执行前状态', { exact: true }).click()
 await invoiceApproval.getByText('拟提交值', { exact: true }).waitFor()
 await invoiceApproval.getByText('执行前状态', { exact: true }).waitFor()
@@ -587,12 +726,13 @@ await approvalDiff.waitFor()
 const diffHeader = approvalDiff.locator('.field-diff-head > span')
 assert.deepEqual(await diffHeader.allTextContents(), ['字段', '执行前', '拟提交'])
 const diffText = await approvalDiff.textContent()
-assert.ok(diffText?.includes('client_order_ref'))
+assert.ok(diffText?.includes('客户参考'))
+assert.equal(diffText?.includes('client_order_ref'), false)
 assert.ok(diffText?.includes('新建 / 无前态'))
 assert.ok(diffText?.includes('PI-DYNAMIC-MVP-20260908'))
-assert.ok(diffText?.includes('Nimbus Bureau（ID 10）'))
-assert.ok(diffText?.includes('30Days（ID 4）'))
-assert.ok(diffText?.includes('商品 ID 2'))
+assert.ok(diffText?.includes('Nimbus Bureau'))
+assert.ok(diffText?.includes('30Days'))
+assert.ok(diffText?.includes('商品名称未读取（记录 2）'))
 assert.ok(diffText?.includes('数量 1'))
 assert.ok(diffText?.includes('单价 695.22'))
 assert.equal(diffText?.includes('记录（records）'), false)
@@ -602,9 +742,10 @@ const purchaseApproval = page.locator('.approval-row').filter({ hasText: '确认
 await purchaseApproval.waitFor()
 assert.ok((await purchaseApproval.textContent())?.includes('采购订单'))
 assert.ok((await purchaseApproval.textContent())?.includes('P00001（ID 1）'))
-assert.ok((await purchaseApproval.textContent())?.includes('供应商（partner_id）'))
-assert.ok((await purchaseApproval.textContent())?.includes('数量 3'))
-const sendFileApproval = page.locator('.approval-row').filter({ hasText: '生成正式发票文件' })
+assert.equal(await purchaseApproval.locator('.field-diff').count(), 0)
+assert.ok((await purchaseApproval.locator('.approval-business-context').textContent())?.includes('Alpine Supplier'))
+assert.ok((await purchaseApproval.locator('.approval-business-context').textContent())?.includes('36.00'))
+const sendFileApproval = page.locator('.approval-row').filter({ hasText: '生成正式发票 PDF' })
 await sendFileApproval.waitFor()
 assert.ok((await sendFileApproval.textContent())?.includes('发票文件向导'))
 assert.ok((await sendFileApproval.textContent())?.includes('is_move_sent'))
@@ -635,15 +776,15 @@ const historicalRunSummary = await page.locator('.trace-detail-panel').textConte
 assert.ok(historicalRunSummary?.includes('本轮结束'), historicalRunSummary)
 assert.equal(historicalRunSummary?.includes('动作回执不可用'), false)
 await page.getByRole('tab', { name: /^变更与审批/ }).click()
-await page.getByText('创建客户发票', { exact: true }).waitFor()
+await page.getByText('创建发票与贷项', { exact: true }).waitFor()
 await invoiceApproval.getByRole('button', { name: '批准这项业务动作' }).waitFor()
 await page.waitForFunction(() => {
-  const row = [...document.querySelectorAll('.approval-row')].find((item) => item.textContent?.includes('创建客户发票'))
+  const row = [...document.querySelectorAll('.approval-row')].find((item) => item.textContent?.includes('创建发票与贷项'))
   const button = row?.querySelector('button')
   return Boolean(button && !button.disabled)
 })
 await page.evaluate(() => {
-  const row = [...document.querySelectorAll('.approval-row')].find((item) => item.textContent?.includes('创建客户发票'))
+  const row = [...document.querySelectorAll('.approval-row')].find((item) => item.textContent?.includes('创建发票与贷项'))
   const approve = [...(row?.querySelectorAll('button') ?? [])].find((item) => item.textContent?.includes('批准这项业务动作'))
   const reject = [...(row?.querySelectorAll('button') ?? [])].find((item) => item.textContent?.includes('拒绝'))
   for (let index = 0; index < 5; index += 1) (index % 2 === 0 ? approve : reject)?.click()
@@ -670,7 +811,7 @@ await page.waitForTimeout(120)
 assert.ok((await page.locator('.approval-progress').textContent())?.includes('正在提交审批决定'))
 await page.getByText('业务状态已变化，审批未生效。', { exact: true }).first().waitFor({ timeout: 6000 })
 assert.equal(await page.getByText('正在提交审批决定…', { exact: true }).count(), 0)
-assert.ok((await page.locator('.approval-row').allTextContents()).join('\n').includes('生成正式发票文件'))
+assert.ok((await page.locator('.approval-row').allTextContents()).join('\n').includes('生成正式发票 PDF'))
 await sendFileApproval.getByRole('button', { name: '批准这项业务动作' }).click()
 await page.getByText('DECISION_NETWORK_DOWN', { exact: true }).waitFor()
 assert.equal(await page.getByText('正在提交审批决定…', { exact: true }).count(), 0)
@@ -694,7 +835,8 @@ const traceText = await page.locator('.trace-page').textContent()
 assert.ok(traceText.includes('未缓存输入 未知'))
 assert.ok(traceText.includes('mcp_odoo_validate_write'))
 assert.equal(await page.locator('.trace-tool-node').filter({ hasText: 'mcp_odoo_validate_write' }).count(), 1)
-await page.getByRole('button', { name: /第 1 轮/ }).click()
+await page.locator('.trace-node').filter({ hasText: /第 1 轮/ }).click()
+await page.locator('.trace-detail-panel .loading-line').waitFor({ state: 'hidden' })
 assert.ok((await page.locator('.trace-detail-panel').textContent()).length > 1500)
 await page.getByRole('button', { name: /mcp_odoo_validate_write/ }).click()
 const activeToolDetail = await page.locator('.trace-detail-panel').textContent()
@@ -711,6 +853,7 @@ const traceCallsAfter = await page.evaluate(() => window.__bridgeCalls.filter(({
 assert.ok(traceCallsAfter > traceCallsBefore)
 const currentTraceVersion = await page.evaluate(() => window.__traceVersion)
 await page.getByRole('button', { name: /read_business_records/ }).click()
+await page.locator('.trace-detail-panel .loading-line').waitFor({ state: 'hidden' })
 assert.ok((await page.locator('.trace-detail-panel').textContent()).includes(`"version": ${currentTraceVersion}`))
 
 // 300 trace events in one burst must coalesce to one trace read and one quiet business refresh.
@@ -733,10 +876,11 @@ const traceBurstElapsed = Date.now() - traceBurstStarted
 // current activity, and an uncertain write must remain unknown without a retry.
 await page.getByRole('tab', { name: /Business B3/ }).click()
 await page.getByRole('heading', { name: 'Business B3' }).waitFor()
-const b3Goal = page.getByLabel('业务目标', { exact: true })
+const b3Goal = page.locator('.business-header h2')
 await b3Goal.waitFor()
 const fullB3Goal = '核对中断写入是否已经落库，并保留当前运行与历史单据证据。'
-assert.ok((await b3Goal.textContent()).includes('核对中断写入是否已经落库'))
+assert.ok((await b3Goal.textContent()).includes('Business B3'))
+assert.equal(await page.getByText('查看已确认的业务说明', { exact: true }).count(), 0)
 await page.getByText('查看原始指令', { exact: true }).click()
 await page.locator('.goal-details').getByText(fullB3Goal, { exact: true }).waitFor()
 const currentActivity = await page.locator('.activity-card').textContent()
@@ -766,6 +910,39 @@ assert.equal(await page.locator('.document-table a').count(), 0)
 // not rewrite verified/rejected history into a pending/expired decision.
 await page.getByRole('tab', { name: /Business B4/ }).click()
 await page.getByRole('heading', { name: 'Business B4' }).waitFor()
+await page.getByRole('tab', { name: /^执行台/ }).click()
+const finishedResult = page.getByLabel('执行结果', { exact: true })
+await finishedResult.getByText('销售订单已确认', { exact: true }).waitFor()
+assert.equal(await page.locator('.business-header h2').textContent(), 'Business B4')
+assert.equal(await page.locator('.business-header > div > p').count(), 0)
+await page.getByText('查看已确认的业务说明', { exact: true }).click()
+assert.equal(await page.locator('.business-header .goal-details').first().locator('p').textContent(), '确认订单，暂不发货。')
+await finishedResult.getByText('查看 Agent 完整回复', { exact: true }).click()
+await finishedResult.getByText('本轮已确认订单，尚未发货。', { exact: true }).waitFor()
+const modelCallsBeforeResult = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => ['send_message', 'start_run'].includes(method)).length)
+for (const scenario of ['failed', 'stale', 'missing']) {
+  await page.evaluate((value) => { window.__resultScenario = value; window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b4' } }) }, scenario)
+  if (scenario === 'missing') {
+    await finishedResult.getByText('本轮未返回总结，可查看核验结果和运行详情。', { exact: true }).waitFor()
+    assert.ok(!(await finishedResult.textContent()).includes('旧轮次总结'))
+  } else {
+    await finishedResult.getByText('本轮结果待核对', { exact: true }).waitFor()
+    assert.equal(await finishedResult.getByText('销售订单已确认', { exact: true }).count(), 0)
+    const receipts = page.getByLabel('执行回执与留档')
+    await receipts.getByText('此前运行 · 发票已过账', { exact: true }).waitFor()
+    await receipts.getByText('PDF 已生成', { exact: true }).waitFor()
+    assert.ok((await receipts.textContent()).includes('没有邮件发送回执'))
+    assert.equal(await receipts.locator('.receipt-list > li').first().locator('strong').textContent(), '邮件：无发送记录')
+    assert.equal(await receipts.locator('.spin').count(), 0)
+  }
+}
+await page.evaluate(() => { window.__resultScenario = 'running'; window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b4' } }) })
+await page.getByRole('button', { name: '取消运行', exact: true }).waitFor()
+await page.locator('.business-content').evaluate((element) => { element.scrollTop = element.scrollHeight })
+await page.evaluate(() => { window.__resultScenario = null; window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b4', status: 'completed' } }) })
+await finishedResult.getByText('销售订单已确认', { exact: true }).waitFor()
+await page.waitForFunction(() => { const result = document.querySelector('.outcome-summary')?.getBoundingClientRect(); const panel = document.querySelector('.business-content')?.getBoundingClientRect(); return result && panel && result.top >= panel.top - 2 && result.top < panel.bottom })
+assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => ['send_message', 'start_run'].includes(method)).length), modelCallsBeforeResult)
 await page.getByRole('tab', { name: /^变更与审批/ }).click()
 const terminalApprovals = page.locator('.approval-row')
 await terminalApprovals.nth(1).waitFor()
@@ -822,6 +999,8 @@ for (let index = 0; index < 10; index += 1) {
 }
 await page.keyboard.press('Shift+Tab')
 assert.equal(await page.evaluate(() => Boolean(document.querySelector('[role="dialog"]')?.contains(document.activeElement))), true)
+assert.equal(await page.getByRole('checkbox', { name: '启用长期记忆（Mem0）' }).isChecked(), false)
+await page.getByRole('checkbox', { name: '启用长期记忆（Mem0）' }).check()
 await page.getByRole('button', { name: '保存连接设置' }).click()
 await page.getByRole('alert').getByText('当前有业务正在执行或等待审批，请结束后再修改连接设置。').waitFor()
 await page.getByRole('button', { name: '保存连接设置' }).click()
@@ -829,6 +1008,13 @@ await page.getByRole('dialog', { name: '连接设置' }).waitFor({ state: 'hidde
 await page.getByRole('status').getByText('设置已保存，连接状态已刷新。').waitFor()
 await page.getByRole('button', { name: '连接设置' }).click()
 await page.getByRole('dialog', { name: '连接设置' }).waitFor()
+assert.equal(await page.getByRole('checkbox', { name: '启用长期记忆（Mem0）' }).isChecked(), true)
+await page.getByRole('checkbox', { name: '启用长期记忆（Mem0）' }).uncheck()
+await page.getByRole('button', { name: '保存连接设置' }).click()
+await page.getByRole('dialog', { name: '连接设置' }).waitFor({ state: 'hidden' })
+await page.getByRole('button', { name: '连接设置' }).click()
+await page.getByRole('dialog', { name: '连接设置' }).waitFor()
+assert.equal(await page.getByRole('checkbox', { name: '启用长期记忆（Mem0）' }).isChecked(), false)
 await page.keyboard.press('Escape')
 await page.getByRole('dialog', { name: '连接设置' }).waitFor({ state: 'hidden' })
 await page.waitForFunction(() => document.activeElement === document.querySelector('.settings-button'))
@@ -876,7 +1062,7 @@ await page.locator('.material-chip button').click()
 await page.getByRole('tab', { name: /^单据/ }).click()
 await page.locator('.material-history').getByText('订单材料.csv', { exact: true }).waitFor()
 await page.locator('.material-history-row span').filter({ hasText: '4 条数据' }).waitFor()
-await page.getByRole('button', { name: /^INV-B2 客户发票/ }).click()
+await page.getByRole('button', { name: /^INV-B2 发票与贷项/ }).click()
 const previewHeading = page.locator('.resource-preview h3')
 await previewHeading.waitFor()
 await previewHeading.scrollIntoViewIfNeeded()
@@ -895,7 +1081,7 @@ await page.getByRole('button', { name: '导出 SO-B2 的 CSV' }).click()
 await page.getByText('SO-B2.csv', { exact: true }).waitFor()
 await page.getByRole('button', { name: '打开', exact: true }).click()
 assert.ok((await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'open_business_artifact'))).length >= 1)
-await page.getByRole('button', { name: /^INV-B2 客户发票/ }).click()
+await page.getByRole('button', { name: /^INV-B2 发票与贷项/ }).click()
 await page.getByRole('button', { name: '下载 INV-B2 的 PDF' }).click()
 await page.getByRole('alert').getByText('发票已过账，但尚未生成正式 PDF，请先生成发票文件后再下载。', { exact: true }).waitFor()
 const actionSpacing = await page.evaluate(() => ({
@@ -907,9 +1093,11 @@ assert.equal(actionSpacing.documentMargin, '0px')
 assert.equal(actionSpacing.documentGap, '14px')
 assert.equal(actionSpacing.artifactGap, '12px')
 await page.setViewportSize({ width: 1600, height: 1000 })
-await page.getByLabel('业务目标', {exact: true}).evaluate(e => { e.textContent = '完整业务目标 '.repeat(1000) })
-assert.ok(await page.getByLabel('业务目标', {exact: true}).evaluate(e => e.clientHeight < 100 && e.scrollHeight > e.clientHeight))
-await page.getByLabel('业务目标', {exact: true}).evaluate(e => { e.textContent = '处理订单与发票' })
+await page.getByText('查看原始指令', {exact: true}).click()
+const originalInstructions = page.locator('.business-header .goal-details p').last()
+await originalInstructions.evaluate(e => { e.textContent = '完整原始指令 '.repeat(1000) })
+assert.ok(await originalInstructions.evaluate(e => e.clientHeight < 200 && e.scrollHeight > e.clientHeight))
+await originalInstructions.evaluate(e => { e.textContent = '处理订单与发票' })
 const globalAlert = page.locator('.global-alert')
 if (await globalAlert.isVisible().catch(() => false)) {
   await globalAlert.getByRole('button', { name: '关闭', exact: true }).click()
@@ -941,8 +1129,8 @@ await page.getByRole('tab', { name: /Business B2/ }).click()
 await page.evaluate(() => window.__showCompactionUsage())
 await page.getByRole('tab', { name: /^运行详情/ }).click()
 await page.locator('.trace-toolbar select').selectOption('business-b2-run')
-await page.locator('.trace-detail-content').getByText('含上下文压缩 1 次 · 100 token', { exact: true }).waitFor()
-assert.equal(await page.getByText('含上下文压缩 0 次', { exact: false }).count(), 0)
+await page.locator('.trace-detail-content').getByText('压缩记录 1 条 · 100 token', { exact: true }).waitFor()
+assert.equal(await page.getByText('压缩记录 0 条', { exact: false }).count(), 0)
 await page.evaluate(() => window.__showAcceptedProjection(false))
 const businessB3Tab = page.getByRole('tab', { name: /Business B3/ })
 await businessB3Tab.evaluate((element) => {
@@ -970,6 +1158,29 @@ for (const { rowBox, buttonBox, disabled } of approvalLayout) {
   assert.equal(disabled, false)
 }
 await page.setViewportSize({ width: 1600, height: 1000 })
+// A revision retires the old approval and starts a read-only proposal turn only.
+await page.evaluate(() => { window.__enterpriseCase = null; window.__showAcceptedProjection(false); window.__setRunState(true); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b2' } }) })
+await page.getByRole('tab', { name: /^变更与审批/ }).click()
+const revisionApproval = page.locator('.approval-row').filter({ hasText: '创建发票与贷项' }).first()
+await revisionApproval.getByRole('button', { name: '提出修改', exact: true }).click()
+const revisionInput = revisionApproval.getByRole('textbox', { name: '希望怎样修改这项动作？' })
+await revisionInput.fill('测试预检失败')
+const executionsBeforeRevision = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => ['send_message', 'start_run', 'decide_approval'].includes(method)).length)
+await revisionApproval.getByRole('button', { name: '提交修改要求', exact: true }).click()
+await revisionApproval.getByRole('alert').getByText('修改预检失败，原审批仍保留。', { exact: true }).waitFor()
+assert.equal(await revisionInput.inputValue(), '测试预检失败')
+assert.equal(await revisionApproval.getByRole('button', { name: '批准这项业务动作' }).isDisabled(), true)
+await revisionInput.fill('数量改为 5 件，先保留草稿。')
+await revisionApproval.getByRole('button', { name: '提交修改要求', exact: true }).evaluate((button) => { for (let index = 0; index < 5; index += 1) button.click() })
+await page.locator('.thinking-message').waitFor()
+await page.getByRole('tab', { name: /^变更与审批/ }).click()
+await page.waitForFunction(() => !document.querySelector('.business-content .loading-line'))
+assert.equal(await page.locator('.approval-row.pending').count(), 0)
+assert.equal(await page.getByLabel('讨论范围').inputValue(), 'business-b2')
+const revisionCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'request_approval_revision'))
+assert.equal(revisionCalls.length, 2)
+assert.deepEqual(revisionCalls[1].params, { session_id: 'session-b', business_id: 'business-b2', run_id: 'business-b2-run', action_id: 'action-b2', text: '数量改为 5 件，先保留草稿。' })
+assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => ['send_message', 'start_run', 'decide_approval'].includes(method)).length), executionsBeforeRevision)
 assert.equal(pageErrors.length, 0, pageErrors.join('\n'))
 
 const calls = await page.evaluate(() => window.__bridgeCalls.map(({ method }) => method))
@@ -986,8 +1197,86 @@ if (process.env.RENDERER_CHECK_SCREENSHOTS) {
     }
   }
 }
+// New business documents use the existing workspace, including readback status.
+await page.evaluate(() => {
+  const original = window.workbench.call.bind(window.workbench)
+  window.workbench.call = async (method, params) => {
+    const result = await original(method, params)
+    if (['get_business', 'refresh_business'].includes(method) && params.business_id === 'business-b2' && window.__enterpriseCase) {
+      const [type, model] = window.__enterpriseCase
+      result.business = { ...result.business, type, completion_target: ['payment', 'refund', 'reconciliation'].includes(type) ? 'reconciled' : 'done' }
+      result.documents = [{ id: '900', model, name: 'EV-' + type, state: 'done', observed_at: '2026-09-22T00:00:00Z', source: 'refresh_native_read', fields: { amount: 100, amount_total: 100, amount_residual: 0, qty_produced: 4, product_qty: 4, is_matched: true, is_reconciled: true } }]
+      result.approvals = []
+    }
+    return result
+  }
+})
+for (const [type, model, label] of [['inventory', 'stock.picking', '收发货与退货'], ['manufacturing', 'mrp.production', '制造单'], ['payment', 'account.payment', '收付款'], ['refund', 'account.move', '发票与贷项'], ['reconciliation', 'account.bank.statement.line', '银行流水']]) {
+  await page.evaluate(([type, model]) => { window.__enterpriseCase = [type, model]; window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b2' } }) }, [type, model])
+  await page.getByRole('tab', { name: /^单据/ }).click()
+  await page.getByRole('button', { name: new RegExp('EV-' + type + ' ' + label) }).waitFor()
+  assert.equal(await page.getByText('尚未取得销售订单', { exact: true }).count(), 0)
+}
+assert.equal(pageErrors.length, 0, pageErrors.join('\n'))
+// The execution view consumes the existing delta stream without a business RPC.
+await page.getByRole('tab', { name: /Business B4/ }).click()
+await page.getByRole('tab', { name: /^执行台/ }).click()
+await page.evaluate(() => { window.__activityScenario = { phase: 'model_wait', label: '等待模型响应', detail: '请求已提交。', tool_name: 'native_read', tool_status: 'completed' }; window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b4' } }) })
+await page.locator('.activity-card').getByText('等待模型响应', { exact: true }).waitFor()
+assert.equal(await page.locator('.activity-card .spin').count(), 1)
+assert.ok((await page.locator('.activity-meta').textContent()).includes('最近工具：'))
+const deltaBusinessCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'get_business').length)
+await page.evaluate(() => {
+  window.__emitWorkbench({ event: 'message_delta', data: { session_id: 'session-b', business_id: 'business-b4', run_id: 'business-b4-run', message_id: 'execution-live', sequence: 0, text: '公开进度：正在核对发票。' } })
+  window.__emitWorkbench({ event: 'message_delta', data: { session_id: 'session-b', business_id: 'business-b2', run_id: 'business-b2-run', message_id: 'execution-other', sequence: 0, text: '其他业务不能混入当前执行。' } })
+})
+await page.locator('.activity-card').getByText('公开进度：正在核对发票。', { exact: true }).waitFor()
+await page.locator('.activity-card').getByText('正在回复', { exact: true }).waitFor()
+assert.equal((await page.locator('.activity-card').textContent()).includes('其他业务不能混入'), false)
+assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'get_business').length), deltaBusinessCalls)
+await page.evaluate(() => window.__emitWorkbench({ event: 'message_delta', data: { session_id: 'session-b', business_id: 'business-b4', run_id: 'business-b4-run', message_id: 'execution-live', sequence: 1, text: '\n\n' + '正在核对单据来源与付款关系。\n\n'.repeat(70) } }))
+const publicReply = page.locator('.activity-public-text')
+await page.waitForFunction(() => { const element = document.querySelector('.activity-public-text'); return element && element.scrollHeight > element.clientHeight && element.scrollHeight - element.clientHeight - element.scrollTop < 3 })
+await publicReply.evaluate((element) => { element.scrollTop = 0; element.dispatchEvent(new Event('scroll', { bubbles: true })) })
+await page.evaluate(() => window.__emitWorkbench({ event: 'message_delta', data: { session_id: 'session-b', business_id: 'business-b4', run_id: 'business-b4-run', message_id: 'execution-live', sequence: 2, text: '\n最新公开片段。' } }))
+await publicReply.getByText('最新公开片段。', { exact: true }).waitFor({ state: 'attached' })
+assert.equal(await publicReply.evaluate((element) => element.scrollTop), 0)
+await page.evaluate(() => {
+  window.__emitWorkbench({ event: 'message_end', data: { session_id: 'session-b', business_id: 'business-b4', run_id: 'business-b4-run', message_id: 'execution-live', sequence: 3, text: '公开进度：发票已核对，下一步读取付款状态。' } })
+  window.__activityScenario = { phase: 'tool', label: '正在调用工具', detail: '读取付款状态。', tool_name: 'native_read', tool_status: 'running', tool_id: 'current-tool' }
+  window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b4' } })
+})
+await page.locator('.activity-card').getByText('正在调用工具', { exact: true }).waitFor()
+assert.ok((await page.locator('.activity-meta').textContent()).includes('正在执行：'))
+assert.equal(await page.locator('.activity-card').getByText('正在回复', { exact: true }).count(), 0)
+await page.evaluate(() => { window.__activityScenario = null; window.__resultScenario = 'failed'; window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b4' } }) })
+await page.getByLabel('执行回执与留档').getByText('邮件：无发送记录', { exact: true }).waitFor()
+assert.equal(await page.locator('.business-content .spin').count(), 0)
+await page.getByRole('tab', { name: /^运行详情/ }).click()
+await page.locator('.trace-toolbar select').selectOption('business-b4-old-run')
+await page.getByRole('button', { name: '业务会话快照', exact: true }).click()
+await page.getByRole('button', { name: '业务会话快照', exact: true }).waitFor()
+assert.deepEqual(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'open_session_snapshot').at(-1)?.params), { session_id: 'session-b', business_id: 'business-b4' })
+await page.getByRole('tab', { name: /^执行台/ }).click()
+await page.getByRole('button', { name: '导出业务回执', exact: true }).click()
+await page.getByText('业务回执已导出。', { exact: true }).waitFor()
+assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'export_business_report').at(-1)?.params.run_id), 'business-b4-run')
+await page.evaluate(() => { window.__setRunState(false); window.__resultScenario = 'awaiting_input'; window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b4' } }) })
+await page.getByText('请确认预付款比例，再调整业务方案。', { exact: true }).waitFor()
+assert.equal(await page.getByRole('button', { name: '等待补充条件', exact: true }).isDisabled(), true)
+const startCallsBeforeClarification = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'start_run').length)
+await page.getByRole('textbox', { name: '会话消息' }).fill('按 30% 预付款调整方案，先给我确认。')
+await page.getByRole('button', { name: '发送', exact: true }).click()
+await page.waitForFunction(() => window.__bridgeCalls.some(({ method, params }) => method === 'send_message' && params.text === '按 30% 预付款调整方案，先给我确认。'))
+assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'start_run').length), startCallsBeforeClarification)
+await page.evaluate(() => { window.__odooUnconfigured = true })
+await page.getByRole('button', { name: '打开 Odoo', exact: true }).click()
+await page.getByRole('dialog', { name: '连接设置' }).waitFor()
+await page.getByText('请先填写 Odoo 地址与数据库，再打开 Odoo。', { exact: true }).waitFor()
+await page.keyboard.press('Escape')
+assert.equal(pageErrors.length, 0, pageErrors.join('\n'))
 console.log('renderer-check: PASS')
-console.log('checked: session/business/trace stale guards, same-run trace refresh, changed routing, host crash/retry, message scope, session search, approval scope+preflight labels, purchase/file approval labels, invoice PDF availability, business-chain scope labels, document selection across refresh, CONFIG_BUSY mapping, settings save+Escape, splitter overflow, evidence navigation, unknown-write no-retry, historical activity preservation')
+console.log('checked: session/business/trace stale guards, same-run trace refresh, changed routing, host crash/retry, message scope, session search, approval scope+preflight labels, purchase/file approval labels, invoice PDF availability, business-chain scope labels, document selection across refresh, CONFIG_BUSY mapping, settings save+Escape, splitter overflow, evidence navigation, unknown-write no-retry, historical activity preservation, latest proposal guards, busy-send draft preservation, approval revision failure/success without automatic execution')
 console.log(`pressure: session50=${sessionPressureElapsed}ms business50=${businessPressureElapsed}ms business20sequential=${sequentialBusinessElapsed}ms trace300=${traceBurstElapsed}ms trace_rpc_delta=${burstTraceCallsAfter - burstTraceCallsBefore} business_rpc_delta=${burstBusinessCallsAfter - burstBusinessCallsBefore} repeated={proposal:${proposalCalls.length},send:${dedupeSendCalls.length},start:${startCalls.length},approve:${repeatedApproveCalls.length},cancel:${cancelCalls.length}}`)
 await browser.close()
 server.close()

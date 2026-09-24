@@ -4,19 +4,20 @@ import asyncio
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from itertools import count
 from pathlib import Path
 
-from odoo_runtime.actions import ACTION_TOOLS
-from odoo_runtime.capabilities import CAPABILITY_TOOLS
-from odoo_runtime.reads import READ_RESPONSES
-from odoo_runtime.sops import SOPS, SOP_TOOLS, build_sop_tools, get_sop
+from erp_harness.erp.actions import ACTION_TOOLS
+from erp_harness.erp.capabilities import CAPABILITY_TOOLS
+from erp_harness.erp.reads import READ_RESPONSES, NATIVE_READ_RESPONSES
+from erp_harness.tools.sops import SOPS, SOP_TOOLS, build_sop_payload, build_sop_tools, get_sop
 
 
 class ControlledSopTest(unittest.TestCase):
     def test_all_sops_are_reachable_and_reference_advertised_tools(self) -> None:
-        self.assertEqual(len(SOPS), 11)
-        advertised = set(READ_RESPONSES) | set(ACTION_TOOLS) | set(CAPABILITY_TOOLS) | {"get_current_time"}
+        self.assertEqual(len(SOPS), 15)
+        advertised = set(READ_RESPONSES) | set(NATIVE_READ_RESPONSES) | set(ACTION_TOOLS) | set(CAPABILITY_TOOLS) | {"get_current_time"}
         for name, spec in SOPS.items():
             self.assertTrue(spec["required_tools"], name)
             self.assertEqual(set(spec["required_tools"]) - advertised, set(), name)
@@ -58,6 +59,35 @@ class ControlledSopTest(unittest.TestCase):
         self.assertEqual(events[-1]["end_sequence"], 2)
         self.assertTrue(events[-1]["success"])
         self.assertNotIn("private business request", json.dumps(events))
+
+    def test_native_sop_replaces_only_the_model_visible_locator(self) -> None:
+        tool = build_sop_tools(read_locator="find_records")[1]
+        payload = json.loads(asyncio.run(tool.execute("sop", {
+            "sop_id": "po_to_receipt", "inputs": {"purchase_order": "PO001"},
+        })).text)
+        self.assertIn("mcp_odoo_find_records", payload["sop"]["required_tools"])
+        self.assertNotIn("mcp_odoo_search_records", payload["sop"]["required_tools"])
+        self.assertIn("search_records", get_sop("po_to_receipt", {"purchase_order": "PO001"})["sop"]["required_tools"])
+
+    def test_business_method_does_not_use_field_write_pipeline(self):
+        with patch.dict("os.environ", {"ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": "sale.order.action_confirm"}):
+            payload = build_sop_payload("safe_write_review", {"model": "sale.order", "operation": "action_confirm"})
+        tools = payload["sop"]["required_tools"]
+        self.assertEqual(tools, ["mcp_odoo_read_record", "mcp_odoo_execute_method"])
+        self.assertIn("mcp_odoo_execute_method(model='sale.order', method='action_confirm'", " ".join(payload["sop"]["steps"]))
+        self.assertNotIn("mcp_odoo_validate_write", tools)
+        self.assertIn("mcp_odoo_validate_write", build_sop_payload("safe_write_review", {"model": "sale.order", "operation": "write"})["sop"]["required_tools"])
+
+    def test_guessed_method_is_not_endorsed_and_policy_is_rechecked(self):
+        with patch("erp_harness.tools.sops.allowed_side_effect_methods", return_value=[
+                "sale.order.action_confirm", "purchase.order.button_confirm"]):
+            for operation in ("confirm", "button_confirm"):
+                result = build_sop_payload("safe_write_review", {"model": "sale.order", "operation": operation})
+                self.assertFalse(result["success"])
+                self.assertEqual(result["reviewed_methods"], ["action_confirm"])
+                self.assertNotIn("sop", result)
+        with patch("erp_harness.tools.sops.allowed_side_effect_methods", return_value=[]):
+            self.assertFalse(get_sop("safe_write_review", {"model": "sale.order", "operation": "action_confirm"})["success"])
 
 
 if __name__ == "__main__":

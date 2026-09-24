@@ -124,9 +124,9 @@ export class HostClient {
       ? join(packagedHost, "python", process.platform === "win32" ? "python.exe" : "python")
       : process.env.WORKBENCH_PYTHON || "python";
     const hostRoot = app.isPackaged ? join(packagedHost, "app") : process.env.WORKBENCH_HOST_ROOT || process.cwd();
-    const child = spawn(python, ["-m", "workbench.host", "--data-dir", dataDir], {
+    const child = spawn(python, ["-m", "erp_harness.app.host", "--data-dir", dataDir], {
       cwd: hostRoot,
-      env: { ...env, PYTHONPATH: hostRoot },
+      env,
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -225,6 +225,9 @@ const SAFE_ERROR_MESSAGES: Record<string, string> = {
 };
 
 const SAFE_LOCAL_ERROR_MESSAGES: Record<string, string> = {
+  "VALUEERROR\u0000当前业务尚无已保存的会话记录。": "当前业务尚无已保存的会话记录。",
+  "VALUEERROR\u0000会话记录不完整或格式无效，未生成快照；请保留原始日志。": "会话记录不完整或格式无效，未生成快照；请保留原始日志。",
+  "VALUEERROR\u0000业务会话快照路径不在当前业务目录。": "快照路径归属不符，无法打开。",
   "KEYERROR\u0000'unknown proposal'": "未找到可处理的业务提案，可能已处理或已过期。",
   "KEYERROR\u0000'unknown session'": "未找到当前会话，请重新选择会话。",
   "KEYERROR\u0000'business does not belong to session'": "业务不属于当前会话，请重新选择会话。",
@@ -232,6 +235,15 @@ const SAFE_LOCAL_ERROR_MESSAGES: Record<string, string> = {
   "KEYERROR\u0000'unknown method'": "主机不支持当前请求，请刷新桌面应用。",
   "VALUEERROR\u0000proposal already decided": "该业务提案已经处理，请刷新会话状态。",
   "RUNTIMEERROR\u0000only one active run is allowed on this host": "主机已有运行中的业务，请等待当前运行结束。",
+  "RUNTIMEERROR\u0000当前任务正在执行或等待审批，请完成当前任务后再发送；修改待审批动作请使用审批卡上的修改入口。": "当前任务尚未结束。修改待审批动作请使用审批卡上的修改入口。",
+  "RUNTIMEERROR\u0000请等待本轮提案生成完成后再确认。": "请等待本轮提案生成完成后再确认。",
+  "VALUEERROR\u0000本轮提案未正常完成，请重新说明需求以生成完整提案。": "本轮提案未完成，请重新说明需求。",
+  "VALUEERROR\u0000这份提案已有更新版本，请确认最新提案。": "这份提案已有更新版本，请确认最新提案。",
+  "VALUEERROR\u0000需求已有补充，请使用最新需求重新生成提案。": "需求已有补充，请使用最新提案。",
+  "VALUEERROR\u0000审批已过期，请先结束旧运行，再重新提出需求。": "审批已过期，请先结束旧运行，再重新提出需求。",
+  "VALUEERROR\u0000approval scope is invalid": "当前审批已变化，请读取最新状态。",
+  "VALUEERROR\u0000action scope or state is invalid": "当前动作已变化，请读取最新状态。",
+  "RUNTIMEERROR\u0000business is blocked by an unresolved write; refresh and reconcile first": "存在结果不确定的写入，请先核对实际落库状态。",
   "VALUEERROR\u0000content_base64 is required": "材料内容为空，请重新选择文件。",
   "VALUEERROR\u0000content_base64 is invalid": "材料编码无效，请重新选择文件。",
   "VALUEERROR\u0000session material limit exceeded": "当前会话已达到材料数量上限。",

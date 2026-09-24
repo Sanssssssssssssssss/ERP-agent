@@ -1,0 +1,52 @@
+# 单次决策回归
+
+新增故障只收真实运行证据：完整原请求、首次可纠正截面、错误响应和源码哈希。人工构造边界只做离线测试；没有模型消费请求的 UI 问题不编造付费案例。以后 debug 按仓库 [维护规则](../../AGENTS.md) 补入，原判定不随补丁修改。
+
+本轮入口：`python -m experiments.agent_regression.incidents` 离线冻结；加 `--paid` 执行 A04 的 A/B 和原 B02/B03 保护，共 4 次，不执行返回的工具。A04 来源是 S01499 的真实 `confirm` 误调用；跨 run 防重发和桌面回读范围用离线测试验证。结果保存在 `.runtime/agent-regression-guards-20260924/`。
+
+D04 来自明确选择“整个会话”后，模型把无绑定状态误判为“只生成提案”的真实请求。只替换生产状态回包和工具定义，不注入业务绑定或改写旧历史。冻结：`python -m experiments.agent_regression.incidents --directory .runtime/agent-regression-scope-20260924 --case D04`；同目录加 `--paid`（不带 `--case`）执行 A/B 共 2 次。[原始传播证据](../../.runtime/agent-regression-full-20260923/full/S01499/conversation-scope-finding.json)。
+
+待维护：2003 的 SOP 缺必填输入、空查询条件、猜字段及同轮依赖读取（[原请求与哈希索引](../../.runtime/agent-regression-full-20260923/full/bench/2003-replay-candidates.json)）。后续修改对应能力时冻结该节点再验证。
+
+12 个真实 trace 节点，A/B 各一次请求；返回工具意图只保存，不执行。完整请求、推理、原始响应与判定依据在 `.runtime/agent-regression-20260923/`。
+
+```powershell
+python -m experiments.agent_regression.freeze
+python -m experiments.agent_regression.provenance
+python -m experiments.agent_regression.prepare
+python -m pytest tests/test_agent_regression.py -q
+# 由负责人设置 COMMAND_CODE_API_KEY 后，执行已授权的 24 次请求：
+python -m experiments.agent_regression.runner --paid
+python -m experiments.agent_regression.runner --summary
+```
+
+可用 `--case A01`、`--group tool_contract`、`--arm candidate` 选择子集。每个节点/分支只允许启动一次；失败、取消或用量不明均不补发。HTTP 无超时、无重试、无自动续跑。
+
+阶段与上下文追加对照入口：`python -m experiments.agent_regression.context_followup` 离线准备/核验，显式加 `--paid` 才发送。B01 三分支、A03/B02 各两分支、E02 三分支，共 10 次；已运行分支禁止再次启动。完整证据在 `.runtime/agent-regression-context-20260923/`，结果见 [报告](RESULTS.md)。
+
+四条完整业务已于 `f32cc60` 运行，入口、冻结哈希、岗位 profile、审批和完整日志保存在 `.runtime/agent-regression-full-20260923/full/`。该目录已有 attempt 标记；查看 `summary.json` 与各题日志，不重复启动。S01499 聊天及2278成本仍待验收，详见 [报告](RESULTS.md)。
+
+`freeze.json` 锁定来源、oracle 和上下文哈希；`cases/*/manifest.json` 的 `boundary` 说明故障传播切点，不能将其当成上游根因的独立证明。A03/B02/B03/C03/D03 是正确保护，D01/D02 是已修问题防回归。B01/C01/C02 的上游问题是当前阶段与历史目标混入；A01/A02 检查工具契约。两个旧 prepared 分支保留其真实来源标识。
+
+`provenance.json` 补充源码版本、根因位置、首次可纠正请求和归档证据哈希。历史补丁版本以当时 source-hashes 为准；未知 commit 不猜测。D01/D02 保留祖先原请求；C02 勘误仅澄清“三类绑定各需唯一”，原 oracle 与通过条件不变。
+
+| 节点 | 检查点 | 根因或保护范围 |
+|---|---|---|
+| A01 | 确认请求 1 | 首轮裸工具名；名称契约缺口是待验证原因 |
+| A02 | 确认请求 7 | SOP 已在请求 3 消费；区分方法与字段写入 |
+| A03 | 确认请求 12 | 目录权限误报缺模型；保护正确确认动作 |
+| B01 | 开票请求 29 | host 目标串接在请求 1 已出现 |
+| B02 | 投递请求 8 | 保护合法发送提案 |
+| B03 | 最终追问请求 2 | 保护 SMTP 接受证据与不重发 |
+| C01 | 开票请求 39 | 同一范围根因；PDF 拒绝后的恢复点 |
+| C02 | 开票请求 41 | 同一范围根因；缺绑定后的交接点 |
+| C03 | 资格查询请求 3 | 保护业务选择权 |
+| D01 | 已修 B01 分支 | 内部公司联系人不是订单客户 |
+| D02 | 已修 C06 分支 | 公司与客户查询范围歧义 |
+| D03 | 原 B02 请求 2 | 金额冲突需要澄清；源码 commit 未知 |
+
+候选调用生产 builder，仅替换声明位置；逆替换必须还原完整原请求。这只控制实验输入，**不要求输出遵循 Golden Trace**。正确身份、授权、业务约束和证据决定结果；额外合理只读、措辞或工具顺序变化允许通过人工复核。无法确定的语义标为 `needs_review`，不调用模型裁判。单节点不证明最终业务成功。
+
+C02 的新 runtime 会在 typed handoff 后暂停，其强制续出的模型回复属于反事实分析。真实暂停由离线会话持久化检查验收，不能把该回复里的工具意图计为生产调用。结果和未通过项见 [简短报告](RESULTS.md)。
+
+`results/*/*/` 保存请求、原始 SSE、意图和结构检查。`summary.json` 单列 fresh/cache/output、reasoning 子集、请求数、工具意图、耗时与未知值；这些数字不参与业务正确性打分。最终业务回归由负责人另行执行。

@@ -1,5 +1,7 @@
 # ERP-agent
 
+[长期记忆](docs/long-term-memory.md) · [持久 Odoo demo](experiments/demo_odoo/README.md)
+
 Native ERP Agent Harness
 
 [English](README.md) · 简体中文
@@ -58,17 +60,17 @@ Trace 展示运行、工具和用量记录；截图使用合成演示数据。
 
 当前工作台业务投影包括 `sale_invoice`、`sale_purchase_invoice` 和 `purchase`。原生运行时已有受控 SOP 工具及 knowledge index/search/stats。独立的 `experiments/company_records_rag` 向量实验没有接入 Agent 或工作台。ERP-Bench 独立负责评分；工作台回读不等于 ERP-Bench 得分。
 
+桌面 worker 使用 `native` 执行、`dynamic` 工具、`controlled` SOP 和 `record` 业务状态记录。当前源码整合了桌面底座与后续 benchmark 后端改动；上方 v0.5.4 下载仍是此前发布的预览版。固定来源与离线检查见[后端整合及验证边界](docs/backend-release.md)。Benchmark 的 `TaskEvidence` 需要宿主显式配置，桌面 worker 尚未启用。
+
 ## Windows 开发快速开始
 
-需要 Windows、Node.js 22 或更新版本，以及 Python 3.13。
+需要 Windows、Node.js 22 或更新版本、Python 3.13 和 uv。
 
 ```powershell
 git clone https://github.com/Sanssssssssssssssss/ERP-agent.git
 cd ERP-agent
 
-py -3.13 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e .\agent
-.\.venv\Scripts\python.exe -m pip install -r .\desktop\requirements-host.txt
+uv sync --locked
 
 cd desktop
 npm ci
@@ -89,12 +91,12 @@ node scripts/renderer-check.mjs
 ```
 
 `desktop/package.json` 提供 Windows portable 和 installer 命令。打包还需要 `desktop/scripts/prepare-sidecar.mjs` 和 `desktop/requirements-host.txt` 所描述的固定 sidecar 输入。
-干净克隆时，sidecar 默认读取 `.venv\Lib\site-packages`，并把固定版本的 CPython 压缩包缓存到 `.runtime\cache`；请在 `desktop/` 先运行 `npm run prepare:sidecar`，再运行 `npm run dist:portable`。
+先构建后端 wheel，并准备不含开发依赖的打包环境。具体构建、验证和回退命令见[开发指南](docs/development.zh-CN.md)。
 
 ## 边界
 
 - 已验收的 Stage 7 原生运行路径不启动或导入 MCP；固定 MCP 源码仅作为来源和历史对照实验保留。
-- 原生工具清单保留部分 `mcp_odoo_*` 兼容名称；`integration/odoo_tools.py:52` 会在调用原生 adapter 前去掉该标识，不经过 MCP transport。
+- 原生工具清单保留部分 `mcp_odoo_*` 兼容名称；`src/erp_harness/tools/router.py` 会在调用原生 adapter 前去掉该标识，不经过 MCP transport。
 - Odoo 写入需要明确审批。不确定写入进入回读/核对状态，不会静默重放或标记完成。
 - PDF 导出针对已观测的 Odoo 单据；预付款发票或已过账发票都不代表银行付款已经发生。
 - 制造计划/确认、银行、对账、工资、HR、OCR 和企业级全文档检索不属于当前工作台的覆盖承诺，除非具体来源和实验另有说明。
@@ -105,11 +107,12 @@ node scripts/renderer-check.mjs
 | 路径 | 作用 |
 | --- | --- |
 | [`desktop/`](desktop/) | Windows Electron 工作台、界面契约和打包脚本 |
-| [`workbench/`](workbench/) | 会话、审批、存储、材料和业务投影宿主 |
-| [`odoo_runtime/`](odoo_runtime/) | 原生 Odoo 辅助能力和运行时 |
-| [`integration/`](integration/) | Pi runner、原生工具清单、Harbor 和报告适配器 |
+| [`src/erp_harness/app/`](src/erp_harness/app/) | 会话、审批、存储、材料和业务投影宿主 |
+| [`src/erp_harness/erp/`](src/erp_harness/erp/) | 原生 Odoo 辅助能力和运行时 |
+| [`src/erp_harness/`](src/erp_harness/) | 已融合的会话运行时、模型适配、上下文与工具 |
+| [`bench/adapters/`](bench/adapters/) | Harbor、评分、快照和报告适配器 |
 | [`bench/`](bench/) | ERP-Bench 任务、schema 和 Harbor 集成 |
-| [`configs/`](configs/) | 阶段和基线实验配置 |
+| [`bench/configs/`](bench/configs/) | 阶段和基线实验配置 |
 | [`experiments/`](experiments/) | 阶段证据、限制和历史研究记录 |
 | [`sources.lock.json`](sources.lock.json) | 固定来源提交、许可证、树和 bundle 哈希 |
 
@@ -117,4 +120,4 @@ node scripts/renderer-check.mjs
 
 ## 来源与贡献
 
-本仓库包含自写 Harness 代码和 `sources.lock.json` 中固定的来源材料。重新分发组件前请查看 [`LICENSE`](LICENSE)、[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) 和 [`agent/THIRD_PARTY_NOTICES.md`](agent/THIRD_PARTY_NOTICES.md)。贡献方式见 [`CONTRIBUTING.md`](CONTRIBUTING.md)，安全问题见 [`SECURITY.md`](SECURITY.md)。
+本仓库包含自写 Harness 代码和 `sources.lock.json` 中固定的来源材料。重新分发组件前请查看 [`LICENSE`](LICENSE)、[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) 和 [`docs/licenses/pi-agent-NOTICES.md`](docs/licenses/pi-agent-NOTICES.md)。贡献方式见 [`CONTRIBUTING.md`](CONTRIBUTING.md)，安全问题见 [`SECURITY.md`](SECURITY.md)。

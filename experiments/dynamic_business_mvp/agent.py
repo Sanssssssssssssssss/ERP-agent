@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any
 
-from integration.harbor_agent import PiAgentMcpBaseline
+from bench.adapters.harbor_agent import PiAgentMcpBaseline
 
 
 class MvpAgent(PiAgentMcpBaseline):

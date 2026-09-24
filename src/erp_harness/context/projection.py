@@ -1,0 +1,389 @@
+"""Pi message adapter for the MCP-independent Odoo World core."""
+
+from __future__ import annotations
+
+# 请求视图优化。输入原始消息，输出消息副本；会话日志和观察回执保留。
+# project_messages：相同读取保留最新全文，旧项换成可核验引用。
+# project_read_history：保留最近两次有效 assistant 响应内的观察值。
+# 供给首轮仅外置大量未排期、未开始的工单；负荷与完整回读引用仍可见。
+# 更早的大读取可外置为引用；其余结果可按列与行做无损编码。
+# 外置引用可经 read_observation / search_observations 按需回读。
+# 只处理成功且哈希匹配的读取；不外置失败工具、写入结果或模型推理。
+# 无损表格只在实际字节数更小时采用。投影异常则返回原消息。
+# 这里不调用模型。它与 compaction 的模型摘要是两条独立路径。
+
+import hashlib
+import json
+import math
+import sys
+from typing import Any, Iterable
+
+from erp_harness.runtime.messages import AssistantMessage, TextContent, ToolResultMessage
+
+from erp_harness.context.world import READ_TOOLS, WorldStore
+
+_TABLE_MARKERS = {"__world_table__", "__world_schema_table__"}
+
+
+def _native_tool_name(name: str) -> str:
+    return name.removeprefix("mcp_odoo_")
+
+
+def _contains_table_marker(value: Any) -> bool:
+    if isinstance(value, dict):
+        return bool(_TABLE_MARKERS.intersection(value)) or any(
+            _contains_table_marker(item) for item in value.values()
+        )
+    if isinstance(value, list):
+        return any(_contains_table_marker(item) for item in value)
+    return False
+
+
+def _encode_tables(value: Any) -> tuple[Any, bool]:
+    if isinstance(value, list):
+        if _contains_table_marker(value):
+            return value, False
+        children = [_encode_tables(item) for item in value]
+        encoded = [item for item, _changed in children]
+        if (len(value) >= 2 and all(isinstance(item, dict) for item in encoded)
+                and all("__world_table__" not in item for item in encoded)):
+            columns = list(encoded[0])
+            if columns and all(set(item) == set(columns) for item in encoded):
+                table = {
+                    "__world_table__": True,
+                    "columns": columns,
+                    "rows": [[item[column] for column in columns] for item in encoded],
+                }
+                if len(json.dumps(table, ensure_ascii=False, separators=(",", ":")).encode()) < len(
+                    json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()
+                ):
+                    return table, True
+        return encoded, any(changed for _item, changed in children)
+    if isinstance(value, dict):
+        result = {}
+        changed = False
+        for key, item in value.items():
+            result[key], item_changed = _encode_tables(item)
+            changed |= item_changed
+        return result, changed
+    return value, False
+
+
+def _schema_table(value: Any) -> tuple[Any, bool]:
+    if _contains_table_marker(value):
+        return value, False
+    if not isinstance(value, dict) or len(value) < 2 or not all(
+        isinstance(metadata, dict) for metadata in value.values()
+    ):
+        return value, False
+    names = list(value)
+    metadata = [value[name] for name in names]
+    columns = [key for key in metadata[0] if all(key in item for item in metadata)]
+    if not columns:
+        return value, False
+    table = {
+        "__world_schema_table__": True,
+        "fields": names,
+        "columns": columns,
+        "rows": [[item[column] for column in columns] for item in metadata],
+        "extras": [
+            {key: item[key] for key in item if key not in columns}
+            for item in metadata
+        ],
+    }
+    if len(json.dumps(table, ensure_ascii=False, separators=(",", ":")).encode()) >= len(
+        json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()
+    ):
+        return value, False
+    return table, True
+
+
+def expand_lossless_tables(value: Any) -> Any:
+    """Decode provider-view tables for deterministic round-trip verification."""
+    if isinstance(value, list):
+        return [expand_lossless_tables(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    if value.get("__world_table__") is True:
+        columns, rows = value.get("columns"), value.get("rows")
+        if (isinstance(columns, list) and isinstance(rows, list)
+                and all(isinstance(row, list) and len(row) == len(columns) for row in rows)):
+            return [
+                {column: expand_lossless_tables(row[index]) for index, column in enumerate(columns)}
+                for row in rows
+            ]
+    if value.get("__world_schema_table__") is True:
+        names, columns, rows, extras = (
+            value.get("fields"), value.get("columns"), value.get("rows"), value.get("extras")
+        )
+        if (isinstance(names, list) and isinstance(columns, list) and isinstance(rows, list)
+                and isinstance(extras, list) and len(names) == len(rows) == len(extras)
+                and all(isinstance(row, list) and len(row) == len(columns) for row in rows)
+                and all(isinstance(extra, dict) for extra in extras)):
+            return {
+                name: {
+                    **{column: expand_lossless_tables(row[index]) for index, column in enumerate(columns)},
+                    **expand_lossless_tables(extra),
+                }
+                for name, row, extra in zip(names, rows, extras)
+            }
+    return {key: expand_lossless_tables(item) for key, item in value.items()}
+
+
+def _table_projection(
+    payload: Any, *, source_text: str, receipt_id: str, result_sha256: str,
+    schema: bool = False,
+) -> str | None:
+    """Encode only result rows, preserving the complete response envelope."""
+    if not isinstance(payload, dict) or payload.get("success") is not True:
+        return None
+    if _contains_table_marker(payload):
+        return None
+    result, changed = (
+        _schema_table(payload.get("result")) if schema else _encode_tables(payload.get("result"))
+    )
+    if not changed:
+        return None
+    projected = dict(payload)
+    projected["result"] = result
+    projected["world_projection"] = {
+        "kind": "lossless_table",
+        "receipt_id": receipt_id,
+        "result_sha256": result_sha256,
+        "result_encoding": "columns_and_rows_values",
+        "rows_are_in_original_order": True,
+        "full_result_retained": True,
+    }
+    text = json.dumps(projected, ensure_ascii=False, separators=(",", ":"))
+    return text if len(text.encode()) < len(source_text.encode()) else None
+
+
+def project_messages(world: WorldStore, messages: Iterable[Any]) -> list[Any]:
+    """Keep tool pairing and the newest full result; fail open if projection receipts fail."""
+    try:
+        # output 只是本次 provider 请求的消息视图；WorldStore 仍保留原始观察历史。
+        output = list(messages)
+        groups: dict[str, list[tuple[int, ToolResultMessage, dict[str, Any]]]] = {}
+        for index, message in enumerate(output):
+            if not isinstance(message, ToolResultMessage):
+                continue
+            candidate = world.projection_candidate(message.tool_call_id, message.text)
+            if candidate is not None:
+                groups.setdefault(candidate["group_key"], []).append((index, message, candidate))
+        compacted = []
+        original_bytes = projected_bytes = 0
+        for entries in groups.values():
+            if len(entries) < 2:
+                continue
+            latest = entries[-1][2]
+            for index, message, candidate in entries[:-1]:
+                # 旧重复读取只改为指向最新 receipt，原工具调用 ID 与消息配对位置不变。
+                compact = json.dumps({
+                    "success": True,
+                    "world_projection": {
+                        "kind": "identical_repeated_read",
+                        "receipt_id": candidate["receipt_id"],
+                        "same_as": latest["receipt_id"],
+                        "result_sha256": candidate["result_sha256"],
+                        "full_result_retained": True,
+                    },
+                }, ensure_ascii=False, separators=(",", ":"))
+                output[index] = message.model_copy(update={"content": [TextContent(text=compact)]}, deep=True)
+                original_bytes += len(message.text.encode())
+                projected_bytes += len(compact.encode())
+                compacted.append(message.tool_call_id)
+        world.record_projection(compacted, original_bytes, projected_bytes)
+    except Exception as exc:  # observation must not break the provider request
+        try:
+            world.mark_unhealthy("projection", exc)
+        except Exception:
+            try:
+                world.disable_projection()
+            except Exception:
+                pass
+        print(f"World projection disabled after receipt failure: {type(exc).__name__}", file=sys.stderr)
+        return list(messages)
+    return output
+
+
+def _supply_workorder_projection(
+    payload: dict[str, Any], *, source_text: str, reference: dict[str, Any] | None,
+) -> str | None:
+    """Expose backlog coverage without turning omitted work into idle capacity."""
+    result = payload.get("result")
+    manufacturing = result.get("manufacturing") if isinstance(result, dict) else None
+    rows = manufacturing.get("shared_workorders") if isinstance(manufacturing, dict) else None
+    if reference is None or not isinstance(rows, list):
+        return None
+    coverage = payload.get("completeness", {}).get("sources", {}).get("shared_workorders", {})
+    if coverage.get("complete") is not True or coverage.get("rows") != len(rows):
+        return None
+
+    def relation_id(value: Any) -> int | None:
+        if isinstance(value, list) and len(value) == 2:
+            value = value[0]
+        return value if type(value) is int and value > 0 else None
+
+    def number(value: Any) -> bool:
+        return type(value) in (int, float) and math.isfinite(value) and value >= 0
+
+    retained, loads = [], {}
+    omitted = 0
+    for row in rows:
+        facts = row if isinstance(row, dict) else {}
+        center = relation_id(facts.get("workcenter_id"))
+        # Missing/ambiguous fields are retained, including false-as-number and
+        # started work with absent dates. No target MO is inferred from product IDs.
+        hide = (
+            relation_id(facts.get("id")) is not None and center is not None
+            and relation_id(facts.get("production_id")) is not None
+            and facts.get("state") in ("ready", "waiting", "pending")
+            and all(key in facts and (facts[key] is None or facts[key] is False or facts[key] == "")
+                    for key in ("date_start", "date_finished"))
+            and number(facts.get("duration")) and facts["duration"] == 0
+            and number(facts.get("duration_expected"))
+        )
+        if hide:
+            omitted += 1
+        else:
+            retained.append(row)
+        load = loads.setdefault(center, {
+            "workcenter_id": center, "full_count": 0, "omitted_count": 0,
+            "state_counts": {}, "known_expected_minutes": 0,
+            "unknown_expected_minutes_count": 0,
+        })
+        load["full_count"] += 1
+        load["omitted_count"] += int(hide)
+        state = facts.get("state") if isinstance(facts.get("state"), str) else "unknown"
+        load["state_counts"][state] = load["state_counts"].get(state, 0) + 1
+        expected = facts.get("duration_expected")
+        if number(expected):
+            load["known_expected_minutes"] += expected
+        else:
+            load["unknown_expected_minutes_count"] += 1
+    if omitted < 20:
+        return None
+    projected = {**payload, "result": {**result, "manufacturing": {
+        **manufacturing, "shared_workorders": {
+            "retained_rows": retained, "full_count": len(rows), "omitted_count": omitted,
+            "workcenter_load": list(loads.values()),
+            "scope_notice": (
+                "Complete scan of the readable nonterminal workorders in this historical observation only; "
+                "not a database transaction snapshot. Omitted rows are unstarted, undated backlog. "
+                "Known expected minutes sum the original duration_expected values, without deducting actual "
+                "duration; they are not remaining work, free capacity or a calendar/scheduling promise. "
+                "Target production scope is not inferred; use existing record reads for exact MO relations. "
+                "Refresh Odoo after writes when current state matters."
+            ),
+            "full_rows": {**reference, "path": "$.result.manufacturing.shared_workorders",
+                          "recall_tool": "read_observation"},
+        },
+    }}, "world_projection": {
+        "kind": "supply_unstarted_workorders", "receipt_id": reference["observation_ref"],
+        "result_sha256": reference["result_sha256"], "full_result_retained": True,
+    }}
+    text = json.dumps(projected, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    return text if len(text.encode()) < len(source_text.encode()) else None
+
+
+def project_read_history(world: WorldStore, messages: Iterable[Any]) -> list[Any]:
+    """Project consumed reads and large, unstarted supply backlog on its first use."""
+    original = list(messages)
+    try:
+        if not world.telemetry().get("projection_enabled", True):
+            return original
+        output = list(original)
+        # 后续非失败的 assistant 消息数用于判断是否已消费；最近两轮不外置，但仍可做表格压缩。
+        consumed_after = [0] * len(original)
+        assistant_seen = 0
+        for index in range(len(original) - 1, -1, -1):
+            message = original[index]
+            if (isinstance(message, AssistantMessage)
+                    and message.stop_reason not in {"error", "aborted"}):
+                assistant_seen += 1
+            elif isinstance(message, ToolResultMessage):
+                consumed_after[index] = assistant_seen
+        compacted: list[str] = []
+        original_bytes = projected_bytes = 0
+        for index, message in enumerate(original):
+            if (not isinstance(message, ToolResultMessage)
+                    or message.is_error or _native_tool_name(message.tool_name) not in READ_TOOLS):
+                continue
+            # receipt/hash 确认对应原消息；引用回读时再由 WorldStore 检查身份与完整性。
+            receipt = world.receipt_for_call(message.tool_call_id)
+            if (not receipt or not receipt.get("outcome", {}).get("success")
+                    or receipt.get("result_sha256") != hashlib.sha256(
+                        message.text.encode()).hexdigest()):
+                continue
+            try:
+                payload = json.loads(message.text)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, dict) or "world_projection" in payload:
+                continue
+            compact = None
+            if _native_tool_name(message.tool_name) == "read_supply_context":
+                # Do not summarize partial supply facts, unverified/corrupt storage,
+                # or results from a different tool. The full receipt remains authoritative.
+                if (receipt.get("tool") != "read_supply_context"
+                        or payload.get("success") is not True
+                        or payload.get("completeness", {}).get("complete") is not True
+                        or world.observation_integrity(message.tool_call_id) != "verified"):
+                    continue
+                if consumed_after[index] <= 2:
+                    compact = _supply_workorder_projection(
+                        payload, source_text=message.text,
+                        reference=world.artifact_reference(message.tool_call_id, message.text),
+                    )
+            if not consumed_after[index] and compact is None:
+                continue
+            # Keep recently consumed observations in the provider context.  Older
+            # large reads can be recalled by identity-scoped reference; this is a
+            # display policy, not a limit on tools or model turns.
+            if consumed_after[index] > 2:
+                reference = world.artifact_reference(message.tool_call_id, message.text)
+                if reference is not None:
+                    candidate = {
+                        "success": True,
+                        "world_observation": {
+                            "kind": "externalized_read",
+                            **reference,
+                            "recall_tools": ["read_observation", "search_observations"],
+                            "historical_notice": (
+                                "This is a historical read snapshot. Refresh Odoo when "
+                                "current state matters after a write."
+                            ),
+                        },
+                    }
+                    encoded = json.dumps(candidate, ensure_ascii=False, separators=(",", ":"))
+                    if len(encoded.encode()) < len(message.text.encode()):
+                        compact = encoded
+                elif world.observation_integrity(message.tool_call_id) == "corrupt":
+                    # The receipt cannot prove the stored model-visible payload;
+                    # retain the original provider message rather than substituting it.
+                    continue
+            if compact is None:
+                compact = _table_projection(
+                    payload, source_text=message.text,
+                    receipt_id=receipt["receipt_id"], result_sha256=receipt["result_sha256"],
+                    schema=_native_tool_name(message.tool_name) == "get_model_fields",
+                )
+            if compact is None:
+                continue
+            output[index] = message.model_copy(update={"content": [TextContent(text=compact)]}, deep=True)
+            original_bytes += len(message.text.encode())
+            projected_bytes += len(compact.encode())
+            compacted.append(message.tool_call_id)
+        world.record_projection(compacted, original_bytes, projected_bytes)
+        return output
+    except Exception as exc:  # observation must not break the provider request
+        # 节省上下文失败时不阻断 agent：关闭投影并把原消息交给 provider。
+        try:
+            world.mark_unhealthy("history_projection", exc)
+        except Exception:
+            try:
+                world.disable_projection()
+            except Exception:
+                pass
+        print(f"World history projection disabled after receipt failure: {type(exc).__name__}", file=sys.stderr)
+        return original
