@@ -17,6 +17,30 @@ from experiments.tool_routing.reviewed_dataset import inclusion_labels, load_rev
 from experiments.tool_routing.reviewed_dataset import expanded_reviewed, training_labels
 from experiments.tool_routing.routing_state import routing_state
 from experiments.tool_routing.model_comparison import parse_selector, verdict
+from experiments.tool_routing.train_head import concrete_questions
+from experiments.tool_routing.train_reviewed import training_items, decision_metrics
+
+
+def test_reviewed_training_covers_every_judged_format_and_masks_unknowns():
+    train, _, _, groups = expanded_reviewed()
+    specs = [concrete_questions(groups,label,first) for label in ['A','B'] for first in [False,True]]
+    encoded = {r['id']:[[{'ids':[gi,v],'markers':[0,1]} for gi in range(len(groups))] for v in range(4)] for r in train}
+    items = training_items(train,list(groups),specs,encoded)
+    assert len(items)==4*sum(v is not None for r in train for v in training_labels(r,groups).values())
+    for r in train:
+        for g,target in training_labels(r,groups).items():
+            matched = [i for i in items if i['case_id']==r['id'] and i['group']==g]
+            if target is None:
+                assert matched==[]
+            else:
+                assert [i['variant'] for i in matched]==[0,1,2,3]
+                assert [i['label'] for i in matched]==([1,0,1,0] if target else [0,1,0,1])
+                assert len({i['weight'] for i in matched})==1
+    # Duplicating common negatives must not hide failure on the scarce positive class.
+    positive={'group':'actions','target':1,'selected':False,'ce':2.}
+    negative={'group':'actions','target':0,'selected':False,'ce':0.}
+    assert decision_metrics([positive,negative])['balanced_ce']==1.
+    assert decision_metrics([positive,*([negative]*100)])['balanced_ce']==1.
 
 
 def test_expanded_labels_do_not_force_optional_preloads_or_leak_families():

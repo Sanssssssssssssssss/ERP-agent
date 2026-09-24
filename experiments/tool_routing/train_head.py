@@ -35,10 +35,11 @@ def chosen(answer, positive):
     return answer['noul'] >= .5 if positive == 'noul' else answer['choice'] == positive
 
 
-def fit_epoch(agent, items, optimizer, params, step=0):
+def fit_epoch(agent, items, optimizer, params, step=0, *, microbatch=4, diagnostics=None):
     """Exact 16-example accumulation (last batch may be smaller), official forward."""
     import torch
     from laya.common import collate_items
+    assert isinstance(microbatch,int) and microbatch>0
     assert not any(p.requires_grad for p in agent.model.encoder.parameters()), 'Encoder must remain frozen.'
     agent.model.train(); agent.model.encoder.eval()
     total=tokens=0
@@ -48,7 +49,7 @@ def fit_epoch(agent, items, optimizer, params, step=0):
         offset=0
         while offset<len(batch_items):
             chunk=[];width=0
-            while offset<len(batch_items) and len(chunk)<4:
+            while offset<len(batch_items) and len(chunk)<microbatch:
                 item=batch_items[offset];needed=max(width,len(item['ids']))
                 if chunk and needed*(len(chunk)+1)>4096:break
                 chunk.append(item);width=needed;offset+=1
@@ -64,7 +65,9 @@ def fit_epoch(agent, items, optimizer, params, step=0):
             total+=loss.item();tokens+=int(batch['attention_mask'].sum())
         step+=1
         for group in optimizer.param_groups:group['lr']=3e-5*min(1.,step/20)
-        torch.nn.utils.clip_grad_norm_(params,1.);optimizer.step()
+        norm=float(torch.nn.utils.clip_grad_norm_(params,1.,error_if_nonfinite=True))
+        if diagnostics is not None:diagnostics.append(norm)
+        optimizer.step()
     return step,total/len(items),tokens
 
 

@@ -136,7 +136,7 @@ def summarize(directory, laya_directory=None):
         result['laya']={}
         for variant in ['base','candidate']:
             predictions=[json.loads(s) for s in (laya_directory/(variant+'-test.jsonl')).read_text(encoding='utf8').splitlines()]
-            predictions=[r for r in predictions if r['id'] in ids]
+            predictions=[r for r in predictions if r['id'] in ids and r.get('variant',0)==0]
             result['laya'][variant]={'cases':len(predictions),'verdicts':dict(Counter(r['status'] for r in predictions)),
                 'missing_required':sum(bool(r['missing_required']) for r in predictions),
                 'unrelated':sum(bool(r['unrelated']) for r in predictions),
