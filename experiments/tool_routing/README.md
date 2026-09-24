@@ -1,6 +1,6 @@
 本实验只评估：在主模型请求前，由 Laya 建议注入哪些 capabilities。生产后端不接入；不预测工具参数，不执行工具，不授予写权限。
 
-真实本地推理及调用诊断已完成，当前模板有强标签敏感，暂不晋级：[结果与证据](RESULTS.md)。
+历史池已扩展至 1,944 个响应，并完成 scorer 微调与输入修复对照，暂不晋级：[本轮结果](TUNING.md)、[测试入口](../../tests/fixtures/capability_routing/README.md)。此前模板诊断见[原始结果](RESULTS.md)。
 
 当前主模型会自己调用 list/configure，再在下一轮拿到工具。Laya 可以前置能力选择，但包含业务读取的混合轮不能直接删掉。首轮用本地多语言 checkpoint，每个 capability 一个 `noul` 问题；一次 `system_one(state, questions)` 批量输出十组概率。0.5 只是固定实验阈值，不代表已校准。
 
