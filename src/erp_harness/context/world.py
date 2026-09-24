@@ -349,16 +349,27 @@ class WorldStore:
 
     def artifact_reference(self, call_id: str, result_text: str) -> dict[str, Any] | None:
         """Return a small, identity-scoped reference after a large visible read."""
+        receipt = self.history_projection_receipt(call_id, result_text, include_reference=True)
+        return receipt["reference"] if receipt else None
+
+    def history_projection_receipt(
+        self, call_id: str, result_text: str, *, include_reference: bool = False,
+    ) -> dict[str, Any] | None:
+        """Check this request once; never copy the full receipt or cache its integrity."""
         with self._lock:
             receipt = self._by_call.get(call_id)
-            integrity, _payload = self._visible_payload(receipt)
-            if (not receipt or receipt["tool"] not in READ_TOOLS
-                    or not receipt["outcome"]["success"]
-                    or integrity != "verified"
-                    or len(result_text.encode()) < ARTIFACT_REFERENCE_BYTES
-                    or receipt.get("result_sha256") != hashlib.sha256(result_text.encode()).hexdigest()):
+            encoded = result_text.encode()
+            if (not receipt or not receipt.get("outcome", {}).get("success")
+                    or receipt.get("result_sha256") != hashlib.sha256(encoded).hexdigest()):
                 return None
-            return self._observation_summary(receipt)
+            integrity = self._visible_payload(receipt)[0] if include_reference else None
+            reference = None
+            if (include_reference and integrity == "verified" and receipt["tool"] in READ_TOOLS
+                    and len(encoded) >= ARTIFACT_REFERENCE_BYTES):
+                reference = self._observation_summary(receipt)
+            return {"receipt_id": receipt["receipt_id"], "tool": receipt.get("tool"),
+                    "result_sha256": receipt["result_sha256"], "integrity": integrity,
+                    "reference": reference}
 
     def observation_integrity(self, call_id: str) -> str:
         with self._lock:

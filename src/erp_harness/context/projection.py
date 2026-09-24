@@ -12,7 +12,6 @@ from __future__ import annotations
 # 无损表格只在实际字节数更小时采用。投影异常则返回原消息。
 # 这里不调用模型。它与 compaction 的模型摘要是两条独立路径。
 
-import hashlib
 import json
 import math
 import sys
@@ -309,31 +308,34 @@ def project_read_history(world: WorldStore, messages: Iterable[Any]) -> list[Any
             if (not isinstance(message, ToolResultMessage)
                     or message.is_error or _native_tool_name(message.tool_name) not in READ_TOOLS):
                 continue
-            # receipt/hash 确认对应原消息；引用回读时再由 WorldStore 检查身份与完整性。
-            receipt = world.receipt_for_call(message.tool_call_id)
-            if (not receipt or not receipt.get("outcome", {}).get("success")
-                    or receipt.get("result_sha256") != hashlib.sha256(
-                        message.text.encode()).hexdigest()):
-                continue
             try:
                 payload = json.loads(message.text)
             except (TypeError, json.JSONDecodeError):
                 continue
             if not isinstance(payload, dict) or "world_projection" in payload:
                 continue
+            supply = _native_tool_name(message.tool_name) == "read_supply_context"
+            if supply and (payload.get("success") is not True
+                           or payload.get("completeness", {}).get("complete") is not True):
+                continue
+            # 一次锁内查询核对消息/hash，按需返回引用；不复制完整 receipt。
+            receipt = world.history_projection_receipt(
+                message.tool_call_id, message.text,
+                include_reference=supply or consumed_after[index] > 2,
+            )
+            if receipt is None:
+                continue
             compact = None
-            if _native_tool_name(message.tool_name) == "read_supply_context":
+            if supply:
                 # Do not summarize partial supply facts, unverified/corrupt storage,
                 # or results from a different tool. The full receipt remains authoritative.
                 if (receipt.get("tool") != "read_supply_context"
-                        or payload.get("success") is not True
-                        or payload.get("completeness", {}).get("complete") is not True
-                        or world.observation_integrity(message.tool_call_id) != "verified"):
+                        or receipt["integrity"] != "verified"):
                     continue
                 if consumed_after[index] <= 2:
                     compact = _supply_workorder_projection(
                         payload, source_text=message.text,
-                        reference=world.artifact_reference(message.tool_call_id, message.text),
+                        reference=receipt["reference"],
                     )
             if not consumed_after[index] and compact is None:
                 continue
@@ -341,7 +343,7 @@ def project_read_history(world: WorldStore, messages: Iterable[Any]) -> list[Any
             # large reads can be recalled by identity-scoped reference; this is a
             # display policy, not a limit on tools or model turns.
             if consumed_after[index] > 2:
-                reference = world.artifact_reference(message.tool_call_id, message.text)
+                reference = receipt["reference"]
                 if reference is not None:
                     candidate = {
                         "success": True,
@@ -358,7 +360,7 @@ def project_read_history(world: WorldStore, messages: Iterable[Any]) -> list[Any
                     encoded = json.dumps(candidate, ensure_ascii=False, separators=(",", ":"))
                     if len(encoded.encode()) < len(message.text.encode()):
                         compact = encoded
-                elif world.observation_integrity(message.tool_call_id) == "corrupt":
+                elif receipt["integrity"] == "corrupt":
                     # The receipt cannot prove the stored model-visible payload;
                     # retain the original provider message rather than substituting it.
                     continue
