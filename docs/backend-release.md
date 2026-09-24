@@ -22,6 +22,19 @@ After an administrator tightens field ACLs, start a new business session. Re-run
 
 ## Validation
 
+2026-09-24 consolidation: baseline `2e23d5d`, branch `refactor/backend-consolidation-20260924`. Shared model settings, worker setup, session recovery, atomic save/path helpers and write argument construction; business details read each ledger once, guards batch within each verification phase, and World reuses one verified receipt view per projection. Feature entry points remain. Production Python: **−109 lines**; regression tests: **+380 lines**.
+
+Local validation: **1,186 passed, 4 skipped, 182 subtests**; current-source desktop IPC passed. Frozen comparisons: 24 model configurations, 135 World outputs, 144 recovery flows, 347 helper checks and seven business-detail states. Review caught and fixed legacy null material lists and delayed recovery-stream cleanup; both have regressions. Enterprise action regressions now run in CI.
+
+Real Odoo A/B used two new databases from the same 10,000-document snapshot, isolated on port 18159:
+
+| Business | Baseline / candidate core RPC | Result |
+| --- | --- | --- |
+| Update and confirm S00006 | 16 / 16 | Same final fields, amount and state |
+| Receive 4 of 10 on five purchase lines | 54 / 30 | Same stock, remaining 6, backorders and source relations; no invoice |
+
+Each side performed four approved, verified writes; replayed writes were suppressed. The baseline audit's warehouse-role invoice lookup returned 403; only the audit read was repeated with the purchase role, and the error remains in the evidence. Existing environments were not restored or written. Paid model calls: **0**; these deterministic tool runs do not establish a new model score or token saving. Full receipts, rollback baseline and scripts: `.runtime/backend-consolidation-20260924/`; live comparison: `live-odoo/comparison.json`.
+
 2026-09-24: [PR #5](https://github.com/Sanssssssssssssssss/ERP-agent/pull/5) merged at `3a4ce45`; rollback tag: `backend-main-baseline-20260924`. All required CI checks passed, including historical MCP comparisons and the packaged desktop.
 
 The following cleanup shares usage aggregation and run finalization, and computes each readback outcome once. All feature entry points remain; production Python decreases by 17 lines. Model instructions, tool schemas, approval and ledger paths retain their behavior. Local checks: 1,148 passed, 4 skipped, 179 subtests; current-source desktop IPC passed with one mock write. Independent equivalence review found no blocking differences. Paid model calls: 0; no new real ERP business score is claimed. Evidence: `.runtime/duplicate-cleanup-20260924/` and `.runtime/ipc-check/run-57688/`.
