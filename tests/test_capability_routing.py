@@ -26,6 +26,7 @@ def test_reviewed_training_covers_every_judged_format_and_masks_unknowns():
     specs = [concrete_questions(groups,label,first) for label in ['A','B'] for first in [False,True]]
     encoded = {r['id']:[[{'ids':[gi,v],'markers':[0,1]} for gi in range(len(groups))] for v in range(4)] for r in train}
     items = training_items(train,list(groups),specs,encoded)
+    assert all('target' not in item for item in items)  # SDK reserves it for soft-label vectors.
     assert len(items)==4*sum(v is not None for r in train for v in training_labels(r,groups).values())
     for r in train:
         for g,target in training_labels(r,groups).items():

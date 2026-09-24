@@ -42,7 +42,7 @@ def training_items(cases, names, specs, encoded):
             for variant,spec in enumerate(specs):
                 slot=list(spec[g]['criteria']).index('A' if variant<2 else 'B')
                 items.append({**encoded[r['id']][variant][gi], 'label':slot if target else 1-slot,
-                              'weight':weight,'case_id':r['id'],'group':g,'variant':variant,'target':target})
+                              'weight':weight,'case_id':r['id'],'group':g,'variant':variant,'semantic_target':target})
     return items
 
 
@@ -63,7 +63,7 @@ def decision_metrics(decisions):
 def encoder_cache(agent, directory):
     """Disk-backed exact single-row cache; official decision-head forward stays intact."""
     import torch
-    directory.mkdir()
+    directory.mkdir(exist_ok=True)
     original=agent.model.encoder.forward
     stats={'misses':0,'hits':0,'bytes':0,'encoder_tokens':0}
 
@@ -116,7 +116,10 @@ def main(args):
             head=sum(1+len(agent.tok(' '+s,add_special_tokens=False)['input_ids']) for s in opts)
             assert head+len(agent.tok('choice question: '+internal['ins'],add_special_tokens=False)['input_ids'])<=agent.cfg['head_max_len']
     items=training_items(splits['train'],names,specs,encoded)
-    positives=Counter(i['group'] for i in items if i['target']==1 and i['variant']==0)
+    # Exercise the real SDK collator before any expensive forward. `target` is reserved
+    # for soft-label vectors; experiment metadata must not shadow its input fields.
+    collate_items([items[:16]],agent.tok.pad_token_id)
+    positives=Counter(i['group'] for i in items if i['semantic_target']==1 and i['variant']==0)
     frozen={'source_sha256':sha(args.source/'frozen.json'),'model_lock':lock,'seed':seed,
         'epochs_max':args.epochs,'epochs_min':args.min_epochs,'patience':args.patience,'lr':3e-5,'batch':16,'microbatch':1,
         'questions':specs,'max_len_by_case':lengths,'train_items_per_epoch':len(items),
@@ -127,6 +130,13 @@ def main(args):
                   'Same family/positive weights as prior run; full format coverage and training duration are changed.',
                   'No state truncation. Single-row encoder cache preserves dtype and the official head forward.'],
         'versions':{'torch':torch.__version__,'device':torch.cuda.get_device_name(),'amp':str(agent.dtype)}}
+    cache_dir=args.output/'encoder-cache'
+    if args.cache_from:
+        prior=read(args.cache_from/'frozen.json')
+        assert prior['model_lock']==lock and prior['versions']==frozen['versions'], 'Cache model/runtime changed.'
+        cache_dir=args.cache_from/'encoder-cache'
+        assert cache_dir.is_dir()
+        frozen['encoder_cache_source']={'path':str(cache_dir.resolve()),'manifest_sha256':sha(args.cache_from/'frozen.json')}
     (args.output/'sources').mkdir()
     source_files=[Path(__file__),Path(fit_epoch.__code__.co_filename),Path(training_labels.__code__.co_filename)]
     frozen['sources']={p.name:sha(p) for p in source_files}
@@ -168,7 +178,7 @@ def main(args):
         return routes,result
 
     summary={'paid_calls':0,'odoo_calls':0,'epochs':[],'selected_epoch':0,'trainable_parameters':sum(p.numel() for p in params)}
-    with encoder_cache(agent,args.output/'encoder-cache') as cache_stats:
+    with encoder_cache(agent,cache_dir) as cache_stats:
         _,base_train=evaluate(splits['train'],'base-train')
         _,base_dev=evaluate(splits['dev'],'base-dev')
         summary['baseline']={'train':base_train,'dev':base_dev}
@@ -235,6 +245,7 @@ if __name__=='__main__':
     parser.add_argument('--source',type=Path,required=True);parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--epochs',type=int,default=24);parser.add_argument('--min-epochs',type=int,default=12)
     parser.add_argument('--patience',type=int,default=6)
+    parser.add_argument('--cache-from',type=Path,help='Reuse only encoder features from an identical locked model/runtime.')
     args=parser.parse_args()
     if not 1<=args.min_epochs<=args.epochs or args.patience<1:parser.error('Invalid epoch/patience settings.')
     main(args)
