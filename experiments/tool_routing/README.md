@@ -1,5 +1,8 @@
 本实验只评估：在主模型请求前，由 Laya 建议注入哪些 capabilities。生产后端不接入；不预测工具参数，不执行工具，不授予写权限。
 
+2026-09-25 数据补充入口为 `collect_dataset`。先 `freeze` 固定意图、真实读取材料和历史前缀，再 `paid` 每节点调用一次模型，最后 `export` 隔离训练分歧；开发/测试分歧保留。员工、请假不在本轮范围。真实 HTTP 请求和用量均由现有单请求运行器记录，无业务工具执行。
+最新数据、用量与训练状态见 [数据补充结果](DATASET_RESULTS.md)。
+
 历史池已扩展至 1,944 个响应。最新对照采用具体选项、完整决策头和历史计划输入：[论坛调优结果](FORUM_TUNING.md)。此前结果：[scorer 微调](TUNING.md)、[原始模板](RESULTS.md)；[测试入口](../../tests/fixtures/capability_routing/README.md)。
 
 最新维护：复核池扩到 62 个节点，增加原始完整请求与同摘要能力选择的 24 次真实 API 对照，以及修正标签后的本地训练。见 [本轮审查与结果](REVIEWED_RESULTS.md)。旧训练器默认拒绝弱标签，显式复现才使用 `--allow-reference-labels`。

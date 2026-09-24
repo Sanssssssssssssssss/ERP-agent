@@ -21,6 +21,7 @@ def verdict(selected, review):
     unrelated = sorted(selected & set(review['unrelated_groups']))
     accepted = any(selected == set(alt) for alt in review['allowed_injection_sets'])
     return {'selected_groups': sorted(selected), 'missing_required': missing, 'unrelated': unrelated,
+            'missing_preferred':sorted(set(review.get('preferred_groups', []))-selected),
             'status': 'fail' if missing or unrelated else 'pass' if accepted else 'needs_review'}
 
 

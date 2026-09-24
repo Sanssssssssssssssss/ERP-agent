@@ -23,6 +23,7 @@ def score(rows):
     return {'cases':len(rows),'pass':sum(r['status']=='pass' for r in rows),
             'fail':sum(r['status']=='fail' for r in rows),'needs_review':sum(r['status']=='needs_review' for r in rows),
             'missing_required':sum(bool(r['missing_required']) for r in rows),
+            'missing_preferred':sum(bool(r.get('missing_preferred')) for r in rows),
             'unrelated':sum(bool(r['unrelated']) for r in rows),
             'mean_groups':sum(len(r['selected_groups']) for r in rows)/len(rows)}
 
@@ -175,7 +176,8 @@ def main(args):
         assert cache_dir.is_dir()
         frozen['encoder_cache_source']={'path':str(cache_dir.resolve()),'manifest_sha256':sha(args.cache_from/'frozen.json')}
     (args.output/'sources').mkdir()
-    source_files=[Path(__file__),Path(fit_epoch.__code__.co_filename),Path(training_labels.__code__.co_filename)]
+    source_files=[Path(__file__),Path(fit_epoch.__code__.co_filename),Path(training_labels.__code__.co_filename),
+                  Path(verdict.__code__.co_filename)]
     frozen['sources']={p.name:sha(p) for p in source_files}
     for source in source_files:(args.output/'sources'/source.name).write_bytes(source.read_bytes())
     (args.output/'frozen.json').write_text(json.dumps(frozen,indent=2),encoding='utf8')
@@ -211,6 +213,9 @@ def main(args):
                     routes.append(row);log.write(json.dumps(row)+'\n');log.flush()
         result={**score(routes),**decision_metrics(decisions)}
         result['by_variant']={str(v):score([r for r in routes if r['variant']==v]) for v in range(4)}
+        sources={r['id']:r.get('source_kind','legacy_reviewed_prefix') for r in subset}
+        result['by_source']={s:score([r for r in routes if sources[r['id']]==s]) for s in set(sources.values())}
+        result['all_formats_pass']=sum(all(x['status']=='pass' for x in routes if x['id']==r['id']) for r in subset)
         print(json.dumps({'stage':tag,**{k:result[k] for k in ['cases','pass','missing_required','unrelated','balanced_ce']}}),flush=True)
         return routes,result
 

@@ -33,6 +33,16 @@ def base_name(name):
     return name.removeprefix("mcp_odoo_")
 
 
+@lru_cache(maxsize=1)
+def base_tool_names():
+    # Read the contract without importing production dependencies into the ML venv.
+    tree = ast.parse((ROOT/'src/erp_harness/tools/dynamic_tools.py').read_text(encoding='utf8'))
+    values = [ast.literal_eval(n.value.args[0]) for n in tree.body if isinstance(n, ast.Assign)
+              and any(isinstance(t, ast.Name) and t.id in {'BASE_TOOLS','OPTIONAL_NATIVE_BASE_TOOLS'} for t in n.targets)]
+    assert len(values)==2
+    return set.union(*values) | {'find_records'}
+
+
 def catalog():
     path = ROOT / "src/erp_harness/tools/dynamic_tools.py"
     tree = ast.parse(path.read_text(encoding="utf-8"))

@@ -41,6 +41,12 @@ def validate(train, evaluation, groups, dev=()):
             alternatives = row['allowed_injection_sets']
             required, unrelated = set(row['required_groups']), set(row['unrelated_groups'])
             uncertain = set(row['uncertain_groups'])
+            preferred = set(row.get('preferred_groups', []))
+            if preferred:
+                if not row.get('preference_rationale') or preferred & (unrelated | uncertain) or preferred-set(groups):
+                    raise ValueError('Preferred supervision requires explicit, noncontradictory review.')
+                if not any(preferred <= set(allowed) for allowed in alternatives):
+                    raise ValueError('Preferred set must be a permitted alternative.')
             if not alternatives:
                 raise ValueError('Use an explicit empty alternative for base-only, or keep the case unreviewed.')
             for allowed in alternatives:
@@ -59,8 +65,9 @@ def inclusion_labels(row, groups):
 
 
 def training_labels(row, groups):
-    # Optional preloads are valid alternatives, not forced positive targets.
-    return {g: 1 if g in row['required_groups'] else 0 if g in row['unrelated_groups'] else None for g in groups}
+    # Only an explicit reviewed preference is supervised; ordinary optional sets stay masked.
+    positive = set(row['required_groups']) | set(row.get('preferred_groups', []))
+    return {g: 1 if g in positive else 0 if g in row['unrelated_groups'] else None for g in groups}
 
 
 def expanded_reviewed():

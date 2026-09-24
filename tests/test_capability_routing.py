@@ -68,6 +68,22 @@ def test_expanded_labels_do_not_force_optional_preloads_or_leak_families():
     assert verdict([],{'required_groups':[],'unrelated_groups':['migration'],'allowed_injection_sets':[[],['actions']]})['status']=='pass'
 
 
+def test_reviewed_preference_is_supervision_but_not_business_requirement():
+    train, _, _, groups = expanded_reviewed()
+    row = copy.deepcopy(next(r for r in train if r['id']=='2003:agent:0003'))
+    row.update(preferred_groups=['actions'],preference_rationale='Reviewed pending write supports preloading.')
+    validate([row],[],groups)
+    assert training_labels(row,groups)['actions']==1
+    assert verdict([],row)['status']=='pass'
+    with pytest.raises(ValueError,match='Preferred'):
+        validate([{**row,'preference_rationale':''}],[],groups)
+    with pytest.raises(ValueError,match='Preferred'):
+        validate([{**row,'preferred_groups':['migration']}],[],groups)
+    from experiments.tool_routing.collect_dataset import coverage
+    report=coverage([row],groups)
+    assert report['train']['groups']['actions']['1']=={'nodes':1,'families':1}
+
+
 def test_projection_keeps_pre_approval_observations_and_publication_without_future():
     request={'messages':[
         {'role':'user','content':'Confirm PO\n# Odoo Environment\npassword=SECRET\nStage 6 knowledge probe: search first'},
@@ -75,7 +91,9 @@ def test_projection_keeps_pre_approval_observations_and_publication_without_futu
         {'role':'tool','tool_call_id':'a','content':'{"action_status":"pending_approval"}'},
         {'role':'assistant','content':'Waiting for approval.'},
         {'role':'user','content':'The host approved action a.'}],
-        'tools':[{'function':{'name':'mcp_odoo_execute_approved_write'}}],
+        'tools':[{'function':{'name':'mcp_odoo_execute_approved_write'}},
+                 {'function':{'name':'mcp_odoo_get_model_fields','description':'Read field definitions without extra capability.'}},
+                 {'function':{'name':'diagnose_current_run','description':'Read ActionStore execution diagnostics.'}}],
         'response':{'secret_future':'NEVER'}}
     text=routing_state(request);state=json.loads(text)
     assert 'SECRET' not in text and 'NEVER' not in text and 'Stage 6' in state['goal']
@@ -83,6 +101,8 @@ def test_projection_keeps_pre_approval_observations_and_publication_without_futu
     assert state['recent_observations'][0]['tool_call_id']=='a'
     assert state['recent_observations'][0]['observation']['action_status']=='pending_approval'
     assert state['recent_observations'][0]['arguments']['model']=='purchase.order'
+    assert {t['name'] for t in state['available_base_tools']}=={'mcp_odoo_get_model_fields','diagnose_current_run'}
+    assert 'ActionStore' in str(state['available_base_tools'])
 
 
 def test_competitive_choice_maps_labels_without_probability_threshold():

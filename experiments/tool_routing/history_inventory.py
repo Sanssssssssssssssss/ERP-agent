@@ -23,6 +23,7 @@ REPOSITORIES = {
     "erp-harness-refactor": [".runtime"],
     "pi-odoo-harness-lab": [".runtime", "jobs", "artifacts", "runs", "logs"],
     "erp-agent-odoo": ["experiments/odoo", "backend/storage", "reports", ".benchmarks", "benchmarks", "workspace"],
+    "benchmark-runs": ["."],
 }
 PRUNE = ("pytest", "cache", "venv", "node_modules", "baseline-source", "selfcheck", "offline",
          "wheelhouse", "runtime-bundles", "stage7-dist", "model-multilingual", "extensions",
@@ -217,7 +218,7 @@ def task_group(repo, run, request, business_id):
     return business_id, "desktop_business_unresolved", True
 
 
-def build(repositories=None):
+def build(repositories=None, output_dir=FIXTURES):
     PARSE_ERRORS.clear()
     groups, mapping, _, catalog_paths = catalog()
     notes = {"scanned_roots": [], "scan_errors": [], "unpaired_runs": [], "excluded_nonreal": [], "duplicates": 0}
@@ -287,7 +288,7 @@ def build(repositories=None):
                                 "request_path": str(request_path) if request_path else None, "request_sha256": request_hash,
                                 "request_prefix_kind": "session_reconstruction" if reconstruction else "original_provider_request" if request_path else "unavailable",
                                 "prefix_reconstruction": reconstruction, "response_path": str(output), "response_sha256": digest(output), "response_pointer": pointer,
-                                "source_repo": repo, "source_run": str(run), "source_family": run.relative_to(ROOT.parent / repo).parts[1],
+                                "source_repo": repo, "source_run": str(run), "source_family": run.relative_to(ROOT.parent / repo).parts[1 if repo != 'benchmark-runs' else 0],
                                 "task_id": task_id, "source_business_id": business_id, "business_group": business_group,
                                 "grouping_needs_review": grouping_review,
                                 "business_group_evidence": "ERPBench task number in trial path" if business_group.startswith("erpbench:") else "Unique sale order reference in first original user message" if not grouping_review else "Unresolved desktop sources conservatively grouped together",
@@ -334,9 +335,9 @@ def build(repositories=None):
             inventory["legacy_session_database"] = {"path": str(old_sessions), "sha256": digest(old_sessions),
                 "sessions": connection.execute("SELECT count(*) FROM sessions").fetchone()[0],
                 "session_items": connection.execute("SELECT count(*) FROM session_items").fetchone()[0]}
-    FIXTURES.mkdir(parents=True, exist_ok=True)
-    (FIXTURES / "history_cases.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in records), encoding="utf-8")
-    (FIXTURES / "history_inventory.json").write_text(json.dumps(inventory, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "history_cases.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in records), encoding="utf-8")
+    (output_dir / "history_inventory.json").write_text(json.dumps(inventory, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return inventory
 
 
@@ -349,11 +350,12 @@ def self_check():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", choices=list(REPOSITORIES), action="append")
+    parser.add_argument("--output", type=Path, default=FIXTURES)
     parser.add_argument("--self-check", action="store_true")
     args = parser.parse_args()
     if args.self_check:
         self_check()
         print('PASS: historical task grouping')
     else:
-        result = build(args.repo)
+        result = build(args.repo, args.output)
         print(json.dumps({"indexed_responses": result["indexed_responses"], "groups": result["counts"]}, ensure_ascii=False))

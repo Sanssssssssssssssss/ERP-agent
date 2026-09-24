@@ -2,7 +2,7 @@
 import json
 import re
 
-from .build_cases import base_name, catalog, TOKEN
+from .build_cases import base_name, base_tool_names, catalog, TOKEN
 from .decision_dataset import bounded, state_from_request
 
 
@@ -17,6 +17,10 @@ def routing_state(request):
         value['environment_instructions_omitted'] = True
     groups, mapping, _, _ = catalog()
     tools = {base_name(t['function']['name']) for t in request.get('tools', [])}
+    value['available_base_tools'] = [
+        {'name':t['function']['name'],'description':t['function'].get('description','')[:240]}
+        for t in request.get('tools', [])
+        if base_name(t['function']['name']) in base_tool_names()]
     value['published_capabilities'] = sorted({mapping[t] for t in tools if t in mapping})
     value['publication_is_partial'] = [g for g in value['published_capabilities']
                                       if not set(groups[g]['tools']) <= tools]
