@@ -170,7 +170,7 @@ async def paid(folder, limit):
                 output = await complete(read(folder/row['teacher_request']),target,api_key=os.environ['COMMAND_CODE_API_KEY'])
                 selected = parse_selector(output,groups)
                 judgment = verdict(selected,row) if selected is not None else {'status':'inconclusive'}
-                judgment['preferred_agreement'] = selected is not None and set(row['preferred_groups'])<=set(selected)
+                judgment['preferred_agreement'] = selected is not None and set(row.get('preferred_groups', []))<=set(selected)
                 judgment['id'] = row['id']; write(target/'judgment.json',judgment)
                 print(json.dumps({'id':row['id'],'status':judgment['status'],
                     'preferred':judgment['preferred_agreement'],'tokens':(output['usage'] or {}).get('total_tokens')}),flush=True)
@@ -206,7 +206,7 @@ def export(folder, target, input_audit=None):
         if output.get('usage'):usages.append(output['usage'])
         good = (output.get('posts')==1 and not output.get('error') and output.get('usage') is not None
                 and selected is not None and verdict(selected,row)['status']=='pass'
-                and set(row['preferred_groups'])<=set(selected))
+                and set(row.get('preferred_groups', []))<=set(selected))
         # Never drop hard test/dev cases based on the teacher's prediction.
         if good or row['split']!='train':
             admitted.append({**row,'teacher_review':'agreed' if good else 'disagreed_or_incomplete'})
