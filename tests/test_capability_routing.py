@@ -251,6 +251,28 @@ def test_joint_source_balance_preserves_class_mass_and_historical_negatives():
     assert rows[0]['weight'] == 1.  # Frozen inputs are not mutated.
 
 
+def test_covered_exposures_keep_both_phases_and_exact_weight_mass():
+    from collections import defaultdict
+    from experiments.tool_routing.train_joint import balance_phases, epoch_items
+    cases=[{'id':'pending','business_group':'same'}, {'id':'done','business_group':'same'},
+           {'id':'rare','business_group':'other'}]
+    items=[{'case_id':c,'group':'actions','variant':v,'semantic_target':t,'weight':w}
+           for c,t,w in [('pending',1,.1),('done',0,9.9),('rare',1,100.)] for v in range(4)]
+    balanced=balance_phases(items,cases)
+    assert [r['weight'] for r in balanced]==[5.]*8+[100.]*4
+    seen=set()
+    for epoch in range(1,5):
+        original=epoch_items(balanced,epoch)
+        covered=epoch_items(balanced,epoch,cover_weighted_pairs=True)
+        mass=defaultdict(float)
+        for r in covered:
+            assert 0 < r['weight'] <= 1
+            mass[r['case_id']]+=r['weight'];seen.add((r['case_id'],r['variant']))
+        assert dict(mass)==pytest.approx({r['case_id']:r['weight'] for r in original})
+        assert len(mass)==3
+    assert len(seen)==12
+
+
 def test_local_router_rejects_invalid_or_oversized_context_before_inference():
     from unittest.mock import Mock
     from experiments.tool_routing.router import CapabilityRouter

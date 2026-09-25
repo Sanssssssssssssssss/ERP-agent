@@ -33,8 +33,8 @@ def unique_items(items):
     return list(result.values())
 
 
-def epoch_items(items, epoch, sample_by_weight=False):
-    # Every pair sees all four formats in four epochs; formats are mixed within each epoch.
+def epoch_items(items, epoch, sample_by_weight=False, cover_weighted_pairs=False):
+    # Rotate formats; random sampling can omit pairs, covered exposures cannot.
     rows = [dict(i) for i in items if i['variant'] ==
             (int(hashlib.sha256((i['case_id']+'|'+i['group']).encode()).hexdigest()[:8], 16)+epoch-1) % 4]
     scale = len(rows) / sum(i['weight'] for i in rows)
@@ -44,6 +44,9 @@ def epoch_items(items, epoch, sample_by_weight=False):
     if sample_by_weight:
         # Repeated unit-weight exposures avoid large rare-example gradients being clipped away.
         return [{**row, 'weight': 1.} for row in rng.choices(rows, weights=[r['weight'] for r in rows], k=len(rows))]
+    if cover_weighted_pairs:
+        rows = [{**row, 'weight': row['weight']/math.ceil(row['weight'])}
+                for row in rows for _ in range(math.ceil(row['weight']))]
     rng.shuffle(rows)
     return rows
 
@@ -65,6 +68,20 @@ def balance_sources(items, cases):
         bucket = masses[row['group'], row['variant'], row['semantic_target']]
         scale = sum(bucket.values()) / (len(bucket) * bucket[origins[row['case_id']]])
         result.append({**row, 'weight': row['weight'] * scale})
+    return result
+
+
+def balance_phases(items, cases):
+    """Preserve family mass; balance judged include/exclude phases within it."""
+    families = {r['id']: r['business_group'] for r in cases}
+    masses = defaultdict(lambda: defaultdict(float))
+    for row in items:
+        masses[row['group'], row['variant'], families[row['case_id']]][row['semantic_target']] += row['weight']
+    result = []
+    for row in items:
+        bucket = masses[row['group'], row['variant'], families[row['case_id']]]
+        result.append({**row, 'weight': row['weight'] * sum(bucket.values()) /
+                       (len(bucket)*bucket[row['semantic_target']])})
     return result
 
 
@@ -110,6 +127,8 @@ def main(args):
     items = unique_items(training_items(splits['train'], names, specs, encoded))
     if args.balance_sources:
         items = balance_sources(items, splits['train'])
+    if args.balance_phases:
+        items = balance_phases(items, splits['train'])
     frozen = {'source_path': str(args.source.resolve()), 'source_sha256': sha(args.source/'frozen.json'), 'model_lock': lock, 'seed': seed,
               'loaded_model_files_sha256': {name:sha(model_path/name) for name in lock['files_sha256']},
               'questions': specs, 'max_len_by_case': lengths, 'epochs': args.epochs,
@@ -117,9 +136,12 @@ def main(args):
               'selection': 'Dev whole-route passes, then required misses, then unrelated selections. All four formats. Epoch 0 eligible.',
               'objective': 'Reviewed weighted hard-label cross entropy; unknown labels masked. No RLCD or fabricated soft targets.',
               'format_schedule': ('Weighted sampling with replacement; each pair rotates format over four epochs. Rare pairs repeat, low-weight pairs may be absent.'
-                                  if args.sample_by_weight else 'Each judged pair once per epoch; all four formats in every four consecutive epochs.'),
+                                  if args.sample_by_weight else 'Every judged pair covered; rotate all four formats in four epochs. Split large weights into bounded exposures when enabled.'),
               'balance_sources': args.balance_sources,
+              'balance_phases': args.balance_phases,
               'sample_by_weight': args.sample_by_weight,
+              'cover_weighted_pairs': args.cover_weighted_pairs,
+              'evaluation_batch': 'All capability questions together, matching the deployed SDK call.',
               'encoder_scope': 'All encoder layers trained; input embeddings frozen to fit local VRAM.',
               'baseline_from': str(args.baseline_from.resolve()) if args.baseline_from else None,
               'baseline_hashes': {n: sha(args.baseline_from/n) for n in ['frozen.json', 'summary.json', 'base-dev.jsonl']} if args.baseline_from else None,
@@ -138,12 +160,12 @@ def main(args):
             for row in subset:
                 for v, spec in enumerate(specs):
                     selected = []; predictions = {}
+                    logits, _ = agent._infer(collate_items([encoded[row['id']][v]], agent.tok.pad_token_id))
+                    assert agent.device.type == 'cuda' and torch.isfinite(logits).all()
                     for gi, group in enumerate(names):
-                        logits, _ = agent._infer(collate_items([[encoded[row['id']][v][gi]]], agent.tok.pad_token_id))
-                        assert agent.device.type == 'cuda' and torch.isfinite(logits).all()
                         slot = list(spec[group]['criteria']).index('A' if v < 2 else 'B')
-                        predictions[group] = float(logits.softmax(-1)[0, slot])
-                        if int(logits.argmax(-1)) == slot:
+                        predictions[group] = float(logits.softmax(-1)[gi, slot])
+                        if int(logits[gi].argmax(-1)) == slot:
                             selected.append(group)
                     result = {'id': row['id'], 'variant': v, 'probabilities': predictions, **verdict(selected, row)}
                     rows.append(result); log.write(json.dumps(result)+'\n'); log.flush()
@@ -154,7 +176,7 @@ def main(args):
 
     if args.baseline_from:
         prior = read(args.baseline_from/'frozen.json')
-        for key in ['source_sha256', 'model_lock', 'questions', 'max_len_by_case']:
+        for key in ['source_sha256', 'model_lock', 'questions', 'max_len_by_case', 'evaluation_batch']:
             assert prior[key] == frozen[key], f'Baseline differs: {key}'
         baseline = read(args.baseline_from/'summary.json')['baseline']
         summary['baseline'] = baseline
@@ -175,10 +197,10 @@ def main(args):
     summary['trainable_parameters'] = sum(p.numel() for p in params)
     optimizer = torch.optim.AdamW([{'params': encoder, 'lr': 2.5e-5, 'initial_lr': 2.5e-5},
                                   {'params': head, 'lr': 1.e-4, 'initial_lr': 1.e-4}], weight_decay=.01)
-    total_steps = sum(math.ceil(len(epoch_items(items, e, args.sample_by_weight))/16) for e in range(1, args.epochs+1))
+    total_steps = sum(math.ceil(len(epoch_items(items, e, args.sample_by_weight, args.cover_weighted_pairs))/16) for e in range(1, args.epochs+1))
     step = 0
     for epoch in range(1, args.epochs+1):
-        agent.model.train(); rows = epoch_items(items, epoch, args.sample_by_weight); loss_sum = 0.
+        agent.model.train(); rows = epoch_items(items, epoch, args.sample_by_weight, args.cover_weighted_pairs); loss_sum = 0.
         for offset in range(0, len(rows), 16):
             chunk = rows[offset:offset+16]; optimizer.zero_grad(set_to_none=True)
             factor = min(1., (step+1)/20) * .5*(1+math.cos(math.pi*step/total_steps))
@@ -217,9 +239,9 @@ def main(args):
             for v, spec in enumerate(specs):
                 selected = []; delta = 0.
                 expected = next(r for r in routes if r['id'] == row['id'] and r['variant'] == v)
+                out = agent.system_one(row['state'], spec, max_len=lengths[row['id']])
+                assert agent.device.type == 'cuda'
                 for group in names:
-                    out = agent.system_one(row['state'], {group: spec[group]}, max_len=lengths[row['id']])
-                    assert agent.device.type == 'cuda'
                     label = 'A' if v < 2 else 'B'; answer = out['answers'][group]
                     if answer['choice'] == label:
                         selected.append(group)
@@ -238,7 +260,10 @@ if __name__ == '__main__':
     p.add_argument('--source', type=Path, required=True); p.add_argument('--output', type=Path, required=True)
     p.add_argument('--epochs', type=int, default=4); p.add_argument('--baseline-from', type=Path)
     p.add_argument('--balance-sources', action='store_true', help='Equal historical/authored mass within each reviewed capability class.')
-    p.add_argument('--sample-by-weight', action='store_true', help='Sample proportional to reviewed weights and train each exposure at unit weight.')
+    p.add_argument('--balance-phases', action='store_true', help='Equal known positive/negative phase mass within each business family and capability.')
+    exposure=p.add_mutually_exclusive_group()
+    exposure.add_argument('--sample-by-weight', action='store_true', help='Sample proportional to reviewed weights and train each exposure at unit weight.')
+    exposure.add_argument('--cover-weighted-pairs', action='store_true', help='Cover every pair, splitting weights above one into repeated bounded-loss exposures.')
     a = p.parse_args()
     if a.epochs < 4 or a.epochs % 4:
         p.error('Use complete four-epoch format cycles.')
