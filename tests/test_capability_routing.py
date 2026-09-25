@@ -257,13 +257,18 @@ def test_local_router_rejects_invalid_or_oversized_context_before_inference():
     router=object.__new__(CapabilityRouter)
     tokenizer=Mock(return_value={'input_ids':list(range(8000))})
     tokenizer.mask_token='<mask>'
-    router.agent=SimpleNamespace(tok=tokenizer,cfg={'max_len':8192,'head_max_len':256},system_one=Mock())
+    router.device_type='cuda'
+    router.agent=SimpleNamespace(tok=tokenizer,cfg={'max_len':8192,'head_max_len':256},
+                                 device=SimpleNamespace(type='cuda'),system_one=Mock())
     with pytest.raises(ValueError,match='complete model request'):
         router.route({'messages':[]})
     with pytest.raises(ValueError,match='provider message roles'):
         router.route({'messages':[{'role':'user','content':'Confirm the order.'},
                                   {'role':'toolResult','content':'Pi session data'}],'tools':[]})
     with pytest.raises(ValueError,match='exceeds model context'):
+        router.route({'messages':[{'role':'user','content':'Confirm the requested order.'}],'tools':[]})
+    router.agent.device.type='cpu'
+    with pytest.raises(RuntimeError,match='Inference device changed'):
         router.route({'messages':[{'role':'user','content':'Confirm the requested order.'}],'tools':[]})
     router.agent.system_one.assert_not_called()
 

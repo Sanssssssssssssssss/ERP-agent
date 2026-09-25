@@ -45,6 +45,8 @@ class CapabilityRouter:
         if not all(isinstance(m,dict) and m.get('role') in {'system','developer','user','assistant','tool'}
                    for m in request['messages']) or not any(m.get('role')=='user' for m in request['messages']):
             raise ValueError('Request requires provider message roles and user context')
+        if self.agent.device.type != self.device_type:
+            raise RuntimeError('Inference device changed; use the existing router')
         started = time.perf_counter()
         state = routing_state(request)
         size = len(self.agent.tok(state.replace(self.agent.tok.mask_token,' '),add_special_tokens=False)['input_ids'])
