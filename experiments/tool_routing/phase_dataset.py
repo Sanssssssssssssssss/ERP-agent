@@ -65,6 +65,8 @@ def freeze(source, reviews, output):
         assert all(new[k]==v for k,v in old.items() if k not in {'teacher_request','teacher_request_sha256','state'})
         projected=json.loads(new['state'])
         previous=json.loads(old['state'])
+        if not previous.get('prior_assistant_intent_unverified'):
+            previous['prior_assistant_intent_unverified'] = projected['prior_assistant_intent_unverified']
         for field in ['observation_order','latest_update_source_message']:
             projected.pop(field)
             previous.pop(field,None)
@@ -74,7 +76,7 @@ def freeze(source, reviews, output):
     write(output/'frozen.json',{'hashes':hashes,'paid_posts_max':len(rows)-len(original),
         'parent_manifest':str((source/'frozen.json').resolve()),'parent_manifest_sha256':sha(source/'frozen.json'),
         'source_hashes':{str(p):sha(p) for p in [Path(__file__),reviews,Path(routing_state.__code__.co_filename)]},
-        'limits':['Existing labels unchanged. Projection adds event ordering and user/host message position; original evidence preserved.',
+        'limits':['Existing labels unchanged. Projection adds event ordering and missing prior reasoning as unverified intent; other evidence preserved.',
                   'Authored prerequisites are explicit counterfactual training probes, not historical executions.',
                   'Historical labels use the request prefix; teacher agreement is corroboration, not business acceptance.']})
     write(output/'coverage.json',coverage(rows,groups))

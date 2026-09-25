@@ -104,7 +104,8 @@ def test_projection_keeps_pre_approval_observations_and_publication_without_futu
     assert {t['name'] for t in state['available_base_tools']}=={'mcp_odoo_get_model_fields','diagnose_current_run'}
     assert 'ActionStore' in str(state['available_base_tools'])
     request['messages'] += [
-        {'role':'assistant','tool_calls':[{'id':'b','function':{'name':'mcp_odoo_execute_approved_write','arguments':'{}'}}]},
+        {'role':'assistant','content':None,'reasoning_content':'Execute the approved action, then read back.',
+         'tool_calls':[{'id':'b','function':{'name':'mcp_odoo_execute_approved_write','arguments':'{}'}}]},
         {'role':'tool','tool_call_id':'b','content':'{"action_status":"verified"}'}]
     completed=json.loads(routing_state(request))
     assert completed['latest_update_source_message']==4
@@ -112,6 +113,9 @@ def test_projection_keeps_pre_approval_observations_and_publication_without_futu
     assert completed['recent_observations'][0]['observation']['action_status']=='verified'
     assert completed['recent_observations'][1]['observation']['action_status']=='pending_approval'
     assert completed['observation_order'].startswith('newest_first')
+    assert completed['prior_assistant_intent_unverified']=='Execute the approved action, then read back.'
+    request['messages'][-2]['content']='The action is submitted; read its status.'
+    assert json.loads(routing_state(request))['prior_assistant_intent_unverified']==request['messages'][-2]['content']
 
 
 def test_competitive_choice_maps_labels_without_probability_threshold():

@@ -64,7 +64,7 @@ def routing_state(request):
                                                 if m.get('role')=='user'), None)
     value['omitted_observations'] = sum(m.get('role') == 'tool' for m in messages)-len(observations)
     prior = next((m for m in reversed(messages) if m.get('role') == 'assistant'), {})
-    value['prior_assistant_intent_unverified'] = bounded(prior.get('content') or '')
+    value['prior_assistant_intent_unverified'] = bounded(prior.get('content') or prior.get('reasoning_content') or '')
     value['interpretation'] = ('Tool observations are historical. Publication does not authorize writes. '
                                'An assistant plan is not business evidence. Missing older evidence stays unknown.')
     return TOKEN.sub('[APPROVAL_TOKEN_REDACTED]', json.dumps(value, ensure_ascii=False, separators=(',', ':')))
