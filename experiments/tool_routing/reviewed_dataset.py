@@ -42,6 +42,9 @@ def validate(train, evaluation, groups, dev=()):
             required, unrelated = set(row['required_groups']), set(row['unrelated_groups'])
             uncertain = set(row['uncertain_groups'])
             preferred = set(row.get('preferred_groups', []))
+            masked = set(row.get('training_mask_groups', []))
+            if masked and (purpose != 'train' or masked-set(groups) or masked & (required | preferred)):
+                raise ValueError('Training disagreement masks cannot alter evaluation or required capabilities.')
             if preferred:
                 if not row.get('preference_rationale') or preferred & (unrelated | uncertain) or preferred-set(groups):
                     raise ValueError('Preferred supervision requires explicit, noncontradictory review.')
@@ -67,7 +70,8 @@ def inclusion_labels(row, groups):
 def training_labels(row, groups):
     # Only an explicit reviewed preference is supervised; ordinary optional sets stay masked.
     positive = set(row['required_groups']) | set(row.get('preferred_groups', []))
-    return {g: 1 if g in positive else 0 if g in row['unrelated_groups'] else None for g in groups}
+    masked = set(row.get('training_mask_groups', []))
+    return {g: None if g in masked else 1 if g in positive else 0 if g in row['unrelated_groups'] else None for g in groups}
 
 
 def expanded_reviewed():

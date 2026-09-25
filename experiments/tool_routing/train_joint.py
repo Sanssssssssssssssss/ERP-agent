@@ -107,10 +107,15 @@ def main(args):
     cases = read(args.source/'cases.json'); groups = read(args.source/'groups.json'); names = list(groups)
     splits = {s: [r for r in cases if r['split'] == s] for s in ['train', 'dev', 'test']}
     validate(splits['train'], splits['test'], groups, splits['dev'])
-    lock = read(WORK/'model-lock.json'); model_path = WORK/'model-multilingual'
-    assert sha(model_path/'model.safetensors') == lock['files_sha256']['model.safetensors']
+    lock = read(WORK/'model-lock.json'); model_path = args.initial_model or WORK/'model-multilingual'
+    if not args.initial_model:
+        assert sha(model_path/'model.safetensors') == lock['files_sha256']['model.safetensors']
     args.output.mkdir(parents=True, exist_ok=False)
-    agent = laya.load(str(model_path.resolve()), device='cuda')
+    if args.initial_model:
+        from .router import CapabilityRouter
+        agent = CapabilityRouter(model_path).agent
+    else:
+        agent = laya.load(str(model_path.resolve()), device='cuda')
     assert agent.device.type == 'cuda' and agent._fast is None and list(agent.temperature) == [1., 1., 1.]
     specs = [joint_questions(groups, label, first) for label in ['A', 'B'] for first in [False, True]]
     for spec in specs:
@@ -129,10 +134,13 @@ def main(args):
         items = balance_sources(items, splits['train'])
     if args.balance_phases:
         items = balance_phases(items, splits['train'])
+    lr_encoder, lr_head = (2.5e-6, 1.e-5) if args.initial_model else (2.5e-5, 1.e-4)
     frozen = {'source_path': str(args.source.resolve()), 'source_sha256': sha(args.source/'frozen.json'), 'model_lock': lock, 'seed': seed,
               'loaded_model_files_sha256': {name:sha(model_path/name) for name in lock['files_sha256']},
               'questions': specs, 'max_len_by_case': lengths, 'epochs': args.epochs,
-              'lr_encoder': 2.5e-5, 'lr_head': 1.e-4, 'batch': 16, 'microbatch': 1,
+              'lr_encoder': lr_encoder, 'lr_head': lr_head, 'batch': 16, 'microbatch': 1,
+              'initial_model': str(model_path.resolve()) if args.initial_model else None,
+              'initial_model_manifest_sha256': sha(model_path/'router.json') if args.initial_model else None,
               'selection': 'Dev whole-route passes, then required misses, then unrelated selections. All four formats. Epoch 0 eligible.',
               'objective': 'Reviewed weighted hard-label cross entropy; unknown labels masked. No RLCD or fabricated soft targets.',
               'format_schedule': ('Weighted sampling with replacement; each pair rotates format over four epochs. Rare pairs repeat, low-weight pairs may be absent.'
@@ -195,8 +203,8 @@ def main(args):
     head = [p for n, p in agent.model.named_parameters() if p.requires_grad and not n.startswith('encoder.')]
     assert encoder and head and not any(p.requires_grad for p in agent.model.encoder.get_input_embeddings().parameters())
     summary['trainable_parameters'] = sum(p.numel() for p in params)
-    optimizer = torch.optim.AdamW([{'params': encoder, 'lr': 2.5e-5, 'initial_lr': 2.5e-5},
-                                  {'params': head, 'lr': 1.e-4, 'initial_lr': 1.e-4}], weight_decay=.01)
+    optimizer = torch.optim.AdamW([{'params': encoder, 'lr': lr_encoder, 'initial_lr': lr_encoder},
+                                  {'params': head, 'lr': lr_head, 'initial_lr': lr_head}], weight_decay=.01)
     total_steps = sum(math.ceil(len(epoch_items(items, e, args.sample_by_weight, args.cover_weighted_pairs))/16) for e in range(1, args.epochs+1))
     step = 0
     for epoch in range(1, args.epochs+1):
@@ -259,6 +267,7 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--source', type=Path, required=True); p.add_argument('--output', type=Path, required=True)
     p.add_argument('--epochs', type=int, default=4); p.add_argument('--baseline-from', type=Path)
+    p.add_argument('--initial-model', type=Path, help='Continue from a verified exported router; use one tenth of the initial learning rate.')
     p.add_argument('--balance-sources', action='store_true', help='Equal historical/authored mass within each reviewed capability class.')
     p.add_argument('--balance-phases', action='store_true', help='Equal known positive/negative phase mass within each business family and capability.')
     exposure=p.add_mutually_exclusive_group()

@@ -72,7 +72,7 @@ def export(run, destination):
     from safetensors.torch import load_file, save_file
     frozen=read(run/'frozen.json'); summary=read(run/'summary.json')
     assert summary['sdk_parity']['same_sets']==summary['sdk_parity']['cases']
-    base=WORK/'model-multilingual'
+    base=Path(frozen['initial_model']) if frozen.get('initial_model') else WORK/'model-multilingual'
     for name,digest in frozen['loaded_model_files_sha256'].items():
         assert sha(base/name)==digest, name
     destination.mkdir(parents=True,exist_ok=False)

@@ -273,6 +273,22 @@ def test_covered_exposures_keep_both_phases_and_exact_weight_mass():
     assert len(seen)==12
 
 
+def test_training_disagreement_mask_preserves_required_labels_and_review():
+    from experiments.tool_routing.reviewed_dataset import training_labels, validate
+    import copy
+    rows=json.loads((FIXTURES/'phase_training.json').read_text(encoding='utf8'))['historical']
+    row=copy.deepcopy(next(r for r in rows if r['required_groups'] and r['unrelated_groups']))
+    positive=next(iter(set(row['required_groups'])|set(row.get('preferred_groups',[]))))
+    negative=next(iter(row['unrelated_groups']))
+    groups={positive:{},negative:{}}
+    row['training_mask_groups']=[negative]
+    assert training_labels(row,groups)=={positive:1,negative:None}
+    assert negative in row['unrelated_groups']
+    row['training_mask_groups']=[positive]
+    with pytest.raises(ValueError,match='disagreement masks'):
+        validate([row],[],{g:{} for g in CAPABILITY_GROUPS})
+
+
 def test_local_router_rejects_invalid_or_oversized_context_before_inference():
     from unittest.mock import Mock
     from experiments.tool_routing.router import CapabilityRouter

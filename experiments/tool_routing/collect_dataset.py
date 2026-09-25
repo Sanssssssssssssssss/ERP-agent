@@ -180,7 +180,7 @@ async def paid(folder, limit):
     await asyncio.gather(worker(),worker())
 
 
-def export(folder, target, input_audit=None):
+def export(folder, target, input_audit=None, mask_training_disagreements=False):
     rows = read(folder/'cases.json');groups = read(folder/'groups.json')
     frozen = read(folder/'frozen.json')
     for name,digest in frozen['hashes'].items():assert sha(folder/name)==digest
@@ -207,6 +207,16 @@ def export(folder, target, input_audit=None):
         good = (output.get('posts')==1 and not output.get('error') and output.get('usage') is not None
                 and selected is not None and verdict(selected,row)['status']=='pass'
                 and set(row.get('preferred_groups', []))<=set(selected))
+        partial = (mask_training_disagreements and row['split']=='train' and not good
+                   and output.get('posts')==1 and not output.get('error') and output.get('usage') is not None
+                   and selected is not None and (set(row['required_groups'])|set(row.get('preferred_groups', []))) <= set(selected))
+        if partial:
+            # Keep the original review; only disputed negatives lose training supervision.
+            masked=sorted(set(selected)&set(row['unrelated_groups']))
+            admitted.append({**row,'teacher_review':'partial_agreement','training_mask_groups':masked})
+            quarantined.append({'id':row['id'],'split':'train','selected':selected,'excluded_from_training':False,
+                                'masked_groups':masked,'reason':'Required/preferred capabilities agree; disputed negatives are unsupervised.'})
+            continue
         # Never drop hard test/dev cases based on the teacher's prediction.
         if good or row['split']!='train':
             admitted.append({**row,'teacher_review':'agreed' if good else 'disagreed_or_incomplete'})
@@ -235,9 +245,10 @@ if __name__=='__main__':
     p.add_argument('operation',choices=['freeze','paid','export']);p.add_argument('--folder',type=Path,required=True)
     p.add_argument('--facts',type=Path);p.add_argument('--history',type=Path);p.add_argument('--output',type=Path)
     p.add_argument('--input-audit',type=Path)
+    p.add_argument('--mask-training-disagreements',action='store_true',help='Retain agreed training labels when all required capabilities agree; mask disputed negatives.')
     p.add_argument('--extra-scenarios',type=Path,help='Additional training-only intents; optional variants column avoids duplicate context expansion.')
     p.add_argument('--limit',type=int)
     a=p.parse_args()
     if a.operation=='freeze':freeze(a.folder,a.facts,a.history,a.extra_scenarios)
     elif a.operation=='paid':asyncio.run(paid(a.folder,a.limit))
-    else:export(a.folder,a.output,a.input_audit)
+    else:export(a.folder,a.output,a.input_audit,a.mask_training_disagreements)

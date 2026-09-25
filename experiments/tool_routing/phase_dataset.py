@@ -22,7 +22,7 @@ def freeze(source, reviews, output):
     spec = read(reviews); output.mkdir(parents=True, exist_ok=False)
     template = {'model':'deepseek/deepseek-v4-flash','reasoning_effort':'high',
                 'stream':True,'stream_options':{'include_usage':True},'store':False}
-    for item in spec['historical']:
+    for item in spec['historical'] + spec.get('authored_prefixes', []):
         request = verify_source(item)
         rows.append({**item, 'state':routing_state(request)})
     for parent_id in spec['long_goal_parents']:
