@@ -3,13 +3,15 @@
 2026-09-25 数据补充入口为 `collect_dataset`。先 `freeze` 固定意图、真实读取材料和历史前缀，再 `paid` 每节点调用一次模型，最后 `export` 隔离训练分歧；开发/测试分歧保留。员工、请假不在本轮范围。真实 HTTP 请求和用量均由现有单请求运行器记录，无业务工具执行。
 最新数据、用量与训练状态见 [数据补充结果](DATASET_RESULTS.md)。
 
+当前训练入口为 `python -m experiments.tool_routing.train_joint --source .runtime/capability-routing-20260925/dataset-v4 --output .runtime/routing-joint-new --epochs 4`，使用隔离 ML 环境。编码器层与决策头联合训练，词嵌入冻结；每四轮覆盖全部选项格式，权重只按开发集选择。下文保留旧实验复现入口。
+
 历史池已扩展至 1,944 个响应。最新对照采用具体选项、完整决策头和历史计划输入：[论坛调优结果](FORUM_TUNING.md)。此前结果：[scorer 微调](TUNING.md)、[原始模板](RESULTS.md)；[测试入口](../../tests/fixtures/capability_routing/README.md)。
 
 最新维护：复核池扩到 62 个节点，增加原始完整请求与同摘要能力选择的 24 次真实 API 对照，以及修正标签后的本地训练。见 [本轮审查与结果](REVIEWED_RESULTS.md)。旧训练器默认拒绝弱标签，显式复现才使用 `--allow-reference-labels`。
 
 完整训练结果见 [训练审计](TRAINING_AUDIT.md)：修复采样后完成 14 轮、2,478 次更新，开发集选第 8 轮；测试默认格式 6/21，四格式合计 19/84。SDK 复算一致，泛化与格式稳健性未达标，继续保持实验隔离。
 
-当前主模型会自己调用 list/configure，再在下一轮拿到工具。Laya 可以前置能力选择，但包含业务读取的混合轮不能直接删掉。首轮用本地多语言 checkpoint，每个 capability 一个 `noul` 问题；一次 `system_one(state, questions)` 批量输出十组概率。0.5 只是固定实验阈值，不代表已校准。
+当前主模型会自己调用 list/configure，再在下一轮拿到工具。Laya 可以前置能力选择，但包含业务读取的混合轮不能直接删掉。使用本地多语言 checkpoint，每个 capability 一个 `noul` 问题；一次 `system_one(state, questions)` 批量输出本轮八组概率，员工与请假排除。0.5 只是固定实验阈值，不代表已校准。
 
 运行入口：
 
