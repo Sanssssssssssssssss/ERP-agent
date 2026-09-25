@@ -12,7 +12,7 @@ from .build_cases import base_name, read
 from .decision_dataset import FIXTURES
 from .laya_probe import sha
 from .reviewed_dataset import expanded_reviewed, verify_source
-from .routing_state import routing_state
+from .routing_state import PHASE_CONTRACT, routing_state
 
 
 def verdict(selected, review):
@@ -30,7 +30,7 @@ def selector_payload(request, state, groups):
         'messages': [
             {'role':'system', 'content':
              'Select the complete optional capability set to publish for the next ERP assistant turn. '
-             'Use the smallest relevant set, including capabilities needed for the pending business operation. '
+             'Use the smallest relevant set. '+PHASE_CONTRACT+' '
              'Base search/read/aggregation/schema/SOP/verification and run diagnosis remain available. '
              'An empty set means base tools suffice. Current publication may contain unrelated tools; '
              'do not blindly retain it. Preloading never authorizes a write or retry. '

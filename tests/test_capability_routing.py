@@ -103,6 +103,15 @@ def test_projection_keeps_pre_approval_observations_and_publication_without_futu
     assert state['recent_observations'][0]['arguments']['model']=='purchase.order'
     assert {t['name'] for t in state['available_base_tools']}=={'mcp_odoo_get_model_fields','diagnose_current_run'}
     assert 'ActionStore' in str(state['available_base_tools'])
+    request['messages'] += [
+        {'role':'assistant','tool_calls':[{'id':'b','function':{'name':'mcp_odoo_execute_approved_write','arguments':'{}'}}]},
+        {'role':'tool','tool_call_id':'b','content':'{"action_status":"verified"}'}]
+    completed=json.loads(routing_state(request))
+    assert completed['latest_update_source_message']==4
+    assert completed['recent_observations'][0]['source_message']==6
+    assert completed['recent_observations'][0]['observation']['action_status']=='verified'
+    assert completed['recent_observations'][1]['observation']['action_status']=='pending_approval'
+    assert completed['observation_order'].startswith('newest_first')
 
 
 def test_competitive_choice_maps_labels_without_probability_threshold():
@@ -217,6 +226,18 @@ def test_training_expansion_adds_intents_without_changing_holdout():
     assert all(r['split'] == 'train' and r['variants'] in {'0', '1', '2'} for r in rows)
     groups = {g for r in rows for g in r['preferred'].split(',')} - {'-'}
     assert groups == set(CAPABILITY_GROUPS) - {'employee', 'time_off'}
+
+
+def test_joint_source_balance_preserves_class_mass_and_historical_negatives():
+    from experiments.tool_routing.train_joint import balance_sources
+    cases = [{'id':'history','source_kind':'historical_business'},
+             {'id':'probe','source_kind':'new_scripted_contract_probe'}]
+    rows = [{'case_id':c,'group':'actions','variant':0,'semantic_target':t,'weight':w}
+            for c,t,w in [('history',0,1.),('probe',0,99.),('history',1,20.)]]
+    result = balance_sources(rows,cases)
+    assert [r['weight'] for r in result] == [50.,50.,20.]
+    assert sum(r['weight'] for r in result) == sum(r['weight'] for r in rows)
+    assert rows[0]['weight'] == 1.  # Frozen inputs are not mutated.
 
 
 def test_real_history_index_has_provenance_and_honest_gaps():

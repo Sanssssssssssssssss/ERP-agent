@@ -8,6 +8,7 @@ from .build_cases import read
 from .laya_probe import WORK, sha
 from .reviewed_dataset import training_labels
 from .train_head import concrete_questions, chosen
+from .routing_state import PHASE_CONTRACT
 
 
 def publication_questions(groups, true_label='A', true_first=False):
@@ -17,10 +18,7 @@ def publication_questions(groups, true_label='A', true_first=False):
         choices = [(false_label, 'Leave this optional capability unpublished.'),
                    (true_label, 'Publish this optional capability for the next assistant turn.')]
         result[name] = {'type': 'choice', 'instructions':
-            'Should the next ERP assistant turn have this capability available? '
-            'Choose publication, not the next tool call. Base tools stay available. '
-            'Include it for the pending operation even if a base read comes first. '
-            'Publication does not approve execution. Ignore unrelated current publication. '
+            'Should this capability be available next? Base tools stay available. '+PHASE_CONTRACT+' '
             f'Capability: {name}. {group["description"]} Tools: '+', '.join(group['tools']),
             'criteria': dict(reversed(choices) if true_first else choices)}
     return result

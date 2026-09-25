@@ -4,6 +4,7 @@ Uses reviewed hard labels and CE. This is not a reproduction of upstream RLCD.
 No ERP or paid model calls. Evaluate the frozen test only after dev selection.
 """
 import argparse
+from collections import defaultdict
 import hashlib
 import json
 import math
@@ -47,6 +48,22 @@ def rank(result):
     return -result['pass'], result['missing_required'], result['unrelated']
 
 
+def balance_sources(items, cases):
+    """Keep each class's mass, sharing it between historical and authored inputs."""
+    origins = {r['id']: 'authored' if r.get('source_kind') == 'new_scripted_contract_probe'
+               else 'historical' for r in cases}
+    masses = defaultdict(lambda: defaultdict(float))
+    for row in items:
+        key = row['group'], row['variant'], row['semantic_target']
+        masses[key][origins[row['case_id']]] += row['weight']
+    result = []
+    for row in items:
+        bucket = masses[row['group'], row['variant'], row['semantic_target']]
+        scale = sum(bucket.values()) / (len(bucket) * bucket[origins[row['case_id']]])
+        result.append({**row, 'weight': row['weight'] * scale})
+    return result
+
+
 def joint_questions(groups, label, first):
     questions = publication_questions(groups, label, first)
     for name, group in groups.items():
@@ -87,12 +104,16 @@ def main(args):
         assert lengths[row['id']] <= 8192, row['id']
         encoded[row['id']] = [agent._encode_state(row['state'], names, {g: agent._to_internal(q) for g, q in spec.items()}, max_len=lengths[row['id']]) for spec in specs]
     items = unique_items(training_items(splits['train'], names, specs, encoded))
+    if args.balance_sources:
+        items = balance_sources(items, splits['train'])
     frozen = {'source_path': str(args.source.resolve()), 'source_sha256': sha(args.source/'frozen.json'), 'model_lock': lock, 'seed': seed,
+              'loaded_model_files_sha256': {name:sha(model_path/name) for name in lock['files_sha256']},
               'questions': specs, 'max_len_by_case': lengths, 'epochs': args.epochs,
               'lr_encoder': 2.5e-5, 'lr_head': 1.e-4, 'batch': 16, 'microbatch': 1,
               'selection': 'Dev whole-route passes, then required misses, then unrelated selections. All four formats. Epoch 0 eligible.',
               'objective': 'Reviewed weighted hard-label cross entropy; unknown labels masked. No RLCD or fabricated soft targets.',
               'format_schedule': 'Each judged pair once per epoch; all four formats in every four consecutive epochs.',
+              'balance_sources': args.balance_sources,
               'encoder_scope': 'All encoder layers trained; input embeddings frozen to fit local VRAM.',
               'baseline_from': str(args.baseline_from.resolve()) if args.baseline_from else None,
               'baseline_hashes': {n: sha(args.baseline_from/n) for n in ['frozen.json', 'summary.json', 'base-dev.jsonl']} if args.baseline_from else None,
@@ -210,6 +231,7 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--source', type=Path, required=True); p.add_argument('--output', type=Path, required=True)
     p.add_argument('--epochs', type=int, default=4); p.add_argument('--baseline-from', type=Path)
+    p.add_argument('--balance-sources', action='store_true', help='Equal historical/authored mass within each reviewed capability class.')
     a = p.parse_args()
     if a.epochs < 4 or a.epochs % 4:
         p.error('Use complete four-epoch format cycles.')
