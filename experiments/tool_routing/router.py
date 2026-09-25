@@ -39,7 +39,16 @@ class CapabilityRouter:
         self.questions = read(directory/'questions.json')
         self.model_sha256 = manifest['files']['model.safetensors']
 
-    def route(self, request):
+    def _predict(self, state, questions, positive):
+        result = self.agent.system_one(state,questions)
+        if self.agent.device.type!=self.device_type or set(result['answers'])!=set(questions):
+            raise RuntimeError('Unexpected inference device or answer set')
+        if any(a['choice'] not in {'A','B'} or not math.isfinite(a['probabilities'][positive])
+               for a in result['answers'].values()):
+            raise RuntimeError('Invalid model decision')
+        return result, [g for g,a in result['answers'].items() if a['choice']==positive]
+
+    def route(self, request, *, verify_labels=False):
         if not isinstance(request,dict) or not isinstance(request.get('messages'),list) or not isinstance(request.get('tools'),list):
             raise ValueError('Provide a complete model request with messages and tools')
         if not all(isinstance(m,dict) and m.get('role') in {'system','developer','user','assistant','tool'}
@@ -53,17 +62,38 @@ class CapabilityRouter:
         # Conservative room for the whole decision head; never silently truncate state.
         if size+self.agent.cfg['head_max_len']+4 > self.agent.cfg['max_len']:
             raise ValueError('Routing input exceeds model context; use the existing model route')
-        result = self.agent.system_one(state,self.questions)
-        if self.agent.device.type!=self.device_type or set(result['answers'])!=set(self.questions):
-            raise RuntimeError('Unexpected inference device or answer set')
-        if any(a['choice'] not in {'A','B'} or not math.isfinite(a['probabilities']['A'])
-               for a in result['answers'].values()):
-            raise RuntimeError('Invalid model decision')
-        return {'capabilities':[g for g,a in result['answers'].items() if a['choice']=='A'],
+        result, selected = self._predict(state,self.questions,'A')
+        primary_elapsed_ms = (time.perf_counter()-started)*1000
+        usage = result['usage']; review_selected = selected
+        if verify_labels:
+            # Change label tokens only. Never choose the answer that happens to score better.
+            questions = {g:{**q,'criteria':{{'A':'B','B':'A'}[k]:v for k,v in q['criteria'].items()}}
+                         for g,q in self.questions.items()}
+            review, review_selected = self._predict(state,questions,'B')
+            usage = {k:usage[k]+review['usage'][k]
+                     if usage.get(k) is not None and review['usage'].get(k) is not None else None
+                     for k in usage.keys() | review['usage'].keys()}
+        receipt = {'status':'ok','capabilities':selected,
                 'probabilities':{g:a['probabilities']['A'] for g,a in result['answers'].items()},
-                'probabilities_calibrated':False,'state_tokens':size,'usage':result['usage'],
+                'probabilities_calibrated':False,'state_tokens':size,'usage':usage,
+                'inference_calls':2 if verify_labels else 1,
+                'primary_elapsed_ms':round(primary_elapsed_ms,2),
                 'elapsed_ms':round((time.perf_counter()-started)*1000,2),
                 'model_sha256':self.model_sha256,'scope':'capability_publication_only'}
+        if set(selected)!=set(review_selected):
+            receipt.update(status='fallback',reason='unstable_capability_selection',use_existing_router=True,
+                           candidate_capabilities=receipt.pop('capabilities'),review_capabilities=review_selected)
+        return receipt
+
+
+async def publish_next_turn(controller, decision, call_id, *, host_owns_selection=False, unresolved_write=False):
+    """Experimental host seam. Flags come from live host state, never model text or trace."""
+    if host_owns_selection or unresolved_write or decision.get('status')!='ok':
+        return {'applied':False,'reason':'host_override' if host_owns_selection else
+                'unresolved_write' if unresolved_write else 'router_fallback'}
+    configure = next(t for t in controller.tools if t.name=='configure_odoo_tools')
+    result = await configure.execute(call_id,{'capabilities':decision.get('capabilities')})
+    return {'applied':result.details.get('success') is True,'result':result.details}
 
 
 def export(run, destination):
@@ -103,6 +133,7 @@ def export(run, destination):
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--model',type=Path,required=True)
+    p.add_argument('--verify-labels',action='store_true',help='Check swapped option labels; disagreement returns fallback, not a publishable set')
     operation=p.add_mutually_exclusive_group(required=True)
     operation.add_argument('--request',type=Path)
     operation.add_argument('--jsonl',action='store_true',help='Persistent stdin worker: one complete request per line')
@@ -116,7 +147,7 @@ def main():
     for line in lines:
         try:
             with redirect_stdout(sys.stderr):
-                result=router.route(json.loads(line))
+                result=router.route(json.loads(line),verify_labels=a.verify_labels)
             result={'status':'ok',**result}
         except (ValueError,KeyError,TypeError,AttributeError,IndexError,RuntimeError):
             # No raw request, credentials, or approval values in diagnostic output.

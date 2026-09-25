@@ -315,6 +315,52 @@ def test_local_router_rejects_invalid_or_oversized_context_before_inference():
     router.agent.system_one.assert_not_called()
 
 
+def test_router_label_review_uses_semantics_and_withholds_unstable_selection():
+    from unittest.mock import Mock
+    from experiments.tool_routing.router import CapabilityRouter
+    router=object.__new__(CapabilityRouter)
+    router.questions={'actions':{'type':'choice','criteria':{'B':'Leave unpublished','A':'Publish actions'}}}
+    router.device_type='cuda';router.model_sha256='test'
+    tokenizer=Mock(return_value={'input_ids':[1,2]});tokenizer.mask_token='<mask>'
+    def answer(choice):
+        return {'answers':{'actions':{'choice':choice,'probabilities':{'A':.99,'B':.01}}},
+                'usage':{'input_tokens':10,'output_tokens':0}}
+    predict=Mock(side_effect=[answer('A'),answer('B')])
+    router.agent=SimpleNamespace(tok=tokenizer,cfg={'max_len':8192,'head_max_len':256},
+                                 device=SimpleNamespace(type='cuda'),system_one=predict)
+    request={'messages':[{'role':'user','content':'Confirm the order.'}],'tools':[]}
+    result=router.route(request,verify_labels=True)
+    assert result['status']=='ok' and result['capabilities']==['actions']
+    assert result['inference_calls']==2 and result['usage']['input_tokens']==20
+    assert predict.call_args_list[1].args[1]['actions']['criteria']=={'A':'Leave unpublished','B':'Publish actions'}
+    predict.side_effect=[answer('A'),answer('A')]
+    result=router.route(request,verify_labels=True)
+    assert result['status']=='fallback' and result['use_existing_router']
+    assert 'capabilities' not in result  # A host must not publish a rejected proposal.
+
+
+def test_publication_fallback_preserves_host_selection_and_module_checks(tmp_path):
+    from experiments.tool_routing.router import publish_next_turn
+    calls=[];snapshots=[]
+    controller=DynamicToolController(fake_tools(set(),calls),tmp_path/'publication.jsonl',count(1).__next__)
+    controller.bind(lambda tools:snapshots.append(tuple(tools)))
+    async def check():
+        assert (await publish_next_turn(controller,{'status':'ok','capabilities':['actions']},'initial'))['applied']
+        original=controller.tools;count_before=len(snapshots)
+        for decision,flags in [({'status':'fallback'},{}),({'status':'ok','capabilities':[]},{'host_owns_selection':True}),
+                               ({'status':'ok','capabilities':[]},{'unresolved_write':True})]:
+            assert not (await publish_next_turn(controller,decision,'hold',**flags))['applied']
+            assert controller.tools==original and len(snapshots)==count_before
+        for groups in [['accounting'],['unknown'],['actions','actions'],None]:
+            assert not (await publish_next_turn(controller,{'status':'ok','capabilities':groups},'invalid'))['applied']
+            assert controller.tools==original
+        assert (await publish_next_turn(controller,{'status':'ok','capabilities':[]},'read-only'))['applied']
+        assert {'configure_odoo_tools','list_odoo_capabilities'}<={t.name for t in controller.tools}
+        assert 'mcp_odoo_execute_approved_write' not in {t.name for t in controller.tools}
+    asyncio.run(check())
+    assert calls==['find_records']  # Publication probes availability; it never executes a business write.
+
+
 def test_real_history_index_has_provenance_and_honest_gaps():
     rows = [json.loads(s) for s in (FIXTURES/'history_cases.jsonl').read_text(encoding='utf8').splitlines()]
     assert rows and len({r['id'] for r in rows}) == len(rows)
