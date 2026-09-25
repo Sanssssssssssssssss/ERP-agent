@@ -33,14 +33,18 @@ def unique_items(items):
     return list(result.values())
 
 
-def epoch_items(items, epoch):
+def epoch_items(items, epoch, sample_by_weight=False):
     # Every pair sees all four formats in four epochs; formats are mixed within each epoch.
     rows = [dict(i) for i in items if i['variant'] ==
             (int(hashlib.sha256((i['case_id']+'|'+i['group']).encode()).hexdigest()[:8], 16)+epoch-1) % 4]
     scale = len(rows) / sum(i['weight'] for i in rows)
     for row in rows:
         row['weight'] *= scale
-    random.Random(20260924+epoch).shuffle(rows)
+    rng = random.Random(20260924+epoch)
+    if sample_by_weight:
+        # Repeated unit-weight exposures avoid large rare-example gradients being clipped away.
+        return [{**row, 'weight': 1.} for row in rng.choices(rows, weights=[r['weight'] for r in rows], k=len(rows))]
+    rng.shuffle(rows)
     return rows
 
 
@@ -112,8 +116,10 @@ def main(args):
               'lr_encoder': 2.5e-5, 'lr_head': 1.e-4, 'batch': 16, 'microbatch': 1,
               'selection': 'Dev whole-route passes, then required misses, then unrelated selections. All four formats. Epoch 0 eligible.',
               'objective': 'Reviewed weighted hard-label cross entropy; unknown labels masked. No RLCD or fabricated soft targets.',
-              'format_schedule': 'Each judged pair once per epoch; all four formats in every four consecutive epochs.',
+              'format_schedule': ('Weighted sampling with replacement; each pair rotates format over four epochs. Rare pairs repeat, low-weight pairs may be absent.'
+                                  if args.sample_by_weight else 'Each judged pair once per epoch; all four formats in every four consecutive epochs.'),
               'balance_sources': args.balance_sources,
+              'sample_by_weight': args.sample_by_weight,
               'encoder_scope': 'All encoder layers trained; input embeddings frozen to fit local VRAM.',
               'baseline_from': str(args.baseline_from.resolve()) if args.baseline_from else None,
               'baseline_hashes': {n: sha(args.baseline_from/n) for n in ['frozen.json', 'summary.json', 'base-dev.jsonl']} if args.baseline_from else None,
@@ -169,10 +175,10 @@ def main(args):
     summary['trainable_parameters'] = sum(p.numel() for p in params)
     optimizer = torch.optim.AdamW([{'params': encoder, 'lr': 2.5e-5, 'initial_lr': 2.5e-5},
                                   {'params': head, 'lr': 1.e-4, 'initial_lr': 1.e-4}], weight_decay=.01)
-    total_steps = sum(math.ceil(len(epoch_items(items, e))/16) for e in range(1, args.epochs+1))
+    total_steps = sum(math.ceil(len(epoch_items(items, e, args.sample_by_weight))/16) for e in range(1, args.epochs+1))
     step = 0
     for epoch in range(1, args.epochs+1):
-        agent.model.train(); rows = epoch_items(items, epoch); loss_sum = 0.
+        agent.model.train(); rows = epoch_items(items, epoch, args.sample_by_weight); loss_sum = 0.
         for offset in range(0, len(rows), 16):
             chunk = rows[offset:offset+16]; optimizer.zero_grad(set_to_none=True)
             factor = min(1., (step+1)/20) * .5*(1+math.cos(math.pi*step/total_steps))
@@ -232,6 +238,7 @@ if __name__ == '__main__':
     p.add_argument('--source', type=Path, required=True); p.add_argument('--output', type=Path, required=True)
     p.add_argument('--epochs', type=int, default=4); p.add_argument('--baseline-from', type=Path)
     p.add_argument('--balance-sources', action='store_true', help='Equal historical/authored mass within each reviewed capability class.')
+    p.add_argument('--sample-by-weight', action='store_true', help='Sample proportional to reviewed weights and train each exposure at unit weight.')
     a = p.parse_args()
     if a.epochs < 4 or a.epochs % 4:
         p.error('Use complete four-epoch format cycles.')

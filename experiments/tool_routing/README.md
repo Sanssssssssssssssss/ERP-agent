@@ -9,9 +9,9 @@
 
 ```powershell
 # 一次调用；request.json 是原模型请求，包含完整 messages 和 tools
-.runtime/laya-routing-20260924/venv/Scripts/python.exe -m experiments.tool_routing.router --model .runtime/capability-routing-phase-20260925/model --request request.json
-# 常驻进程；标准输入每行一个完整请求，标准输出每行一个 JSON 结果
-.runtime/laya-routing-20260924/venv/Scripts/python.exe -u -m experiments.tool_routing.router --model .runtime/capability-routing-phase-20260925/model --jsonl
+.runtime/laya-routing-20260924/venv/Scripts/python.exe -X utf8 -m experiments.tool_routing.router --model .runtime/capability-routing-phase-20260925/model --request request.json
+# 常驻进程；UTF-8 标准输入每行一个完整请求，标准输出每行一个 JSON 结果
+.runtime/laya-routing-20260924/venv/Scripts/python.exe -u -X utf8 -m experiments.tool_routing.router --model .runtime/capability-routing-phase-20260925/model --jsonl
 ```
 
 `status=ok` 的 `capabilities` 是本轮建议的完整可选集合，空集合表示保留基础工具。`status=fallback` 时沿用现有编排，不把失败当成空集合。接口核对权重和投射代码哈希，拒绝超窗输入；概率未校准。宿主仍须通过现有 `DynamicToolController` 发布，保留安装检查、审批和未知写入保护。当前入口独立运行，生产宿主尚未自动调用它。

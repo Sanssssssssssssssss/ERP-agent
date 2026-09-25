@@ -42,8 +42,9 @@ class CapabilityRouter:
     def route(self, request):
         if not isinstance(request,dict) or not isinstance(request.get('messages'),list) or not isinstance(request.get('tools'),list):
             raise ValueError('Provide a complete model request with messages and tools')
-        if not all(isinstance(m,dict) for m in request['messages']) or not any(m.get('role')=='user' for m in request['messages']):
-            raise ValueError('Request requires user context')
+        if not all(isinstance(m,dict) and m.get('role') in {'system','developer','user','assistant','tool'}
+                   for m in request['messages']) or not any(m.get('role')=='user' for m in request['messages']):
+            raise ValueError('Request requires provider message roles and user context')
         started = time.perf_counter()
         state = routing_state(request)
         size = len(self.agent.tok(state.replace(self.agent.tok.mask_token,' '),add_special_tokens=False)['input_ids'])

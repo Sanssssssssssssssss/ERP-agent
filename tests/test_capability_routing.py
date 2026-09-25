@@ -228,6 +228,17 @@ def test_training_expansion_adds_intents_without_changing_holdout():
     assert groups == set(CAPABILITY_GROUPS) - {'employee', 'time_off'}
 
 
+def test_joint_sampling_repeats_rare_pairs_at_unit_weight_and_rotates_formats():
+    from experiments.tool_routing.train_joint import epoch_items
+    items=[{'case_id':c,'group':'knowledge','variant':v,'weight':w}
+           for c,w in [('rare',100.),('common',.00001)] for v in range(4)]
+    epochs=[epoch_items(items,e,True) for e in range(1,5)]
+    assert all(len(rows)==2 and all(r['weight']==1. for r in rows) for rows in epochs)
+    assert {r['case_id'] for rows in epochs for r in rows}=={'rare'}
+    assert {r['variant'] for rows in epochs for r in rows}==set(range(4))
+    assert epochs[0]==epoch_items(items,1,True) and items[0]['weight']==100.
+
+
 def test_joint_source_balance_preserves_class_mass_and_historical_negatives():
     from experiments.tool_routing.train_joint import balance_sources
     cases = [{'id':'history','source_kind':'historical_business'},
@@ -249,6 +260,9 @@ def test_local_router_rejects_invalid_or_oversized_context_before_inference():
     router.agent=SimpleNamespace(tok=tokenizer,cfg={'max_len':8192,'head_max_len':256},system_one=Mock())
     with pytest.raises(ValueError,match='complete model request'):
         router.route({'messages':[]})
+    with pytest.raises(ValueError,match='provider message roles'):
+        router.route({'messages':[{'role':'user','content':'Confirm the order.'},
+                                  {'role':'toolResult','content':'Pi session data'}],'tools':[]})
     with pytest.raises(ValueError,match='exceeds model context'):
         router.route({'messages':[{'role':'user','content':'Confirm the requested order.'}],'tools':[]})
     router.agent.system_one.assert_not_called()
