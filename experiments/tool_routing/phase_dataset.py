@@ -64,9 +64,11 @@ def freeze(source, reviews, output):
         new=next(r for r in rows if r['id']==old['id'])
         assert all(new[k]==v for k,v in old.items() if k not in {'teacher_request','teacher_request_sha256','state'})
         projected=json.loads(new['state'])
+        previous=json.loads(old['state'])
         for field in ['observation_order','latest_update_source_message']:
             projected.pop(field)
-        assert projected==json.loads(old['state']), 'Unexpected change to frozen decision evidence'
+            previous.pop(field,None)
+        assert projected==previous, 'Unexpected change to frozen decision evidence'
     write(output/'cases.json',rows); write(output/'groups.json',groups)
     hashes={p.relative_to(output).as_posix():sha(p) for p in output.rglob('*.json')}
     write(output/'frozen.json',{'hashes':hashes,'paid_posts_max':len(rows)-len(original),

@@ -240,6 +240,20 @@ def test_joint_source_balance_preserves_class_mass_and_historical_negatives():
     assert rows[0]['weight'] == 1.  # Frozen inputs are not mutated.
 
 
+def test_local_router_rejects_invalid_or_oversized_context_before_inference():
+    from unittest.mock import Mock
+    from experiments.tool_routing.router import CapabilityRouter
+    router=object.__new__(CapabilityRouter)
+    tokenizer=Mock(return_value={'input_ids':list(range(8000))})
+    tokenizer.mask_token='<mask>'
+    router.agent=SimpleNamespace(tok=tokenizer,cfg={'max_len':8192,'head_max_len':256},system_one=Mock())
+    with pytest.raises(ValueError,match='complete model request'):
+        router.route({'messages':[]})
+    with pytest.raises(ValueError,match='exceeds model context'):
+        router.route({'messages':[{'role':'user','content':'Confirm the requested order.'}],'tools':[]})
+    router.agent.system_one.assert_not_called()
+
+
 def test_real_history_index_has_provenance_and_honest_gaps():
     rows = [json.loads(s) for s in (FIXTURES/'history_cases.jsonl').read_text(encoding='utf8').splitlines()]
     assert rows and len({r['id'] for r in rows}) == len(rows)

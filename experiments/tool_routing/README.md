@@ -3,13 +3,26 @@
 2026-09-25 数据补充入口为 `collect_dataset`。先 `freeze` 固定意图、真实读取材料和历史前缀，再 `paid` 每节点调用一次模型，最后 `export` 隔离训练分歧；开发/测试分歧保留。员工、请假不在本轮范围。真实 HTTP 请求和用量均由现有单请求运行器记录，无业务工具执行。
 最新数据、用量与训练状态见 [数据补充结果](DATASET_RESULTS.md)。
 
-当前训练入口为 `python -m experiments.tool_routing.train_joint --source .runtime/capability-routing-20260925/dataset-v4 --output .runtime/routing-joint-new --epochs 4`，使用隔离 ML 环境。编码器层与决策头联合训练，词嵌入冻结；每四轮覆盖全部选项格式，权重只按开发集选择。下文保留旧实验复现入口。
+当前训练入口为 `python -m experiments.tool_routing.train_joint --source .runtime/capability-routing-phase-20260925/dataset-v2 --output .runtime/routing-joint-new --epochs 4 --balance-sources`，使用隔离 ML 环境。编码器层与决策头联合训练，词嵌入冻结；每四轮覆盖全部选项格式，权重只按开发集选择。
 
-历史池已扩展至 1,944 个响应。最新对照采用具体选项、完整决策头和历史计划输入：[论坛调优结果](FORUM_TUNING.md)。此前结果：[scorer 微调](TUNING.md)、[原始模板](RESULTS.md)；[测试入口](../../tests/fixtures/capability_routing/README.md)。
+本地调用入口：
 
-最新维护：复核池扩到 62 个节点，增加原始完整请求与同摘要能力选择的 24 次真实 API 对照，以及修正标签后的本地训练。见 [本轮审查与结果](REVIEWED_RESULTS.md)。旧训练器默认拒绝弱标签，显式复现才使用 `--allow-reference-labels`。
+```powershell
+# 一次调用；request.json 是原模型请求，包含完整 messages 和 tools
+.runtime/laya-routing-20260924/venv/Scripts/python.exe -m experiments.tool_routing.router --model .runtime/capability-routing-phase-20260925/model --request request.json
+# 常驻进程；标准输入每行一个完整请求，标准输出每行一个 JSON 结果
+.runtime/laya-routing-20260924/venv/Scripts/python.exe -u -m experiments.tool_routing.router --model .runtime/capability-routing-phase-20260925/model --jsonl
+```
 
-完整训练结果见 [训练审计](TRAINING_AUDIT.md)：修复采样后完成 14 轮、2,478 次更新，开发集选第 8 轮；测试默认格式 6/21，四格式合计 19/84。SDK 复算一致，泛化与格式稳健性未达标，继续保持实验隔离。
+`status=ok` 的 `capabilities` 是本轮建议的完整可选集合，空集合表示保留基础工具。`status=fallback` 时沿用现有编排，不把失败当成空集合。接口核对权重和投射代码哈希，拒绝超窗输入；概率未校准。宿主仍须通过现有 `DynamicToolController` 发布，保留安装检查、审批和未知写入保护。当前入口独立运行，生产宿主尚未自动调用它。
+
+Python 调用可复用同一个 `CapabilityRouter(model_path)` 实例，逐轮调用 `.route(request)`；异常由调用方回退。验收结果和权重路径以[结果报告](DATASET_RESULTS.md)为准。下文是历史实验复现入口。
+
+历史池包含 1,944 个响应。早期对照采用具体选项、完整决策头和历史计划输入：[论坛调优结果](FORUM_TUNING.md)。此前结果：[scorer 微调](TUNING.md)、[原始模板](RESULTS.md)；[测试入口](../../tests/fixtures/capability_routing/README.md)。
+
+早期复核池有 62 个节点，包含原始完整请求与同摘要能力选择的 24 次真实 API 对照。见[早期审查结果](REVIEWED_RESULTS.md)。旧训练器默认拒绝弱标签，显式复现才使用 `--allow-reference-labels`。
+
+早期仅训练决策头的结果见[训练审计](TRAINING_AUDIT.md)：14 轮、2,478 次更新，测试默认格式 6/21、四格式合计 19/84。该方案未通过，已改为上述联合训练。
 
 当前主模型会自己调用 list/configure，再在下一轮拿到工具。Laya 可以前置能力选择，但包含业务读取的混合轮不能直接删掉。使用本地多语言 checkpoint，每个 capability 一个 `noul` 问题；一次 `system_one(state, questions)` 批量输出本轮八组概率，员工与请假排除。0.5 只是固定实验阈值，不代表已校准。
 
