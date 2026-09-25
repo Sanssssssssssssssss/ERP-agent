@@ -208,6 +208,17 @@ def test_joint_training_covers_all_formats_without_repeating_pairs():
     assert rank({'pass': 30, 'missing_required': 2, 'unrelated': 3}) < rank({'pass': 0, 'missing_required': 0, 'unrelated': 45})
 
 
+def test_training_expansion_adds_intents_without_changing_holdout():
+    import csv
+    rows = list(csv.DictReader((FIXTURES/'collection_expansion.tsv').open(encoding='utf8'), delimiter='\t'))
+    original = list(csv.DictReader((FIXTURES/'collection_scenarios.tsv').open(encoding='utf8'), delimiter='\t'))
+    assert len({r['id'] for r in rows}) == len(rows)
+    assert {r['id'] for r in rows}.isdisjoint({r['id'] for r in original})
+    assert all(r['split'] == 'train' and r['variants'] in {'0', '1', '2'} for r in rows)
+    groups = {g for r in rows for g in r['preferred'].split(',')} - {'-'}
+    assert groups == set(CAPABILITY_GROUPS) - {'employee', 'time_off'}
+
+
 def test_real_history_index_has_provenance_and_honest_gaps():
     rows = [json.loads(s) for s in (FIXTURES/'history_cases.jsonl').read_text(encoding='utf8').splitlines()]
     assert rows and len({r['id'] for r in rows}) == len(rows)

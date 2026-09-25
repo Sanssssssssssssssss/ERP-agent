@@ -87,7 +87,7 @@ def main(args):
         assert lengths[row['id']] <= 8192, row['id']
         encoded[row['id']] = [agent._encode_state(row['state'], names, {g: agent._to_internal(q) for g, q in spec.items()}, max_len=lengths[row['id']]) for spec in specs]
     items = unique_items(training_items(splits['train'], names, specs, encoded))
-    frozen = {'source_sha256': sha(args.source/'frozen.json'), 'model_lock': lock, 'seed': seed,
+    frozen = {'source_path': str(args.source.resolve()), 'source_sha256': sha(args.source/'frozen.json'), 'model_lock': lock, 'seed': seed,
               'questions': specs, 'max_len_by_case': lengths, 'epochs': args.epochs,
               'lr_encoder': 2.5e-5, 'lr_head': 1.e-4, 'batch': 16, 'microbatch': 1,
               'selection': 'Dev whole-route passes, then required misses, then unrelated selections. All four formats. Epoch 0 eligible.',
