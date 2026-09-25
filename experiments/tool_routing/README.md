@@ -3,20 +3,22 @@
 2026-09-25 数据补充入口为 `collect_dataset`。先 `freeze` 固定意图、真实读取材料和历史前缀，再 `paid` 每节点调用一次模型，最后 `export` 隔离训练分歧；开发/测试分歧保留。员工、请假不在本轮范围。真实 HTTP 请求和用量均由现有单请求运行器记录，无业务工具执行。
 最新数据、用量与训练状态见 [数据补充结果](DATASET_RESULTS.md)。
 
-当前训练入口为 `python -m experiments.tool_routing.train_joint --source .runtime/capability-routing-phase-20260925/dataset-v2 --output .runtime/routing-joint-new --epochs 4 --balance-sources`，使用隔离 ML 环境。编码器层与决策头联合训练，词嵌入冻结；每四轮覆盖全部选项格式，权重只按开发集选择。
+训练已跑完；v15 未超过 v14，交付 v14 权重＋已验证的历史意图输入修复。数据池与检查点保留，完整成绩见结果报告。
 
-本地调用入口：
+本地调用入口（默认格式 52/60，仍有 3 个漏选、5 个待复核）：
 
 ```powershell
 # 一次调用；request.json 是原模型请求，包含完整 messages 和 tools
-.runtime/laya-routing-20260924/venv/Scripts/python.exe -X utf8 -m experiments.tool_routing.router --model .runtime/capability-routing-phase-20260925/model --request request.json
+.runtime/laya-routing-20260924/venv/Scripts/python.exe -X utf8 -m experiments.tool_routing.router --model .runtime/capability-routing-phase-20260925/model-v14-intent --request request.json
 # 常驻进程；UTF-8 标准输入每行一个完整请求，标准输出每行一个 JSON 结果
-.runtime/laya-routing-20260924/venv/Scripts/python.exe -u -X utf8 -m experiments.tool_routing.router --model .runtime/capability-routing-phase-20260925/model --jsonl
+.runtime/laya-routing-20260924/venv/Scripts/python.exe -u -X utf8 -m experiments.tool_routing.router --model .runtime/capability-routing-phase-20260925/model-v14-intent --jsonl
 ```
 
 `status=ok` 的 `capabilities` 是本轮建议的完整可选集合，空集合表示保留基础工具。`status=fallback` 时沿用现有编排，不把失败当成空集合。接口核对权重和投射代码哈希，拒绝超窗输入；概率未校准。宿主仍须通过现有 `DynamicToolController` 发布，保留安装检查、审批和未知写入保护。当前入口独立运行，生产宿主尚未自动调用它。
 
 Python 调用可复用同一个 `CapabilityRouter(model_path)` 实例，逐轮调用 `.route(request)`；异常由调用方回退。验收结果和权重路径以[结果报告](DATASET_RESULTS.md)为准。下文是历史实验复现入口。
+
+后续训练可用 `train_joint --source .runtime/capability-routing-phase-20260925/dataset-v5-intent --output .runtime/routing-joint-new --initial-model .runtime/capability-routing-phase-20260925/model-v14-intent --epochs 4 --balance-sources --balance-phases --cover-weighted-pairs`。使用上述隔离 Python，通过 `-m experiments.tool_routing.train_joint` 调用；这批重投射数据尚未再次训练。旧 bundle 需配套旧源码，保留哈希检查。
 
 历史池包含 1,944 个响应。早期对照采用具体选项、完整决策头和历史计划输入：[论坛调优结果](FORUM_TUNING.md)。此前结果：[scorer 微调](TUNING.md)、[原始模板](RESULTS.md)；[测试入口](../../tests/fixtures/capability_routing/README.md)。
 

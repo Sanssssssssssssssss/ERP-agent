@@ -1,4 +1,26 @@
-2026-09-25：**两组联合训练、测试与权重导出已完成；仍未达到全量替换条件。** 员工、请假排除。生产 `src/`、`desktop/` 未改。
+2026-09-25：**训练已全部结束。交付 v14 权重＋历史意图修复，可本地调用；尚未通过全面替代验收，生产未切换。** 员工、请假排除。[使用入口](README.md)、[交付核验](../../.runtime/capability-routing-phase-20260925/delivery-check.json)。
+
+| 实际批量调用 | 原测试通过 | 新增阶段控制通过 |
+|---|---:|---:|
+| v11 参考 | 43/51 | 6/9 |
+| v12 | 42/51 | 3/9 |
+| v13 | 48/51 | 5/9 |
+| v14 | 44/51 | 7/9 |
+| v14＋历史意图（交付） | 44/51 | 8/9 |
+
+交付版本默认格式合计 **52/60：3 个必选能力漏选、5 个待复核**。漏选为跨实例前置查询、退货库存待写入、付款向导创建后的继续执行。概率未校准，不能依靠高置信度保证正确。[逐项结果](../../.runtime/capability-routing-phase-20260925/intent-heldout-probe/decisions.jsonl)。
+
+v14 完成 4 轮、836 次更新，选择第 4 轮（开发集 167/180）。已修复训练样本漏覆盖、过大权重和阶段失衡；训练集阶段判断从 9/14 提升到 14/14。评测统一为实际八类批量推理，SDK 核对 204/204。v15 从 v14 补训 4 轮、880 次更新，耗时 91.6 分钟；开发集依次 154、155、157、157/180，未晋级。最终选回初始 v14，导出权重逐字节一致。[训练回执](../../.runtime/capability-routing-phase-20260925/joint-v15-phase-expansion/summary.json)、[导出核对](../../.runtime/capability-routing-phase-20260925/model-v15/export-check.json)。
+
+输入审计发现 41 个节点把上一轮意图存于 `reasoning_content`，旧投射只读空 `content`。现在仅在正文为空时补入有长度限制的历史意图，仍标为未核验。四种格式合计从 371/420 提升到 **378/420，零通过退步**；这是 105 个节点的重复格式检查，含开发集，不能当作 420 个独立业务。正式 CLI 与 105 个受测输入一致，常驻进程的真实请求、非法输入、超窗拒绝和恢复通过。[输入对照](../../.runtime/capability-routing-phase-20260925/intent-format-check/summary.json)。额外事实摘要曾令开发集 42/45 降到 36/45，已放弃。
+
+数据池为 371 个节点：训练 275、开发 45、测试 51，另有 9 个阶段控制。相对 v14 新增 12 个真实审批续调截面、5 个明确标记的有序前置意图变体；争议能力仅在训练中屏蔽，原始标签与分歧保留。v14 权重实际使用的是此前 258 个训练节点。`dataset-v5-intent` 已按修复后的投射重建，371 个节点标签未变，尚未用于新一轮训练。[数据审计](../../.runtime/capability-routing-phase-20260925/v15-data-audit.json)、[当前数据](../../.runtime/capability-routing-phase-20260925/dataset-v5-intent/coverage.json)。
+
+交付模型：[model-v14-intent](../../.runtime/capability-routing-phase-20260925/model-v14-intent/)。28 项离线检查＋3 个子检查通过。旧 bundle 与旧源码配套；回退至 `a6c6358` 可使用原 v14，不能绕过投射哈希检查。
+
+本轮复核及对照共 76 次付费 POST。已知新输入 161,971、缓存输入 88,192、输出 61,720（含 reasoning 57,417），合计 **311,883 token，另 1 次用量未知**。未知项由评测器未兼容可选标注字段而中断，已修复，未重跑。Laya 训练与推理在本机运行，没有完整业务执行。
+
+下面保留 v11 历史结果；对应旧源码与冻结数据。
 
 | 同一测试输入与问法 | 默认格式通过 | 四格式合计通过 |
 |---|---:|---:|
@@ -18,7 +40,7 @@
 
 验证：23 项离线检查＋3 个子检查通过；官方 SDK 逐类核对 204/204 一致，导出后八类批量调用 51/51 一致。RTX 4070 Laptop 上，模型加载约 6.68 秒，首调用 0.60 秒，后续 50 个不同节点 P50 0.26 秒／P95 1.22 秒；不是端到端业务耗时。概率未校准。见[训练回执](../../.runtime/capability-routing-20260925/joint-v11-expanded/summary.json)、[导出核验](../../.runtime/capability-routing-20260925/selected-model/export-receipt.json)。
 
-本轮新增 44 次付费 POST：新输入 50,286、缓存输入 32,256、输出 9,797（含 reasoning 7,610），总计 **92,339 token**。复用旧回包 180 份，无额外付费重试、无完整业务执行。数据采集累计 404 次／697,406 token，不含更早的其他实验。训练、测试、导出仅本地运行。[用量回执](../../.runtime/capability-routing-20260925/collection-v4/expansion-summary.json)。
+v11 数据补充为 44 次付费 POST：新输入 50,286、缓存输入 32,256、输出 9,797（含 reasoning 7,610），总计 **92,339 token**。复用旧回包 180 份，无额外付费重试、无完整业务执行。截至 v11，数据采集累计 404 次／697,406 token，不含更早的其他实验。[用量回执](../../.runtime/capability-routing-20260925/collection-v4/expansion-summary.json)。
 
 已核实 tokenizer 配置哈希变化来自官方加载器的兼容转换，转换后与本地文件逐字节一致，发生于本轮训练之前；原权重和其余锁定文件通过校验。[核验记录](../../.runtime/capability-routing-20260925/tokenizer-compatibility/receipt.json)。早期失败的决策头实验、日志及[原报告](../../.runtime/capability-routing-20260925/head-v8c/report-before-joint.md)保留。
 
