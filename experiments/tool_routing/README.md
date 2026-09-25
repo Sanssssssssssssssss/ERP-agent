@@ -18,6 +18,10 @@
 
 Python 调用可复用同一个 `CapabilityRouter(model_path)` 实例，逐轮调用 `.route(request)`；异常由调用方回退。验收结果和权重路径以[结果报告](DATASET_RESULTS.md)为准。下文是历史实验复现入口。
 
+可选加 `--verify-labels`，或 `.route(request, verify_labels=True)`：本地再做一次等价判定；不一致返回 `fallback`，不提供可发布的 `capabilities`。实测拦住 2 个漏选，仍有 1 个稳定漏选。暖态约 0.59 秒；不调用付费模型作裁判。
+
+实验宿主可用 `await publish_next_turn(controller, decision, call_id, host_owns_selection=..., unresolved_write=...)` 复用真实发布入口。接管与未决写入标记由实时宿主提供；回退时保留现有工具和 list/configure。主模型接管后应由宿主在本 run 保持选择权。当前没有接入生产循环，不能仅凭这两个离线标记替代 ActionStore。
+
 后续训练可用 `train_joint --source .runtime/capability-routing-phase-20260925/dataset-v5-intent --output .runtime/routing-joint-new --initial-model .runtime/capability-routing-phase-20260925/model-v14-intent --epochs 4 --balance-sources --balance-phases --cover-weighted-pairs`。使用上述隔离 Python，通过 `-m experiments.tool_routing.train_joint` 调用；这批重投射数据尚未再次训练。旧 bundle 需配套旧源码，保留哈希检查。
 
 历史池包含 1,944 个响应。早期对照采用具体选项、完整决策头和历史计划输入：[论坛调优结果](FORUM_TUNING.md)。此前结果：[scorer 微调](TUNING.md)、[原始模板](RESULTS.md)；[测试入口](../../tests/fixtures/capability_routing/README.md)。

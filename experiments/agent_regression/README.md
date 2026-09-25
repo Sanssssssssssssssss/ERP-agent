@@ -2,6 +2,8 @@
 
 新增故障只收真实运行证据：完整原请求、首次可纠正截面、错误响应和源码哈希。人工构造边界只做离线测试；没有模型消费请求的 UI 问题不编造付费案例。以后 debug 按仓库 [维护规则](../../AGENTS.md) 补入，原判定不随补丁修改。
 
+R01：Laya 缩小发布集合后，主模型实际调用未发布的跨实例工具。入口 `python -m experiments.agent_regression.routing_recovery`；`freeze` 固定真实失败、运行时拒绝和两个候选截面，`paid` 每分支只发一次。已有结果：补生产提示仍失败，收到真实拒绝后请求启用所需能力，额外预加载尚未消除。未执行任何返回工具。[冻结上下文](../../.runtime/capability-routing-final-20260926/R01/)、[人工审查](../../.runtime/capability-routing-final-20260926/review-summary.json)。
+
 本轮入口：`python -m experiments.agent_regression.incidents` 离线冻结；加 `--paid` 执行 A04 的 A/B 和原 B02/B03 保护，共 4 次，不执行返回的工具。A04 来源是 S01499 的真实 `confirm` 误调用；跨 run 防重发和桌面回读范围用离线测试验证。结果保存在 `.runtime/agent-regression-guards-20260924/`。
 
 D04 来自明确选择“整个会话”后，模型把无绑定状态误判为“只生成提案”的真实请求。只替换生产状态回包和工具定义，不注入业务绑定或改写旧历史。冻结：`python -m experiments.agent_regression.incidents --directory .runtime/agent-regression-scope-20260924 --case D04`；同目录加 `--paid`（不带 `--case`）执行 A/B 共 2 次。[原始传播证据](../../.runtime/agent-regression-full-20260923/full/S01499/conversation-scope-finding.json)。
