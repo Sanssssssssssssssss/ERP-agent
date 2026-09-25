@@ -17,6 +17,7 @@ from .laya_probe import WORK, sha
 from .model_comparison import verdict
 from .reviewed_dataset import training_labels, validate
 from .train_head import concrete_questions, chosen, fit_epoch
+from .publication_probe import publication_questions
 
 
 def score(rows):
@@ -139,7 +140,8 @@ def main(args):
     args.output.mkdir(parents=True,exist_ok=False)
     agent=laya.load(str(model_dir.resolve()),device='cuda')
     assert agent.device.type=='cuda' and agent._fast is None and list(agent.temperature)==[1.,1.,1.]
-    specs=[concrete_questions(groups,label,first) for label in ['A','B'] for first in [False,True]]
+    question_factory=publication_questions if args.contract=='publication' else concrete_questions
+    specs=[question_factory(groups,label,first) for label in ['A','B'] for first in [False,True]]
     encoded={};lengths={}
     for r in cases:
         length=len(agent.tok(r['state'].replace(agent.tok.mask_token,' '),add_special_tokens=False)['input_ids'])+260
@@ -189,7 +191,7 @@ def main(args):
         assert cache_dir.is_dir()
         frozen['encoder_cache_source']={'path':str(cache_dir.resolve()),'manifest_sha256':sha(args.cache_from/'frozen.json')}
     (args.output/'sources').mkdir()
-    source_files=[Path(__file__),Path(fit_epoch.__code__.co_filename),Path(training_labels.__code__.co_filename),
+    source_files=[Path(__file__),Path(question_factory.__code__.co_filename),Path(fit_epoch.__code__.co_filename),Path(training_labels.__code__.co_filename),
                   Path(verdict.__code__.co_filename)]
     frozen['sources']={p.name:sha(p) for p in source_files}
     for source in source_files:(args.output/'sources'/source.name).write_bytes(source.read_bytes())
@@ -342,6 +344,7 @@ if __name__=='__main__':
     parser.add_argument('--source',type=Path,required=True);parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--epochs',type=int,default=24);parser.add_argument('--min-epochs',type=int,default=12)
     parser.add_argument('--patience',type=int,default=6)
+    parser.add_argument('--contract',choices=['step','publication'],default='publication',help='Publication matches the reviewed next-turn labels; step reproduces the old experiment.')
     parser.add_argument('--cache-from',type=Path,help='Reuse only encoder features from an identical locked model/runtime.')
     parser.add_argument('--resume-from',type=Path,help='Continue completed epochs from a matching frozen checkpoint; preserve original selection history.')
     args=parser.parse_args()
