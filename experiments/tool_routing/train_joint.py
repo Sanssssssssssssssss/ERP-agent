@@ -184,7 +184,7 @@ def main(args):
 
     if args.baseline_from:
         prior = read(args.baseline_from/'frozen.json')
-        for key in ['source_sha256', 'model_lock', 'questions', 'max_len_by_case', 'evaluation_batch']:
+        for key in ['source_sha256', 'model_lock', 'loaded_model_files_sha256', 'questions', 'max_len_by_case', 'evaluation_batch']:
             assert prior[key] == frozen[key], f'Baseline differs: {key}'
         baseline = read(args.baseline_from/'summary.json')['baseline']
         summary['baseline'] = baseline
