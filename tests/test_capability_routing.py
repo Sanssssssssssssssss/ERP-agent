@@ -191,6 +191,23 @@ def test_task_splits_preserve_reserved_families():
         assert split_family(family) == 'test'
 
 
+def test_joint_training_covers_all_formats_without_repeating_pairs():
+    from experiments.tool_routing.train_joint import unique_items, epoch_items, rank
+    items = [{'case_id': c, 'group': 'actions', 'variant': v, 'label': v % 2, 'weight': w}
+             for c in ['case-1', 'case-2'] for v in range(4) for w in [1., 2.]]
+    unique = unique_items(items)
+    assert len(unique) == 8 and sum(i['weight'] for i in unique) == 24
+    seen = []
+    for epoch in range(1, 5):
+        rows = epoch_items(unique, epoch)
+        assert len(rows) == 2 and sum(i['weight'] for i in rows) == 2
+        assert len({(i['case_id'], i['group']) for i in rows}) == 2
+        seen.extend((i['case_id'], i['variant']) for i in rows)
+    assert len(set(seen)) == 8
+    # Publishing everything must not win merely because it cannot miss a group.
+    assert rank({'pass': 30, 'missing_required': 2, 'unrelated': 3}) < rank({'pass': 0, 'missing_required': 0, 'unrelated': 45})
+
+
 def test_real_history_index_has_provenance_and_honest_gaps():
     rows = [json.loads(s) for s in (FIXTURES/'history_cases.jsonl').read_text(encoding='utf8').splitlines()]
     assert rows and len({r['id'] for r in rows}) == len(rows)

@@ -43,5 +43,5 @@
 本次恢复运行的复现（需保留原 checkpoint）：
 
 ```powershell
-.runtime/laya-routing-20260924/venv/Scripts/python.exe -m experiments.tool_routing.train_reviewed --source .runtime/capability-routing-20260925/dataset-v3 --output .runtime/routing-head-repeat --resume-from .runtime/capability-routing-20260925/head-v8b --epochs 24 --min-epochs 8 --patience 6
+.runtime/laya-routing-20260924/venv/Scripts/python.exe -m experiments.tool_routing.train_reviewed --source .runtime/capability-routing-20260925/dataset-v3 --output .runtime/routing-head-repeat --contract step --resume-from .runtime/capability-routing-20260925/head-v8b --epochs 24 --min-epochs 8 --patience 6
 ```
