@@ -1,5 +1,7 @@
 # 单次决策回归
 
+R09／R10：来自 E01 的旧库存字段试错及重复 preview，[冻结节点](../../.runtime/laya-contracts-20260926/)。`python -m experiments.agent_regression.contract_recovery --output <新目录>` 生成真实 SOP／工具契约候选；加 `--paid` 对 R07、R09、R03 各发一次请求，不执行返回工具。首次结果：R07／R09 避开原错误，R03 仍输出两项删除命令；后者改由共享预检在审批前规范化，非法命令继续拒绝。[原始响应](../../.runtime/laya-contract-nodes-20260926/)。R08 已补退货明细身份预检，真实 Odoo 局部检查确认缺产品拒绝、正确绑定接受；不宣称覆盖任意模型的所有缺省字段。
+
 新增故障只收真实运行证据：完整原请求、首次可纠正截面、错误响应和源码哈希。人工构造边界只做离线测试；没有模型消费请求的 UI 问题不编造付费案例。以后 debug 按仓库 [维护规则](../../AGENTS.md) 补入，原判定不随补丁修改。
 
 R01：Laya 缩小发布集合后，主模型实际调用未发布的跨实例工具。入口 `python -m experiments.agent_regression.routing_recovery`；`freeze` 固定真实失败、运行时拒绝和两个候选截面，`paid` 每分支只发一次。已有结果：补生产提示仍失败，收到真实拒绝后请求启用所需能力，额外预加载尚未消除。未执行任何返回工具。[冻结上下文](../../.runtime/capability-routing-final-20260926/R01/)、[人工审查](../../.runtime/capability-routing-final-20260926/review-summary.json)。

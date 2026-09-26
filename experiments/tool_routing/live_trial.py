@@ -86,6 +86,8 @@ print('ENTERPRISE_RESULT='+json.dumps({'database':env.cr.dbname,'smtp':'localhos
         folder=OUT/case;folder.mkdir()
         if case in {'SALE','E01'}:
             spec=read(ROOT/f'.runtime/backend-final-live-20260924/{case}/input.json')
+        elif case in {'E02','E03'}:
+            spec=read(ROOT/f'.runtime/enterprise-validation-20260922/live/{case}/input.json')
         else:
             scenario=next(s for s in fixtures['scenarios'] if s['id']=='vendor_refund')
             company=next(c['name'] for c in fixtures['companies'] if c['id']==scenario['company_id'])
@@ -129,13 +131,25 @@ assert len(p.move_ids)==10 and all(m.product_uom_qty==10 for m in p.move_ids)
 assert not env['sale.order'].browse(1).invoice_ids and not env['purchase.order'].browse(1).invoice_ids
 print('ENTERPRISE_RESULT='+json.dumps({'initial':True,'pickings':p.read(['name','state'])}))
 """
+    elif case=='E02':
+        body="""mo=env['mrp.production'].browse(1).exists()
+assert mo and mo.state in ('draft','confirmed') and mo.product_qty==4
+assert not env['mrp.production'].search([('product_id','=',961),('state','=','done')])
+print('ENTERPRISE_RESULT='+json.dumps({'initial':True,'production':mo.read(['name','state','product_qty','bom_id'])},default=str))
+"""
+    elif case=='E03':
+        body="""invoice=env['account.move'].browse(1).exists()
+assert invoice.state=='posted' and abs(invoice.amount_residual-2339.10)<0.005
+assert not env['account.payment'].search([('invoice_ids','in',[1]),('state','not in',['canceled','rejected'])])
+print('ENTERPRISE_RESULT='+json.dumps({'initial':True,'invoice':invoice.read(['name','state','amount_total','amount_residual'])},default=str))
+"""
     else:
         body="""bill=env['account.move'].browse(4).exists();p=env['stock.picking'].browse(6).exists()
 assert bill.state=='posted' and bill.amount_residual==0 and p.state=='done'
 assert not env['account.move'].search([('reversed_entry_id','=',4)])
 print('ENTERPRISE_RESULT='+json.dumps({'initial':True,'bill':bill.read(['name','state','amount_total','amount_residual']),'picking':p.read(['name','state'])},default=str))
 """
-    scenario='partial_transfer' if case=='E01' else 'vendor_refund'
+    scenario=read(folder/'input.json')['case']
     source=f"import json\nenv.cr.execute('SET TRANSACTION READ ONLY')\nCASE={scenario!r}\nFIXTURES={fixtures!r}\ntry:\n"+''.join(' '+line+'\n' for line in body.splitlines())+'finally:\n env.cr.rollback()\n'
     result=shell(db,source)
     save(folder/(label+'.json'),{**result,'verifier_sha256':hashlib.sha256(source.encode()).hexdigest()})
@@ -211,15 +225,21 @@ def run(case):
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('command',choices=['setup','finish-setup','freeze',*DATABASES])
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('command',choices=['setup','finish-setup','freeze','SALE','E01','E02','E03','E06'])
     parser.add_argument('--trial',help='New isolated trial name; never reuse a paid attempt')
     parser.add_argument('--port',type=int,default=PORT)
     parser.add_argument('--laya-model',type=Path,default=LAYA_MODEL)
+    parser.add_argument('--cases',nargs='+',choices=['SALE','E01','E02','E03','E06'],default=list(DATABASES))
     args=parser.parse_args()
     if args.trial:
         assert re.fullmatch(r'[a-z][a-z0-9-]{0,31}',args.trial),'Invalid trial name'
         OUT=ROOT/'.runtime'/args.trial;CONTAINER='erp-'+args.trial;DATA='/tmp/'+args.trial
-        DATABASES={k:args.trial.replace('-','_')+'_'+v for k,v in [('SALE','sale'),('E01','stock'),('E06','refund')]}
+        suffixes={'SALE':'sale','E01':'stock','E02':'manufacturing','E03':'collection','E06':'refund'}
+        DATABASES={k:args.trial.replace('-','_')+'_'+suffixes[k] for k in args.cases}
+        if (OUT/'environment.json').exists():
+            DATABASES=read(OUT/'environment.json')['databases']
+            assert all(re.fullmatch(re.escape(args.trial.replace('-','_'))+r'_[a-z0-9]+', db) for db in DATABASES.values())
+    assert set(args.cases)==set(DATABASES), 'Custom cases require a new isolated --trial'
     PORT=args.port;LAYA_MODEL=args.laya_model
     if args.command in {'setup','finish-setup'}:setup(resume=args.command=='finish-setup')
     elif args.command=='freeze':freeze()
