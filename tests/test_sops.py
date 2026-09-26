@@ -78,6 +78,19 @@ class ControlledSopTest(unittest.TestCase):
         self.assertNotIn("mcp_odoo_validate_write", tools)
         self.assertIn("mcp_odoo_validate_write", build_sop_payload("safe_write_review", {"model": "sale.order", "operation": "write"})["sop"]["required_tools"])
 
+    def test_stock_contract_uses_accessible_live_fields_and_links_rpc_to_sop(self):
+        from erp_harness.erp._odoo_core.odoo_client import READ_CALL_ID
+        def fields(**kw):
+            self.assertEqual(READ_CALL_ID.get(), "stock-sop")
+            return {"success": True, "result": {"state": {"type": "selection"}, "company_id": {"access": "restricted"}, "not_requested": {}}}
+        tool = build_sop_tools(read_fields=fields)[1]
+        result = asyncio.run(tool.execute("stock-sop", {"sop_id": "stock_delivery_and_return", "inputs": {"source": "picking"}}))
+        for contract in result.details["sop"]["read_contract"].values():
+            self.assertEqual(contract["fields"], ["state"])
+        bad = get_sop("safe_write_review", {"model": "sale.order", "operation": "write+confirm"})
+        self.assertFalse(bad["success"])
+        self.assertIn("Separate", bad["next_action"])
+
     def test_guessed_method_is_not_endorsed_and_policy_is_rechecked(self):
         with patch("erp_harness.tools.sops.allowed_side_effect_methods", return_value=[
                 "sale.order.action_confirm", "purchase.order.button_confirm"]):

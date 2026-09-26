@@ -220,6 +220,20 @@ def _actions(
 
 
 class NativeActionCheckpointTests(unittest.TestCase):
+    def test_relation_shorthand_is_canonical_before_approval_only(self):
+        actions, writer, runtime = _actions()
+        runtime.client.metadata["links"] = {"type": "many2many", "relation": "res.partner"}
+        original = {"links": [[2, 8], [3, 9], [4, 10]]}
+        result = actions.validate_write("res.partner", "write", values=original, record_ids=[7])
+        self.assertTrue(result["success"], result)
+        stored = actions.store.get(result["approval"]["action_id"])
+        self.assertEqual(stored["payload"]["values"], {"links": [[2, 8, 0], [3, 9, 0], [4, 10, 0]]})
+        self.assertEqual(original, {"links": [[2, 8], [3, 9], [4, 10]]})
+        self.assertEqual(writer.calls, [])
+        for command in ([2, True], [2, -1], [0, 0], [1, 8], [2, 8, {"name": "bad"}]):
+            rejected = actions.validate_write("res.partner", "write", values={"links": [command]}, record_ids=[7])
+            self.assertFalse(rejected["success"], command)
+
     def test_execute_method_rejects_read_surface_and_uses_native_reads(self):
         for method in sorted(READ_ONLY_METHODS):
             with self.subTest(method=method):

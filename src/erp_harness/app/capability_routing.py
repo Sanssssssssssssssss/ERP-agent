@@ -135,10 +135,14 @@ class LayaProvider(OpenAICompatibleProvider):
             for line in path.read_text(encoding="utf8").splitlines():
                 row = json.loads(line)
                 if row.get("event") == "end" and row.get("success") is True and row.get("tool") == "get_odoo_sop":
-                    required = {owners[t] for t in SOPS.get(row.get("sop_id"), {}).get("required_tools", []) if t in owners}
+                    # New receipts contain the rendered contract, including method-specific SOPs.
+                    tools = row.get("required_tools", SOPS.get(row.get("sop_id"), {}).get("required_tools", []))
+                    required = {owners[t.removeprefix("mcp_odoo_")] for t in tools
+                                if t.removeprefix("mcp_odoo_") in owners}
                     groups.update(required)
                     if required:
-                        evidence.append({"source": "sop", "tool_call_id": row["tool_call_id"], "groups": sorted(required)})
+                        evidence.append({"source": "sop", "tool_call_id": row["tool_call_id"],
+                                         "required_tools": tools, "groups": sorted(required)})
         # Only the latest assistant/result block can recover a missing dispatch. No old-run pinning.
         latest = next((m for m in reversed(messages) if isinstance(m, AssistantMessage)), None)
         calls = {c.id: c.name for c in latest.tool_calls} if latest else {}

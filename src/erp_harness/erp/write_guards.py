@@ -158,9 +158,61 @@ class _Guard:
                     self.qualify(self.read("mrp.workorder", linked_id, _WO_FIELDS), parent)
 
 
+def _return_write_prestate(runtime: Any, payload: dict) -> list:
+    """Validate return-line identity before approval, including direct child writes."""
+    guard = _Guard(runtime, payload)
+    model, operation = payload["model"], payload["operation"]
+    fields = ("picking_id", "product_return_moves") if model == "stock.return.picking" else ("wizard_id", "move_id", "product_id")
+    previous = guard._read_many(model, payload.get("record_ids") or [], fields) if operation == "write" else [{}]
+    proposals = payload.get("values_list") if operation == "create" else None
+    proposals = proposals if proposals is not None else [payload.get("values") or {}]
+    for values in proposals:
+        for old in previous:
+            row = {**old, **values}
+            if model == "stock.return.picking.line":
+                wizard = guard.read("stock.return.picking", _id(row.get("wizard_id")), ("picking_id",))
+                picking_id, lines = _id(wizard["picking_id"]), [row]
+            else:
+                picking_id, lines = _id(row.get("picking_id")), []
+                # Retain existing children when the parent/source changes; validate every added/updated line.
+                remaining = set(old.get("product_return_moves") or [])
+                for code, record_id, argument in values.get("product_return_moves") or []:
+                    if code in (0, 1):
+                        child = guard.read("stock.return.picking.line", record_id, ("wizard_id", "move_id", "product_id")) if code == 1 else {}
+                        if child and _id(child["wizard_id"]) != old.get("id"):
+                            raise ValueError("return line is not owned by the source wizard")
+                        lines.append({**child, **argument})
+                        remaining.discard(record_id)
+                    elif code in (2, 3):
+                        remaining.discard(record_id)
+                    elif code == 4:
+                        remaining.add(record_id)
+                    elif code == 5:
+                        remaining.clear()
+                    elif code == 6:
+                        remaining = set(argument)
+                lines.extend(guard._read_many("stock.return.picking.line", list(remaining), ("move_id", "product_id")))
+            if not lines:
+                continue  # Odoo may populate an empty wizard from its own defaults.
+            picking = guard.read("stock.picking", picking_id, ("company_id", "state"))
+            for line in lines:
+                move_id, product_id = _id(line.get("move_id")), _id(line.get("product_id"))
+                if move_id is None or product_id is None:
+                    raise ValueError("return lines require explicit move_id and product_id; read stock.move.product_id before validating")
+                move = guard.read("stock.move", move_id, ("picking_id", "product_id", "company_id", "state"))
+                if (picking["state"] != "done" or move["state"] != "done"
+                        or _id(move["picking_id"]) != picking_id
+                        or _id(move["product_id"]) != product_id
+                        or _id(move["company_id"]) != _id(picking["company_id"])):
+                    raise ValueError("return line must match the completed original move, product and company")
+    return [[model, record_id, list(fields), ActionStore.digest(row)] for (model, record_id, fields), row in sorted(guard.rows.items())]
+
+
 def business_write_prestate(runtime: Any, payload: dict) -> list:
     """Keep dependency digests in the ledger; never append a success report to context."""
     model, operation = payload.get("model"), payload.get("operation")
+    if model in {"stock.return.picking", "stock.return.picking.line"} and operation in {"create", "write"}:
+        return _return_write_prestate(runtime, payload)
     if model not in {"mrp.production", "mrp.workorder"} or operation not in {"create", "write"}:
         return []
     proposals = payload.get("values_list") if operation == "create" else None

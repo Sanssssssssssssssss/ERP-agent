@@ -449,6 +449,7 @@ async def run(args: argparse.Namespace) -> None:
                         receipt_dir / "sop-events.jsonl",
                         next_tool_sequence,
                         read_locator="find_records" if runtime_mode == "native" else "search_records",
+                        read_fields=(lambda **kw: native.call("get_model_fields", kw)) if native else None,
                     )
                     if sop_mode == "controlled"
                     else ()

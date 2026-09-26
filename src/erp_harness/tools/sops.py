@@ -10,8 +10,13 @@ from typing import Any
 
 from erp_harness.runtime.tools import AgentTool, AgentToolResult
 from erp_harness.erp._odoo_core.write_policy import allowed_side_effect_methods
+from erp_harness.erp._odoo_core.odoo_client import READ_CALL_ID
 
 MAX_INPUT_LENGTH = 2_000
+STOCK_READ_FIELDS = {
+    "stock.picking": ["name", "state", "company_id", "partner_id", "picking_type_id", "move_ids", "backorder_ids"],
+    "stock.move": ["display_name", "product_id", "product_uom", "product_uom_qty", "quantity", "picked", "state", "picking_id", "location_id", "location_dest_id"],
+}
 
 
 def _spec(
@@ -45,9 +50,10 @@ SOPS = {
         models=["stock.picking", "stock.move", "stock.return.picking", "stock.backorder.confirmation"],
         steps=[
             "Resolve the source picking, company, products, units, requested quantities and available stock. Read exact move IDs; do not copy historical order lines.",
-            "For returns create stock.return.picking for the original done picking, set only the requested product_return_moves quantities, then call action_create_returns once. Read the resulting picking and its original-move links.",
+            "For returns create stock.return.picking for the original done picking. Each new product_return_moves line needs move_id, product_id from that original move, and the requested quantity; UI onchange is not run by API create. Then call action_create_returns once. Read the resulting picking and its original-move links.",
             "Confirm/assign the transfer as needed. Approve actual stock.move.quantity and picked values, then execute stock.picking.button_validate. Partial completion must explicitly preserve or resolve the remainder; the runtime supports stock.backorder.confirmation.process for a keep-backorder decision.",
             "Read done moves and backorders; verify original products, quantities, directions and company. A wizard action or a successful RPC is not proof of completed stock movement.",
+            "Use the live read_contract fields below when available. validate_write already includes preview; submit ready values directly. Only inspect a backorder wizard if button_validate actually returns one; otherwise read the resulting transfers and remaining quantities.",
         ],
     ),
     "manufacture_and_replenish": _spec(
@@ -127,7 +133,7 @@ SOPS = {
         ],
     ),
     "safe_write_review": _spec(
-        "Review a create, write, or unlink without treating confirmation as authorization.",
+        "Review one operation: create, write, unlink, or an exact reviewed business method. Never combine names such as write+confirm.",
         kind="workflow",
         read_only=False,
         parameters={"model": True, "operation": True},
@@ -300,7 +306,8 @@ def get_sop(sop_id: str, inputs: dict[str, Any] | None = None) -> dict[str, Any]
     if sop_id == "safe_write_review" and supplied["operation"] not in {"create", "write", "unlink"}:
         operation = supplied["operation"]
         if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]*", operation):
-            return {"success": False, "tool": "get_odoo_sop", "error": "Invalid operation name."}
+            return {"success": False, "tool": "get_odoo_sop", "error": "Invalid operation name.",
+                    "next_action": "Supply one create/write/unlink operation or one exact reviewed method. Separate field changes and business methods; do not join operation names."}
         # A model's business verb is not evidence that an Odoo method exists.
         prefix = supplied["model"] + "."
         reviewed = sorted(name[len(prefix):] for name in allowed_side_effect_methods() if name.startswith(prefix))
@@ -351,6 +358,7 @@ def build_sop_tools(
     log_path: Path | None = None,
     next_sequence: Callable[[], int] | None = None,
     read_locator: str = "search_records",
+    read_fields: Callable[..., dict] | None = None,
 ) -> tuple[AgentTool, AgentTool]:
     if read_locator not in {"search_records", "find_records"}:
         raise ValueError("read_locator must be search_records or find_records")
@@ -368,12 +376,31 @@ def build_sop_tools(
             "event": "start", "tool": name, "tool_call_id": call_id,
             "sop_id": sop_id, "sequence": started,
         })
-        payload = build()
+        token = READ_CALL_ID.set(call_id)
+        try:
+            payload = build()
+            if payload.get("success") and sop_id == "stock_delivery_and_return" and read_fields:
+                contract = {}
+                for model, fields in STOCK_READ_FIELDS.items():
+                    try:
+                        result = read_fields(model=model, field_names=fields)
+                        if not result.get("success"):
+                            raise ValueError("schema unavailable")
+                        contract[model] = {"source": "live_fields_get", "fields": [
+                            name for name, meta in result["result"].items()
+                            if name in fields and meta.get("access") != "restricted"
+                        ]}
+                    except Exception as exc:
+                        contract[model] = {"status": "unavailable", "error_type": type(exc).__name__}
+                payload["sop"]["read_contract"] = contract
+        finally:
+            READ_CALL_ID.reset(token)
         log({
             "event": "end", "tool": name, "tool_call_id": call_id,
             "sop_id": sop_id, "sequence": started,
             "end_sequence": next_sequence() if next_sequence else None,
             "success": payload.get("success") is True,
+            "required_tools": payload.get("sop", {}).get("required_tools", []),
         })
         return AgentToolResult(content=json.dumps(payload, separators=(",", ":")), details=payload)
 
