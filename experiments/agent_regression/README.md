@@ -4,6 +4,10 @@
 
 R01：Laya 缩小发布集合后，主模型实际调用未发布的跨实例工具。入口 `python -m experiments.agent_regression.routing_recovery`；`freeze` 固定真实失败、运行时拒绝和两个候选截面，`paid` 每分支只发一次。已有结果：补生产提示仍失败，收到真实拒绝后请求启用所需能力，额外预加载尚未消除。未执行任何返回工具。[冻结上下文](../../.runtime/capability-routing-final-20260926/R01/)、[人工审查](../../.runtime/capability-routing-final-20260926/review-summary.json)。
 
+R02（效率，待实验）：E01 接入实跑第 3 轮，Laya 已发布 actions，旧能力列表仍显示 active=[]；模型同轮重复 configure 并正常查询。已冻结完整原请求、回包、宿主发布记录及源码哈希，未追加付费调用。只能确认多余控制工具调用，不能声称多了一轮模型调用；原因是否来自旧状态还需对照。[案例清单](../../.runtime/laya-integrated-20260926/R02/manifest.json)。
+
+R03（参数恢复，待实验）：E06 第 29 轮使用两项关系删除参数，被校验拦截；第 30 轮自行改为合法三项参数。已保存完整出错与恢复截面、禁止越权和保留原单关系的判定规则，未追加付费调用。[案例清单](../../.runtime/laya-integrated-20260926/R03/manifest.json)。
+
 本轮入口：`python -m experiments.agent_regression.incidents` 离线冻结；加 `--paid` 执行 A04 的 A/B 和原 B02/B03 保护，共 4 次，不执行返回的工具。A04 来源是 S01499 的真实 `confirm` 误调用；跨 run 防重发和桌面回读范围用离线测试验证。结果保存在 `.runtime/agent-regression-guards-20260924/`。
 
 D04 来自明确选择“整个会话”后，模型把无绑定状态误判为“只生成提案”的真实请求。只替换生产状态回包和工具定义，不注入业务绑定或改写旧历史。冻结：`python -m experiments.agent_regression.incidents --directory .runtime/agent-regression-scope-20260924 --case D04`；同目录加 `--paid`（不带 `--case`）执行 A/B 共 2 次。[原始传播证据](../../.runtime/agent-regression-full-20260923/full/S01499/conversation-scope-finding.json)。

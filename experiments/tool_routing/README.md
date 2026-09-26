@@ -1,7 +1,7 @@
-本实验只评估：在主模型请求前，由 Laya 建议注入哪些 capabilities。生产后端不接入；不预测工具参数，不执行工具，不授予写权限。
+本实验评估：在主模型请求前，由 Laya 建议注入哪些 capabilities。支持显式开启的接入实验，默认关闭；不预测工具参数，不执行业务工具，不授予写权限。
 
 2026-09-25 数据补充入口为 `collect_dataset`。先 `freeze` 固定意图、真实读取材料和历史前缀，再 `paid` 每节点调用一次模型，最后 `export` 隔离训练分歧；开发/测试分歧保留。员工、请假不在本轮范围。真实 HTTP 请求和用量均由现有单请求运行器记录，无业务工具执行。
-最新数据、用量与训练状态见 [数据补充结果](DATASET_RESULTS.md)。
+最新训练状态见 [数据补充结果](DATASET_RESULTS.md)；V4.1 Flash 三条完整业务见 [接入结果](LIVE_RESULTS.md)。
 
 训练已跑完；v15 未超过 v14，交付 v14 权重＋已验证的历史意图输入修复。数据池与检查点保留，完整成绩见结果报告。
 
@@ -14,13 +14,17 @@
 .runtime/laya-routing-20260924/venv/Scripts/python.exe -u -X utf8 -m experiments.tool_routing.router --model .runtime/capability-routing-phase-20260925/model-v14-intent --jsonl
 ```
 
-`status=ok` 的 `capabilities` 是本轮建议的完整可选集合，空集合表示保留基础工具。`status=fallback` 时沿用现有编排，不把失败当成空集合。接口核对权重和投射代码哈希，拒绝超窗输入；概率未校准。宿主仍须通过现有 `DynamicToolController` 发布，保留安装检查、审批和未知写入保护。当前入口独立运行，生产宿主尚未自动调用它。
+`status=ok` 的 `capabilities` 是本轮建议的完整可选集合，空集合表示保留基础工具。`status=fallback` 时沿用现有编排，不把失败当成空集合。接口核对权重和投射代码哈希，拒绝超窗输入；概率未校准。宿主通过现有 `DynamicToolController` 发布，保留安装检查、审批和未知写入保护。独立调用与宿主接入共用这个路由接口。
 
 Python 调用可复用同一个 `CapabilityRouter(model_path)` 实例，逐轮调用 `.route(request)`；异常由调用方回退。验收结果和权重路径以[结果报告](DATASET_RESULTS.md)为准。下文是历史实验复现入口。
 
 可选加 `--verify-labels`，或 `.route(request, verify_labels=True)`：本地再做一次等价判定；不一致返回 `fallback`，不提供可发布的 `capabilities`。实测拦住 2 个漏选，仍有 1 个稳定漏选。暖态约 0.59 秒；不调用付费模型作裁判。
 
-实验宿主可用 `await publish_next_turn(controller, decision, call_id, host_owns_selection=..., unresolved_write=...)` 复用真实发布入口。接管与未决写入标记由实时宿主提供；回退时保留现有工具和 list/configure。主模型接管后应由宿主在本 run 保持选择权。当前没有接入生产循环，不能仅凭这两个离线标记替代 ActionStore。
+离线发布实验可用 `await publish_next_turn(controller, decision, call_id, host_owns_selection=..., unresolved_write=...)`。真实接入读取 ActionStore，并在本 run 持久保留主模型接管；回退保留现有工具和 list/configure。
+
+2026-09-26 接入实验：业务 worker 同时设置 `ERP_LAYA_PYTHON`（隔离 ML Python 的绝对路径）与 `ERP_LAYA_MODEL`（已验收 bundle 的绝对路径）即可启用；删除这两个进程环境变量恢复原编排。默认关闭。接入读取实时 ActionStore，在实际请求及工具执行使用的同一快照上发布；主模型 configure 或路由失败后，本 run 保持主模型接管。审批重启复用接管记录。原始路由输入、决定、发布结果保存在各 run 的 `laya/`。主模型通过独立的 `LLM_MODEL` 设置，本轮为 `deepseek/deepseek-v4.1-flash`。
+
+三条业务入口：`python -m experiments.tool_routing.live_trial`。使用新建数据库副本、固定原输入和既有验收器；`setup → freeze → SALE / E01 / E06`，每条仅一次，审批依据原目标人工核对。已有目录有启动标记，不重复执行。证据在 `.runtime/laya-integrated-20260926/`；本轮同时更换主模型，成本变化不能单独归因于 Laya。
 
 后续训练可用 `train_joint --source .runtime/capability-routing-phase-20260925/dataset-v5-intent --output .runtime/routing-joint-new --initial-model .runtime/capability-routing-phase-20260925/model-v14-intent --epochs 4 --balance-sources --balance-phases --cover-weighted-pairs`。使用上述隔离 Python，通过 `-m experiments.tool_routing.train_joint` 调用；这批重投射数据尚未再次训练。旧 bundle 需配套旧源码，保留哈希检查。
 
@@ -61,7 +65,7 @@ Python 调用可复用同一个 `CapabilityRouter(model_path)` 实例，逐轮�
 评测分三项：
 
 - **注入相关性**：所需新增组是否漏选、多注入多少组/工具、base-only/无新增组、复合能力。历史下一步仅作覆盖代理；独立审阅允许多个合理注入集合，不要求 Golden Trace 相同。
-- **边界**：conversation 固定工具合同不参与动态路由；建议不能改变审批、身份校验或未知写入保护。此旁路实验没有验证生产发布与执行，只输出建议。
+- **边界**：conversation 固定工具合同不参与动态路由；建议不能改变审批、身份校验或未知写入保护。历史旁路实验只验证建议，2026-09-26 接入实验另行验证真实发布与执行。
 - **开销**：冷启动、暖态 P50/P95、本地输入 token、额外可见工具数，以及纯编排/混合编排响应数量。保持历史 active 的预加载只可能增加 schema；不能包装成 schema 节省。未做闭环对照前，不报告主模型调用或业务总成本下降。
 
 `reviewed_cases.json` 是子 agent 独立审阅的12个旧回归截面，其中8个动态节点、4个conversation负控制；不是365主池里已经审核的12题，也不是人类签字验收。
