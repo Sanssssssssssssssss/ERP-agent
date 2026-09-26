@@ -1,6 +1,8 @@
 """The model and dispatcher must share one publication snapshot. No paid calls."""
 import asyncio
+import json
 from itertools import count
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 from erp_harness.app.capability_routing import LayaProvider
@@ -56,21 +58,42 @@ def test_published_tools_are_dispatchable_in_the_same_turn(tmp_path,monkeypatch)
     store.close()
 
 
-def test_fallback_and_manual_selection_survive_worker_restart(tmp_path):
+def test_model_selection_survives_restart_without_disabling_router(tmp_path):
     provider,controller,store,_=setup(tmp_path)
     kwargs={'model':'test','system':'ERP','messages':[UserMessage(content='Read')],'tools':list(controller.tools)}
     async def check():
         configure=next(t for t in controller.tools if t.name=='configure_odoo_tools')
         await configure.execute('main-model',{'capabilities':['actions']})
-        provider._decide=AsyncMock(side_effect=AssertionError('Host selection must win'))
+        provider._decide=AsyncMock(return_value={'status':'ok','capabilities':['diagnostics']})
         kwargs['tools'][:]=controller.tools
         await provider._publish(kwargs)
         assert 'mcp_odoo_execute_approved_write' in {t.name for t in kwargs['tools']}
+        assert set(controller._active)=={'actions','diagnostics'}
+        # An explicit removal must not be undone by the next Laya decision.
+        await configure.execute('main-remove',{'capabilities':['actions']})
+        kwargs['tools'][:]=controller.tools
         resumed=LayaProvider(provider._config);resumed.bind_router(controller,store,tmp_path)
-        assert resumed._hold_reason()=='host_takeover'
+        resumed._decide=AsyncMock(return_value={'status':'ok','capabilities':['diagnostics']})
+        await resumed._publish(kwargs)
+        assert resumed._hold_reason() is None and controller._active==('actions',)
+        resumed._decide.assert_awaited_once()
         await resumed.aclose();await provider.aclose()
     asyncio.run(check())
     store.close()
+
+
+def test_redundant_model_selection_pins_tools_but_not_whole_router(tmp_path):
+    provider,controller,store,_=setup(tmp_path)
+    kwargs={'model':'test','system':'ERP','messages':[UserMessage(content='Continue')],'tools':list(controller.tools)}
+    async def check():
+        provider._decide=AsyncMock(return_value={'status':'ok','capabilities':['actions']})
+        await provider._publish(kwargs)
+        await next(t for t in controller.tools if t.name=='configure_odoo_tools').execute('model-same',{'capabilities':['actions']})
+        provider._decide=AsyncMock(return_value={'status':'ok','capabilities':[]})
+        await provider._publish(kwargs)
+        assert controller._active==('actions',) and provider._hold_reason() is None
+        await provider.aclose()
+    asyncio.run(check());store.close()
 
 
 def test_pending_ledger_holds_and_router_failure_preserves_tools(tmp_path,monkeypatch):
@@ -90,3 +113,91 @@ def test_pending_ledger_holds_and_router_failure_preserves_tools(tmp_path,monkey
         await provider.aclose()
     asyncio.run(check())
     store.close()
+
+
+def test_publication_receipt_failure_rolls_back_both_tool_views(tmp_path,monkeypatch):
+    provider,controller,store,_=setup(tmp_path);staged=[]
+    controller.bind(lambda tools:staged.append(tuple(tools)))
+    original=controller._log
+    def log(row):
+        if row.get('event')=='end' and row.get('tool')=='configure_odoo_tools':
+            raise OSError('simulated end receipt failure')
+        original(row)
+    monkeypatch.setattr(controller,'_log',log)
+    kwargs={'model':'test','system':'ERP','messages':[UserMessage(content='Confirm')],'tools':list(controller.tools)}
+    initial=list(kwargs['tools'])
+    async def check():
+        provider._decide=AsyncMock(return_value={'status':'ok','capabilities':['actions']})
+        await provider._publish(kwargs)
+        assert provider.failed and kwargs['tools']==initial and list(staged[-1])==initial
+        assert controller._active==()
+        await provider.aclose()
+    asyncio.run(check());store.close()
+
+
+def test_unwritable_router_receipts_keep_original_routing(tmp_path,monkeypatch):
+    provider,controller,store,_=setup(tmp_path)
+    kwargs={'model':'test','system':'ERP','messages':[UserMessage(content='Read')],'tools':list(controller.tools)}
+    original=Path.write_text
+    def fail(path,*args,**kw):
+        if path.parent==provider.directory:raise OSError('simulated read-only directory')
+        return original(path,*args,**kw)
+    monkeypatch.setattr(Path,'write_text',fail)
+    async def check():
+        provider._decide=AsyncMock(side_effect=AssertionError('No selector after failed provenance'))
+        await provider._publish(kwargs)
+        assert provider.failed and kwargs['tools']==list(controller.tools)
+        await provider.aclose()
+    asyncio.run(check());store.close()
+
+
+def test_diagnostic_receipt_failure_keeps_durable_publication(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from erp_harness.app.runner import _restore_dynamic_selection
+    provider,controller,store,_=setup(tmp_path)
+    original=provider._record
+    def record(row):
+        if row.get('status')=='applied':raise OSError('simulated diagnostic receipt failure')
+        original(row)
+    monkeypatch.setattr(provider,'_record',record)
+    kwargs={'model':'test','system':'ERP','messages':[UserMessage(content='Confirm')],'tools':list(controller.tools)}
+    async def check():
+        provider._decide=AsyncMock(return_value={'status':'ok','capabilities':['actions']})
+        await provider._publish(kwargs)
+        assert provider.failed and controller._active==('actions',)
+        assert kwargs['tools']==list(controller.tools)
+        restored=DynamicToolController(fake_tools(set(),[]),tmp_path/'dynamic-tools.jsonl',count().__next__)
+        _restore_dynamic_selection(restored,SimpleNamespace(messages=[],stage_tools_for_next_turn=lambda tools:None),tmp_path/'dynamic-tools.jsonl')
+        assert restored._active==controller._active
+        await provider.aclose()
+    asyncio.run(check());store.close()
+
+
+def test_publication_notice_and_request_correlation_are_request_local(tmp_path,monkeypatch):
+    from erp_harness.app.request_receipts import RequestReceipts, routing_decision_id
+    provider,controller,store,_=setup(tmp_path);receipts=RequestReceipts(tmp_path/'requests');seen=[]
+    provider._decide=AsyncMock(return_value={'status':'ok','capabilities':['actions']})
+    async def response(self,**kw):
+        seen.append(kw)
+        for _ in range(2):
+            row=receipts._allocate({'model':'test'})
+            assert row['routing_decision_id']==routing_decision_id.get()
+            yield AssistantDoneEvent(reason='stop',message=AssistantMessage(content='done'))
+    monkeypatch.setattr(OpenAICompatibleProvider,'stream_response',response)
+    async def check():
+        from erp_harness.runtime.provider import provider_request_kind
+        kind=provider_request_kind.set('normal')
+        try:
+            source=provider.stream_response(model='test',system='ERP',messages=[UserMessage(content='Confirm')],tools=list(controller.tools))
+            while True:
+                try:await asyncio.ensure_future(anext(source))
+                except StopAsyncIteration:break
+        finally:
+            provider_request_kind.reset(kind)
+        assert routing_decision_id.get() is None
+        assert 'Current host publication: ["actions"]' in seen[0]['system']
+        assert 'mcp_odoo_execute_approved_write' in {t.name for t in seen[0]['tools']}
+        decision=json.loads((provider.directory/'decisions.jsonl').read_text().splitlines()[0])
+        assert all(row['routing_decision_id']==decision['call_id'] for row in receipts._rows.values())
+        await provider.aclose()
+    asyncio.run(check());store.close()

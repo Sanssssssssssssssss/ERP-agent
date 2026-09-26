@@ -16,6 +16,8 @@ from erp_harness.app.stream_events import public_events
 from erp_harness.runtime.provider import provider_request_kind
 from erp_harness.runtime.messages import AssistantMessage
 
+routing_decision_id = ContextVar("routing_decision_id", default=None)
+
 
 def _now():
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
@@ -87,6 +89,8 @@ class RequestReceipts:
                "request_file": f"{self.number:04d}", "request_kind": provider_request_kind.get(),
                "status": "prepared", "run_id": os.environ.get("HARBOR_TRIAL_ID") or os.environ.get("PI_AGENT_RUN_ID"),
                "session_id": os.environ.get("PI_AGENT_SESSION_ID")}
+        if routing_decision_id.get() is not None:
+            row["routing_decision_id"] = routing_decision_id.get()
         if scope is not None:
             scope["row"] = row
         else:

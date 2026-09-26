@@ -69,6 +69,15 @@ DYNAMIC_TOOL_POLICY = (
     "selected tool is rejected."
     + EXACT_TOOL_NAME_POLICY
 )
+HOST_ROUTING_POLICY = (
+    " The host selects optional capabilities before each request. Use the tools already "
+    "published in this request; do not configure a capability that is already present. "
+    "The current host publication notice supersedes historical active-tool lists. "
+    "If a needed tool is absent, use configure_odoo_tools as recovery; use "
+    "list_odoo_capabilities only when group availability is unknown. A model-requested "
+    "configuration takes effect next turn; do not call newly requested tools in the same response."
+    + EXACT_TOOL_NAME_POLICY
+)
 BUSINESS_EXECUTION_POLICY = (
     " Determine the user-required scope and constraints before acting; for fulfillment, "
     "procurement, or manufacturing work, determine the supply-and-demand gap. Do not "
@@ -80,7 +89,7 @@ McpToolSet = None
 
 
 def build_business_system_prompt(*, sop_mode: str, tool_mode: str,
-                                 runtime_date: str, runtime_timezone: str) -> str:
+                                 runtime_date: str, runtime_timezone: str, host_routing: bool = False) -> str:
     """Use the ERP role without importing the generic coding prompt or tool list."""
     return (
         "You are an ERP business execution assistant. Be concise and respond in Simplified Chinese; "
@@ -90,7 +99,7 @@ def build_business_system_prompt(*, sop_mode: str, tool_mode: str,
         + MCP_ONLY_POLICY
         + BUSINESS_EXECUTION_POLICY
         + (SOP_POLICY if sop_mode == "controlled" else "")
-        + (DYNAMIC_TOOL_POLICY if tool_mode == "dynamic" else "")
+        + ((HOST_ROUTING_POLICY if host_routing else DYNAMIC_TOOL_POLICY) if tool_mode == "dynamic" else "")
     )
 
 
@@ -515,6 +524,7 @@ async def run(args: argparse.Namespace) -> None:
                         tool_mode=tool_mode,
                         runtime_date=runtime_date,
                         runtime_timezone=runtime_now.strftime("UTC%z"),
+                        host_routing=bool(os.environ.get("ERP_LAYA_MODEL")),
                     ),
                     auto_compact_enabled=not budget_enabled,
                     # 关闭的是任务结束后的自动摘要。请求前和溢出恢复由 session 管理。
