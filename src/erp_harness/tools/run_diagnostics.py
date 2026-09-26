@@ -196,7 +196,7 @@ def summarize_run(directory: Path, session_file: Path, identity: dict, *, run_id
     return result
 
 
-def build_diagnostic_tool(receipt_dir: Path, session_file: Path, identity_context):
+def build_diagnostic_tool(receipt_dir: Path, session_file: Path, identity_context, *, routing_context=None):
     identity = copy.deepcopy(identity_context())
     run_id = os.environ.get("HARBOR_TRIAL_ID") or os.environ.get("PI_AGENT_RUN_ID")
     session_id = os.environ.get("PI_AGENT_SESSION_ID")
@@ -208,6 +208,10 @@ def build_diagnostic_tool(receipt_dir: Path, session_file: Path, identity_contex
             payload = {"success": False, "error_code": "identity_or_scope_unavailable", "items": []}
         else:
             payload = summarize_run(receipt_dir, session_file, identity, run_id=run_id, session_id=session_id)
+            if payload.get("success") and routing_context is not None:
+                payload["routing"] = routing_context()
+                if len(json.dumps(payload, ensure_ascii=False).encode()) > 8192:
+                    payload = {"success": False, "error_code": "diagnostic_size_limit", "items": []}
         return AgentToolResult(content=json.dumps(payload, ensure_ascii=False), details=payload)
 
     return AgentTool(name="diagnose_current_run", label="Diagnose current run",

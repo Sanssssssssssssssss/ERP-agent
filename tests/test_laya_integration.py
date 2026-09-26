@@ -11,7 +11,7 @@ from erp_harness.erp.store import ActionStore
 from erp_harness.providers.env import OpenAICompatibleConfig
 from erp_harness.providers.config import ProviderSettings
 from erp_harness.providers.openai_compatible import OpenAICompatibleProvider
-from erp_harness.runtime.messages import AssistantMessage, ToolCall, UserMessage
+from erp_harness.runtime.messages import AssistantMessage, ToolCall, ToolResultMessage, UserMessage
 from erp_harness.runtime.provider_events import AssistantDoneEvent
 from erp_harness.runtime.session import HarnessSession, SessionConfig
 from erp_harness.runtime.storage import JsonlSessionStorage
@@ -199,5 +199,81 @@ def test_publication_notice_and_request_correlation_are_request_local(tmp_path,m
         assert 'mcp_odoo_execute_approved_write' in {t.name for t in seen[0]['tools']}
         decision=json.loads((provider.directory/'decisions.jsonl').read_text().splitlines()[0])
         assert all(row['routing_decision_id']==decision['call_id'] for row in receipts._rows.values())
+        publication=json.loads((provider.directory/'decisions.jsonl').read_text().splitlines()[-1])
+        assert publication['event']=='publication' and publication['decision_id']==decision['call_id']
+        assert publication['active']==['actions'] and publication['proposed']==['actions']
+        assert len(publication['tool_contract_sha256'])==64
+        await provider.aclose()
+    asyncio.run(check());store.close()
+
+
+def test_old_publication_is_not_current_state_and_errors_survive(tmp_path):
+    provider,controller,store,_=setup(tmp_path)
+    catalog=ToolResultMessage(tool_call_id='catalog',tool_name='list_odoo_capabilities',content=json.dumps({
+        'success':True,'active':[], 'capabilities':[{'id':'actions','active':False,'status':'available'},
+        {'id':'accounting','active':False,'status':'module_missing','missing_models':['account.move']}],
+        'notice':'Configure next turn'}))
+    configured=ToolResultMessage(tool_call_id='config',tool_name='configure_odoo_tools',content=json.dumps({
+        'success':True,'active':['actions'],'published_tools':['old'],'available_next_turn':True}))
+    failed=ToolResultMessage(tool_call_id='failure',tool_name='configure_odoo_tools',content=json.dumps({
+        'success':False,'unknown':['invented'],'error':'Invalid selection'}))
+    record=ToolResultMessage(tool_call_id='read',tool_name='mcp_odoo_read_record',content=json.dumps({
+        'success':True,'result':{'active':False,'state':'draft'}}))
+    messages=[UserMessage(content='Confirm'),catalog,configured,failed,record]
+    before=[m.model_dump() for m in messages]
+    projected,total=provider.project_model_context(messages)
+    assert total==2 and [m.model_dump() for m in messages]==before
+    assert [m.tool_call_id for m in projected[1:]]==['catalog','config','failure','read']
+    cleaned=json.loads(projected[1].text)
+    assert 'active' not in cleaned and all('active' not in row for row in cleaned['capabilities'])
+    assert cleaned['capabilities'][1]['status']=='module_missing'
+    assert cleaned['capabilities'][1]['missing_models']==['account.move']
+    assert projected[3:] == [failed,record]
+    assert provider.project_model_context(projected)[0]==projected
+    from erp_harness.app.capability_routing import project_routing_result
+    invalid='{"success":true,"capabilities":null}'
+    assert project_routing_result('list_odoo_capabilities',invalid)==invalid
+    diagnosis=ToolResultMessage(tool_call_id='diagnose',tool_name='diagnose_current_run',content=json.dumps({
+        'success':True,'routing':{'status':'fallback','reason':'router_error'},'items':[]}))
+    assert provider.project_model_context([AssistantMessage(content='Diagnose'),diagnosis])[0][-1]==diagnosis
+    consumed=provider.project_model_context([diagnosis,AssistantMessage(content='Recovered')])[0][0]
+    assert 'routing' not in json.loads(consumed.text)
+    store.close()
+
+
+def test_new_host_routed_run_does_not_inherit_previous_run_tools(tmp_path):
+    from types import SimpleNamespace
+    from erp_harness.app.runner import _restore_dynamic_selection
+    provider,controller,store,_=setup(tmp_path)
+    previous=ToolResultMessage(tool_call_id='old-run',tool_name='configure_odoo_tools',content=json.dumps({
+        'success':True,'active':['actions']}))
+    session=SimpleNamespace(messages=[previous],stage_tools_for_next_turn=lambda tools:None)
+    log=tmp_path/'dynamic-tools.jsonl'
+    _restore_dynamic_selection(controller,session,log,restore_history=False)
+    assert controller._active==()
+    _restore_dynamic_selection(controller,session,log)  # Existing model-owned sessions stay compatible.
+    assert controller._active==('actions',)
+    log.write_text(json.dumps({'event':'end','tool':'configure_odoo_tools','success':True,'active':['diagnostics']})+'\n')
+    _restore_dynamic_selection(controller,session,log,restore_history=False)
+    assert controller._active==('diagnostics',)  # An approval restart uses this run's durable receipt.
+    store.close()
+
+
+def test_routing_diagnosis_distinguishes_model_retention_and_failed_selection(tmp_path):
+    provider,controller,store,_=setup(tmp_path)
+    kwargs={'model':'test','system':'ERP','messages':[UserMessage(content='Continue')],'tools':list(controller.tools)}
+    async def check():
+        await next(t for t in controller.tools if t.name=='configure_odoo_tools').execute('recovery',{'capabilities':['actions']})
+        kwargs['tools'][:]=controller.tools
+        provider._decide=AsyncMock(return_value={'status':'ok','capabilities':[]})
+        await provider._publish(kwargs,'decision-1')
+        info=provider.routing_diagnostic()
+        assert info['proposed']==[] and info['active']==['actions'] and info['required_by_model']==['actions']
+        assert info['decision_id']=='decision-1' and not info['business_truth'] and not info['automatic_business_retry']
+        provider._decide=AsyncMock(return_value={'status':'ok','capabilities':['actions','actions']})
+        await provider._publish(kwargs,'decision-2')
+        info=provider.routing_diagnostic()
+        assert info['status']=='fallback' and info['reason']=='router_error' and info['proposed'] is None
+        assert info['active']==['actions'] and info['fallback']=='model_recovery'
         await provider.aclose()
     asyncio.run(check());store.close()

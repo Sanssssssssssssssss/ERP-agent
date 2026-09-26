@@ -13,6 +13,36 @@ from erp_harness.erp.store import ActionStore
 from erp_harness.providers.openai_compatible import OpenAICompatibleProvider, _build_chat_payload
 from erp_harness.runtime.provider import provider_request_kind
 from erp_harness.app.request_receipts import routing_decision_id
+from erp_harness.runtime.messages import TextContent, ToolResultMessage
+from erp_harness.tools.dynamic_tools import CAPABILITY_GROUPS, tool_contract_sha256
+
+
+def project_routing_result(name, content):
+    """Remove historical publication state, retaining availability and failure evidence."""
+    if name not in {"configure_odoo_tools", "list_odoo_capabilities", "diagnose_current_run"}:
+        return content
+    try:
+        value = json.loads(content)
+    except (TypeError, ValueError):
+        return content
+    if not isinstance(value, dict) or value.get("success") is not True:
+        return content
+    if name == "list_odoo_capabilities" and (not isinstance(value.get("capabilities"), list)
+                                             or any(not isinstance(g, dict) for g in value["capabilities"])):
+        return content
+    if name == "diagnose_current_run":
+        if "routing" not in value:
+            return content
+        value.pop("routing")  # Live state belongs to the current call, never an old diagnosis.
+    else:
+        for key in ("active", "added", "removed", "published_tools", "tool_contract_sha256",
+                    "available_next_turn", "notice"):
+            value.pop(key, None)
+        for group in value.get("capabilities", []):
+            if isinstance(group, dict):
+                group.pop("active", None)
+        value["publication"] = "Historical receipt; use current request tools for availability."
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
 class LayaProvider(OpenAICompatibleProvider):
@@ -24,6 +54,8 @@ class LayaProvider(OpenAICompatibleProvider):
         self.process = None
         self.stderr = None
         self.failed = False
+        self.routing_state = {"decision_id": None, "status": "not_decided", "reason": None,
+                              "proposed": None, "required_by_model": [], "excluded_by_model": []}
         try:
             self.directory.mkdir(exist_ok=True)
         except OSError:
@@ -32,6 +64,33 @@ class LayaProvider(OpenAICompatibleProvider):
     def _record(self, row):
         with (self.directory / "decisions.jsonl").open("a", encoding="utf8") as stream:
             stream.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    def routing_diagnostic(self):
+        """Live publication only; no trace content, business truth or replay authority."""
+        return {**self.routing_state, "active": list(self.controller._active),
+                "fallback": "model_recovery" if self.failed else "available",
+                "business_truth": False, "automatic_business_retry": False}
+
+    def publication_notice(self):
+        return ("\nCurrent host publication: " + json.dumps(list(self.controller._active))
+                + ". Only the tools in this request establish current availability. "
+                "Publication grants no execution approval.")
+
+    def project_model_context(self, messages):
+        # Keep stored history and the trained selector input intact. Clean only the main-model view.
+        projected, count = [], 0
+        last_assistant = max((i for i, message in enumerate(messages) if message.role == "assistant"), default=-1)
+        for index, message in enumerate(messages):
+            if isinstance(message, ToolResultMessage) and not message.is_error:
+                # A just-requested diagnosis must reach the model once before it becomes history.
+                content = (message.text if message.tool_name == "diagnose_current_run" and index > last_assistant
+                           else project_routing_result(message.tool_name, message.text))
+                if content != message.text:
+                    message = message.model_copy(update={"content": [TextContent(text=content)],
+                                                         "details": json.loads(content)})
+                    count += 1
+            projected.append(message)
+        return projected, count
 
     def _takeover(self, reason):
         self.failed = True
@@ -94,9 +153,12 @@ class LayaProvider(OpenAICompatibleProvider):
         row = {"call_id": call_id, "request_number": getattr(self._config.provider_hooks, "number", 0) + 1}
         before = self.controller._active
         published = False
+        status, reason, proposed = "fallback", None, None
+        required, excluded = set(), set()
         try:
             reason = self._hold_reason()
             if reason:
+                status = "held"
                 self._record({**row, "status": "held", "reason": reason})
                 return
             payload = _build_chat_payload(
@@ -110,31 +172,38 @@ class LayaProvider(OpenAICompatibleProvider):
             # Persist provenance before configure so a restart can identify host-origin calls.
             self._record({**row, "event": "decision", **decision})
             if decision.get("status") != "ok":
+                reason = "unstable_capability_selection" if decision.get("reason") == "unstable_capability_selection" else "router_fallback"
                 if decision.get("reason") != "unstable_capability_selection":
                     self._takeover("router_fallback")
                 return
             selected = decision.get("capabilities")
-            if not isinstance(selected, list) or any(not isinstance(g, str) for g in selected):
+            if (not isinstance(selected, list) or any(not isinstance(g, str) or g not in CAPABILITY_GROUPS for g in selected)
+                    or len(selected) != len(set(selected))):
                 raise ValueError("Invalid capability selection")
+            proposed = selected
             required, excluded = self._model_selection()
             selected = sorted((set(selected) | required) - excluded)
             if set(selected) == set(self.controller._active):
+                status = "unchanged"
                 self._record({**row, "status": "unchanged", "required_by_model": sorted(required),
                               "excluded_by_model": sorted(excluded)})
                 return
             configure = next(t for t in self.controller.tools if t.name == "configure_odoo_tools")
             result = await configure.execute(call_id, {"capabilities": selected})
             if result.details.get("success") is not True:
+                reason = "publication_rejected"
                 self._takeover("publication_rejected")
                 self._record({**row, "status": "fallback", "reason": "publication_rejected"})
                 return
             # The loop dispatches from this same list. Never replace only the HTTP schema.
             kwargs["tools"][:] = self.controller.tools
             published = True
+            status = "applied"
             self._record({**row, "status": "applied", "active": selected,
                           "required_by_model": sorted(required), "excluded_by_model": sorted(excluded),
                           "published_tools": [t.name for t in kwargs["tools"]]})
         except (OSError, ValueError, TypeError, KeyError, RuntimeError, StopIteration, sqlite3.Error) as error:
+            status, reason = "fallback", "router_error"
             # Roll back only an uncommitted publication. A diagnostic-log failure must
             # retain the successful dynamic receipt's selection, including on restart.
             if not published and self.controller._active != before:
@@ -149,19 +218,27 @@ class LayaProvider(OpenAICompatibleProvider):
             if self.process is not None and self.process.returncode is None:
                 self.process.kill()
                 await self.process.wait()
+        finally:
+            self.routing_state = {"decision_id": call_id, "status": status, "reason": reason,
+                                  "proposed": proposed, "required_by_model": sorted(required),
+                                  "excluded_by_model": sorted(excluded)}
 
     async def stream_response(self, **kwargs):
         call_id = None
         if provider_request_kind.get() == "normal" and kwargs["tools"] and hasattr(self, "controller"):
             call_id = "laya:" + uuid.uuid4().hex
             await self._publish(kwargs, call_id)
-            # Request-local state: never append a new historical user instruction each turn.
-            kwargs["system"] += (
-                "\nCurrent host publication: " + json.dumps(list(self.controller._active))
-                + ". Base tools remain available. Use the actual tool definitions now; historical "
-                "active lists may be stale. Configure only when a needed capability is absent. "
-                "Publication grants no execution approval."
-            )
+            kwargs["messages"], projected = self.project_model_context(kwargs["messages"])
+            kwargs["system"] += self.publication_notice()
+            try:
+                self._record({"event": "publication", "call_id": call_id, **self.routing_diagnostic(),
+                              "history_results_projected": projected,
+                              "tool_contract_sha256": tool_contract_sha256([
+                                  {"name": t.name, "description": t.description, "parameters": dict(t.parameters)}
+                                  for t in kwargs["tools"]])})
+            except OSError:
+                self._takeover("publication_receipt_unavailable")
+                self.routing_state.update(status="fallback", reason="publication_receipt_unavailable")
         source = super().stream_response(**kwargs)
         try:
             while True:

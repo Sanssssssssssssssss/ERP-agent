@@ -76,6 +76,7 @@ HOST_ROUTING_POLICY = (
     "If a needed tool is absent, use configure_odoo_tools as recovery; use "
     "list_odoo_capabilities only when group availability is unknown. A model-requested "
     "configuration takes effect next turn; do not call newly requested tools in the same response."
+    " Use diagnose_current_run for execution or publication failures; it cannot establish business facts."
     + EXACT_TOOL_NAME_POLICY
 )
 BUSINESS_EXECUTION_POLICY = (
@@ -182,9 +183,10 @@ def _receipt_dynamic_selection(path: Path) -> tuple[bool, tuple[str, ...] | None
     return False, None
 
 
-def _restore_dynamic_selection(dynamic_tools: DynamicToolController, session: HarnessSession, dynamic_log: Path) -> None:
+def _restore_dynamic_selection(dynamic_tools: DynamicToolController, session: HarnessSession, dynamic_log: Path,
+                               *, restore_history: bool = True) -> None:
     receipt_found, active = _receipt_dynamic_selection(dynamic_log)
-    if not receipt_found:
+    if not receipt_found and restore_history:
         # A new run keeps the business session transcript but has a new receipt
         # directory. Recover only a typed, successful configure result from
         # history; never copy approvals, action receipts, or arbitrary prose.
@@ -459,7 +461,8 @@ async def run(args: argparse.Namespace) -> None:
                     world,
                     identity_context=(native_runtime.identity_context if native_runtime is not None else None),
                 ) if world is not None else ()),
-                *([build_diagnostic_tool(receipt_dir, args.session_file, native_runtime.identity_context)]
+                *([build_diagnostic_tool(receipt_dir, args.session_file, native_runtime.identity_context,
+                                        routing_context=getattr(provider, "routing_diagnostic", None))]
                   if native_runtime is not None else []),
             ]
             if tool_mode == "dynamic":
@@ -541,7 +544,8 @@ async def run(args: argparse.Namespace) -> None:
                 # last published set from its append-only receipt before the
                 # continuation model turn is built.
                 dynamic_log = receipt_dir / "dynamic-tools.jsonl"
-                _restore_dynamic_selection(dynamic_tools, session, dynamic_log)
+                _restore_dynamic_selection(dynamic_tools, session, dynamic_log,
+                                           restore_history=not bool(os.environ.get("ERP_LAYA_MODEL")))
                 # 工具集合的变更留到下一轮发布，避免同一轮请求与执行使用不同契约。
                 dynamic_tools.bind(session.stage_tools_for_next_turn)
                 if os.environ.get("ERP_LAYA_MODEL"):

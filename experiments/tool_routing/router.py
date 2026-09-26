@@ -1,6 +1,7 @@
 """Local capability publication. No provider requests, ERP calls, or write approval."""
 import argparse
 from contextlib import redirect_stdout
+from hashlib import sha256
 import json
 import math
 from pathlib import Path
@@ -23,6 +24,7 @@ class CapabilityRouter:
         import torch
         directory = Path(directory)
         manifest = read(directory/'router.json')
+        self.projection = manifest.get('projection', 'legacy')
         if manifest.get('projection', 'legacy') == 'evidence_v2':
             from .evidence_state import evidence_state
             self.project = evidence_state
@@ -83,6 +85,8 @@ class CapabilityRouter:
                      if usage.get(k) is not None and review['usage'].get(k) is not None else None
                      for k in usage.keys() | review['usage'].keys()}
         receipt = {'status':'ok','capabilities':selected,
+                'projection':getattr(self, 'projection', 'unknown'),
+                'state_sha256':sha256(state.encode('utf8')).hexdigest(),
                 'probabilities':{g:a['probabilities']['A'] for g,a in result['answers'].items()},
                 'probabilities_calibrated':False,'state_tokens':size,'usage':usage,
                 'inference_calls':2 if verify_labels else 1,
