@@ -109,6 +109,21 @@ def build_routing_state(request, *, goal=None, stage=None, ledger=None, identity
             if isinstance(v, str) and not v.startswith('The desktop host has completed human approval')]
     calls = {c["id"]: c["function"] for m in messages if m.get("role") == "assistant"
              for c in m.get("tool_calls", [])}
+    if world is not None:
+        visible_calls = {m.get('tool_call_id') for m in messages if m.get('role') == 'tool'}
+        archived = []
+        # World outlives compacted chat. Add missing observations only to the selector's private view.
+        for receipt in world._authorized_receipts(identity):
+            call_id = receipt['call_id']
+            if call_id in visible_calls:
+                continue
+            integrity, payload = world._visible_payload(receipt)
+            if integrity != 'verified':
+                state['evidence_gaps'].append({'source_call_id':call_id,'reason':'unverified_observation'})
+                continue
+            calls[call_id] = {'name': receipt['tool'], 'arguments': receipt['request']}
+            archived.append({'role':'tool','tool_call_id':call_id,'name':receipt['tool'],'content':payload})
+        messages = archived + messages
     seen = set()
     for message in reversed(messages):
         if message.get("role") != "tool":

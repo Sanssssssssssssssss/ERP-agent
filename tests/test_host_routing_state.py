@@ -39,6 +39,7 @@ def test_world_freshness_and_identity_are_preserved():
     identity={'identity_id':'same'}
     world=SimpleNamespace(receipt_for_call=lambda c:{'identity':identity,
         'targets':[{'model':'account.move.line','records':[{'id':110}]}]},
+        _authorized_receipts=lambda _:[],
         record_view=lambda *a:{'stale':True,'fields':{
             'amount_residual':{'status':'value','value':935.64,'stale':True},
             'reconciled':{'status':'empty','value':False,'stale':False}}})
@@ -95,6 +96,7 @@ def test_composite_world_receipt_preserves_complete_small_groups():
         'manufacturing':{'boms':[{'id':2,'product_qty':4}]}},'completeness':{'complete':True}}
     req=request([]);req['messages'][-1]['content']=json.dumps(payload)
     world=SimpleNamespace(receipt_for_call=lambda _: {'identity':identity,'targets':[]},
+                          _authorized_receipts=lambda _:[],
                           _visible_payload=lambda _:('verified',payload))
     facts=build_routing_state(req,world=world,identity=identity)['business_facts']
     assert facts[0]['values']['stock_quants']==payload['result']['stock_quants']
@@ -139,6 +141,22 @@ def test_world_replay_respects_restart_invalidation_and_cutoff(tmp_path,monkeypa
         view=replay.record_view('same','sale.order',1)
         assert view['stale'] is stale and view['fields']['state']['value']==value
         if second<7: assert replay.receipt_for_call('later') is None
+
+
+def test_compacted_chat_retains_world_relations_and_latest_failure(tmp_path,monkeypatch):
+    from erp_harness.context.world import WorldStore
+    identity={'instance':'main','identity_id':'same','url':None}
+    monkeypatch.setattr('erp_harness.context.world._safe_identities',lambda:('main',{'main':identity}))
+    world=WorldStore(tmp_path/'world.jsonl')
+    handle=world.begin('read','read_record',{'model':'account.move.line'},'native',identity=identity)
+    world.finish(handle,json.dumps({'success':True,'result':[{'id':i,'reconciled':False} for i in [121,122,8,110]]}))
+    req={'messages':[{'role':'user','content':'Reconcile bank receipts.'},
+        {'role':'tool','name':'execute_method','tool_call_id':'failed',
+         'content':json.dumps({'success':False,'error':'Missing invoice binding'})}]}
+    state=build_routing_state(req,world=world,identity=identity)
+    assert [f['record_id'] for f in state['business_facts']]==[121,122,8,110]
+    assert state['recent_results'][0]['error']=='Missing invoice binding'
+    assert len(req['messages'])==2  # Provider/main-model history is unchanged.
 
 
 def test_training_rejects_identical_state_with_opposite_supervision():

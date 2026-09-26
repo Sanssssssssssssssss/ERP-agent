@@ -74,7 +74,7 @@ def replay_world(run, cutoff, directory):
             world._merge(event,recovering=when<reset)
             world._receipts[event['receipt_id']]=event
             world._by_call[event['call_id']]=event
-    return world,identity
+    return (world,identity) if identity is not None else (None,None)
 
 
 def as_of_state(path, request):
