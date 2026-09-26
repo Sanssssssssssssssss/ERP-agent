@@ -6,6 +6,10 @@ R01：Laya 缩小发布集合后，主模型实际调用未发布的跨实例工
 
 R02（效率，待实验）：E01 接入实跑第 3 轮，Laya 已发布 actions，旧能力列表仍显示 active=[]；模型同轮重复 configure 并正常查询。已冻结完整原请求、回包、宿主发布记录及源码哈希，未追加付费调用。只能确认多余控制工具调用，不能声称多了一轮模型调用；原因是否来自旧状态还需对照。[案例清单](../../.runtime/laya-integrated-20260926/R02/manifest.json)。
 
+R04（效率，待实验）：E01 第二次接入实跑第 6 轮，已明确展示当前 actions，模型仍重复 configure 并查询记录；本次总 token 上升，不能全归因于这一调用。完整原请求、响应、关联及约束已冻结，未追加 API。[案例清单](../../.runtime/laya-live-v2-20260926/R04/manifest.json)。
+
+R05（编排切换，待实验）：E06 第二次实跑第 12 轮，Laya 撤下前两轮的 actions，随后主模型只调用 configure 加回。冻结完整上下文，按业务安全与编排开销评判，不要求轨迹相同。[案例清单](../../.runtime/laya-live-v2-20260926/R05/manifest.json)。
+
 R03（参数恢复，待实验）：E06 第 29 轮使用两项关系删除参数，被校验拦截；第 30 轮自行改为合法三项参数。已保存完整出错与恢复截面、禁止越权和保留原单关系的判定规则，未追加付费调用。[案例清单](../../.runtime/laya-integrated-20260926/R03/manifest.json)。
 
 本轮入口：`python -m experiments.agent_regression.incidents` 离线冻结；加 `--paid` 执行 A04 的 A/B 和原 B02/B03 保护，共 4 次，不执行返回的工具。A04 来源是 S01499 的真实 `confirm` 误调用；跨 run 防重发和桌面回读范围用离线测试验证。结果保存在 `.runtime/agent-regression-guards-20260924/`。
