@@ -16,6 +16,12 @@ R04／R06 接口整理复测（`b2f7a1f`）：R04 原样再次重复 configure�
 
 R04／R05／R06 宿主独占编排实验：`python -m experiments.agent_regression.host_routing freeze --output <新目录>`，随后同目录执行 `paid`。真实 Laya 决策＋真实 controller 生成候选，主模型不再看到目录／配置入口及其历史调用；当前 run 的成功 SOP 回执提供工具依赖。三节点 A/B 各一次，共 6 POST，返回工具不执行。输入和约束见 [冻结记录](../../.runtime/laya-exclusive-nodes-20260926/frozen.json)。依赖兜底单独计数，不算 Laya 原始预测正确。回退点 `724a1c9`。
 
+上述候选三个节点的目标／安全检查通过，R04 仍有额外 preview；三个完整业务也通过。结果见 [宿主编排实验](../tool_routing/EXCLUSIVE_RESULTS.md)。
+
+R07：本轮 SALE 请求 2 将 SOP 操作写成 `write+confirm`，请求 3 自行修正；[原请求、首次纠正节点及哈希](../../.runtime/laya-exclusive-20260926/R07/manifest.json)。R08：E06 请求 11 的嵌套退货明细缺 `product_id`，预检未提示，请求 12 的创建被 Odoo 拒绝并记为 `known_failed`；请求 13 补字段重新预检，[证据](../../.runtime/laya-exclusive-20260926/R08/manifest.json)。二者已归档，未追加付费重放、未宣称预防性修复完成。
+
+R03 在本轮 E06 请求 29 再次出现，30 自行修正；[复现记录](../../.runtime/laya-exclusive-20260926/R03-recurrence/manifest.json)。沿用原安全约束，不另造案例。
+
 R03（参数恢复，待实验）：E06 第 29 轮使用两项关系删除参数，被校验拦截；第 30 轮自行改为合法三项参数。已保存完整出错与恢复截面、禁止越权和保留原单关系的判定规则，未追加付费调用。[案例清单](../../.runtime/laya-integrated-20260926/R03/manifest.json)。
 
 本轮入口：`python -m experiments.agent_regression.incidents` 离线冻结；加 `--paid` 执行 A04 的 A/B 和原 B02/B03 保护，共 4 次，不执行返回的工具。A04 来源是 S01499 的真实 `confirm` 误调用；跨 run 防重发和桌面回读范围用离线测试验证。结果保存在 `.runtime/agent-regression-guards-20260924/`。
