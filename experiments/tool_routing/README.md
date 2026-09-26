@@ -20,11 +20,15 @@ Python 调用可复用同一个 `CapabilityRouter(model_path)` 实例，逐轮�
 
 可选加 `--verify-labels`，或 `.route(request, verify_labels=True)`：本地再做一次等价判定；不一致返回 `fallback`，不提供可发布的 `capabilities`。实测拦住 2 个漏选，仍有 1 个稳定漏选。暖态约 0.59 秒；不调用付费模型作裁判。
 
-离线发布实验可用 `await publish_next_turn(controller, decision, call_id, host_owns_selection=..., unresolved_write=...)`。真实接入读取 ActionStore，并在本 run 持久保留主模型接管；回退保留现有工具和 list/configure。
+离线发布实验可用 `await publish_next_turn(controller, decision, call_id, host_owns_selection=..., unresolved_write=...)`。真实接入读取 ActionStore；未决写入保留当前工具，回退保留现有工具和 list/configure。
 
-2026-09-26 接入实验：业务 worker 同时设置 `ERP_LAYA_PYTHON`（隔离 ML Python 的绝对路径）与 `ERP_LAYA_MODEL`（已验收 bundle 的绝对路径）即可启用；删除这两个进程环境变量恢复原编排。默认关闭。接入读取实时 ActionStore，在实际请求及工具执行使用的同一快照上发布；主模型 configure 或路由失败后，本 run 保持主模型接管。审批重启复用接管记录。原始路由输入、决定、发布结果保存在各 run 的 `laya/`。主模型通过独立的 `LLM_MODEL` 设置，本轮为 `deepseek/deepseek-v4.1-flash`。
+2026-09-26 接入实验：业务 worker 同时设置 `ERP_LAYA_PYTHON`（隔离 ML Python 的绝对路径）与 `ERP_LAYA_MODEL`（已验收 bundle 的绝对路径）即可启用；删除这两个进程环境变量恢复原编排。默认关闭。接入在实际请求及执行共用的工具列表上发布，并告知主模型当前集合；主模型明确选定、移除的组由日志恢复并保留，正常 configure 不再永久关闭 Laya。标签判定不一致仅保留当前轮工具；基础设施故障才持久降级。审批与未决写入保护不变。原输入、决定、发布结果保存于各 run 的 `laya/`，请求回执以 `routing_decision_id` 显式关联。主模型为 `deepseek/deepseek-v4.1-flash`。
+
+本地选择器等待 300 秒后降级，关停等待 5 秒；不限制付费模型或完整业务。输入投射由 bundle 声明：旧版保持原样，`evidence_v2` 只修复压缩 schema 的字段名读取。扩充 SOP、表格与意图字段的版本因历史节点退化未采用。权重未重训，不能把接入完整性视为路由准确率保证。
 
 三条业务入口：`python -m experiments.tool_routing.live_trial`。使用新建数据库副本、固定原输入和既有验收器；`setup → freeze → SALE / E01 / E06`，每条仅一次，审批依据原目标人工核对。已有目录有启动标记，不重复执行。证据在 `.runtime/laya-integrated-20260926/`；本轮同时更换主模型，成本变化不能单独归因于 Laya。
+
+复测使用 `--trial laya-live-v2-20260926 --port 18190 --laya-model .runtime/laya-integration-v2-20260926/model`；三个阶段都带相同参数。新建数据库、附件目录和 profile，旧运行保留。冻结源码、输入、bundle 清单及权重哈希后才能启动。
 
 后续训练可用 `train_joint --source .runtime/capability-routing-phase-20260925/dataset-v5-intent --output .runtime/routing-joint-new --initial-model .runtime/capability-routing-phase-20260925/model-v14-intent --epochs 4 --balance-sources --balance-phases --cover-weighted-pairs`。使用上述隔离 Python，通过 `-m experiments.tool_routing.train_joint` 调用；这批重投射数据尚未再次训练。旧 bundle 需配套旧源码，保留哈希检查。
 

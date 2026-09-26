@@ -16,11 +16,20 @@ from .decision_dataset import bounded
 class CapabilityRouter:
     """Load once and reuse per turn in the isolated Laya environment."""
 
+    project = staticmethod(routing_state)
+
     def __init__(self, directory, device='cuda'):
         import laya
         import torch
         directory = Path(directory)
         manifest = read(directory/'router.json')
+        if manifest.get('projection', 'legacy') == 'evidence_v2':
+            from .evidence_state import evidence_state
+            self.project = evidence_state
+        elif manifest.get('projection', 'legacy') == 'legacy':
+            self.project = routing_state
+        else:
+            raise ValueError('Unknown routing projection')
         for name,digest in manifest['files'].items():
             if Path(name).is_absolute() or '..' in Path(name).parts:
                 raise ValueError('Invalid bundle path')
@@ -57,7 +66,7 @@ class CapabilityRouter:
         if self.agent.device.type != self.device_type:
             raise RuntimeError('Inference device changed; use the existing router')
         started = time.perf_counter()
-        state = routing_state(request)
+        state = self.project(request)
         size = len(self.agent.tok(state.replace(self.agent.tok.mask_token,' '),add_special_tokens=False)['input_ids'])
         # Conservative room for the whole decision head; never silently truncate state.
         if size+self.agent.cfg['head_max_len']+4 > self.agent.cfg['max_len']:

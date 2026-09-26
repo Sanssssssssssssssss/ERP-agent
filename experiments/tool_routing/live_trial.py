@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import socket
 import subprocess
@@ -23,6 +24,7 @@ PORT=18189
 DATA='/tmp/laya-integrated-20260926'
 DATABASES={k:f'erp_laya_{v}_20260926' for k,v in [('SALE','sale'),('E01','stock'),('E06','refund')]}
 MODEL='deepseek/deepseek-v4.1-flash'
+LAYA_MODEL=ROOT/'.runtime/capability-routing-phase-20260925/model-v14-intent'
 
 
 def read(path): return json.loads(path.read_text(encoding='utf8'))
@@ -64,7 +66,7 @@ def setup(resume=False):
                 with (SNAP/'database.dump').open('rb') as stream:
                     compose('exec','-T','db','pg_restore','--exit-on-error','-U','odoo','-d',db,stdin=stream,stdout=log,stderr=log)
         compose('run','-d','--no-deps','--name',CONTAINER,'-p',f'127.0.0.1:{PORT}:8069',
-                       'odoo','odoo','-d',','.join(DATABASES.values()),'--db-filter=^erp_laya_(sale|stock|refund)_20260926$',
+                       'odoo','odoo','-d',','.join(DATABASES.values()),'--db-filter=^('+ '|'.join(re.escape(db) for db in DATABASES.values()) +')$',
                        '--no-database-list','--max-cron-threads=0','--data-dir='+DATA,stdout=log,stderr=log)
         docker('cp',manage.linux(SNAP/'filestore.tar'),CONTAINER+':/tmp/baseline-filestore.tar',stdout=log,stderr=log)
         for db in DATABASES.values():
@@ -146,7 +148,9 @@ def freeze():
     save(OUT/'frozen.json',{'commit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
          'source_hashes':{p.relative_to(ROOT).as_posix():sha(p) for p in files},
          'input_hashes':{case:sha(OUT/case/'input.json') for case in DATABASES},'model':MODEL,'reasoning':'high',
-         'memory':'off','laya_model_sha256':sha(ROOT/'.runtime/capability-routing-phase-20260925/model-v14-intent/model.safetensors'),
+         'memory':'off','laya_model':str(LAYA_MODEL.resolve()),'laya_model_sha256':sha(LAYA_MODEL/'model.safetensors'),
+         'laya_manifest_sha256':sha(LAYA_MODEL/'router.json'),
+         'environment':read(OUT/'environment.json'),'environment_sha256':sha(OUT/'environment.json'),
          'attempts_per_case':1,'limits':{'run':None,'request':None,'output':None},'snapshot':read(OUT/'environment.json')['snapshot_sha256']})
 
 
@@ -154,6 +158,11 @@ def run(case):
     frozen=read(OUT/'frozen.json');folder=OUT/case;spec=read(folder/'input.json')
     assert all(sha(ROOT/p)==h for p,h in frozen['source_hashes'].items())
     assert sha(folder/'input.json')==frozen['input_hashes'][case]
+    assert sha(OUT/'environment.json')==frozen['environment_sha256']
+    assert (f'http://127.0.0.1:{PORT}',DATABASES,CONTAINER)==tuple(frozen['environment'][k] for k in ('url','databases','container'))
+    assert str(LAYA_MODEL.resolve())==frozen['laya_model']
+    assert sha(LAYA_MODEL/'router.json')==frozen['laya_manifest_sha256']
+    assert sha(LAYA_MODEL/'model.safetensors')==frozen['laya_model_sha256']
     account=read(SNAP/'accounts.json')[spec['role']]
     config={'ODOO_URL':f'http://127.0.0.1:{PORT}','ODOO_DB':DATABASES[case],
             'ODOO_USERNAME':account['login'],'ODOO_API_KEY':account['api_key']}
@@ -162,7 +171,7 @@ def run(case):
     os.environ.update(config,LLM_API_KEY=os.environ['COMMAND_CODE_API_KEY'],LLM_BASE_URL='https://api.commandcode.ai/provider/v1',
         LLM_MODEL=MODEL,LLM_THINKING_TYPE='high',ERP_MEMORY_MODE='off',PYTHONUTF8='1',
         ERP_LAYA_PYTHON=str(ROOT/'.runtime/laya-routing-20260924/venv/Scripts/python.exe'),
-        ERP_LAYA_MODEL=str(ROOT/'.runtime/capability-routing-phase-20260925/model-v14-intent'))
+        ERP_LAYA_MODEL=str(LAYA_MODEL.resolve()))
     events=(folder/'host-events.jsonl').open('a',encoding='utf8');started=time.monotonic()
     host=Workbench(folder/'profile/data',ROOT,worker_timeout_seconds=None,event_sink=lambda e:(events.write(json.dumps(e,ensure_ascii=False,default=str)+'\n'),events.flush()))
     summary={'case':case,'business_passed':False}
@@ -202,7 +211,16 @@ def run(case):
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('command',choices=['setup','finish-setup','freeze',*DATABASES]);args=parser.parse_args()
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('command',choices=['setup','finish-setup','freeze',*DATABASES])
+    parser.add_argument('--trial',help='New isolated trial name; never reuse a paid attempt')
+    parser.add_argument('--port',type=int,default=PORT)
+    parser.add_argument('--laya-model',type=Path,default=LAYA_MODEL)
+    args=parser.parse_args()
+    if args.trial:
+        assert re.fullmatch(r'[a-z][a-z0-9-]{0,31}',args.trial),'Invalid trial name'
+        OUT=ROOT/'.runtime'/args.trial;CONTAINER='erp-'+args.trial;DATA='/tmp/'+args.trial
+        DATABASES={k:args.trial.replace('-','_')+'_'+v for k,v in [('SALE','sale'),('E01','stock'),('E06','refund')]}
+    PORT=args.port;LAYA_MODEL=args.laya_model
     if args.command in {'setup','finish-setup'}:setup(resume=args.command=='finish-setup')
     elif args.command=='freeze':freeze()
     else:run(args.command)

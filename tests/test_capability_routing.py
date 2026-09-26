@@ -125,6 +125,20 @@ def test_competitive_choice_maps_labels_without_probability_threshold():
         selected({'choice':'missing'}, {'A':'actions'})
 
 
+def test_evidence_projection_reads_schema_field_names_without_changing_other_context():
+    from experiments.tool_routing.evidence_state import evidence_state
+    request={'messages':[{'role':'user','content':'Read invoice fields.'},
+        {'role':'assistant','tool_calls':[{'id':'f','function':{'name':'mcp_odoo_get_model_fields','arguments':'{}'}}]},
+        {'role':'tool','tool_call_id':'f','name':'mcp_odoo_get_model_fields','content':json.dumps({'success':True,'result':{'__world_schema_table__':True,'fields':['id','company_id','state','amount_residual']}})}], 'tools':[]}
+    state=json.loads(evidence_state(request));legacy=json.loads(routing_state(request))
+    observation=state['recent_observations'][0]['observation']
+    assert observation['result']['field_names']==['id','company_id','state','amount_residual']
+    observation['result']=legacy['recent_observations'][0]['observation']['result']
+    assert state==legacy
+    request['messages'][-1]['content']=json.dumps({'result':{'__world_schema_table__':True,'fields':'invalid'}})
+    assert evidence_state(request)==routing_state(request)
+
+
 def test_reviewed_labels_preserve_preloads_unknowns_and_evaluation_boundary():
     train, evaluation, groups = load_reviewed()
     example = next(r for r in train if r['id'] == '2003:agent:0003')
