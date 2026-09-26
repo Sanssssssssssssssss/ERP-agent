@@ -1,5 +1,7 @@
 实验版本 `c4796e3`：主模型不再配置能力，三个隔离真实业务全部通过。回退点 `724a1c9`；Laya 仍由现有 `ERP_LAYA_MODEL` 开关启用。
 
+本次模型包为 `.runtime/laya-exclusive-bundle-20260926`，`ERP_LAYA_PYTHON` 使用原隔离 venv。权重及输入投射源码未变；能力目录内容一致性检查后，仅重绑 controller 文件哈希。旧模型包和日志保留。
+
 改动集中在现有 provider、controller、runner：移除主模型的目录／配置工具及配对历史；每次请求前由 Laya 提议、runtime 发布。成功 SOP 的声明依赖保留到当前 run 结束，未决动作保留所需工具。准确关联的未发布工具拒绝可触发下一轮补充发布，业务调用不会自动重放。本地选择器异常由 runtime 发布可用目录，诊断继续使用原只读工具。
 
 设计采用官方建议的“决策与执行授权分离、显式兜底与记录”，见 [Laya](https://nandhakishorm.github.io/laya/staged-adoption/)；请求前过滤工具、保留必要依赖参照 [LangChain](https://docs.langchain.com/oss/python/langchain/middleware/built-in#llm-tool-selector)。[Anthropic](https://www.anthropic.com/engineering/advanced-tool-use) 将工具发现与程序化执行分别讨论，因此本实验只检验能力发布，不把业务步骤合并算作已有能力。
