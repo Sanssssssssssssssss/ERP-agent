@@ -1,5 +1,7 @@
 # 单次决策回归
 
+E01／E02／E03 完整业务新增真实节点：[R09 复现](../../.runtime/laya-contract-live-20260926/R09-recurrence/)、[R11 制造旧字段](../../.runtime/laya-contract-live-20260926/R11/)、[R12 猜子记录 ID](../../.runtime/laya-contract-live-20260926/R12/)、[R13 空查询条件](../../.runtime/laya-contract-live-20260926/R13/)、[R14 未设投产数量](../../.runtime/laya-contract-live-20260926/R14/)、[R15 提前完工](../../.runtime/laya-contract-live-20260926/R15/)、[R16 不存在的工具](../../.runtime/laya-contract-live-20260926/R16/)、[R17 缺 SOP 输入](../../.runtime/laya-contract-live-20260926/R17/)、[R18 财务旧字段](../../.runtime/laya-contract-live-20260926/R18/)。已保存完整出错／首次纠正请求、响应、哈希及业务约束，未追加付费重放，尚未预防性修复。R12 的上游诱因仍需验证。[完整业务与成本对比](../tool_routing/CONTRACT_RESULTS.md)
+
 R09／R10：来自 E01 的旧库存字段试错及重复 preview，[冻结节点](../../.runtime/laya-contracts-20260926/)。`python -m experiments.agent_regression.contract_recovery --output <新目录>` 生成真实 SOP／工具契约候选；加 `--paid` 对 R07、R09、R03 各发一次请求，不执行返回工具。首次结果：R07／R09 避开原错误，R03 仍输出两项删除命令；后者改由共享预检在审批前规范化，非法命令继续拒绝。[原始响应](../../.runtime/laya-contract-nodes-20260926/)。R08 已补退货明细身份预检，真实 Odoo 局部检查确认缺产品拒绝、正确绑定接受；不宣称覆盖任意模型的所有缺省字段。
 
 新增故障只收真实运行证据：完整原请求、首次可纠正截面、错误响应和源码哈希。人工构造边界只做离线测试；没有模型消费请求的 UI 问题不编造付费案例。以后 debug 按仓库 [维护规则](../../AGENTS.md) 补入，原判定不随补丁修改。
