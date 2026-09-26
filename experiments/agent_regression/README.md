@@ -6,9 +6,11 @@ R01：Laya 缩小发布集合后，主模型实际调用未发布的跨实例工
 
 R02（效率，待实验）：E01 接入实跑第 3 轮，Laya 已发布 actions，旧能力列表仍显示 active=[]；模型同轮重复 configure 并正常查询。已冻结完整原请求、回包、宿主发布记录及源码哈希，未追加付费调用。只能确认多余控制工具调用，不能声称多了一轮模型调用；原因是否来自旧状态还需对照。[案例清单](../../.runtime/laya-integrated-20260926/R02/manifest.json)。
 
-R04（效率，待实验）：E01 第二次接入实跑第 6 轮，已明确展示当前 actions，模型仍重复 configure 并查询记录；本次总 token 上升，不能全归因于这一调用。完整原请求、响应、关联及约束已冻结，未追加 API。[案例清单](../../.runtime/laya-live-v2-20260926/R04/manifest.json)。
+R04（效率，未稳定复现）：E01 第二次实跑第 6 轮已发布 actions，模型仍根据历史 active=false 重复 configure。原样与去掉历史启用状态各重放一次，两者均无重复 configure，不能算已修复或归因全部 token。[案例清单](../../.runtime/laya-live-v2-20260926/R04/manifest.json) · [对照](../../.runtime/laya-management-diagnosis-20260926/E01-stale/results.json)。
 
-R05（编排切换，待实验）：E06 第二次实跑第 12 轮，Laya 撤下前两轮的 actions，随后主模型只调用 configure 加回。冻结完整上下文，按业务安全与编排开销评判，不要求轨迹相同。[案例清单](../../.runtime/laya-live-v2-20260926/R05/manifest.json)。
+R05（编排切换，局部确认）：E06 第二次实跑第 12 轮撤下 actions，主模型只 configure。原样重放复现；真实 controller 保留 actions 后直接提出 validate_write。未执行返回工具，尚非完整业务改进。[案例清单](../../.runtime/laya-live-v2-20260926/R05/manifest.json) · [对照](../../.runtime/laya-management-diagnosis-20260926/api-results.json)。
+
+R06（漏预加载，局部确认）：SALE 第 3 轮 Laya 选空，主模型仅 configure；预发布 actions 后提出合法目标的预检。选择器的上游错判原因仍待分离，不能将预发布对照当作已修复权重。[冻结与约束](../../.runtime/laya-management-diagnosis-20260926/R06-manifest.json)。
 
 R03（参数恢复，待实验）：E06 第 29 轮使用两项关系删除参数，被校验拦截；第 30 轮自行改为合法三项参数。已保存完整出错与恢复截面、禁止越权和保留原单关系的判定规则，未追加付费调用。[案例清单](../../.runtime/laya-integrated-20260926/R03/manifest.json)。
 
