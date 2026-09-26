@@ -28,6 +28,8 @@ class CapabilityRouter:
         if manifest.get('projection', 'legacy') == 'evidence_v2':
             from .evidence_state import evidence_state
             self.project = evidence_state
+        elif manifest.get('projection') == 'host_facts_v1':
+            self.project = lambda state: json.dumps(state, ensure_ascii=False, separators=(',', ':'))
         elif manifest.get('projection', 'legacy') == 'legacy':
             self.project = routing_state
         else:
@@ -60,11 +62,16 @@ class CapabilityRouter:
         return result, [g for g,a in result['answers'].items() if a['choice']==positive]
 
     def route(self, request, *, verify_labels=False):
-        if not isinstance(request,dict) or not isinstance(request.get('messages'),list) or not isinstance(request.get('tools'),list):
-            raise ValueError('Provide a complete model request with messages and tools')
-        if not all(isinstance(m,dict) and m.get('role') in {'system','developer','user','assistant','tool'}
-                   for m in request['messages']) or not any(m.get('role')=='user' for m in request['messages']):
-            raise ValueError('Request requires provider message roles and user context')
+        if self.projection == 'host_facts_v1':
+            if (not isinstance(request,dict) or request.get('version') != self.projection
+                    or not isinstance(request.get('task'),dict) or not isinstance(request.get('action_ledger'),dict)):
+                raise ValueError('Provide a versioned host fact snapshot')
+        else:
+            if not isinstance(request,dict) or not isinstance(request.get('messages'),list) or not isinstance(request.get('tools'),list):
+                raise ValueError('Provide a complete model request with messages and tools')
+            if not all(isinstance(m,dict) and m.get('role') in {'system','developer','user','assistant','tool'}
+                       for m in request['messages']) or not any(m.get('role')=='user' for m in request['messages']):
+                raise ValueError('Request requires provider message roles and user context')
         if self.agent.device.type != self.device_type:
             raise RuntimeError('Inference device changed; use the existing router')
         started = time.perf_counter()
@@ -115,6 +122,8 @@ def export(run, destination):
     from safetensors.torch import load_file, save_file
     frozen=read(run/'frozen.json'); summary=read(run/'summary.json')
     assert summary['sdk_parity']['same_sets']==summary['sdk_parity']['cases']
+    for name,digest in frozen['sources'].items():
+        assert sha(name)==digest, 'Training source changed; revalidate export: '+name
     base=Path(frozen['initial_model']) if frozen.get('initial_model') else WORK/'model-multilingual'
     for name,digest in frozen['loaded_model_files_sha256'].items():
         assert sha(base/name)==digest, name
@@ -137,7 +146,10 @@ def export(run, destination):
     (destination/'questions.json').write_text(json.dumps(frozen['questions'][0],indent=2),encoding='utf8')
     sources=[Path(routing_state.__code__.co_filename),Path(bounded.__code__.co_filename),
              Path(catalog.__code__.co_filename),*catalog()[3]]
+    if frozen.get('projection') == 'host_facts_v1':
+        sources=[ROOT/'src/erp_harness/app/routing_state.py',ROOT/'src/erp_harness/context/world.py',Path(catalog.__code__.co_filename),*catalog()[3]]
     manifest={'files':{p.relative_to(destination).as_posix():sha(p) for p in destination.rglob('*') if p.is_file()},
+              'projection':frozen.get('projection','legacy'),
               'projection_sources':{p.relative_to(ROOT).as_posix():sha(p) for p in sources},'source_run':str(run.resolve()),
               'source_manifest_sha256':sha(run/'frozen.json'),'scope':'capability_publication_only'}
     (destination/'router.json').write_text(json.dumps(manifest,indent=2),encoding='utf8')

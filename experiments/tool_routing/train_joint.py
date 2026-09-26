@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import random
 import time
+import sys
 
 from .build_cases import read
 from .laya_probe import WORK, sha
@@ -93,6 +94,19 @@ def joint_questions(groups, label, first):
     return questions
 
 
+def validate_states(cases, groups):
+    targets = {}
+    for row in cases:
+        state = json.dumps(json.loads(row['state']), sort_keys=True, ensure_ascii=False)
+        for group, label in training_labels(row, groups).items():
+            if label is None:
+                continue
+            key = state, group
+            if key in targets and targets[key][0] != label:
+                raise ValueError(f'Conflicting supervision for identical state: {targets[key][1]} / {row["id"]} / {group}')
+            targets[key] = label, row['id']
+
+
 def main(args):
     os.environ.update(HF_HOME=str(WORK/'hf-cache'), HF_HUB_OFFLINE='1', TOKENIZERS_PARALLELISM='false')
     import laya
@@ -102,11 +116,14 @@ def main(args):
     seed = 20260924
     random.seed(seed); torch.manual_seed(seed); torch.set_num_threads(4)
     source = read(args.source/'frozen.json')
+    for name, digest in source.get('sources', {}).items():
+        assert sha(name) == digest, 'Dataset projector changed: '+name
     for name in ['cases.json', 'groups.json']:
         assert sha(args.source/name) == source['hashes'][name]
     cases = read(args.source/'cases.json'); groups = read(args.source/'groups.json'); names = list(groups)
     splits = {s: [r for r in cases if r['split'] == s] for s in ['train', 'dev', 'test']}
     validate(splits['train'], splits['test'], groups, splits['dev'])
+    validate_states(cases, groups)
     lock = read(WORK/'model-lock.json'); model_path = args.initial_model or WORK/'model-multilingual'
     if not args.initial_model:
         assert sha(model_path/'model.safetensors') == lock['files_sha256']['model.safetensors']
@@ -117,7 +134,12 @@ def main(args):
     else:
         agent = laya.load(str(model_path.resolve()), device='cuda')
     assert agent.device.type == 'cuda' and agent._fast is None and list(agent.temperature) == [1., 1., 1.]
-    specs = [joint_questions(groups, label, first) for label in ['A', 'B'] for first in [False, True]]
+    question_factory = joint_questions
+    if source.get('projection') == 'host_facts_v1':
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2]/'src'))
+        from erp_harness.app.routing_state import disclosure_questions
+        question_factory = disclosure_questions
+    specs = [question_factory(groups, label, first) for label in ['A', 'B'] for first in [False, True]]
     for spec in specs:
         for question in spec.values():
             internal = agent._to_internal(question)
@@ -136,6 +158,7 @@ def main(args):
         items = balance_phases(items, splits['train'])
     lr_encoder, lr_head = (2.5e-6, 1.e-5) if args.initial_model else (2.5e-5, 1.e-4)
     frozen = {'source_path': str(args.source.resolve()), 'source_sha256': sha(args.source/'frozen.json'), 'model_lock': lock, 'seed': seed,
+              'projection':source.get('projection','legacy'),
               'loaded_model_files_sha256': {name:sha(model_path/name) for name in lock['files_sha256']},
               'questions': specs, 'max_len_by_case': lengths, 'epochs': args.epochs,
               'lr_encoder': lr_encoder, 'lr_head': lr_head, 'batch': 16, 'microbatch': 1,
@@ -153,7 +176,7 @@ def main(args):
               'encoder_scope': 'All encoder layers trained; input embeddings frozen to fit local VRAM.',
               'baseline_from': str(args.baseline_from.resolve()) if args.baseline_from else None,
               'baseline_hashes': {n: sha(args.baseline_from/n) for n in ['frozen.json', 'summary.json', 'base-dev.jsonl']} if args.baseline_from else None,
-              'sources': {str(p): sha(p) for p in [Path(__file__), Path(training_items.__code__.co_filename), Path(training_labels.__code__.co_filename), Path(publication_questions.__code__.co_filename), Path(verdict.__code__.co_filename)]}}
+              'sources': {str(p): sha(p) for p in [Path(__file__), Path(question_factory.__code__.co_filename), Path(training_items.__code__.co_filename), Path(training_labels.__code__.co_filename), Path(publication_questions.__code__.co_filename), Path(verdict.__code__.co_filename), *map(Path,source.get('sources',{}))]}}
     (args.output/'frozen.json').write_text(json.dumps(frozen, indent=2), encoding='utf8')
     (args.output/'sources').mkdir()
     for path in frozen['sources']:

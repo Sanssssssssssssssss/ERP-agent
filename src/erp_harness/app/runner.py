@@ -547,7 +547,12 @@ async def run(args: argparse.Namespace) -> None:
                 # 工具集合的变更留到下一轮发布，避免同一轮请求与执行使用不同契约。
                 dynamic_tools.bind(session.stage_tools_for_next_turn)
                 if os.environ.get("ERP_LAYA_MODEL"):
-                    provider.bind_router(dynamic_tools, actions.store, receipt_dir)
+                    provider.bind_router(
+                        dynamic_tools, actions.store, receipt_dir,
+                        goal=args.instruction_file.read_text(encoding="utf-8"),
+                        stage=getattr(getattr(actions, "task_evidence", None), "stage", None),
+                        identity=native_runtime.identity_context(), world=world,
+                    )
             try:
                 system_prompt_path = args.session_file.with_name(
                     "pi-agent-system-prompt.txt"

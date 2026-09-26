@@ -58,16 +58,16 @@ def _sensitive_key(value: Any) -> bool:
     }
 
 
-def _scrub_payload(value: Any, *, error_strings: bool = False) -> Any:
+def _scrub_payload(value: Any, *, error_strings: bool = False, string_limit: int | None = 4096) -> Any:
     if isinstance(value, dict):
         return {
             key: "[redacted]" if _sensitive_key(key)
-            else _scrub_payload(item, error_strings=error_strings)
+            else _scrub_payload(item, error_strings=error_strings, string_limit=string_limit)
             for key, item in value.items()
         }
     if isinstance(value, list):
-        return [_scrub_payload(item, error_strings=error_strings) for item in value]
-    return _scrub_error(value) if error_strings and isinstance(value, str) else value
+        return [_scrub_payload(item, error_strings=error_strings, string_limit=string_limit) for item in value]
+    return _scrub_error(value, limit=string_limit) if error_strings and isinstance(value, str) else value
 
 
 def _sha(value: Any) -> str:
@@ -94,8 +94,8 @@ def _safe_url(value: Any) -> str | None:
     return urlunsplit((parsed.scheme.lower(), host.lower() + port, parsed.path.rstrip("/"), "", ""))
 
 
-def _scrub_error(value: Any) -> str:
-    text = str(value or "")[:4096]
+def _scrub_error(value: Any, *, limit: int | None = 4096) -> str:
+    text = str(value or "")[:limit]
     text = re.sub(r"(?i)(bearer\s+)[^\s,;]+", r"\1[redacted]", text)
     text = re.sub(
         r"(?i)((?:api[_-]?key|password|[a-z0-9_-]*(?:secret|token)|authorization|cookie)"

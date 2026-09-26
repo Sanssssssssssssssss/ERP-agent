@@ -311,6 +311,7 @@ def test_local_router_rejects_invalid_or_oversized_context_before_inference():
     from unittest.mock import Mock
     from experiments.tool_routing.router import CapabilityRouter
     router=object.__new__(CapabilityRouter)
+    router.projection='legacy'
     tokenizer=Mock(return_value={'input_ids':list(range(8000))})
     tokenizer.mask_token='<mask>'
     router.device_type='cuda'
@@ -333,6 +334,7 @@ def test_router_label_review_uses_semantics_and_withholds_unstable_selection():
     from unittest.mock import Mock
     from experiments.tool_routing.router import CapabilityRouter
     router=object.__new__(CapabilityRouter)
+    router.projection='legacy'
     router.questions={'actions':{'type':'choice','criteria':{'B':'Leave unpublished','A':'Publish actions'}}}
     router.device_type='cuda';router.model_sha256='test'
     tokenizer=Mock(return_value={'input_ids':[1,2]});tokenizer.mask_token='<mask>'

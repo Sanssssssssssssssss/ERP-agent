@@ -16,6 +16,7 @@ from erp_harness.app.request_receipts import routing_decision_id
 from erp_harness.runtime.messages import AssistantMessage, TextContent, ToolCall, ToolResultMessage
 from erp_harness.tools.dynamic_tools import CAPABILITY_GROUPS, tool_contract_sha256
 from erp_harness.tools.sops import SOPS
+from erp_harness.app.routing_state import VERSION, build_routing_state, ledger_state, sop_requirements
 
 ROUTING_CONTROLS = frozenset({"configure_odoo_tools", "list_odoo_capabilities"})
 
@@ -51,12 +52,16 @@ def project_routing_result(name, content):
 class LayaProvider(OpenAICompatibleProvider):
     """Update the actual turn tool list before building or sending its request."""
 
-    def bind_router(self, controller, store, directory: Path) -> None:
+    def bind_router(self, controller, store, directory: Path, *, goal=None, stage=None, identity=None, world=None) -> None:
+        model = os.environ.get("ERP_LAYA_MODEL")
+        if model and json.loads((Path(model)/"router.json").read_text(encoding="utf8")).get("projection") != VERSION:
+            raise ValueError("Laya bundle uses an older state contract; select a validated host_facts_v1 bundle")
         self.controller, self.store = controller, store
         self.directory = directory / "laya"
         self.process = None
         self.stderr = None
         self.failed = False
+        self.task_goal, self.task_stage, self.identity, self.world = goal, stage, identity, world
         self.routing_state = {"decision_id": None, "status": "not_decided", "reason": None,
                               "proposed": None, "dependencies": [], "recovery": []}
         try:
@@ -116,33 +121,22 @@ class LayaProvider(OpenAICompatibleProvider):
         except OSError:
             print("Laya state unavailable; runtime owns fallback publication.", file=sys.stderr)
 
-    def _hold_reason(self):
+    def _hold_reason(self, rows=None):
         if self.failed or (self.directory / "host-owner.json").exists():
             return "host_takeover"
         # Read the live ledger, not historical approval text in model context.
         if any(row["status"] not in {"verified", "known_failed", "rejected", "expired"}
-               for row in ActionStore.read_receipts(self.store.path)):
+               for row in (ActionStore.read_receipts(self.store.path) if rows is None else rows)):
             return "unresolved_write"
         return None
 
     def _dependencies(self, messages):
         """Trusted SOP receipts and dispatcher rejections; neither authorizes a write."""
-        groups, evidence = set(), []
         owners = {name: group for group, spec in CAPABILITY_GROUPS.items() for name in spec["tools"]}
         path = self.directory.parent / "sop-events.jsonl"
-        if path.exists():
-            # ponytail: SOP dependencies live for this run; narrower expiry needs verified phase boundaries.
-            for line in path.read_text(encoding="utf8").splitlines():
-                row = json.loads(line)
-                if row.get("event") == "end" and row.get("success") is True and row.get("tool") == "get_odoo_sop":
-                    # New receipts contain the rendered contract, including method-specific SOPs.
-                    tools = row.get("required_tools", SOPS.get(row.get("sop_id"), {}).get("required_tools", []))
-                    required = {owners[t.removeprefix("mcp_odoo_")] for t in tools
-                                if t.removeprefix("mcp_odoo_") in owners}
-                    groups.update(required)
-                    if required:
-                        evidence.append({"source": "sop", "tool_call_id": row["tool_call_id"],
-                                         "required_tools": tools, "groups": sorted(required)})
+        # ponytail: Dependencies live for this host-confirmed run; expiry needs verified phase boundaries.
+        events = [json.loads(line) for line in path.read_text(encoding='utf8').splitlines()] if path.exists() else []
+        groups, evidence = sop_requirements(events, CAPABILITY_GROUPS, SOPS)
         # Only the latest assistant/result block can recover a missing dispatch. No old-run pinning.
         latest = next((m for m in reversed(messages) if isinstance(m, AssistantMessage)), None)
         calls = {c.id: c.name for c in latest.tool_calls} if latest else {}
@@ -185,7 +179,8 @@ class LayaProvider(OpenAICompatibleProvider):
         status, reason, proposed = "fallback", None, None
         required, evidence, recovery = set(), [], []
         try:
-            reason = self._hold_reason()
+            ledger_rows = ActionStore.read_receipts(self.store.path)
+            reason = self._hold_reason(ledger_rows)
             unresolved = reason == "unresolved_write"
             required, evidence, recovery = self._dependencies(kwargs["messages"])
             required.update(g for item in recovery for g in item["groups"])
@@ -193,6 +188,12 @@ class LayaProvider(OpenAICompatibleProvider):
                 model=kwargs["model"], system=kwargs["system"], messages=kwargs["messages"], tools=kwargs["tools"],
                 compat=self._config.compat, reasoning_effort=self._config.reasoning_effort,
                 supports_images=self._config.supports_images, provider=self._config.provider_name, api=self._config.api,
+            )
+            # A live ledger and World state replace the selector's former transcript truncation.
+            payload = build_routing_state(
+                payload, goal=self.task_goal, stage=self.task_stage,
+                ledger=ledger_state(ledger_rows, identity=self.identity),
+                identity=self.identity, world=self.world, required=required,
             )
             decision = {"status": "fallback", "reason": "host_takeover"}
             if reason != "host_takeover":

@@ -113,6 +113,9 @@ def test_pending_ledger_retains_actions_and_worker_failure_uses_host_fallback(tm
             await provider._publish(kwargs)
             assert controller._active==('actions',)
             provider._decide.assert_awaited_once()
+            state=provider._decide.await_args.args[0]
+            assert state['version']=='host_facts_v1' and 'messages' not in state
+            assert state['action_ledger']['unresolved'][0]['status']==status
         monkeypatch.setattr(ActionStore,'read_receipts',staticmethod(lambda _p:[]))
         provider._decide=AsyncMock(side_effect=RuntimeError('Worker failed'))
         await provider._publish(kwargs)
