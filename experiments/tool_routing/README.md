@@ -26,6 +26,8 @@ Python 调用可复用同一个 `CapabilityRouter(model_path)` 实例，逐轮�
 
 本地选择器等待 300 秒后降级，关停等待 5 秒；不限制付费模型或完整业务。输入投射由 bundle 声明：旧版保持原样，`evidence_v2` 只修复压缩 schema 的字段名读取。扩充 SOP、表格与意图字段的版本因历史节点退化未采用。权重未重训，不能把接入完整性视为路由准确率保证。
 
+`b2f7a1f` 清理主模型看到的历史启用状态，保留原始 trace 和冻结的 Laya 投射。新 run 不继承上一 run 的工具；同一 run 继续从账本恢复。`diagnose_current_run` 可读取当前路由建议、实际集合与回退原因，仍无业务真相或重试权限。路由日志新增 `publication` 回执，`decision` 新增 `projection` 与 `state_sha256`。局部验证和未解决项见[管理诊断](MANAGEMENT_DIAGNOSIS.md)。
+
 三条业务入口：`python -m experiments.tool_routing.live_trial`。使用新建数据库副本、固定原输入和既有验收器；`setup → freeze → SALE / E01 / E06`，每条仅一次，审批依据原目标人工核对。已有目录有启动标记，不重复执行。证据在 `.runtime/laya-integrated-20260926/`；本轮同时更换主模型，成本变化不能单独归因于 Laya。
 
 复测使用 `--trial laya-live-v2-20260926 --port 18190 --laya-model .runtime/laya-integration-v2-20260926/model`；三个阶段都带相同参数。新建数据库、附件目录和 profile，旧运行保留。冻结源码、输入、bundle 清单及权重哈希后才能启动。
