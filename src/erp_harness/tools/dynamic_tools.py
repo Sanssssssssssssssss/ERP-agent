@@ -147,8 +147,11 @@ class DynamicToolController:
         tools: Sequence[AgentTool],
         log_path: Path,
         next_sequence: Callable[[], int],
+        *,
+        host_owned: bool = False,
     ) -> None:
         self._all = tuple(tools)
+        self.host_owned = host_owned
         names = [_base_name(tool.name) for tool in self._all]
         available = set(names)
         self._base_tools = _FIND_BASE_TOOLS if "find_records" in available else BASE_TOOLS
@@ -179,8 +182,12 @@ class DynamicToolController:
         }
         return (
             *(tool for tool in self._all if _base_name(tool.name) in selected),
-            *self._controls,
+            *(self._controls if not self.host_owned else ()),
         )
+
+    async def publish(self, call_id: str, groups: list[str]) -> AgentToolResult:
+        """Host publication uses the same checks and durable receipt as model routing."""
+        return await self._execute("configure_odoo_tools", call_id, lambda: self._configure(call_id, groups))
 
     def bind(self, publisher: Callable[[Sequence[AgentTool]], None]) -> None:
         self._publisher = publisher
@@ -374,11 +381,7 @@ class DynamicToolController:
             )
 
         async def configure_tool(call_id, arguments, _signal=None, _on_update=None):
-            return await self._execute(
-                "configure_odoo_tools",
-                call_id,
-                lambda: self._configure(call_id, arguments.get("capabilities")),
-            )
+            return await self.publish(call_id, arguments.get("capabilities"))
 
         return (
             AgentTool(

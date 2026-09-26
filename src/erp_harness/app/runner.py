@@ -70,12 +70,8 @@ DYNAMIC_TOOL_POLICY = (
     + EXACT_TOOL_NAME_POLICY
 )
 HOST_ROUTING_POLICY = (
-    " The host selects optional capabilities before each request. Use the tools already "
-    "published in this request; do not configure a capability that is already present. "
-    "The current host publication notice supersedes historical active-tool lists. "
-    "If a needed tool is absent, use configure_odoo_tools as recovery; use "
-    "list_odoo_capabilities only when group availability is unknown. A model-requested "
-    "configuration takes effect next turn; do not call newly requested tools in the same response."
+    " The host manages tool availability before every request. Work on the business task "
+    "using the current tool definitions. Tool selection and publication require no model action."
     " Use diagnose_current_run for execution or publication failures; it cannot establish business facts."
     + EXACT_TOOL_NAME_POLICY
 )
@@ -470,6 +466,7 @@ async def run(args: argparse.Namespace) -> None:
                     full_tools,
                     receipt_dir / "dynamic-tools.jsonl",
                     next_tool_sequence,
+                    host_owned=bool(os.environ.get("ERP_LAYA_MODEL")),
                 )
                 session_tools = list(dynamic_tools.tools)
             else:

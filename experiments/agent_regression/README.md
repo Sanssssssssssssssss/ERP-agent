@@ -14,6 +14,8 @@ R06（漏预加载，局部确认）：SALE 第 3 轮 Laya 选空，主模型仅
 
 R04／R06 接口整理复测（`b2f7a1f`）：R04 原样再次重复 configure，生产清理后的候选直接提出 preview＋validate，存在冗余预检，效率待审；R06 缺工具恢复保持正确，Laya 漏选仍未修复。每分支一次，共 4 POST，无工具执行。[冻结及判定](../../.runtime/laya-clean-integration-20260926/frozen.json) · [审查](../../.runtime/laya-clean-integration-20260926/review.json)。
 
+R04／R05／R06 宿主独占编排实验：`python -m experiments.agent_regression.host_routing freeze --output <新目录>`，随后同目录执行 `paid`。真实 Laya 决策＋真实 controller 生成候选，主模型不再看到目录／配置入口及其历史调用；当前 run 的成功 SOP 回执提供工具依赖。三节点 A/B 各一次，共 6 POST，返回工具不执行。输入和约束见 [冻结记录](../../.runtime/laya-exclusive-nodes-20260926/frozen.json)。依赖兜底单独计数，不算 Laya 原始预测正确。回退点 `724a1c9`。
+
 R03（参数恢复，待实验）：E06 第 29 轮使用两项关系删除参数，被校验拦截；第 30 轮自行改为合法三项参数。已保存完整出错与恢复截面、禁止越权和保留原单关系的判定规则，未追加付费调用。[案例清单](../../.runtime/laya-integrated-20260926/R03/manifest.json)。
 
 本轮入口：`python -m experiments.agent_regression.incidents` 离线冻结；加 `--paid` 执行 A04 的 A/B 和原 B02/B03 保护，共 4 次，不执行返回的工具。A04 来源是 S01499 的真实 `confirm` 误调用；跨 run 防重发和桌面回读范围用离线测试验证。结果保存在 `.runtime/agent-regression-guards-20260924/`。

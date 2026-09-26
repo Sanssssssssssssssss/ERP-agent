@@ -1,4 +1,4 @@
-"""Opt-in local Laya publication; the existing model router remains the fallback."""
+"""Opt-in Laya publication with runtime-owned dependencies and recovery."""
 from __future__ import annotations
 
 import asyncio
@@ -13,8 +13,11 @@ from erp_harness.erp.store import ActionStore
 from erp_harness.providers.openai_compatible import OpenAICompatibleProvider, _build_chat_payload
 from erp_harness.runtime.provider import provider_request_kind
 from erp_harness.app.request_receipts import routing_decision_id
-from erp_harness.runtime.messages import TextContent, ToolResultMessage
+from erp_harness.runtime.messages import AssistantMessage, TextContent, ToolCall, ToolResultMessage
 from erp_harness.tools.dynamic_tools import CAPABILITY_GROUPS, tool_contract_sha256
+from erp_harness.tools.sops import SOPS
+
+ROUTING_CONTROLS = frozenset({"configure_odoo_tools", "list_odoo_capabilities"})
 
 
 def project_routing_result(name, content):
@@ -55,7 +58,7 @@ class LayaProvider(OpenAICompatibleProvider):
         self.stderr = None
         self.failed = False
         self.routing_state = {"decision_id": None, "status": "not_decided", "reason": None,
-                              "proposed": None, "required_by_model": [], "excluded_by_model": []}
+                              "proposed": None, "dependencies": [], "recovery": []}
         try:
             self.directory.mkdir(exist_ok=True)
         except OSError:
@@ -68,12 +71,11 @@ class LayaProvider(OpenAICompatibleProvider):
     def routing_diagnostic(self):
         """Live publication only; no trace content, business truth or replay authority."""
         return {**self.routing_state, "active": list(self.controller._active),
-                "fallback": "model_recovery" if self.failed else "available",
+                "owner": "runtime", "fallback": "registered_catalog" if self.failed else "available",
                 "business_truth": False, "automatic_business_retry": False}
 
     def publication_notice(self):
-        return ("\nCurrent host publication: " + json.dumps(list(self.controller._active))
-                + ". Only the tools in this request establish current availability. "
+        return ("\nOnly the tools in this request establish current availability. "
                 "Publication grants no execution approval.")
 
     def project_model_context(self, messages):
@@ -81,6 +83,18 @@ class LayaProvider(OpenAICompatibleProvider):
         projected, count = [], 0
         last_assistant = max((i for i, message in enumerate(messages) if message.role == "assistant"), default=-1)
         for index, message in enumerate(messages):
+            if isinstance(message, ToolResultMessage) and message.tool_name in ROUTING_CONTROLS:
+                count += 1
+                continue
+            if isinstance(message, AssistantMessage) and any(c.name in ROUTING_CONTROLS for c in message.tool_calls):
+                # Remove obsolete routing calls and their planning. Preserve mixed business calls and visible facts.
+                business = [c for c in message.tool_calls if c.name not in ROUTING_CONTROLS]
+                content = [c for c in message.content if isinstance(c, TextContent) or
+                           isinstance(c, ToolCall) and c.name not in ROUTING_CONTROLS] if business else []
+                count += 1
+                if not content:
+                    continue
+                message = message.model_copy(update={"content": content})
             if isinstance(message, ToolResultMessage) and not message.is_error:
                 # A just-requested diagnosis must reach the model once before it becomes history.
                 content = (message.text if message.tool_name == "diagnose_current_run" and index > last_assistant
@@ -100,7 +114,7 @@ class LayaProvider(OpenAICompatibleProvider):
             temporary.write_text(json.dumps({"reason": reason}), encoding="utf8")
             temporary.replace(path)
         except OSError:
-            print("Laya state unavailable; using existing model routing.", file=sys.stderr)
+            print("Laya state unavailable; runtime owns fallback publication.", file=sys.stderr)
 
     def _hold_reason(self):
         if self.failed or (self.directory / "host-owner.json").exists():
@@ -111,23 +125,34 @@ class LayaProvider(OpenAICompatibleProvider):
             return "unresolved_write"
         return None
 
-    def _model_selection(self):
-        """Replay durable selections; redundant configure is not a routing failure."""
-        own_log = self.directory / "decisions.jsonl"
-        own_ids = {json.loads(line).get("call_id") for line in own_log.read_text(encoding="utf8").splitlines()} if own_log.exists() else set()
-        dynamic_log = self.directory.parent / "dynamic-tools.jsonl"
-        previous, required, excluded = set(), set(), set()
-        if dynamic_log.exists():
-            for line in dynamic_log.read_text(encoding="utf8").splitlines():
-                event = json.loads(line)
-                if (event.get("tool") == "configure_odoo_tools" and event.get("event") == "end"
-                        and event.get("success") is True):
-                    selected = set(event["active"])
-                    if event.get("tool_call_id") not in own_ids:
-                        required = selected
-                        excluded = (excluded | (previous - selected)) - selected
-                    previous = selected
-        return required, excluded
+    def _dependencies(self, messages):
+        """Trusted SOP receipts and dispatcher rejections; neither authorizes a write."""
+        groups, evidence = set(), []
+        owners = {name: group for group, spec in CAPABILITY_GROUPS.items() for name in spec["tools"]}
+        path = self.directory.parent / "sop-events.jsonl"
+        if path.exists():
+            # ponytail: SOP dependencies live for this run; narrower expiry needs verified phase boundaries.
+            for line in path.read_text(encoding="utf8").splitlines():
+                row = json.loads(line)
+                if row.get("event") == "end" and row.get("success") is True and row.get("tool") == "get_odoo_sop":
+                    required = {owners[t] for t in SOPS.get(row.get("sop_id"), {}).get("required_tools", []) if t in owners}
+                    groups.update(required)
+                    if required:
+                        evidence.append({"source": "sop", "tool_call_id": row["tool_call_id"], "groups": sorted(required)})
+        # Only the latest assistant/result block can recover a missing dispatch. No old-run pinning.
+        latest = next((m for m in reversed(messages) if isinstance(m, AssistantMessage)), None)
+        calls = {c.id: c.name for c in latest.tool_calls} if latest else {}
+        recovery = []
+        for message in reversed(messages):
+            if isinstance(message, AssistantMessage):
+                break
+            if (isinstance(message, ToolResultMessage) and message.is_error
+                    and calls.get(message.tool_call_id) == message.tool_name
+                    and message.text == f"Tool {message.tool_name} not found"):
+                group = owners.get(message.tool_name.removeprefix("mcp_odoo_"))
+                if group and any(t.name == message.tool_name for t in self.controller._all):
+                    recovery.append({"source": "dispatch_rejection", "tool_call_id": message.tool_call_id, "groups": [group]})
+        return groups, evidence, recovery
 
     async def _decide(self, payload):
         if self.process is None:
@@ -154,42 +179,51 @@ class LayaProvider(OpenAICompatibleProvider):
         before = self.controller._active
         published = False
         status, reason, proposed = "fallback", None, None
-        required, excluded = set(), set()
+        required, evidence, recovery = set(), [], []
         try:
             reason = self._hold_reason()
-            if reason:
-                status = "held"
-                self._record({**row, "status": "held", "reason": reason})
-                return
+            unresolved = reason == "unresolved_write"
+            required, evidence, recovery = self._dependencies(kwargs["messages"])
+            required.update(g for item in recovery for g in item["groups"])
             payload = _build_chat_payload(
                 model=kwargs["model"], system=kwargs["system"], messages=kwargs["messages"], tools=kwargs["tools"],
                 compat=self._config.compat, reasoning_effort=self._config.reasoning_effort,
                 supports_images=self._config.supports_images, provider=self._config.provider_name, api=self._config.api,
             )
-            (self.directory / (call_id.replace(":", "-") + ".request.json")).write_text(
-                json.dumps(payload, ensure_ascii=False), encoding="utf8")
-            decision = await self._decide(payload)
-            # Persist provenance before configure so a restart can identify host-origin calls.
-            self._record({**row, "event": "decision", **decision})
-            if decision.get("status") != "ok":
-                reason = "unstable_capability_selection" if decision.get("reason") == "unstable_capability_selection" else "router_fallback"
-                if decision.get("reason") != "unstable_capability_selection":
-                    self._takeover("router_fallback")
-                return
-            selected = decision.get("capabilities")
-            if (not isinstance(selected, list) or any(not isinstance(g, str) or g not in CAPABILITY_GROUPS for g in selected)
-                    or len(selected) != len(set(selected))):
-                raise ValueError("Invalid capability selection")
-            proposed = selected
-            required, excluded = self._model_selection()
-            selected = sorted((set(selected) | required) - excluded)
+            decision = {"status": "fallback", "reason": "host_takeover"}
+            if reason != "host_takeover":
+                (self.directory / (call_id.replace(":", "-") + ".request.json")).write_text(
+                    json.dumps(payload, ensure_ascii=False), encoding="utf8")
+                try:
+                    decision = await self._decide(payload)
+                except (OSError, ValueError, TypeError, KeyError, RuntimeError) as error:
+                    decision = {"status": "fallback", "reason": "router_error", "error_type": type(error).__name__}
+                self._record({**row, "event": "decision", **decision})
+            if decision.get("status") == "ok":
+                proposed = decision.get("capabilities")
+                if (not isinstance(proposed, list) or any(not isinstance(g, str) or g not in CAPABILITY_GROUPS for g in proposed)
+                        or len(proposed) != len(set(proposed))):
+                    proposed = None
+                    raise ValueError("Invalid capability selection")
+                selected = set(proposed)
+            else:
+                reason = decision.get("reason", "router_fallback")
+                selected = set(before)
+                if reason != "unstable_capability_selection":
+                    self._takeover(reason)
+                    if self.controller._availability is None:
+                        await self.controller._list(call_id)
+                    selected = {g for g in CAPABILITY_GROUPS
+                                if self.controller._availability[g]["status"] != "module_missing"}
+            if unresolved:
+                required.update(before)
+                required.add("actions")
+            selected = sorted(selected | required)
             if set(selected) == set(self.controller._active):
-                status = "unchanged"
-                self._record({**row, "status": "unchanged", "required_by_model": sorted(required),
-                              "excluded_by_model": sorted(excluded)})
+                status = "unchanged" if decision.get("status") == "ok" else "fallback"
+                self._record({**row, "status": status, "dependencies": evidence, "recovery": recovery})
                 return
-            configure = next(t for t in self.controller.tools if t.name == "configure_odoo_tools")
-            result = await configure.execute(call_id, {"capabilities": selected})
+            result = await self.controller.publish(call_id, selected)
             if result.details.get("success") is not True:
                 reason = "publication_rejected"
                 self._takeover("publication_rejected")
@@ -200,7 +234,7 @@ class LayaProvider(OpenAICompatibleProvider):
             published = True
             status = "applied"
             self._record({**row, "status": "applied", "active": selected,
-                          "required_by_model": sorted(required), "excluded_by_model": sorted(excluded),
+                          "dependencies": evidence, "recovery": recovery,
                           "published_tools": [t.name for t in kwargs["tools"]]})
         except (OSError, ValueError, TypeError, KeyError, RuntimeError, StopIteration, sqlite3.Error) as error:
             status, reason = "fallback", "router_error"
@@ -220,8 +254,8 @@ class LayaProvider(OpenAICompatibleProvider):
                 await self.process.wait()
         finally:
             self.routing_state = {"decision_id": call_id, "status": status, "reason": reason,
-                                  "proposed": proposed, "required_by_model": sorted(required),
-                                  "excluded_by_model": sorted(excluded)}
+                                  "proposed": proposed, "required_by_runtime": sorted(required),
+                                  "dependencies": evidence, "recovery": recovery}
 
     async def stream_response(self, **kwargs):
         call_id = None

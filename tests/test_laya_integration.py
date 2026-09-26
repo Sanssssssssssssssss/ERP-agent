@@ -11,7 +11,7 @@ from erp_harness.erp.store import ActionStore
 from erp_harness.providers.env import OpenAICompatibleConfig
 from erp_harness.providers.config import ProviderSettings
 from erp_harness.providers.openai_compatible import OpenAICompatibleProvider
-from erp_harness.runtime.messages import AssistantMessage, ToolCall, ToolResultMessage, UserMessage
+from erp_harness.runtime.messages import AssistantMessage, TextContent, ToolCall, ToolResultMessage, UserMessage
 from erp_harness.runtime.provider_events import AssistantDoneEvent
 from erp_harness.runtime.session import HarnessSession, SessionConfig
 from erp_harness.runtime.storage import JsonlSessionStorage
@@ -21,7 +21,7 @@ from tests.test_dynamic_tools import fake_tools
 
 def setup(tmp_path):
     calls=[]
-    controller=DynamicToolController(fake_tools(set(),calls),tmp_path/'dynamic-tools.jsonl',count().__next__)
+    controller=DynamicToolController(fake_tools(set(),calls),tmp_path/'dynamic-tools.jsonl',count().__next__,host_owned=True)
     controller.bind(lambda tools: None)
     store=ActionStore(tmp_path/'actions.sqlite3')
     provider=LayaProvider(OpenAICompatibleConfig(api_key='test',base_url='http://unused.invalid'))
@@ -54,65 +54,76 @@ def test_published_tools_are_dispatchable_in_the_same_turn(tmp_path,monkeypatch)
     asyncio.run(check())
     assert 'mcp_odoo_execute_approved_write' in seen[0] and 'mcp_odoo_execute_approved_write' not in seen[1]
     assert calls.count('execute_approved_write')==1
-    assert all({'configure_odoo_tools','list_odoo_capabilities'}<=names for names in seen)
+    assert all(not {'configure_odoo_tools','list_odoo_capabilities'} & names for names in seen)
     store.close()
 
 
-def test_model_selection_survives_restart_without_disabling_router(tmp_path):
+def test_sop_dependencies_survive_restart_without_model_routing(tmp_path):
+    from erp_harness.tools.sops import build_sop_tools
     provider,controller,store,_=setup(tmp_path)
-    kwargs={'model':'test','system':'ERP','messages':[UserMessage(content='Read')],'tools':list(controller.tools)}
+    kwargs={'model':'test','system':'ERP','messages':[UserMessage(content='Confirm')],'tools':list(controller.tools)}
     async def check():
-        configure=next(t for t in controller.tools if t.name=='configure_odoo_tools')
-        await configure.execute('main-model',{'capabilities':['actions']})
-        provider._decide=AsyncMock(return_value={'status':'ok','capabilities':['diagnostics']})
-        kwargs['tools'][:]=controller.tools
+        sop=build_sop_tools(tmp_path/'sop-events.jsonl',count().__next__)[1]
+        result=await sop.execute('sop',{'sop_id':'safe_write_review','inputs':{'model':'sale.order','operation':'write'}})
+        assert result.details['success']
+        provider._decide=AsyncMock(return_value={'status':'ok','capabilities':[]})
         await provider._publish(kwargs)
-        assert 'mcp_odoo_execute_approved_write' in {t.name for t in kwargs['tools']}
-        assert set(controller._active)=={'actions','diagnostics'}
-        # An explicit removal must not be undone by the next Laya decision.
-        await configure.execute('main-remove',{'capabilities':['actions']})
-        kwargs['tools'][:]=controller.tools
+        assert controller._active==('actions',)
         resumed=LayaProvider(provider._config);resumed.bind_router(controller,store,tmp_path)
         resumed._decide=AsyncMock(return_value={'status':'ok','capabilities':['diagnostics']})
         await resumed._publish(kwargs)
-        assert resumed._hold_reason() is None and controller._active==('actions',)
-        resumed._decide.assert_awaited_once()
+        assert set(controller._active)=={'actions','diagnostics'}
+        assert resumed.routing_diagnostic()['dependencies'][0]['tool_call_id']=='sop'
+        assert not {'configure_odoo_tools','list_odoo_capabilities'} & {t.name for t in kwargs['tools']}
         await resumed.aclose();await provider.aclose()
-    asyncio.run(check())
-    store.close()
+    asyncio.run(check());store.close()
 
 
-def test_redundant_model_selection_pins_tools_but_not_whole_router(tmp_path):
-    provider,controller,store,_=setup(tmp_path)
-    kwargs={'model':'test','system':'ERP','messages':[UserMessage(content='Continue')],'tools':list(controller.tools)}
+def test_dispatch_recovery_requires_exact_failed_call_and_never_executes_it(tmp_path):
+    provider,controller,store,calls=setup(tmp_path)
+    name='mcp_odoo_search_across_instances'
+    attempt=AssistantMessage(content=[ToolCall(id='missing',name=name,arguments={})])
+    failure=ToolResultMessage(tool_call_id='missing',tool_name=name,content=f'Tool {name} not found',is_error=True)
+    kwargs={'model':'test','system':'ERP','messages':[UserMessage(content='Read'),attempt,failure],'tools':list(controller.tools)}
     async def check():
-        provider._decide=AsyncMock(return_value={'status':'ok','capabilities':['actions']})
-        await provider._publish(kwargs)
-        await next(t for t in controller.tools if t.name=='configure_odoo_tools').execute('model-same',{'capabilities':['actions']})
         provider._decide=AsyncMock(return_value={'status':'ok','capabilities':[]})
+        for invalid in [failure.model_copy(update={'tool_call_id':'other'}),failure.model_copy(update={'is_error':False}),
+                        failure.model_copy(update={'content':[TextContent(text='Tool error')]})]:
+            kwargs['messages'][-1]=invalid
+            await provider._publish(kwargs)
+            assert not controller._active
+        kwargs['messages'][-1]=failure
         await provider._publish(kwargs)
-        assert controller._active==('actions',) and provider._hold_reason() is None
+        assert controller._active==('cross_instance',) and 'search_across_instances' not in calls
+        assert provider.routing_diagnostic()['recovery'][0]['tool_call_id']=='missing'
+        kwargs['messages'].append(AssistantMessage(content='Read completed'))
+        await provider._publish(kwargs)
+        assert not controller._active
         await provider.aclose()
     asyncio.run(check());store.close()
 
 
-def test_pending_ledger_holds_and_router_failure_preserves_tools(tmp_path,monkeypatch):
+def test_pending_ledger_retains_actions_and_worker_failure_uses_host_fallback(tmp_path,monkeypatch):
     provider,controller,store,_=setup(tmp_path)
     kwargs={'model':'test','system':'ERP','messages':[UserMessage(content='Continue')],'tools':list(controller.tools)}
-    initial=list(kwargs['tools'])
     async def check():
         for status in ['pending_approval','approved','executing','sending','needs_reconciliation','unknown']:
             monkeypatch.setattr(ActionStore,'read_receipts',staticmethod(lambda _p:[{'status':status}]))
-            provider._decide=AsyncMock(side_effect=AssertionError('Unresolved write must retain tools'))
+            provider._decide=AsyncMock(return_value={'status':'ok','capabilities':[]})
             await provider._publish(kwargs)
-            assert kwargs['tools']==initial
+            assert controller._active==('actions',)
+            provider._decide.assert_awaited_once()
         monkeypatch.setattr(ActionStore,'read_receipts',staticmethod(lambda _p:[]))
-        provider._decide=AsyncMock(return_value={'status':'fallback','candidate_capabilities':[]})
+        provider._decide=AsyncMock(side_effect=RuntimeError('Worker failed'))
         await provider._publish(kwargs)
-        assert kwargs['tools']==initial and provider._hold_reason()=='host_takeover'
+        assert provider._hold_reason()=='host_takeover' and 'actions' in controller._active
+        assert 'accounting' not in controller._active  # Missing installed module remains blocked.
+        assert not {'configure_odoo_tools','list_odoo_capabilities'} & {t.name for t in kwargs['tools']}
+        provider._decide=AsyncMock(side_effect=AssertionError('No automatic worker retry'))
+        await provider._publish(kwargs)
+        assert provider.routing_diagnostic()['fallback']=='registered_catalog'
         await provider.aclose()
-    asyncio.run(check())
-    store.close()
+    asyncio.run(check());store.close()
 
 
 def test_publication_receipt_failure_rolls_back_both_tool_views(tmp_path,monkeypatch):
@@ -195,7 +206,7 @@ def test_publication_notice_and_request_correlation_are_request_local(tmp_path,m
         finally:
             provider_request_kind.reset(kind)
         assert routing_decision_id.get() is None
-        assert 'Current host publication: ["actions"]' in seen[0]['system']
+        assert 'Only the tools in this request' in seen[0]['system']
         assert 'mcp_odoo_execute_approved_write' in {t.name for t in seen[0]['tools']}
         decision=json.loads((provider.directory/'decisions.jsonl').read_text().splitlines()[0])
         assert all(row['routing_decision_id']==decision['call_id'] for row in receipts._rows.values())
@@ -222,13 +233,8 @@ def test_old_publication_is_not_current_state_and_errors_survive(tmp_path):
     messages=[UserMessage(content='Confirm'),catalog,configured,failed,record]
     before=[m.model_dump() for m in messages]
     projected,total=provider.project_model_context(messages)
-    assert total==2 and [m.model_dump() for m in messages]==before
-    assert [m.tool_call_id for m in projected[1:]]==['catalog','config','failure','read']
-    cleaned=json.loads(projected[1].text)
-    assert 'active' not in cleaned and all('active' not in row for row in cleaned['capabilities'])
-    assert cleaned['capabilities'][1]['status']=='module_missing'
-    assert cleaned['capabilities'][1]['missing_models']==['account.move']
-    assert projected[3:] == [failed,record]
+    assert total==3 and [m.model_dump() for m in messages]==before
+    assert projected == [messages[0],record]
     assert provider.project_model_context(projected)[0]==projected
     from erp_harness.app.capability_routing import project_routing_result
     invalid='{"success":true,"capabilities":null}'
@@ -259,21 +265,31 @@ def test_new_host_routed_run_does_not_inherit_previous_run_tools(tmp_path):
     store.close()
 
 
-def test_routing_diagnosis_distinguishes_model_retention_and_failed_selection(tmp_path):
+def test_invalid_selection_is_diagnosable_without_transferring_ownership(tmp_path):
     provider,controller,store,_=setup(tmp_path)
     kwargs={'model':'test','system':'ERP','messages':[UserMessage(content='Continue')],'tools':list(controller.tools)}
     async def check():
-        await next(t for t in controller.tools if t.name=='configure_odoo_tools').execute('recovery',{'capabilities':['actions']})
+        await controller.publish('host', ['actions'])
         kwargs['tools'][:]=controller.tools
-        provider._decide=AsyncMock(return_value={'status':'ok','capabilities':[]})
-        await provider._publish(kwargs,'decision-1')
-        info=provider.routing_diagnostic()
-        assert info['proposed']==[] and info['active']==['actions'] and info['required_by_model']==['actions']
-        assert info['decision_id']=='decision-1' and not info['business_truth'] and not info['automatic_business_retry']
         provider._decide=AsyncMock(return_value={'status':'ok','capabilities':['actions','actions']})
         await provider._publish(kwargs,'decision-2')
         info=provider.routing_diagnostic()
         assert info['status']=='fallback' and info['reason']=='router_error' and info['proposed'] is None
-        assert info['active']==['actions'] and info['fallback']=='model_recovery'
+        assert info['active']==['actions'] and info['owner']=='runtime'
+        assert not info['business_truth'] and not info['automatic_business_retry']
         await provider.aclose()
     asyncio.run(check());store.close()
+
+
+def test_mixed_history_removes_routing_pairs_preserving_business_calls(tmp_path):
+    from erp_harness.runtime.messages import ThinkingContent
+    provider,controller,store,_=setup(tmp_path)
+    call=ToolCall(id='read',name='mcp_odoo_read_record',arguments={'model':'sale.order','record_id':6})
+    messages=[UserMessage(content='Confirm'), AssistantMessage(content=[ThinkingContent(thinking='configure first'),
+        ToolCall(id='routing',name='configure_odoo_tools',arguments={'capabilities':['actions']}),call]),
+        ToolResultMessage(tool_call_id='routing',tool_name='configure_odoo_tools',content='{}'),
+        ToolResultMessage(tool_call_id='read',tool_name=call.name,content='{"state":"draft"}')]
+    view,_=provider.project_model_context(messages)
+    assert view[1].content==[call] and view[2]==messages[3]
+    assert len(messages)==4 and len(messages[1].content)==3
+    store.close()
