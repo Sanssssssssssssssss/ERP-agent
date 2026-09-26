@@ -369,7 +369,13 @@ async def run(args: argparse.Namespace) -> None:
         max_model_requests=max_model_requests,
     )
     receipt_start_number = receipts.number
-    provider = OpenAICompatibleProvider(
+    provider_class = OpenAICompatibleProvider
+    if os.environ.get("ERP_LAYA_MODEL"):
+        if tool_mode != "dynamic" or runtime_mode != "native" or not os.environ.get("ERP_LAYA_PYTHON"):
+            raise ValueError("Laya requires native dynamic tools and ERP_LAYA_PYTHON")
+        from erp_harness.app.capability_routing import LayaProvider
+        provider_class = LayaProvider
+    provider = provider_class(
         transport_config(api_key, base_url, provider_name, thinking, receipts, max_tokens=max_output_tokens)
     )
     world = None
@@ -528,6 +534,8 @@ async def run(args: argparse.Namespace) -> None:
                 _restore_dynamic_selection(dynamic_tools, session, dynamic_log)
                 # 工具集合的变更留到下一轮发布，避免同一轮请求与执行使用不同契约。
                 dynamic_tools.bind(session.stage_tools_for_next_turn)
+                if os.environ.get("ERP_LAYA_MODEL"):
+                    provider.bind_router(dynamic_tools, actions.store, receipt_dir)
             try:
                 system_prompt_path = args.session_file.with_name(
                     "pi-agent-system-prompt.txt"
