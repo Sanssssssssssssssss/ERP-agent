@@ -49,6 +49,35 @@ class MinimalWriteGuardTests(unittest.TestCase):
     def validate(self, model="mrp.workorder", values=None, ids=(30,), operation="write", **kwargs):
         return self.actions.validate_write(model, operation, values=values, record_ids=list(ids) if operation == "write" else None, **kwargs)
 
+    def test_return_identity_is_checked_before_approval_and_again_before_send(self):
+        for field, kind in {"picking_id": "many2one", "wizard_id": "many2one", "move_id": "many2one", "quantity": "float"}.items():
+            self.reader.metadata[field] = {"type": kind}
+        self.reader.metadata["product_return_moves"] = {"type": "one2many", "relation": "stock.return.picking.line"}
+        self.reader.records.update({
+            "stock.picking": {6: {"id": 6, "company_id": 1, "state": "done"}},
+            "stock.move": {12: {"id": 12, "picking_id": 6, "product_id": 3, "company_id": 1, "state": "done"}},
+            "stock.return.picking": {9: {"id": 9, "picking_id": 6, "product_return_moves": [10]}},
+            "stock.return.picking.line": {10: {"id": 10, "wizard_id": 9, "move_id": 12, "product_id": 3}},
+        })
+        line = {"move_id": 12, "quantity": 2}
+        payload = {"picking_id": 6, "product_return_moves": [[0, 0, line]]}
+        missing = self.actions.validate_write("stock.return.picking", "create", values=payload)
+        self.assertFalse(missing["success"])
+        self.assertIn("product_id", missing["error"])
+        self.assertEqual(self.actions.store.summary()["actions"], 0)
+        line["product_id"] = 4
+        self.assertFalse(self.actions.validate_write("stock.return.picking", "create", values=payload)["success"])
+        self.assertFalse(self.validate("stock.return.picking.line", {"product_id": 4}, ids=(10,))["success"])
+        self.assertFalse(self.actions.validate_write("stock.return.picking.line", "create", values={"wizard_id": 9, **line})["success"])
+        line["product_id"] = 3
+        valid = self.actions.validate_write("stock.return.picking", "create", values_list=[payload])
+        self.assertTrue(valid["success"], valid)
+        self.assertTrue(self.validate("stock.return.picking.line", {"quantity": 1}, ids=(10,))["success"])
+        self.reader.records["stock.move"][12]["product_id"] = 4
+        denied = self.actions.execute_approved_write(valid["approval"], confirm=True)
+        self.assertFalse(denied["success"])
+        self.assertEqual(self.writer.calls, [])
+
     def test_mo_windows_cover_single_batch_and_ordinary_edits(self):
         good = {"bom_id": 10, "date_start": "2026-09-12", "date_deadline": "2026-09-14"}
         bad = {**good, "date_deadline": "2026-09-13"}

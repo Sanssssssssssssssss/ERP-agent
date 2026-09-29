@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import os
 import tempfile
@@ -15,6 +16,7 @@ from erp_harness.tools.router import route_tools
 from erp_harness.context.projection import expand_lossless_tables, project_messages, project_read_history
 from erp_harness.tools.dynamic_tools import OPTIONAL_NATIVE_BASE_TOOLS
 from erp_harness.context.world import READ_TOOLS, WorldStore
+from erp_harness.context import world as world_module
 from erp_harness.context.world_tools import build_world_tools
 
 
@@ -467,7 +469,8 @@ class WorldStoreTest(unittest.TestCase):
             self.assertIn("without deducting actual duration", view["scope_notice"])
             self.assertEqual(view["full_rows"]["access_scope"]["identity_id"], receipt["identity"]["identity_id"])
             self.assertEqual(view["full_rows"]["freshness"]["snapshot_at"], receipt["finished_at"])
-            self.assertFalse(view["full_rows"]["freshness"]["stale_after_write"])
+            self.assertNotIn("stale_after_write", view["full_rows"]["freshness"])
+            self.assertTrue(view["full_rows"]["freshness"]["live_refresh_required_for_current_state"])
             # Only this field and the explicit projection marker change.
             actual.pop("world_projection")
             actual["result"]["manufacturing"]["shared_workorders"] = rows
@@ -490,6 +493,8 @@ class WorldStoreTest(unittest.TestCase):
             ref = view["full_rows"]
             # Recovery uses the durable full visible payload, not the provider view.
             world = self.store(root)
+            self.assertEqual(project_read_history(world, [message])[0].text,
+                             json.dumps(projected, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
             cursor, recovered = 0, []
             while cursor is not None:
                 page = world.read_observation(receipt["identity"], ref["observation_ref"], path=ref["path"], cursor=cursor, limit=17)
@@ -500,8 +505,10 @@ class WorldStoreTest(unittest.TestCase):
                 world.read_observation({**receipt["identity"], "identity_id": "different-user"}, ref["observation_ref"], path=ref["path"])
             world.invalidate(instance="default", reason="write", call_id="after-write")
             stale_view = json.loads(project_read_history(world, [message])[0].text)["result"]["manufacturing"]["shared_workorders"]
-            self.assertTrue(stale_view["full_rows"]["freshness"]["stale_after_write"])
+            self.assertEqual(stale_view, view)
             self.assertTrue(stale_view["full_rows"]["freshness"]["live_refresh_required_for_current_state"])
+            current = world.read_observation(receipt["identity"], ref["observation_ref"], path=ref["path"])
+            self.assertTrue(current["observation"]["freshness"]["stale_after_write"])
             old = project_read_history(world, [message, *[AssistantMessage(content="used") for _ in range(3)]])
             self.assertEqual(json.loads(old[0].text)["world_observation"]["kind"], "externalized_read")
 
@@ -537,6 +544,50 @@ class WorldStoreTest(unittest.TestCase):
                 if variant == "corrupt":
                     with self.assertRaisesRegex(ValueError, "hash does not match"):
                         world.read_observation(receipt["identity"], receipt["receipt_id"])
+
+    def test_history_projection_checks_large_receipts_once_each_request(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, ENV):
+            world = self.store(Path(directory))
+            supply, _ = self.supply_message(world, self.supply_payload(1835))
+            text = json.dumps({"success": True, "result": [{"id": 7, "note": "x" * 8000}]})
+            world.finish(world.begin("history", "find_records", {"model": "x.model"}, "native"), text)
+            history = ToolResultMessage(tool_call_id="history", tool_name="find_records", content=text)
+            for message, used in ((supply, 0), (supply, 3), (history, 3)):
+                messages = [message, *[AssistantMessage(content="used") for _ in range(used)]]
+                stored = world._by_call[message.tool_call_id]
+                previous = None
+                for _ in range(2):
+                    with (
+                        patch.object(world, "receipt_for_call", side_effect=AssertionError("full receipt copy")),
+                        patch.object(world, "_visible_payload", wraps=world._visible_payload) as check,
+                        patch.object(world_module, "_sha", wraps=world_module._sha) as digest,
+                        patch.object(world_module.hashlib, "sha256", wraps=world_module.hashlib.sha256) as hashes,
+                        patch.object(world_module.copy, "deepcopy", wraps=copy.deepcopy) as copies,
+                    ):
+                        projected = project_read_history(world, messages)
+                        self.assertNotEqual(projected[0].text, message.text)
+                        self.assertEqual(check.call_count, 1)
+                        self.assertEqual(digest.call_count, 1)
+                        self.assertEqual(hashes.call_count, 2)  # Message bytes and stored visible payload.
+                        self.assertIs(digest.call_args.args[0], stored["visible_payload"])
+                        self.assertFalse(any(
+                            call.args[0] is value for call in copies.call_args_list
+                            for value in (stored, stored["raw_result"], stored["visible_payload"])
+                        ))
+                    if previous is not None:
+                        self.assertEqual(projected, previous)
+                    previous = projected
+            # No cross-request integrity cache: later tampering leaves the original message visible.
+            world._by_call["supply"]["visible_payload"]["result"]["products"][0]["id"] = 999
+            self.assertEqual(project_read_history(world, [supply])[0].text, supply.text)
+
+    def test_history_receipt_query_failure_preserves_context(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, ENV):
+            world = self.store(Path(directory))
+            message, _ = self.supply_message(world, self.supply_payload())
+            with patch.object(world, "history_projection_receipt", side_effect=OSError("receipt unavailable")):
+                self.assertEqual(project_read_history(world, [message]), [message])
+            self.assertFalse(world.telemetry()["projection_enabled"])
 
     def test_schema_table_projection_and_heterogeneous_rows_are_safe(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, ENV):

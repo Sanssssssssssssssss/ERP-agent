@@ -32,6 +32,7 @@ from typing import Any, Callable
 from .sale_view import business_detail, collect_documents, refresh_business as readback_business
 from .materials import MAX_FILES_PER_SESSION, parse_material, read_material_text
 from .storage import StateStore
+from .model_config import capability_router_config
 from .business import completion_target_instruction, default_target, valid_target
 from .worker import conversation_command, conversation_environment, child_environment, worker_command
 
@@ -229,6 +230,7 @@ class Workbench:
         self._lock = threading.RLock()
         self._processes: dict[str, subprocess.Popen[str]] = {}
         self._threads: dict[str, threading.Thread] = {}
+        self._selectors = {}
         self._session_entry_baselines: dict[str, set[str]] = {}
         self._session_compaction_totals: dict[str, dict[str, Any]] = {}
         self._closing = False
@@ -310,6 +312,9 @@ class Workbench:
             ledger.close()
 
     def _finalize_run(self, run: dict[str, Any], status: str, error: str | None = None) -> None:
+        selector = self._selectors.pop(run['id'], None)
+        if selector is not None:
+            selector.close()
         try:
             statuses = self._ledger_statuses(run)
             if any(value in {"sending", "executing", "needs_reconciliation"} for value in statuses.values()):
@@ -697,16 +702,9 @@ class Workbench:
             scope = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:16]
             run["conversation_scope"] = scope
             session_file = self._session_file_for_run(run)
-            session_file.parent.mkdir(parents=True, exist_ok=True)
-            self._session_entry_baselines.setdefault(run["id"], self._session_entry_ids(session_file))
-            runtime_home = self.store.root / "runtime-home"
-            runtime_home.mkdir(exist_ok=True)
-            proc = subprocess.Popen(
+            proc = self._open_worker(run, session_file,
                 conversation_command(self.root, instruction, usage, session_file),
-                cwd=self.root,
-                env={**conversation_environment(run["session_id"], run["id"]), "USERPROFILE": str(runtime_home), "HOME": str(runtime_home), "ERP_CONVERSATION_SOURCES": str(source_file), "ERP_CONVERSATION_BUSINESS": str(status_file), "ERP_KNOWLEDGE_DIR": str(self.store.root / "knowledge")},
-                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, encoding="utf-8", errors="replace", bufsize=1,
+                {**conversation_environment(run["session_id"], run["id"]), "ERP_CONVERSATION_SOURCES": str(source_file), "ERP_CONVERSATION_BUSINESS": str(status_file)},
             )
         except Exception as exc:
             self._finalize_conversation(run, "failed", f"worker_launch_{type(exc).__name__}")
@@ -953,15 +951,20 @@ class Workbench:
             instruction = self._instruction(self._business(run["session_id"], run["business_id"]), run["id"])
             usage = self.store.root / "runs" / run["id"] / ("usage-%d.json" % len(run["events"]))
             session_file = self.store.root / "sessions" / run["business_id"] / "pi-agent-session.jsonl"
-            session_file.parent.mkdir(parents=True, exist_ok=True)
-            self._session_entry_baselines.setdefault(run["id"], self._session_entry_ids(session_file))
-            runtime_home = self.store.root / "runtime-home"
-            runtime_home.mkdir(exist_ok=True)
             evidence_file = instruction.with_name("task-sources.json")
             evidence_env = {"ODOO_TASK_EVIDENCE_FILE": str(evidence_file)} if evidence_file.exists() else {}
-            proc = subprocess.Popen(worker_command(self.root, instruction, usage, session_file, continue_run=continue_run), cwd=self.root,
-                                    env={**child_environment(run["session_id"], run["id"]), **evidence_env, "USERPROFILE": str(runtime_home), "HOME": str(runtime_home), "ERP_MEMORY_DIR": str(self.store.root / "memory"), "ERP_KNOWLEDGE_DIR": str(self.store.root / "knowledge")}, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", bufsize=1)
+            selector_path = capability_router_config()
+            if selector_path and json.loads(Path(selector_path).read_text(encoding='utf8')).get('backend') == 'laya':
+                from erp_harness.providers.selector_service import SelectorService
+                selector = self._selectors.get(run['id'])
+                if selector is None:
+                    selector = SelectorService(selector_path, usage.parent / 'routing', run['id'])
+                    self._selectors[run['id']] = selector
+                # A dead selector falls back at publication; never restart it silently.
+                evidence_env['ERP_SELECTOR_ENDPOINT'] = json.dumps(selector.endpoint)
+            proc = self._open_worker(run, session_file,
+                worker_command(self.root, instruction, usage, session_file, continue_run=continue_run),
+                {**child_environment(run["session_id"], run["id"]), **evidence_env, "ERP_MEMORY_DIR": str(self.store.root / "memory")})
         except Exception as exc:
             self._finalize_run(run, "failed", f"worker_launch_{type(exc).__name__}")
             self._event("run_changed", {"run_id": run["id"], "status": run["status"]})
@@ -976,6 +979,17 @@ class Workbench:
         thread = threading.Thread(target=self._consume_worker, args=(run["id"], proc, usage), daemon=True)
         self._threads[run["id"]] = thread
         thread.start()
+
+    def _open_worker(self, run, session_file, command, environment):
+        session_file.parent.mkdir(parents=True, exist_ok=True)
+        self._session_entry_baselines.setdefault(run["id"], self._session_entry_ids(session_file))
+        runtime_home = self.store.root / "runtime-home"
+        runtime_home.mkdir(exist_ok=True)
+        return subprocess.Popen(command, cwd=self.root,
+            env={**environment, "USERPROFILE": str(runtime_home), "HOME": str(runtime_home),
+                 "ERP_KNOWLEDGE_DIR": str(self.store.root / "knowledge")},
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace", bufsize=1)
 
     @staticmethod
     def _session_entry_ids(path: Path) -> set[str]:
@@ -1573,39 +1587,43 @@ class Workbench:
                 ).start()
 
     def get_business(self, session_id: str, business_id: str) -> dict[str, Any]:
-        self._business(session_id, business_id)
-        for run in self.store.data["runs"].values():
-            if run.get("business_id") != business_id:
-                continue
+        from erp_harness.erp.store import ActionStore
+
+        business = self._business(session_id, business_id)
+        runs = {key: row for key, row in self.store.data["runs"].items() if row.get("business_id") == business_id}
+        archives = {}
+        for run in runs.values():
             self._stamp_usage_projection(run)
+            path = self.store.root / "runs" / run["id"] / "odoo-actions.sqlite3"
+            rows, archive = [], {"available": False, "rows": []}
+            if path.is_file():
+                try:
+                    rows = ActionStore.read_receipts(path)
+                    if any(row.get("run_id") != run["id"] or row.get("session_id") != session_id for row in rows):
+                        raise ValueError("receipt scope mismatch")
+                    archive = {"available": True, "rows": _safe(rows)}
+                except Exception:
+                    rows = []  # Unknown or out-of-scope evidence cannot update the public state.
+            archives[run["id"]] = archive
+            by_action = {row["action_id"]: row for row in rows}
             for action_id, approval in self.store.data["approvals"].items():
                 if approval.get("run_id") != run.get("id"):
                     continue
-                row = self._action_row(run, action_id)
+                row = by_action.get(action_id)
                 if row and row.get("status") in {"verified", "known_failed", "needs_reconciliation"}:
                     if approval.get("status") in {"pending_approval", "approved"}:
                         approval["status"] = row["status"]
                     approval["result"], approval["verification"] = _safe(row.get("result")), _safe(row.get("verification"))
                     self._apply_action_readback(run, approval, row)
-        public_state = copy.deepcopy(self.store.data)
-        public_state["receipt_ledger"] = {}
-        for receipt_run in (row for row in public_state["runs"].values() if row.get("business_id") == business_id):
-            from erp_harness.erp.store import ActionStore
-            path = self.store.root / "runs" / receipt_run["id"] / "odoo-actions.sqlite3"
-            archive = {"available": False, "rows": []}
-            if path.is_file():
-                try:
-                    rows = ActionStore.read_receipts(path)
-                    if any(row.get("run_id") != receipt_run["id"] or row.get("session_id") != session_id for row in rows):
-                        raise ValueError("receipt scope mismatch")
-                    archive = {"available": True, "rows": _safe(rows)}
-                except Exception:
-                    pass  # Missing or unreadable evidence stays unknown in the receipt projection.
-            public_state["receipt_ledger"][receipt_run["id"]] = archive
+        material_ids = business.get("material_ids")
+        material_ids = material_ids if isinstance(material_ids, list) else []
+        public_state = copy.deepcopy({
+            "businesses": {business_id: business}, "runs": runs,
+            "approvals": {key: row for key, row in self.store.data["approvals"].items() if row.get("business_id") == business_id},
+            "materials": {key: row for key, row in self.store.data.get("materials", {}).items() if key in material_ids},
+        })
+        public_state["receipt_ledger"] = archives
         for row in public_state["runs"].values():
-            if row.get("business_id") != business_id:
-                continue
-            self._stamp_usage_projection(row)
             row["usage"] = self._public_usage(row)
         return business_detail(public_state, business_id)
 

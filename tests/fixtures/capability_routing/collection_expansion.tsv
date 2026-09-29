@@ -1,0 +1,45 @@
+id	split	preferred	base_allowed	variants	goal
+expand_preview_price	train	actions	false	0	客户要求调整一条报价明细的单价。先列出拟改字段、原值和新值，给我看预览，审批前不要落库。
+expand_validate_vendor	train	actions	false	1	采购草稿的供应商调整方案已经准备好，请检查这项变更的前置条件、关联身份与审批要求；这一轮只做写入校验。
+expand_execute_approved	train	actions	false	2	宿主已经给出了有效审批和对应的待执行动作，请按该动作的原始字段执行一次修改，回读核验；若审批无效就暂停。
+expand_post_note	train	actions	false	0	把用户刚确认的收货要求保存为采购单内部留言，先给出关联单据和留言内容，按审批流程提交，不对外发邮件。
+expand_business_method	train	actions	false	1	对已经核对身份的生产任务执行取消业务方法，先预检和审批，不直接把状态字段改成取消。
+expand_receivable_currency	train	accounting	true	2	按当前公司的币种查看客户应收账龄，分未到期和不同逾期区间；我需要只读的账龄汇总。
+expand_payable_period	train	accounting	true	0	给财务一份供应商应付款期限分布，使用账龄汇总能力，注明统计日期，别发起付款。
+expand_health_backlog	train	accounting	true	1	检查当前公司的开放应收、开放应付和草稿发票积压情况，输出会计健康摘要；这不是账簿平衡或银行核销检查。
+expand_attachment_text	train	attachments	false	2	已有合约附件的记录编号，请读取受限文本内容供我检查合同条款，不只是查询附件名称。
+expand_attachment_binary	train	attachments	false	0	我要下载订单上已存在的图片附件，目标附件已定位，读取该文件的数据和必要元信息，不重新创建图片。
+expand_async_submit	train	async_reads	false	1	这份允许后台运行的只读统计耗时较长，帮我提交后台任务，给出可轮询的任务编号。
+expand_async_result	train	async_reads	false	2	我手上有一个之前提交的只读任务 ID，请取得它的当前状态和已完成的结果，不能再提交相同任务。
+expand_async_stop	train	async_reads	false	0	停止我自己先前发起的那项后台统计任务，订单和付款等业务记录都不能取消或更改。
+expand_async_inventory	train	async_reads	false	1	展示我这个身份可见的后台任务清单，包括完成、运行中和失败状态；不去读取其他账号的任务。
+expand_cross_search	train	cross_instance	false	2	宿主配置了两个不同的 Odoo 实例，请在各实例内查同一客户编号，并标明每条结果来自哪个实例。
+expand_cross_aggregate	train	cross_instance	false	0	对两个已配置数据库实例分别做只读采购金额汇总，再并列比较；保持各自公司的权限范围。
+expand_cross_health	train	cross_instance	false	1	并列查看不同 Odoo 实例的应收应付健康摘要，实例由宿主配置，不临时添加连接，也不修改账目。
+expand_quality_report	train	diagnostics	false	2	对联系人模型生成缺失字段和重复记录的数据质量诊断，报告问题即可，不合并联系人。
+expand_failed_call	train	diagnostics	false	0	已提供一个 Odoo 方法调用的失败信息，请分析请求方法、参数和访问限制的诊断依据；不能重放那次调用。
+expand_relations	train	diagnostics	false	1	解释这两个业务模型之间的关联结构，检查关系字段及其指向的模型，提供关系检查结果，不创建关联。
+expand_access_rules	train	diagnostics	false	2	仓库岗位对某个模型的访问受到拒绝，请检查该岗位的访问规则和拒绝原因，保持原身份，不越权尝试。
+expand_fit_requirements	train	diagnostics	false	0	给定一份业务能力要求，核对当前实例提供的模型、字段和方法，列出能力差距，不自行安装模块。
+expand_business_pack	train	diagnostics	false	1	业务包标识由宿主提供，请读取它在该实例上的检查报告，说明依赖模型、字段及能力是否具备；不启动包内流程。
+expand_schema_catalog	train	diagnostics	false	2	我需要一份当前身份可见的完整模型目录概览，含模型说明和分类，使用模型目录报告；不是查单个字段。
+expand_knowledge_build	train	knowledge	false	0	请把授权范围内的产品资料刷新到本地知识索引，报告覆盖范围和刷新是否完整，不改变 Odoo 产品记录。
+expand_knowledge_query	train	knowledge	false	1	用本地知识库检索描述符合要求的工业配件，返回少量候选和来源，后续写入前仍需回读核验。
+expand_knowledge_status	train	knowledge	false	2	查看知识索引当前收录数量、覆盖范围和新旧程度，这次只需要索引统计，不检索业务订单。
+expand_json_payload	train	migration	false	0	接口迁移方案里需要将一个已有读取请求表示成 JSON-2 调用格式，请生成对应载荷说明；不要实际发送请求。
+expand_upgrade_risk	train	migration	false	1	为已配置的附加模块做版本升级风险评估，列出兼容性风险，不执行升级，不安装依赖。
+expand_upgrade_log	train	migration	false	2	分析这段示例升级日志，日志不是本机已发生的事件：ERROR module demo_parts: field legacy_ref missing after migration。只解释升级风险和排查方向。
+expand_model_evolution	train	migration	false	0	查询某模型在 Odoo 版本演进中的名称与字段变动，供维护旧接口参考，不查询该模型里的业务数据。
+expand_source_inspect	train	migration	false	1	宿主已经限定附加模块源码目录，请静态检查代码中的迁移兼容问题，不运行源码或修改文件。
+expand_base_existing_sale	train	-	true	2	我想知道这张销售单目前处于什么状态，仅读取已有记录，即使发现还是草稿也不要帮我确认。
+expand_base_invoice_values	train	-	true	0	只读取指定发票的总额和未付余额，不需要全公司的应收账龄或健康汇总。
+expand_base_document_name	train	-	true	1	仅查询该 PDF 附件记录上的名称和关联单据字段，不打开、不下载、不提取文件内容，用基础记录读取即可。
+expand_base_sync_count	train	-	true	2	当前只要一次普通的服务端订单数量统计，同步返回即可，不提交后台任务。
+expand_base_same_database	train	-	true	0	比较当前这个数据库下两家公司的现有销售总额。只有一个 Odoo 实例，不访问其他实例。
+expand_base_one_field	train	-	true	1	只核对 purchase.order 上是否存在供应商关联字段，用基础字段定义查询，不需要模型目录、关系诊断或质量报告。
+expand_base_live_record	train	-	true	2	按明确的产品 ID 读取当前数据库里的价格，必须是当前记录，不检索知识索引，不刷新索引。
+expand_base_current_schema	train	-	true	0	查清当前已安装版本中这个字段的类型，只查现有字段定义，不查版本演变，不生成迁移载荷。
+expand_mixed_file_note	train	actions,attachments	false	1	读取已定位的供应商附件文本，并把我指定的摘要作为采购单内部备注保存；备注先预览再审批，不能发邮件。
+expand_mixed_health_notes	train	actions,accounting	false	2	先使用应收账龄报告汇总该公司的逾期分布，再把用户确认的摘要写进指定客户的内部留言；写入照常审批。
+expand_mixed_index_source	train	attachments,knowledge	false	0	先读取指定说明书附件的受限文本，再将授权的产品资料刷新到知识索引；不要修改 ERP 单据。
+expand_mixed_cross_health	train	accounting,cross_instance	false	1	需要当前实例的一份应收账龄报告，同时比较宿主配置的两个不同实例的会计健康摘要，全程只读。

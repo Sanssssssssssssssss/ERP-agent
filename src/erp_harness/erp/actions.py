@@ -23,6 +23,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from erp_harness.erp._odoo_core.agent_tools import (
+    _write_execute_method_args,
     build_approval_token,
     build_write_preview_report,
     canonical_json,
@@ -292,6 +293,28 @@ def _collect_related_metadata(
 
     walk(fields_metadata, rows)
     return related
+
+
+def _canonical_relation_values(values, metadata, related):
+    """Fill the unused slot of unambiguous relation commands before approval."""
+    result = dict(values)
+    for name, value in values.items():
+        field = metadata.get(name, {})
+        if field.get("type") not in {"one2many", "many2many"} or not isinstance(value, (list, tuple)):
+            continue
+        commands = []
+        for command in value:
+            if (isinstance(command, (list, tuple)) and len(command) == 2
+                    and type(command[0]) is int and command[0] in {2, 3, 4}
+                    and type(command[1]) is int and command[1] > 0):
+                command = [*command, 0]
+            elif (isinstance(command, (list, tuple)) and len(command) == 3
+                    and command[0] in (0, 1) and isinstance(command[2], dict)):
+                command = [*command[:2], _canonical_relation_values(
+                    command[2], related.get(field.get("relation"), {}), related)]
+            commands.append(command)
+        result[name] = commands
+    return result
 
 
 def _policy_denials_for_values(
@@ -1428,6 +1451,9 @@ class NativeActions:
                 if source == "server" and fields_metadata
                 else {}
             )
+            if source == "server":
+                values = _canonical_relation_values(values, fields_metadata, related_metadata) if values is not None else None
+                values_list = [_canonical_relation_values(row, fields_metadata, related_metadata) for row in values_list] if values_list is not None else None
             denied = (
                 _policy_denials_for_values(
                     runtime, name, model, fields_metadata or {},
@@ -1682,20 +1708,12 @@ class NativeActions:
                 )
 
             def send() -> Any:
-                values = prepared["values"]
-                values_list = prepared["values_list"]
-                ids = [int(value) for value in record["payload"].get("record_ids") or []]
-                context = dict(record["payload"].get("context") or {})
-                kwargs = {"context": context} if context else {}
-                if operation == "create" and values_list is not None:
-                    args = [values_list]
-                elif operation == "create":
-                    args = [values]
-                elif operation == "write":
-                    args = [ids, values]
-                else:
-                    args = [ids]
-                return self._send(name, model, operation, *args, **kwargs)
+                call = _write_execute_method_args({
+                    **record["payload"], **prepared, "operation": operation,
+                    "record_ids": [int(value) for value in record["payload"].get("record_ids") or []],
+                    "context": dict(record["payload"].get("context") or {}),
+                })
+                return self._send(name, model, operation, *call["args"], **call["kwargs"])
 
             result = self._execute_row(record, send, prepare)
             return {

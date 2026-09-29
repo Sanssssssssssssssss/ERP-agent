@@ -1,0 +1,69 @@
+[
+  {
+    "case_id": "v7-prefix:E01:0008",
+    "source": ".runtime/laya-host-live-20260926/E01/profile/data/runs/r_0bcc6a0e0dcd48c684563116434667b1/requests/0008.request.json",
+    "sha256": "aa67d249c314ba4d9a08db583a05554f266f06b47a016e9ba045ed474c106f68",
+    "observed_problem": "Unresolved action retained unrelated prior capabilities",
+    "constraints": [
+      "Preserve tool schemas, approval and verification",
+      "Keep current freshness authoritative on new reads",
+      "Preserve historical reference bytes across reload and later writes"
+    ],
+    "not_golden_trace": true
+  },
+  {
+    "case_id": "v7-prefix:E02:0018",
+    "source": ".runtime/laya-host-live-20260926/E02/profile/data/runs/r_af29a798032b42fcb95e11b72dafcf1c/requests/0018.request.json",
+    "sha256": "0d8cebbe0fe674065512f725b43f81c445944e96161de62c665121fd60797b24",
+    "observed_problem": "Approval resume reordered historical JSON keys",
+    "constraints": [
+      "Preserve tool schemas, approval and verification",
+      "Keep current freshness authoritative on new reads",
+      "Preserve historical reference bytes across reload and later writes"
+    ],
+    "not_golden_trace": true
+  },
+  {
+    "case_id": "v7-prefix:E02:0019",
+    "source": ".runtime/laya-host-live-20260926/E02/profile/data/runs/r_af29a798032b42fcb95e11b72dafcf1c/requests/0019.request.json",
+    "sha256": "4dd6149527b9bcf79a0430835915169b4f05eb57b24786f76d4d01d594628a3f",
+    "observed_problem": "Live invalidation rewrote an earlier historical observation",
+    "constraints": [
+      "Preserve tool schemas, approval and verification",
+      "Keep current freshness authoritative on new reads",
+      "Preserve historical reference bytes across reload and later writes"
+    ],
+    "not_golden_trace": true
+  },
+  {
+    "case_id": "prefix-live:E01:0003",
+    "source": ".runtime/laya-prefix-live-20260929/E01/profile/data/runs/r_2481594f1f5349bc9c9503ec28ac02a4/requests/0003.request.json",
+    "sha256": "6c3d755aaf2002a1dbafcc0c13535f2818497560b263966c0ff808e1065cb617",
+    "request_id": "req_7033fb57f0474a25903a4cefb3c4f963",
+    "trigger_response": "0002.output.json",
+    "trigger_tool_call_id": "call_01_757v3cl6mom9qguh7pz52im9",
+    "observed_problem": "Unsupported stock.picking field requested; corrected on the next request.",
+    "root_cause_boundary": "Observed propagation boundary; not proof of earliest causal introduction",
+    "constraints": [
+      "Use installed-model fields or inspect metadata; preserve picking identity."
+    ],
+    "status": "self_corrected",
+    "not_golden_trace": true
+  },
+  {
+    "case_id": "prefix-live:E02:0041",
+    "source": ".runtime/laya-prefix-live-20260929/E02/profile/data/runs/r_8bdea479eec04b6ca00f77fdcd4abac6/requests/0041.request.json",
+    "sha256": "083ee7b7ad2e220d9ad6c906699eb0abac75a6db227a753ce9b01722b2c5dc3b",
+    "request_id": "req_f7e0032906084aeda19b03c15979d98a",
+    "trigger_response": "0040.output.json",
+    "trigger_tool_call_id": "call_00_wveiv11g59c3x7g7toiqcdmn",
+    "observed_problem": "Forecast/actual time confusion caused excess reasoning; supervisor rejected planned-date changes before completion. Prior successful run used past planned dates later overwritten by Odoo actual workorder timestamps.",
+    "root_cause_boundary": "Observed propagation boundary; not proof of earliest causal introduction",
+    "constraints": [
+      "Preserve actual arrival <= production start; do not backdate evidence or assume forecast finish is immutable."
+    ],
+    "status": "needs_review_approval_confounded",
+    "not_golden_trace": true,
+    "adjudication_note": "Do not label all past planned-date changes as falsified actual dates. Existing final actual-order constraint remains unchanged."
+  }
+]

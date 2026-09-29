@@ -58,16 +58,16 @@ def _sensitive_key(value: Any) -> bool:
     }
 
 
-def _scrub_payload(value: Any, *, error_strings: bool = False) -> Any:
+def _scrub_payload(value: Any, *, error_strings: bool = False, string_limit: int | None = 4096) -> Any:
     if isinstance(value, dict):
         return {
             key: "[redacted]" if _sensitive_key(key)
-            else _scrub_payload(item, error_strings=error_strings)
+            else _scrub_payload(item, error_strings=error_strings, string_limit=string_limit)
             for key, item in value.items()
         }
     if isinstance(value, list):
-        return [_scrub_payload(item, error_strings=error_strings) for item in value]
-    return _scrub_error(value) if error_strings and isinstance(value, str) else value
+        return [_scrub_payload(item, error_strings=error_strings, string_limit=string_limit) for item in value]
+    return _scrub_error(value, limit=string_limit) if error_strings and isinstance(value, str) else value
 
 
 def _sha(value: Any) -> str:
@@ -94,8 +94,8 @@ def _safe_url(value: Any) -> str | None:
     return urlunsplit((parsed.scheme.lower(), host.lower() + port, parsed.path.rstrip("/"), "", ""))
 
 
-def _scrub_error(value: Any) -> str:
-    text = str(value or "")[:4096]
+def _scrub_error(value: Any, *, limit: int | None = 4096) -> str:
+    text = str(value or "")[:limit]
     text = re.sub(r"(?i)(bearer\s+)[^\s,;]+", r"\1[redacted]", text)
     text = re.sub(
         r"(?i)((?:api[_-]?key|password|[a-z0-9_-]*(?:secret|token)|authorization|cookie)"
@@ -349,16 +349,27 @@ class WorldStore:
 
     def artifact_reference(self, call_id: str, result_text: str) -> dict[str, Any] | None:
         """Return a small, identity-scoped reference after a large visible read."""
+        receipt = self.history_projection_receipt(call_id, result_text, include_reference=True)
+        return receipt["reference"] if receipt else None
+
+    def history_projection_receipt(
+        self, call_id: str, result_text: str, *, include_reference: bool = False,
+    ) -> dict[str, Any] | None:
+        """Check this request once; never copy the full receipt or cache its integrity."""
         with self._lock:
             receipt = self._by_call.get(call_id)
-            integrity, _payload = self._visible_payload(receipt)
-            if (not receipt or receipt["tool"] not in READ_TOOLS
-                    or not receipt["outcome"]["success"]
-                    or integrity != "verified"
-                    or len(result_text.encode()) < ARTIFACT_REFERENCE_BYTES
-                    or receipt.get("result_sha256") != hashlib.sha256(result_text.encode()).hexdigest()):
+            encoded = result_text.encode()
+            if (not receipt or not receipt.get("outcome", {}).get("success")
+                    or receipt.get("result_sha256") != hashlib.sha256(encoded).hexdigest()):
                 return None
-            return self._observation_summary(receipt)
+            integrity = self._visible_payload(receipt)[0] if include_reference else None
+            reference = None
+            if (include_reference and integrity == "verified" and receipt["tool"] in READ_TOOLS
+                    and len(encoded) >= ARTIFACT_REFERENCE_BYTES):
+                reference = self._observation_summary(receipt, historical=True)
+            return {"receipt_id": receipt["receipt_id"], "tool": receipt.get("tool"),
+                    "result_sha256": receipt["result_sha256"], "integrity": integrity,
+                    "reference": reference}
 
     def observation_integrity(self, call_id: str) -> str:
         with self._lock:
@@ -506,7 +517,7 @@ class WorldStore:
         return matches
 
     def _observation_summary(
-        self, receipt: dict[str, Any], *, include_discovery: bool = True,
+        self, receipt: dict[str, Any], *, include_discovery: bool = True, historical: bool = False,
     ) -> dict[str, Any]:
         request = receipt.get("request") if isinstance(receipt.get("request"), dict) else {}
         identity = receipt.get("identity") if isinstance(receipt.get("identity"), dict) else {}
@@ -536,6 +547,11 @@ class WorldStore:
                 "live_refresh_required_for_current_state": generation != self._generation.get(identity_id, 0),
             },
         }
+        if historical:
+            # Historical references must not rewrite old provider messages after a write.
+            # Current freshness is evaluated only by a new read_observation/search call.
+            summary["freshness"].pop("stale_after_write", None)
+            summary["freshness"]["live_refresh_required_for_current_state"] = True
         if include_discovery:
             summary["paths"] = self._payload_paths(payload)
             summary["preview"] = self._payload_preview(payload)

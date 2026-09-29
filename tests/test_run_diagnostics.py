@@ -110,6 +110,27 @@ def test_identity_scope_and_unresolved_writes_never_replay(tmp_path):
         assert asyncio.run(tool.execute("x", {})).details["error_code"] == "identity_or_scope_unavailable"
 
 
+def test_live_routing_is_scoped_read_only_and_not_reused_as_current_history(tmp_path):
+    from unittest.mock import Mock
+    from erp_harness.app.capability_routing import project_routing_result
+    seed(tmp_path)
+    context=Mock(return_value={'status':'held','reason':'unresolved_write','active':['actions'],
+                              'business_truth':False,'automatic_business_retry':False})
+    with patch.dict('os.environ',{'HARBOR_TRIAL_ID':'run','PI_AGENT_SESSION_ID':'session'}), \
+         patch('erp_harness.tools.run_diagnostics.ActionStore.read_receipts',return_value=[]):
+        identity=dict(IDENTITY)
+        tool=build_diagnostic_tool(tmp_path,tmp_path/'session.jsonl',lambda:identity,routing_context=context)
+        result=asyncio.run(tool.execute('diagnose',{}))
+        assert result.details['routing']['reason']=='unresolved_write'
+        text=result.content[0].text
+        assert len(text.encode())<=8192
+        old=json.loads(project_routing_result('diagnose_current_run',text))
+        assert 'routing' not in old and old['business_truth'] is False
+        identity['identity_id']='other'
+        assert not asyncio.run(tool.execute('denied',{})).details['success']
+        context.assert_called_once()
+
+
 def test_rpc_start_end_ids_preserve_attempt_count_and_timeout_unknown(tmp_path):
     path = tmp_path / "rpc.jsonl"
     with patch.object(OdooClient, "_connect"):

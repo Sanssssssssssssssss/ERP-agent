@@ -2,7 +2,7 @@
 
 import copy
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -217,7 +217,7 @@ def consumption_fixture():
           bom_product_template_attribute_value_ids=[], child_bom_id=False)
     runtime = SimpleNamespace(client=c)
     production = {"id": 7, "bom_id": 5, "product_id": 3, "product_qty": 2, "product_uom_id": 1, "consumption": "strict"}
-    move = {"product_id": 4, "product_uom": 2, "product_uom_qty": 1, "quantity": 1}
+    move = {"product_id": 4, "product_uom": 2, "product_uom_qty": 1, "quantity": 1, "picked": True, "move_line_ids": []}
     return runtime, production, move
 
 
@@ -235,6 +235,23 @@ def test_strict_bom_detects_tampered_demand_while_flexible_policy_reports_deviat
     c.records["mrp.bom.line"][6]["bom_product_template_attribute_value_ids"] = [42]
     with pytest.raises(ValueError, match="native explosion"):
         _bom_consumption(_Evidence(runtime, payload), production, [move], True)
+
+
+def test_completion_counts_only_picked_move_lines_with_unit_conversion():
+    runtime, production, move = consumption_fixture()
+    move.update(product_uom_qty=2, quantity=2, move_line_ids=[11, 12])
+    runtime.client.add("stock.move.line", 11, product_uom_id=1, quantity=2, picked=True)
+    runtime.client.add("stock.move.line", 12, product_uom_id=2, quantity=1, picked=False)
+    guard = _Evidence(runtime, {"instance": "default"})
+    with pytest.raises(ValueError, match="actual picked consumption"):
+        _bom_consumption(guard, production, [move], True)
+    production["consumption"] = "flexible"
+    assert _bom_consumption(guard, production, [move], True)["component_variances"][0]["actual_quantity"] == 2
+    production["consumption"] = "strict"
+    # Preparation remains legal while material has not yet been picked.
+    assert _bom_consumption(guard, production, [move], False)["component_variances"] == []
+    runtime.client.records["stock.move.line"][12]["picked"] = True
+    assert _bom_consumption(_Evidence(runtime, {"instance": "default"}), production, [move], True)["component_variances"] == []
 
 
 @pytest.mark.parametrize("mo_policy,bom_policy,error", [
@@ -260,10 +277,13 @@ def test_consumption_uses_confirmed_mo_policy(mo_policy, bom_policy, error):
     assert _bom_consumption(guard, production, [move], True)["component_variances"] == []
 
 
-def test_warning_deviation_rejected_before_approval_or_write_rpc(tmp_path, monkeypatch):
+@pytest.mark.parametrize("policy,unpicked,error", [("warning", False, "human review"), ("strict", True, "set_qty_producing")])
+def test_warning_deviation_rejected_before_approval_or_write_rpc(tmp_path, monkeypatch, policy, unpicked, error):
     runtime, production, move = consumption_fixture()
     c = runtime.client
-    production.update(consumption="warning", company_id=1, qty_producing=2, qty_produced=0,
+    if unpicked:
+        move.update(product_uom_qty=2, quantity=2, picked=False)
+    production.update(consumption=policy, company_id=1, qty_producing=2, qty_produced=0,
                       state="progress", date_start="2026-01-01 00:00:00", date_deadline=False,
                       move_raw_ids=[8], move_finished_ids=[9], workorder_ids=[])
     c.add("mrp.production", 7, **{k: v for k, v in production.items() if k != "id"})
@@ -278,7 +298,7 @@ def test_warning_deviation_rejected_before_approval_or_write_rpc(tmp_path, monke
     try:
         actions = NativeActions(reads, store=store, clients={"default": writer}, approval_mode="host")
         result = actions.execute_method("mrp.production", "button_mark_done", kwargs={"ids": [7]})
-        assert result["success"] is False and "human review" in result["error"]
+        assert result["success"] is False and error in result["error"]
         assert not result.get("approval_required")
         assert store.summary()["receipts"] == []
         writer.execute_method.assert_not_called()
@@ -310,3 +330,232 @@ def test_relation_commands_verify_updated_fields_deleted_children_and_final_memb
     assert check([3], [[0, 0, {"quantity": 4}]], []) is True
     assert check([1, 3], [[0, 0, {"quantity": 4}]], [1]) is True
     assert check([], [[0, 0, {"quantity": 4}], [5, 0, 0]], []) is True
+
+
+def test_evidence_batches_only_uncached_ids_and_keeps_field_scope_and_context():
+    runtime, payload = payment()
+    client = runtime.client
+    client.add("account.move", 12, _INVOICE, amount_total=200)
+    client.context = {"lang": "zh_CN"}
+    payload["context"] = {"allowed_company_ids": [1]}
+    guard = _Evidence(runtime, payload)
+    with patch.object(guard.client, "read_records", wraps=guard.client.read_records) as read:
+        assert guard.read("account.move", 10, ("amount_total",))["amount_total"] == 100
+        rows = guard.many("account.move", [12, 10, 12], ("amount_total", "id"))
+        assert [row["id"] for row in rows] == [10, 12]
+        assert read.call_args.args[1] == [12]
+        guard.many("account.move", [12, 10], ("amount_total",))
+        assert read.call_count == 2
+        guard.many("account.move", [12, 10], ("amount_total", "state"))
+        assert read.call_args.args[1] == [10, 12]
+        assert read.call_count == 3
+        assert guard.many("account.move", [], ("amount_total",)) == []
+    assert guard.client.context == {"lang": "zh_CN", "allowed_company_ids": [1]}
+    assert client.context == {"lang": "zh_CN"}
+    client.records["account.move"][10]["amount_total"] = 300
+    assert guard.read("account.move", 10, ("amount_total",))["amount_total"] == 100
+    assert _Evidence(runtime, payload).read("account.move", 10, ("amount_total",))["amount_total"] == 300
+
+
+@pytest.mark.parametrize("response", [
+    None, {}, [], [{"id": 1, "state": "draft"}],
+    [{"id": 1, "state": "draft"}, {"id": 1, "state": "draft"}],
+    [{"id": 1, "state": "draft"}, {"id": 3, "state": "draft"}],
+    [{"id": 1, "state": "draft"}, {"id": 2}],
+    [{"id": 1, "state": "draft"}, "bad record"],
+    [{"id": True, "state": "draft"}, {"id": 2, "state": "draft"}],
+])
+def test_batch_evidence_rejects_incomplete_duplicate_foreign_or_malformed_rows(response):
+    runtime, payload = payment()
+    guard = _Evidence(runtime, payload)
+    with patch.object(guard.client, "read_records", return_value=response):
+        with pytest.raises(ValueError, match="evidence unavailable"):
+            guard.many("account.move", [1, 2], ("state",))
+    assert guard.rows == {}
+
+
+def test_batch_evidence_keeps_acl_and_transport_failures_closed():
+    runtime, payload = payment()
+    runtime.policy = Mock()
+    runtime.policy.restricted_fields.return_value = {"amount_total"}
+    guard = _Evidence(runtime, payload)
+    with patch.object(guard.client, "read_records") as read:
+        with pytest.raises(ValueError, match="evidence unavailable"):
+            guard.many("account.move", [10, 12], ("amount_total",))
+        read.assert_not_called()
+    runtime.policy.restricted_fields.assert_called_once_with("default", "account.move", {"id", "amount_total"})
+    runtime.policy.restricted_fields.return_value = set()
+    with patch.object(guard.client, "read_records", side_effect=RuntimeError("secret")):
+        with pytest.raises(ValueError, match="^business guard evidence unavailable for account.move; validate again$"):
+            guard.many("account.move", [10, 12], ("amount_total",))
+    assert guard.rows == {}
+
+
+def _batch_business_case(kind):
+    if kind in {"payment", "refund"}:
+        runtime, payload = payment()
+        c = runtime.client
+        c.add("account.move", 13, **{k: v for k, v in c.records["account.move"][10].items() if k != "id"})
+        if kind == "payment":
+            c.add("account.move.line", 14, **{k: v for k, v in c.records["account.move.line"][11].items() if k != "id"})
+            c.records["account.move.line"][14]["move_id"] = 13
+            c.records["account.move"][13]["line_ids"] = [14]
+            c.records["account.payment.register"][4].update(line_ids=[14, 11], group_payment=True)
+        else:
+            c.add("account.move.reversal", 4, move_ids=[13, 10], new_move_ids=[], company_id=1,
+                  journal_id=2, date="2026-01-01", reason="Return damaged goods")
+            c.records["account.journal"][2]["type"] = "sale"
+            payload.update(model="account.move.reversal", method="reverse_moves")
+        return runtime, payload
+    if kind == "picking":
+        c = Client()
+        c.add("stock.picking", 1, _PICKING, company_id=1, partner_id=8, state="assigned", move_ids=[3, 2],
+              backorder_ids=[], return_ids=[], picking_type_id=4)
+        for record_id in (2, 3):
+            c.add("stock.move", record_id, _MOVE, company_id=1, product_id=record_id, product_uom=1,
+                  product_uom_qty=4, quantity=4, state="assigned", location_id=8, location_dest_id=9, move_orig_ids=[])
+        c.add("stock.picking.type", 4, create_backorder="always")
+        c.add("stock.location", 8, usage="supplier", company_id=False)
+        return SimpleNamespace(client=c), {"instance": "default", "model": "stock.picking", "method": "button_validate", "kwargs": {"ids": [1]}}
+    runtime, production, move = consumption_fixture()
+    c = runtime.client
+    production.update(company_id=1, qty_producing=2, qty_produced=0, state="progress",
+                      date_start="2026-01-01 00:00:00", date_deadline=False, date_finished=False,
+                      move_raw_ids=[18, 8], move_finished_ids=[9], workorder_ids=[])
+    c.add("mrp.production", 7, **{k: v for k, v in production.items() if k != "id"})
+    c.records["mrp.bom"][5].update(company_id=1, operation_ids=[], bom_line_ids=[16, 6])
+    c.records["product.product"][4]["is_storable"] = False
+    c.add("product.product", 14, uom_id=1, is_storable=False)
+    c.add("mrp.bom.line", 16, product_id=14, product_qty=3, product_uom_id=1,
+          bom_product_template_attribute_value_ids=[], child_bom_id=False)
+    for record_id, product_id, quantity in [(8, 4, 4), (18, 14, 6)]:
+        c.add("stock.move", record_id, _MOVE, company_id=1, product_id=product_id, product_uom=1,
+              product_uom_qty=quantity, quantity=quantity, location_id=8, state="assigned", picked=True, move_line_ids=[])
+    c.add("stock.move", 9, _MOVE, company_id=1)
+    c.add("stock.location", 8, usage="supplier", company_id=False)
+    return runtime, {"instance": "default", "model": "mrp.production", "method": "button_mark_done", "kwargs": {"ids": [7]}}
+
+
+@pytest.mark.parametrize("kind", ["picking", "manufacturing", "payment", "refund"])
+def test_business_batch_read_matches_serial_evidence_and_fresh_verification(kind):
+    runtime, payload = _batch_business_case(kind)
+    serial = lambda self, model, ids, fields: [self.read(model, item, fields) for item in sorted(set(ids))]
+    with patch.object(_Evidence, "many", serial):
+        expected = method_prestate(runtime, payload)
+    calls, original = [], Client.read_records
+    def read(client, model, ids, fields):
+        calls.append((model, list(ids)))
+        return list(reversed(original(client, model, ids, fields)))
+    with patch.object(Client, "read_records", read):
+        before = method_prestate(runtime, payload)
+    assert before == expected
+    assert any(len(ids) > 1 for _, ids in calls)
+    assert method_verify(runtime, payload, before, True)["status"] == "not_satisfied"
+    c = runtime.client
+    changed_model, changed_id, changed_field = {
+        "picking": ("stock.move", 2, "quantity"),
+        "manufacturing": ("stock.move", 8, "quantity"),
+        "payment": ("account.move.line", 14, "amount_residual_currency"),
+        "refund": ("account.move", 13, "amount_total"),
+    }[kind]
+    changed = c.records[changed_model][changed_id]
+    prior = changed[changed_field]
+    changed[changed_field] = prior - 1
+    if kind == "manufacturing":
+        with pytest.raises(ValueError, match="strict BOM"):
+            method_prestate(runtime, payload)
+    else:
+        assert method_prestate(runtime, payload) != before
+    changed[changed_field] = prior
+    if kind == "picking":
+        c.records["stock.picking"][1]["state"] = "done"
+        for row in c.records["stock.move"].values():
+            row["state"] = "done"
+        bad = (c.records["stock.move"][2], "quantity", 99)
+    elif kind == "manufacturing":
+        c.records["mrp.production"][7].update(state="done", qty_produced=2, date_finished="2026-01-02 00:00:00")
+        for row in c.records["stock.move"].values():
+            row["state"] = "done"
+        bad = (c.records["stock.move"][8], "quantity", 99)
+    elif kind == "payment":
+        complete_payment(runtime)
+        bad = (c.records["account.payment"][20], "partner_id", 99)
+    else:
+        c.records["account.move.reversal"][4]["new_move_ids"] = [23, 20]
+        for record_id, original_id in [(20, 10), (23, 13)]:
+            c.add("account.move", record_id, _INVOICE, company_id=1, partner_id=8, currency_id=1,
+                  move_type="out_refund", reversed_entry_id=original_id)
+        bad = (c.records["account.move"][20], "reversed_entry_id", 99)
+    with patch.object(_Evidence, "many", serial):
+        expected_result = method_verify(runtime, payload, before, True)
+    assert method_verify(runtime, payload, before, True) == expected_result
+    assert expected_result["status"] == "satisfied"
+    row, field, value = bad
+    row[field] = value
+    assert method_verify(runtime, payload, before, True)["status"] == "not_satisfied"
+
+
+@pytest.mark.parametrize("kind", ["single", "batch", "write", "unlink", "upload", "upload_batch"])
+@pytest.mark.parametrize("context", [{}, {"lang": "zh_CN", "allowed_company_ids": [1]}])
+def test_approved_write_uses_preview_arguments_after_materializing_uploads(tmp_path, monkeypatch, kind, context):
+    import base64
+    from tests.test_actions import _actions
+
+    monkeypatch.setenv("ODOO_MCP_ENABLE_WRITES", "1")
+    monkeypatch.setenv("ODOO_MCP_ATTACHMENT_UPLOAD_ROOTS", str(tmp_path))
+    actions, writer, _ = _actions(path=tmp_path / "actions.sqlite3", approval_mode="host")
+    operation = kind if kind in {"write", "unlink"} else "create"
+    model = "ir.attachment" if kind.startswith("upload") else "res.partner"
+    values = {"name": "Business document"}
+    if kind.startswith("upload"):
+        source = tmp_path / "invoice.pdf"
+        source.write_bytes(b"%PDF-1.4 fixture\n")
+        values["datas_from_path"] = str(source)
+    arguments = {"model": model, "operation": operation, "context": context}
+    if kind in {"batch", "upload_batch"}:
+        arguments["values_list"] = [values, {**values, "name": "Second document"}]
+    elif kind != "unlink":
+        arguments["values"] = values
+    if operation != "create":
+        arguments["record_ids"] = [7]
+    try:
+        preview = actions.preview_write(**arguments)
+        validation = actions.validate_write(**arguments)
+        assert validation["success"], validation
+        approval = validation["approval"]
+        denied = actions.execute_approved_write(approval, confirm=True)
+        assert denied["action_status"] == "pending_approval" and not writer.calls
+        assert actions.store.approve(approval["action_id"], "test-accountant")
+        result = actions.execute_approved_write(approval, confirm=True)
+        assert result["success"] and result["action_status"] == "verified", result
+        expected = copy.deepcopy(preview["execute_method"])
+        if kind.startswith("upload"):
+            rows = expected["args"][0] if kind == "upload_batch" else [expected["args"][0]]
+            for row in rows:
+                row.pop("datas_from_path")
+                row["datas"] = base64.b64encode(source.read_bytes()).decode("ascii")
+        assert writer.calls == [(model, operation, tuple(expected["args"]), expected["kwargs"])]
+        assert actions.execute_approved_write(approval, confirm=True)["replayed"]
+        assert len(writer.calls) == 1
+    finally:
+        actions.store.close()
+
+
+def test_shared_argument_builder_does_not_authorize_unknown_write_operation(tmp_path, monkeypatch):
+    from erp_harness.erp._odoo_core.agent_tools import build_approval_token
+    from tests.test_actions import _actions
+
+    monkeypatch.setenv("ODOO_MCP_ENABLE_WRITES", "1")
+    actions, writer, _ = _actions(path=tmp_path / "actions.sqlite3")
+    try:
+        approval = actions.validate_write("res.partner", "write", record_ids=[7], values={"name": "Updated"})["approval"]
+        record = actions.store.get(approval["action_id"])
+        record["payload"]["operation"] = "custom_write"
+        token = build_approval_token(record["payload"])
+        with patch.object(actions.store, "get", return_value=record):
+            result = actions._execute_approved_write_gated({"action_id": approval["action_id"], "token": token}, True)
+        assert result["success"] is False
+        assert "create, write, or unlink" in result["error"]
+        assert writer.calls == []
+    finally:
+        actions.store.close()

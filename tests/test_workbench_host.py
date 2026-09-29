@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import copy
 import io
 import os
 import sqlite3
@@ -1030,6 +1031,48 @@ class WorkbenchHostTests(unittest.TestCase):
         self.assertEqual(next(r for r in receipts if r["id"] == broken["action_id"])["status"], "unknown")
         self.assertEqual(next(r for r in receipts if r["id"] == valid["action_id"])["status"], "verified")
         self.assertEqual(next(r for r in receipts if r["kind"] == "archive")["status"], "unknown")
+
+    def test_business_detail_reads_ledger_once_and_refreshes_next_request(self):
+        business, run = self._run("batched receipts")
+        rows = [self._action(run, key=str(i)) for i in range(3)]
+        for row in rows:
+            self._approval_state(run, row)
+        path = Path(self.tmp.name) / "runs" / run["id"] / "odoo-actions.sqlite3"
+        with closing(ActionStore(path)) as ledger:
+            ledger.finish(rows[0]["action_id"], "verified", verification={"status": "satisfied"})
+        self.host.store.data["runs"]["unrelated"] = {"id": "unrelated", "business_id": "other", "private": "unrelated history"}
+        with patch.object(ActionStore, "read_receipts", wraps=ActionStore.read_receipts) as reads, \
+                patch("erp_harness.app.host.copy.deepcopy", wraps=copy.deepcopy) as copies:
+            detail = self.host.get_business(self.sid, business["id"])
+        reads.assert_called_once_with(path)
+        self.assertEqual(set(copies.call_args.args[0]["runs"]), {run["id"]})
+        self.assertEqual(self.host.store.data["approvals"][rows[0]["action_id"]]["status"], "verified")
+        detail["business"]["title"] = "edited response"
+        self.assertNotEqual(business["title"], "edited response")
+        with closing(ActionStore(path)) as ledger:
+            ledger.finish(rows[1]["action_id"], "known_failed", verification={"status": "failed"})
+        latest = self.host.get_business(self.sid, business["id"])
+        self.assertEqual(next(row for row in latest["approvals"] if row["action_id"] == rows[1]["action_id"])["status"], "known_failed")
+
+    def test_business_detail_rejects_foreign_ledger_before_updating_approval(self):
+        business, run = self._run("foreign receipts")
+        row = self._action(run)
+        self._approval_state(run, row)
+        path = Path(self.tmp.name) / "runs" / run["id"] / "odoo-actions.sqlite3"
+        with closing(sqlite3.connect(path)) as database:
+            database.execute("UPDATE action_ledger SET session_id = ?, status = ?", ("another-session", "verified"))
+            database.commit()
+        detail = self.host.get_business(self.sid, business["id"])
+        self.assertEqual(detail["approvals"][0]["status"], "pending_approval")
+        self.assertEqual(next(row for row in detail["receipts"] if row["kind"] == "archive")["status"], "unknown")
+
+    def test_business_detail_preserves_legacy_missing_material_list(self):
+        business = self._business("legacy materials")
+        self.host.store.data["materials"]["another-material"] = {"id": "another-material"}
+        for value in (None, "legacy", {}):
+            with self.subTest(material_ids=value):
+                business["material_ids"] = value
+                self.assertEqual(self.host.get_business(self.sid, business["id"])["materials"], [])
 
     def test_plain_message_starts_scoped_conversation_without_odoo_or_proposal(self):
         captured = []

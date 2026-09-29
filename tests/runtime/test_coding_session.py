@@ -360,8 +360,11 @@ async def test_session_export_writes_jsonl_to_destination_directory(tmp_path: Pa
 
 
 @pytest.mark.anyio
-async def test_prompt_logs_unexpected_agent_call_exception(tmp_path: Path) -> None:
+@pytest.mark.parametrize("resume", [False, True])
+async def test_prompt_logs_unexpected_agent_call_exception(tmp_path: Path, resume: bool) -> None:
     storage = JsonlSessionStorage(tmp_path / "session.jsonl")
+    if resume:
+        await storage.append(MessageEntry(message=UserMessage(content="Hello")))
     pi_paths = RuntimePaths(home=tmp_path / "pi-home", agents_home=tmp_path / "agents-home")
     session = await HarnessSession.load(
         SessionConfig(
@@ -376,7 +379,7 @@ async def test_prompt_logs_unexpected_agent_call_exception(tmp_path: Path) -> No
         )
     )
 
-    events = await _collect_session_events(session.prompt("Hello"))
+    events = await _collect_session_events(session.continue_() if resume else session.prompt("Hello"))
 
     log_path = pi_paths.agent_calls_log_path
     assert session.last_diagnostic_log_path == log_path
@@ -396,6 +399,8 @@ async def test_prompt_logs_unexpected_agent_call_exception(tmp_path: Path) -> No
     assert failure.stop_reason == "error"
     assert failure.error_message == "provider exploded"
     assert "Hello" not in log_path.read_text(encoding="utf-8")
+    assert isinstance(events[-1], AgentSettledEvent)
+    assert not session.is_running
 
 
 @pytest.mark.anyio
@@ -868,9 +873,11 @@ async def test_cancelled_prompt_teardown_persists_interrupted_tool_result(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("resume", [False, True])
 async def test_completed_prompt_dispatches_and_yields_same_agent_settled_event(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    resume: bool,
 ) -> None:
     provider = FakeProvider(
         [
@@ -880,12 +887,13 @@ async def test_completed_prompt_dispatches_and_yields_same_agent_settled_event(
             ]
         ]
     )
-    session = await HarnessSession.load(
-        _config(tmp_path, provider, JsonlSessionStorage(tmp_path / "session.jsonl"))
-    )
+    storage = JsonlSessionStorage(tmp_path / "session.jsonl")
+    if resume:
+        await storage.append(MessageEntry(message=UserMessage(content="go")))
+    session = await HarnessSession.load(_config(tmp_path, provider, storage))
     extension_events = _record_extension_events(session, monkeypatch)
 
-    stream_events = await _collect_session_events(session.prompt("go"))
+    stream_events = await _collect_session_events(session.continue_() if resume else session.prompt("go"))
 
     extension_settled = [
         event for event in extension_events if isinstance(event, AgentSettledEvent)

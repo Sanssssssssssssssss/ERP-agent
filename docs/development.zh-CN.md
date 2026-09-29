@@ -24,13 +24,13 @@ npm --prefix desktop run dev
 离线检查：
 
 ```powershell
-uv run --locked pytest -q tests --ignore=tests/test_native_reads.py --ignore=tests/test_capabilities.py --ignore=tests/test_knowledge.py --ignore=tests/test_baseline_fixes.py
+uv run --locked pytest -q
 npm --prefix desktop run typecheck
 npm --prefix desktop run self-check
 node desktop/scripts/renderer-check.mjs
 ```
 
-MCP 对照在独立虚拟环境安装根项目、`bench/reference/mcp`、`mcp==2.0.0` 和 `mcp-types==2.0.0`，只运行上面排除的四个模块。原始试验记录中的旧目录对应关系见 `sources.lock.json`；旧 CLI/TUI 项目由基线提交保留。
+MCP 对照在独立虚拟环境安装根项目、`bench/reference/mcp`、`mcp==2.0.0` 和 `mcp-types==2.0.0`，运行 `python -m unittest discover -s bench/reference/tests`。原始试验记录中的旧目录对应关系见 `sources.lock.json`；旧 CLI/TUI 项目由基线提交保留。
 
 发布构建使用独立依赖环境；Windows sidecar 和 Linux benchmark 安装同一 wheel。Python 嵌入包下载、依赖版本、失败时保留旧 bundle 的检查仍执行。
 

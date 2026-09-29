@@ -1,0 +1,95 @@
+[
+  {
+    "id": "MC01",
+    "source": ".runtime/laya-additive-live-20260929/E02/profile/data/runs/r_768344a05b554cd4b3313fee539b6c7b/requests/0037.request.json",
+    "request_sha256": "46f3da4f13dce61bbb3f1a2946e6f4653cb28066ed8998f6f1e9dd3fa21f6df6",
+    "request_id": "req_a133f827410543c18eae06b8b93a1093",
+    "tool_call_id": "call_00_dr7k7l0d8f7rn9bxau9r22fx",
+    "earliest_observed_divergence": "0036: after qty_producing write, model read quantities and omitted required set_qty_producing; choice alone still recoverable",
+    "first_corrective_boundary": "0037: fresh component read exposes picked=false before button_mark_done",
+    "root_cause": "Model skipped the SOP consumption step; runtime _bom_consumption counts quantity even when picked=false, unlike Odoo _get_consumption_issues. Completion returned a warning wizard; post-state check paused safely.",
+    "constraints": [
+      "Do not send button_mark_done while actual BOM consumption is incomplete.",
+      "Read fresh consumption evidence or use an approved supported production preparation action.",
+      "No state writes, skip_consumption, policy relaxation, invented actual dates or automatic replay of unresolved writes.",
+      "Keep product identities, quantities, company, BOM and approval checks."
+    ],
+    "allowed_patch_paths": [],
+    "candidate_status": "none; preserve frozen evidence before a future patch",
+    "status": "observed_failure_frozen_not_replayed",
+    "oracle": "business/safety constraints; no exact golden trace; ambiguous output needs_review",
+    "source_snapshot": ".runtime/laya-additive-live-20260929/frozen.json",
+    "evidence_files": [
+      {
+        "path": ".runtime/laya-additive-live-20260929/regression/MC01/0035.meta.json",
+        "sha256": "4ade1c776664d5a6169ec7829c716685e908e6be47e96868de015ee8d9f3564d"
+      },
+      {
+        "path": ".runtime/laya-additive-live-20260929/regression/MC01/0035.output.json",
+        "sha256": "a21a9529e1759e7368e1b0964207c14c0f3cb850190c1f6ed02ed7e77d3117d0"
+      },
+      {
+        "path": ".runtime/laya-additive-live-20260929/regression/MC01/0035.request.json",
+        "sha256": "cfa982f6c8f061a6160991b5fe140e2ff3e642807363babeb2c1deb4f78b68b4"
+      },
+      {
+        "path": ".runtime/laya-additive-live-20260929/regression/MC01/0035.response.json",
+        "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      {
+        "path": ".runtime/laya-additive-live-20260929/regression/MC01/0036.meta.json",
+        "sha256": "240b21cadc288df120051709cc8316ffbe1b3ff515775d53d0e6947c721d4aad"
+      },
+      {
+        "path": ".runtime/laya-additive-live-20260929/regression/MC01/0036.output.json",
+        "sha256": "ee35a446ef8220903a883ac4bbdbe000d25aa1acc4a12e5bd7caa0a0668615a0"
+      },
+      {
+        "path": ".runtime/laya-additive-live-20260929/regression/MC01/0036.request.json",
+        "sha256": "7363f741807fa477a3d12af673280390971ce32324fd13f845b3e8ec2ed0b76c"
+      },
+      {
+        "path": ".runtime/laya-additive-live-20260929/regression/MC01/0036.response.json",
+        "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      {
+        "path": ".runtime/laya-additive-live-20260929/regression/MC01/0037.meta.json",
+        "sha256": "8b3ecbe41e091f2b0271f10072193ae113f4dbf7f54bce050487085ac0d599cb"
+      },
+      {
+        "path": ".runtime/laya-additive-live-20260929/regression/MC01/0037.output.json",
+        "sha256": "c61da64f4a29dd5a83fea2146f6ce541ace4995c473b5e3eb05ec11f5bb8f192"
+      },
+      {
+        "path": ".runtime/laya-additive-live-20260929/regression/MC01/0037.request.json",
+        "sha256": "46f3da4f13dce61bbb3f1a2946e6f4653cb28066ed8998f6f1e9dd3fa21f6df6"
+      },
+      {
+        "path": ".runtime/laya-additive-live-20260929/regression/MC01/0037.response.json",
+        "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      {
+        "path": ".runtime/laya-additive-live-20260929/regression/MC01/0038.meta.json",
+        "sha256": "a9d166ae1e47a63f931c1b00d36ba027c2d2ea9cf004ab2ad9ba39bba663c7eb"
+      },
+      {
+        "path": ".runtime/laya-additive-live-20260929/regression/MC01/0038.output.json",
+        "sha256": "52b81394da4ff2a7bbed9ed6d292049a75f2bce4d26da47fc4ad7e667f710cf7"
+      },
+      {
+        "path": ".runtime/laya-additive-live-20260929/regression/MC01/0038.request.json",
+        "sha256": "7ed8fdfa26a526ec257743a1935b32ff870a2f954f3826eb6c70ef778f6c0cc8"
+      },
+      {
+        "path": ".runtime/laya-additive-live-20260929/regression/MC01/0038.response.json",
+        "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      }
+    ],
+    "validation": {
+      "local_verdict": ".runtime/e02-consumption-fix-20260929/local/verdict.json",
+      "live_evidence": ".runtime/e02-consumption-live-20260929/recovery-evidence.json",
+      "live_summary": ".runtime/e02-consumption-live-20260929/E02/summary.json",
+      "result": "passed_local_and_live_9_of_9"
+    }
+  }
+]

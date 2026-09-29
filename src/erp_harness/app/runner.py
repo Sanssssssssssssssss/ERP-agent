@@ -24,11 +24,8 @@ from erp_harness.runtime.messages import AssistantMessage, ToolResultMessage
 from erp_harness.runtime.storage import JsonlSessionStorage
 from erp_harness.runtime.storage.entries import CompactionEntry, MessageEntry
 from erp_harness.runtime.tools import AgentTool, AgentToolResult
-from erp_harness.providers.env import OpenAICompatibleConfig
 from erp_harness.providers.openai_compatible import OpenAICompatibleProvider
 from erp_harness.providers.config import (
-    OpenAICompatibleProviderConfig,
-    ProviderModelMetadata,
     ProviderSettings,
 )
 from erp_harness.context.paths import RuntimePaths
@@ -37,6 +34,7 @@ from erp_harness.runtime.session import HarnessSession, SessionConfig
 
 from erp_harness.tools.router import native_tool_catalog, route_tools
 from erp_harness.app.request_receipts import RequestReceipts, _message_usage, _sum_usage_bucket
+from erp_harness.app.model_config import capability_router_config, CONTEXT_WINDOW, MODEL_COMPAT, provider_config as _provider_config, transport_config
 from erp_harness.app.business import completion_target_instruction, valid_target
 from erp_harness.context.projection import project_messages, project_read_history
 from erp_harness.erp.actions import NativeActions
@@ -50,11 +48,6 @@ from erp_harness.erp.task_evidence import TaskEvidence
 from erp_harness.context.world import WorldStore
 from erp_harness.context.world_tools import build_world_tools
 
-CONTEXT_WINDOW = 128_000
-MODEL_COMPAT = {
-    "supportsReasoningEffort": True,
-    "requiresReasoningContentOnAssistantMessages": True,
-}
 MCP_ONLY_POLICY = (
     "Use mcp_odoo tools for every Odoo operation. Do not access Odoo through "
     "shell commands, direct HTTP, XML-RPC, JSON-2, PostgreSQL, or Python libraries."
@@ -76,6 +69,12 @@ DYNAMIC_TOOL_POLICY = (
     "selected tool is rejected."
     + EXACT_TOOL_NAME_POLICY
 )
+HOST_ROUTING_POLICY = (
+    " The host manages tool availability before every request. Work on the business task "
+    "using the current tool definitions. Routine tool selection and publication require no model action. If a needed tool is absent, use recover_capabilities to request its group; this is recovery, not permission to execute."
+    " Use diagnose_current_run for execution or publication failures; it cannot establish business facts."
+    + EXACT_TOOL_NAME_POLICY
+)
 BUSINESS_EXECUTION_POLICY = (
     " Determine the user-required scope and constraints before acting; for fulfillment, "
     "procurement, or manufacturing work, determine the supply-and-demand gap. Do not "
@@ -87,7 +86,7 @@ McpToolSet = None
 
 
 def build_business_system_prompt(*, sop_mode: str, tool_mode: str,
-                                 runtime_date: str, runtime_timezone: str) -> str:
+                                 runtime_date: str, runtime_timezone: str, host_routing: bool = False) -> str:
     """Use the ERP role without importing the generic coding prompt or tool list."""
     return (
         "You are an ERP business execution assistant. Be concise and respond in Simplified Chinese; "
@@ -97,7 +96,7 @@ def build_business_system_prompt(*, sop_mode: str, tool_mode: str,
         + MCP_ONLY_POLICY
         + BUSINESS_EXECUTION_POLICY
         + (SOP_POLICY if sop_mode == "controlled" else "")
-        + (DYNAMIC_TOOL_POLICY if tool_mode == "dynamic" else "")
+        + ((HOST_ROUTING_POLICY if host_routing else DYNAMIC_TOOL_POLICY) if tool_mode == "dynamic" else "")
     )
 
 
@@ -172,7 +171,7 @@ def _receipt_dynamic_selection(path: Path) -> tuple[bool, tuple[str, ...] | None
     except (OSError, json.JSONDecodeError):
         return True, None
     for row in reversed(rows):
-        if not isinstance(row, dict) or row.get("event") != "end" or row.get("tool") != "configure_odoo_tools":
+        if not isinstance(row, dict) or row.get("event") != "end" or row.get("tool") not in {"configure_odoo_tools", "recover_capabilities"}:
             continue
         if row.get("success") is not True:
             continue
@@ -180,9 +179,10 @@ def _receipt_dynamic_selection(path: Path) -> tuple[bool, tuple[str, ...] | None
     return False, None
 
 
-def _restore_dynamic_selection(dynamic_tools: DynamicToolController, session: HarnessSession, dynamic_log: Path) -> None:
+def _restore_dynamic_selection(dynamic_tools: DynamicToolController, session: HarnessSession, dynamic_log: Path,
+                               *, restore_history: bool = True) -> None:
     receipt_found, active = _receipt_dynamic_selection(dynamic_log)
-    if not receipt_found:
+    if not receipt_found and restore_history:
         # A new run keeps the business session transcript but has a new receipt
         # directory. Recover only a typed, successful configure result from
         # history; never copy approvals, action receipts, or arbitrary prose.
@@ -376,20 +376,14 @@ async def run(args: argparse.Namespace) -> None:
         max_model_requests=max_model_requests,
     )
     receipt_start_number = receipts.number
-    provider = OpenAICompatibleProvider(
-        OpenAICompatibleConfig(
-            api_key=api_key,
-            base_url=base_url,
-            reasoning_effort=thinking,
-            thinking_format="openai",
-            compat=MODEL_COMPAT,
-            provider_name=provider_name,
-            timeout_seconds=None,
-            max_retries=0,
-            max_tokens=max_output_tokens,
-            infer_api_from_model=False,
-            provider_hooks=receipts,
-        )
+    provider_class = OpenAICompatibleProvider
+    if capability_router_config():
+        if tool_mode != "dynamic" or runtime_mode != "native":
+            raise ValueError("Capability routing requires native dynamic tools")
+        from erp_harness.app.capability_routing import CapabilityRoutingProvider
+        provider_class = CapabilityRoutingProvider
+    provider = provider_class(
+        transport_config(api_key, base_url, provider_name, thinking, receipts, max_tokens=max_output_tokens)
     )
     world = None
     actions = None
@@ -455,6 +449,7 @@ async def run(args: argparse.Namespace) -> None:
                         receipt_dir / "sop-events.jsonl",
                         next_tool_sequence,
                         read_locator="find_records" if runtime_mode == "native" else "search_records",
+                        read_fields=(lambda **kw: native.call("get_model_fields", kw)) if native else None,
                     )
                     if sop_mode == "controlled"
                     else ()
@@ -463,7 +458,8 @@ async def run(args: argparse.Namespace) -> None:
                     world,
                     identity_context=(native_runtime.identity_context if native_runtime is not None else None),
                 ) if world is not None else ()),
-                *([build_diagnostic_tool(receipt_dir, args.session_file, native_runtime.identity_context)]
+                *([build_diagnostic_tool(receipt_dir, args.session_file, native_runtime.identity_context,
+                                        routing_context=getattr(provider, "routing_diagnostic", None))]
                   if native_runtime is not None else []),
             ]
             if tool_mode == "dynamic":
@@ -471,33 +467,13 @@ async def run(args: argparse.Namespace) -> None:
                     full_tools,
                     receipt_dir / "dynamic-tools.jsonl",
                     next_tool_sequence,
+                    host_owned=bool(capability_router_config()),
                 )
                 session_tools = list(dynamic_tools.tools)
             else:
                 session_tools = full_tools
             cwd = Path.cwd()
-            provider_config = OpenAICompatibleProviderConfig(
-                name=provider_name,
-                base_url=base_url,
-                api_key_env="LLM_API_KEY",
-                models=(model,),
-                default_model=model,
-                context_windows={model: CONTEXT_WINDOW},
-                compat=MODEL_COMPAT,
-                model_metadata={
-                    model: ProviderModelMetadata(
-                        reasoning=True,
-                        context_window=CONTEXT_WINDOW,
-                    )
-                },
-                timeout_seconds=None,
-                max_retries=0,
-                thinking_levels=(thinking,),
-                thinking_models=(model,),
-                thinking_default=thinking,
-                thinking_parameter="reasoning_effort",
-                thinking_defaults={model: thinking},
-            )
+            provider_config = _provider_config(base_url, model, provider_name, thinking)
             runtime_now = datetime.now().astimezone()
             runtime_date = runtime_now.date().isoformat()
             async def stop_after_approval(turn):
@@ -549,6 +525,7 @@ async def run(args: argparse.Namespace) -> None:
                         tool_mode=tool_mode,
                         runtime_date=runtime_date,
                         runtime_timezone=runtime_now.strftime("UTC%z"),
+                        host_routing=bool(capability_router_config()),
                     ),
                     auto_compact_enabled=not budget_enabled,
                     # 关闭的是任务结束后的自动摘要。请求前和溢出恢复由 session 管理。
@@ -565,9 +542,17 @@ async def run(args: argparse.Namespace) -> None:
                 # last published set from its append-only receipt before the
                 # continuation model turn is built.
                 dynamic_log = receipt_dir / "dynamic-tools.jsonl"
-                _restore_dynamic_selection(dynamic_tools, session, dynamic_log)
                 # 工具集合的变更留到下一轮发布，避免同一轮请求与执行使用不同契约。
                 dynamic_tools.bind(session.stage_tools_for_next_turn)
+                if capability_router_config():
+                    provider.bind_router(
+                        dynamic_tools, actions.store, receipt_dir,
+                        goal=args.instruction_file.read_text(encoding="utf-8"),
+                        stage=getattr(getattr(actions, "task_evidence", None), "stage", None),
+                        identity=native_runtime.identity_context(), world=world,
+                    )
+                _restore_dynamic_selection(dynamic_tools, session, dynamic_log,
+                                           restore_history=not bool(capability_router_config()))
             try:
                 system_prompt_path = args.session_file.with_name(
                     "pi-agent-system-prompt.txt"

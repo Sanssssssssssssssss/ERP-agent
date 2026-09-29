@@ -1,0 +1,815 @@
+{
+  "schema_version": 1,
+  "created_date": "2026-09-24",
+  "purpose": "Independent next-round optional capability publication review; evaluation only.",
+  "dataset_path": "E:\\GPTProject2\\erp-harness-refactor\\.runtime\\capability-routing-20260924\\dataset-v2\\cases.jsonl",
+  "dataset_sha256": "f230d23a51155ea0b945b1f1038c422a22db3afff0b17959b4865d6db3c79e3d",
+  "catalog_sources": [
+    {
+      "path": "E:\\GPTProject2\\erp-harness-refactor\\src\\erp_harness\\tools\\dynamic_tools.py",
+      "sha256": "5ca83b9125d27404ba5f38e8350ce62eb4a57bd30d17d893d455785c10b31589"
+    },
+    {
+      "path": "E:\\GPTProject2\\erp-harness-refactor\\src\\erp_harness\\tools\\native_tool_catalog.json",
+      "sha256": "b1e62992253e0e9425e388a07ac085ea0f4ead81cc3e95efd027f7d31b14521f"
+    }
+  ],
+  "capability_groups": {
+    "actions": {
+      "description": "Preview, validate, execute, and verify Odoo mutations.",
+      "tools": [
+        "preview_write",
+        "validate_write",
+        "execute_approved_write",
+        "chatter_post",
+        "execute_method"
+      ],
+      "required_models": []
+    },
+    "accounting": {
+      "description": "Receivable/payable aging and accounting health summaries.",
+      "tools": [
+        "receivable_payable_aging",
+        "accounting_health_summary"
+      ],
+      "required_models": [
+        "account.move"
+      ]
+    },
+    "attachments": {
+      "description": "Read bounded Odoo attachment metadata or content.",
+      "tools": [
+        "read_attachment"
+      ],
+      "required_models": []
+    },
+    "async_reads": {
+      "description": "Submit, inspect, cancel, and list allowlisted read-only background tasks.",
+      "tools": [
+        "submit_async_task",
+        "get_async_task",
+        "cancel_async_task",
+        "list_async_tasks"
+      ],
+      "required_models": []
+    },
+    "cross_instance": {
+      "description": "Search, aggregate, and compare health across configured Odoo instances.",
+      "tools": [
+        "search_across_instances",
+        "aggregate_across_instances",
+        "accounting_health_across_instances"
+      ],
+      "required_models": []
+    },
+    "diagnostics": {
+      "description": "Diagnose calls, access, relationships, data quality, fit gaps, and business packs.",
+      "tools": [
+        "data_quality_report",
+        "diagnose_odoo_call",
+        "inspect_model_relationships",
+        "diagnose_access",
+        "fit_gap_report",
+        "business_pack_report",
+        "schema_catalog"
+      ],
+      "required_models": []
+    },
+    "employee": {
+      "description": "Find employees with bounded native lookup.",
+      "tools": [
+        "search_employee"
+      ],
+      "required_models": [
+        "hr.employee"
+      ]
+    },
+    "knowledge": {
+      "description": "Index, search, and inspect the local Odoo knowledge store.",
+      "tools": [
+        "index_knowledge",
+        "search_knowledge",
+        "knowledge_stats"
+      ],
+      "required_models": []
+    },
+    "migration": {
+      "description": "Plan JSON-2 migration and inspect upgrade or addon risks.",
+      "tools": [
+        "generate_json2_payload",
+        "upgrade_risk_report",
+        "analyze_upgrade_log",
+        "lookup_model_history",
+        "scan_addons_source"
+      ],
+      "required_models": []
+    },
+    "time_off": {
+      "description": "Search employee leave and holiday records.",
+      "tools": [
+        "search_holidays"
+      ],
+      "required_models": [
+        "hr.leave.report.calendar"
+      ]
+    }
+  },
+  "selection": {
+    "rule": "Preserve dataset row order; split=test; alphabetic actual target group: first matching row, deduplicate IDs; then first two rows with target_groups=[]; maximum 10. target_groups used only for deterministic stratification, never as a semantic answer.",
+    "selected_count": 9,
+    "positive_strata": [
+      "accounting",
+      "actions",
+      "async_reads",
+      "cross_instance",
+      "diagnostics",
+      "knowledge",
+      "migration"
+    ],
+    "absent_test_positive_strata": [
+      "attachments",
+      "employee",
+      "time_off"
+    ],
+    "base_empty_count": 2,
+    "business_group_count": 2
+  },
+  "evaluation_contract": {
+    "scope": "Each allowed set is the complete set of optional groups for the next model round; base/control tools remain available. Static historical all-group publication is not a retention requirement.",
+    "labels_are_model_inputs": false,
+    "predictions_accessed": false,
+    "current_response_accessed": false,
+    "may_change_current_training_or_threshold": false,
+    "historical_next_tool_is_unique_gold": false,
+    "allowed_sets_exhaustive": false,
+    "unlisted_combination_policy": "An exact listed alternative is accepted. A set containing unrelated_groups has an unsupported immediate inclusion. Other unlisted combinations, omissions of required_groups, and uncertain_groups should be reported separately for review; do not infer business failure.",
+    "unrelated_definition": "No reasonable immediate need is established by the inspected prefix. This is not a permanent prohibition or a statement that the capability is unsafe.",
+    "required_definition": "Required to continue the explicit next-phase instruction visible in this prefix, not authorization to execute a tool.",
+    "safety_boundary": "Publication relevance only. No approval, permission, method safety, payload correctness, or business completion is inferred from schema validity, catalog membership, or prior tool success.",
+    "response_boundary": "Only original request prefixes and current real catalog were inspected. Sampled-group assessments evaluate group relevance; exact current response arguments/outcomes were not reviewed.",
+    "review_independence": "Independent agent semantic judgments, not user-approved gold labels. Freeze for this trained run; do not tune against these labels.",
+    "review_limitations": "Nine nodes cover two business families and seven observed test strata. Stage 5 cross-instance and Stage 6 knowledge cases contain explicit artificial probe instructions inside real historical requests; they do not establish organic business demand. Long prefixes were reviewed selectively with source pointers; information limits remain explicit.",
+    "privacy": "No full trace, tool arguments, approval token, or credential copied into this fixture. Original inputs remain behind path/hash pointers."
+  },
+  "cases": [
+    {
+      "id": "history:202217d0d2e21780ae02",
+      "split": "test",
+      "selection_stratum": "accounting",
+      "business_group": "erpbench:2262",
+      "request_path": "E:\\GPTProject2\\pi-odoo-harness-lab\\.runtime\\jobs\\stage2-full-reads-ab-20260904-r2\\2262_easy_26_buy_only_net_30_no__rXL45hb\\agent\\requests\\0044.request.json",
+      "request_sha256": "2afa16d460be17f57f50a8acd20d3b9d4927ad6ce626cb8221cecc31edc637d8",
+      "request_message_count": 163,
+      "active_capabilities_observed": [
+        "accounting",
+        "actions",
+        "async_reads",
+        "attachments",
+        "cross_instance",
+        "diagnostics",
+        "employee",
+        "knowledge",
+        "migration",
+        "time_off"
+      ],
+      "review_kind": "independent_prefix_semantic_review",
+      "reviewer": "trace_case_inventory",
+      "review_status": "completed_independent_review_pending_acceptance",
+      "response_inspected": false,
+      "prediction_inspected": false,
+      "allowed_injection_sets": [
+        [],
+        [
+          "accounting"
+        ]
+      ],
+      "required_groups": [],
+      "uncertain_groups": [
+        "actions"
+      ],
+      "phase": "Invoice readback and possible final reconciliation",
+      "rationale": "The latest normal read confirms four posted customer invoices with 30 Days terms and SO origins. Base tools can finish record-specific verification. Accounting health or aging is a reasonable optional cross-check of the receivable state, but accounting is not required merely because invoices exist.",
+      "sampling_target_group_assessment": "Reasonable optional verification; not uniquely required.",
+      "information_limits": [
+        "Posted invoice readback does not prove the full procurement, delivery, margin, and lineage requirements are complete. Further base reads can establish remaining work before deciding whether additional actions are needed.",
+        "The recovered invalid post_date read does not itself require diagnostics."
+      ],
+      "source_pointers": [
+        {
+          "purpose": "Original sales, procurement, invoice, and payment-term obligations.",
+          "json_pointers": [
+            "/messages/1"
+          ]
+        },
+        {
+          "purpose": "Invoice creation/posting attempts followed by successful posted-state readback; latest read recovers from an invalid field.",
+          "json_pointers": [
+            "/messages/147",
+            "/messages/148",
+            "/messages/149",
+            "/messages/150",
+            "/messages/151",
+            "/messages/152",
+            "/messages/153",
+            "/messages/154",
+            "/messages/155",
+            "/messages/156",
+            "/messages/157",
+            "/messages/158",
+            "/messages/159",
+            "/messages/160",
+            "/messages/161",
+            "/messages/162"
+          ]
+        }
+      ],
+      "inspection_notes": "Original goal and recent transaction/readback messages inspected; not a full business acceptance audit.",
+      "unrelated_groups": [
+        "async_reads",
+        "attachments",
+        "cross_instance",
+        "diagnostics",
+        "employee",
+        "knowledge",
+        "migration",
+        "time_off"
+      ]
+    },
+    {
+      "id": "E01:r_fe648d5406d04caa81099b77d8dc4ea0:0008",
+      "split": "test",
+      "selection_stratum": "actions",
+      "business_group": "enterprise:E01",
+      "request_path": "E:\\GPTProject2\\erp-harness-refactor\\.runtime\\backend-final-live-20260924\\E01\\profile\\data\\runs\\r_fe648d5406d04caa81099b77d8dc4ea0\\requests\\0008.request.json",
+      "request_sha256": "f7f0d66a117bf67ae5bfb8c74bbafb8aa11a4d402cbbca05be9fcabc56b38f1b",
+      "request_message_count": 21,
+      "active_capabilities_observed": [
+        "actions"
+      ],
+      "review_kind": "independent_prefix_semantic_review",
+      "reviewer": "trace_case_inventory",
+      "review_status": "completed_independent_review_pending_acceptance",
+      "response_inspected": false,
+      "prediction_inspected": false,
+      "allowed_injection_sets": [
+        [
+          "actions"
+        ],
+        []
+      ],
+      "required_groups": [],
+      "uncertain_groups": [],
+      "phase": "Prepare approved partial receipt and delivery",
+      "rationale": "The user explicitly requests four units per product on the linked receipt and delivery, retaining six-unit backorders. The prefix has resolved stock moves, writable quantity/picked fields, and confirmed source orders. Actions can support preview/validation and the approval workflow. Base-only is also reasonable for another verification round.",
+      "sampling_target_group_assessment": "Strong prefix support for action preparation; visibility does not authorize execution.",
+      "information_limits": [
+        "No trusted host approval should be inferred from schema metadata, confirmed source orders, or this injection label.",
+        "Partial processing must preserve original demand and backorders; writable-field metadata alone does not establish a valid stock operation."
+      ],
+      "source_pointers": [
+        {
+          "purpose": "System tool contract, explicit quantities, backorders, invoice exclusion, and approval requirement.",
+          "json_pointers": [
+            "/messages/0",
+            "/messages/1"
+          ]
+        },
+        {
+          "purpose": "Stock procedure, recovered field error, resolved stock moves, field metadata, and confirmed SO/PO reads.",
+          "json_pointers": [
+            "/messages/7",
+            "/messages/14",
+            "/messages/15",
+            "/messages/16",
+            "/messages/17",
+            "/messages/18",
+            "/messages/19",
+            "/messages/20"
+          ]
+        }
+      ],
+      "inspection_notes": "Original goal/system, stock procedure, recent reads and metadata inspected. Long stock result was inspected through its columns/representative rows; exact write acceptance is outside this review.",
+      "unrelated_groups": [
+        "accounting",
+        "async_reads",
+        "attachments",
+        "cross_instance",
+        "diagnostics",
+        "employee",
+        "knowledge",
+        "migration",
+        "time_off"
+      ]
+    },
+    {
+      "id": "history:be9a93715dc40f698073",
+      "split": "test",
+      "selection_stratum": "async_reads",
+      "business_group": "erpbench:2262",
+      "request_path": "E:\\GPTProject2\\pi-odoo-harness-lab\\.runtime\\jobs\\stage3-world-ab-20260904-r2\\2262_easy_26_buy_only_net_30_no__BATuXxK\\agent\\requests\\0013.request.json",
+      "request_sha256": "c7578715ad3b5751430049be98b3df4f91b227848ee994ff5969561272efe928",
+      "request_message_count": 57,
+      "active_capabilities_observed": [
+        "accounting",
+        "actions",
+        "async_reads",
+        "attachments",
+        "cross_instance",
+        "diagnostics",
+        "employee",
+        "knowledge",
+        "migration",
+        "time_off"
+      ],
+      "review_kind": "independent_prefix_semantic_review",
+      "reviewer": "trace_case_inventory",
+      "review_status": "completed_independent_review_pending_acceptance",
+      "response_inspected": false,
+      "prediction_inspected": false,
+      "allowed_injection_sets": [
+        [],
+        [
+          "diagnostics"
+        ]
+      ],
+      "required_groups": [],
+      "uncertain_groups": [
+        "actions"
+      ],
+      "phase": "Recover a stock.quant field mismatch during reconnaissance",
+      "rationale": "The last read fails because stock.quant has no name field; immediately preceding metadata supplies valid quantity/location fields. Base schema/read tools can repair this. Diagnostics is a reasonable optional helper for repeated schema mismatches. There is no visible pending async task, requested background operation, or evidence that this bounded stock read needs a long-running job.",
+      "sampling_target_group_assessment": "Async capability lacks an immediate prefix-grounded need; do not promote the sampled historical group to a required label.",
+      "information_limits": [
+        "Actions may become useful once stock, vendor constraints, dates, and the procurement plan are settled; their next-round preload is left for review.",
+        "A later choice to run an expensive allowlisted report could justify async reads, but that choice is not established at this prefix."
+      ],
+      "source_pointers": [
+        {
+          "purpose": "MCP-only contract and ordinary procurement/fulfillment goal, with no async probe instruction.",
+          "json_pointers": [
+            "/messages/0",
+            "/messages/1"
+          ]
+        },
+        {
+          "purpose": "Earlier field recovery, bounded reconnaissance, live model metadata, and final invalid stock.quant field.",
+          "json_pointers": [
+            "/messages/13",
+            "/messages/14",
+            "/messages/15",
+            "/messages/16",
+            "/messages/17",
+            "/messages/39",
+            "/messages/40",
+            "/messages/41",
+            "/messages/42",
+            "/messages/44",
+            "/messages/45",
+            "/messages/46",
+            "/messages/47",
+            "/messages/48",
+            "/messages/49",
+            "/messages/50",
+            "/messages/51",
+            "/messages/52",
+            "/messages/53",
+            "/messages/54",
+            "/messages/55",
+            "/messages/56"
+          ]
+        }
+      ],
+      "inspection_notes": "Goal and recent reconnaissance inspected; earlier large model listings and results were summarized. No present response or async outcome was opened.",
+      "unrelated_groups": [
+        "accounting",
+        "async_reads",
+        "attachments",
+        "cross_instance",
+        "employee",
+        "knowledge",
+        "migration",
+        "time_off"
+      ]
+    },
+    {
+      "id": "history:2a52bcb9810e3a3ebfe8",
+      "split": "test",
+      "selection_stratum": "cross_instance",
+      "business_group": "erpbench:2262",
+      "request_path": "E:\\GPTProject2\\pi-odoo-harness-lab\\.runtime\\jobs\\stage5-capabilities-b-20260904-r2\\2262_easy_26_buy_only_net_30_no__m5QW4P5\\agent\\requests\\0004.request.json",
+      "request_sha256": "d807395214e0661b86eb6e9407d607d33cde0aac9dc9359bc3cc1190a4c5fadb",
+      "request_message_count": 8,
+      "active_capabilities_observed": [
+        "accounting",
+        "actions",
+        "async_reads",
+        "attachments",
+        "cross_instance",
+        "diagnostics",
+        "employee",
+        "knowledge",
+        "migration",
+        "time_off"
+      ],
+      "review_kind": "independent_prefix_semantic_review",
+      "reviewer": "trace_case_inventory",
+      "review_status": "completed_independent_review_pending_acceptance",
+      "response_inspected": false,
+      "prediction_inspected": false,
+      "allowed_injection_sets": [
+        [
+          "cross_instance"
+        ]
+      ],
+      "required_groups": [
+        "cross_instance"
+      ],
+      "uncertain_groups": [
+        "actions"
+      ],
+      "phase": "Finish the explicit ordered Stage 5 capability probe",
+      "rationale": "The original user message expressly orders four read-only probes before the ERP task. The first three reports have returned; the fourth is search_across_instances on res.partner. Cross-instance publication therefore has direct prefix support even though the underlying procurement task alone would not require it.",
+      "sampling_target_group_assessment": "Required for the unfinished explicit probe, not evidence of an organic cross-instance business requirement.",
+      "information_limits": [
+        "Configured instances and runtime permissions still determine what the search can access.",
+        "Actions relate to the later ERP task and are deferred while the ordered probe remains unfinished."
+      ],
+      "source_pointers": [
+        {
+          "purpose": "Full short prefix: original ordered probe and successful first three probe results.",
+          "json_pointers": [
+            "/messages/0",
+            "/messages/1",
+            "/messages/2",
+            "/messages/3",
+            "/messages/4",
+            "/messages/5",
+            "/messages/6",
+            "/messages/7"
+          ]
+        }
+      ],
+      "inspection_notes": "All eight prefix messages inspected.",
+      "unrelated_groups": [
+        "accounting",
+        "async_reads",
+        "attachments",
+        "diagnostics",
+        "employee",
+        "knowledge",
+        "migration",
+        "time_off"
+      ]
+    },
+    {
+      "id": "history:91ca9966e74711378d09",
+      "split": "test",
+      "selection_stratum": "diagnostics",
+      "business_group": "erpbench:2262",
+      "request_path": "E:\\GPTProject2\\pi-odoo-harness-lab\\.runtime\\jobs\\stage1-snapshot-ab-20260903-r3\\2262_easy_26_buy_only_net_30_no__JJRVSob\\agent\\requests\\0014.request.json",
+      "request_sha256": "d3e933cecd2c66f6b3959ccc43fd89abf4f3ccfa02d978665a67f780ba58f572",
+      "request_message_count": 58,
+      "active_capabilities_observed": [
+        "accounting",
+        "actions",
+        "async_reads",
+        "attachments",
+        "cross_instance",
+        "diagnostics",
+        "employee",
+        "knowledge",
+        "migration",
+        "time_off"
+      ],
+      "review_kind": "independent_prefix_semantic_review",
+      "reviewer": "trace_case_inventory",
+      "review_status": "completed_independent_review_pending_acceptance",
+      "response_inspected": false,
+      "prediction_inspected": false,
+      "allowed_injection_sets": [
+        [],
+        [
+          "diagnostics"
+        ]
+      ],
+      "required_groups": [],
+      "uncertain_groups": [
+        "actions"
+      ],
+      "phase": "Recover an invalid company tax field during planning",
+      "rationale": "The latest company read fails on default_sale_tax_id, after other field mismatches. Base field inspection and retry are sufficient; call/schema diagnostics are a reasonable optional recovery route. The two listed attachments are stylesheet/placeholder assets and do not establish a business-document reading need.",
+      "sampling_target_group_assessment": "Reasonable optional error recovery; broad business-pack or unrelated reports are not justified merely by this group-level label.",
+      "information_limits": [
+        "The successful metadata and recovered reads do not validate a purchasing plan or authorize mutations.",
+        "Actions are relevant to the eventual task, but immediate preload remains uncertain while planning and field recovery are unfinished."
+      ],
+      "source_pointers": [
+        {
+          "purpose": "Original stock/vendor-note and fulfillment obligations.",
+          "json_pointers": [
+            "/messages/1"
+          ]
+        },
+        {
+          "purpose": "Field mismatches, subsequent reconnaissance, attachment metadata, and final company-field error.",
+          "json_pointers": [
+            "/messages/45",
+            "/messages/46",
+            "/messages/47",
+            "/messages/48",
+            "/messages/49",
+            "/messages/50",
+            "/messages/51",
+            "/messages/52",
+            "/messages/53",
+            "/messages/54",
+            "/messages/55",
+            "/messages/56",
+            "/messages/57"
+          ]
+        }
+      ],
+      "inspection_notes": "Goal and recent error/recovery messages inspected; long chatter results were sampled and are not treated as complete business evidence.",
+      "unrelated_groups": [
+        "accounting",
+        "async_reads",
+        "attachments",
+        "cross_instance",
+        "employee",
+        "knowledge",
+        "migration",
+        "time_off"
+      ]
+    },
+    {
+      "id": "history:cf0891a9f73b0c6175ed",
+      "split": "test",
+      "selection_stratum": "knowledge",
+      "business_group": "erpbench:2262",
+      "request_path": "E:\\GPTProject2\\pi-odoo-harness-lab\\.runtime\\jobs\\stage6-knowledge-ab-20260907-r4\\2262_easy_26_buy_only_net_30_no__7MiRW2B\\agent\\requests\\0002.request.json",
+      "request_sha256": "209e2b0380d9a41d0b0047579d977a80da7aa58cfe6b5ae42bdc6d1904aca93a",
+      "request_message_count": 7,
+      "active_capabilities_observed": [
+        "accounting",
+        "actions",
+        "async_reads",
+        "attachments",
+        "cross_instance",
+        "diagnostics",
+        "employee",
+        "knowledge",
+        "migration",
+        "time_off"
+      ],
+      "review_kind": "independent_prefix_semantic_review",
+      "reviewer": "trace_case_inventory",
+      "review_status": "completed_independent_review_pending_acceptance",
+      "response_inspected": false,
+      "prediction_inspected": false,
+      "allowed_injection_sets": [
+        [
+          "knowledge"
+        ]
+      ],
+      "required_groups": [
+        "knowledge"
+      ],
+      "uncertain_groups": [
+        "actions"
+      ],
+      "phase": "Continue the explicitly requested Stage 6 knowledge probe",
+      "rationale": "The user explicitly requires index_knowledge, then a customer-name search_knowledge call, then knowledge_stats before solving the ERP task. Indexing has succeeded; search and stats remain. Knowledge publication is directly justified by that unfinished instruction.",
+      "sampling_target_group_assessment": "Required for the explicit probe; not proof that semantic retrieval is necessary for the underlying ERP task.",
+      "information_limits": [
+        "The prefix also reports that the required SOP-list tool was not found. This unresolved contract issue must be handled before first mutation; it does not invalidate the read-oriented knowledge probe.",
+        "Index success does not prove current record correctness, write authority, or successful business completion; normal reads remain required."
+      ],
+      "source_pointers": [
+        {
+          "purpose": "System SOP requirement, original ordered knowledge probe, index result, SOP-tool failure, time and profile.",
+          "json_pointers": [
+            "/messages/0",
+            "/messages/1",
+            "/messages/2",
+            "/messages/3",
+            "/messages/4",
+            "/messages/5",
+            "/messages/6"
+          ]
+        }
+      ],
+      "inspection_notes": "All seven prefix messages inspected; the business goal and probe suffix were read separately; module metadata was inspected without treating it as authorization.",
+      "unrelated_groups": [
+        "accounting",
+        "async_reads",
+        "attachments",
+        "cross_instance",
+        "diagnostics",
+        "employee",
+        "migration",
+        "time_off"
+      ]
+    },
+    {
+      "id": "history:aeae2071c2069ab5b673",
+      "split": "test",
+      "selection_stratum": "migration",
+      "business_group": "erpbench:2262",
+      "request_path": "E:\\GPTProject2\\pi-odoo-harness-lab\\.runtime\\jobs\\stage1-snapshot-ab-20260903-r3\\2262_easy_26_buy_only_net_30_no__JJRVSob\\agent\\requests\\0017.request.json",
+      "request_sha256": "7db41279e050d59d6960a85c1f13efd8de00ca2c0b79b20971f90051fb4628ac",
+      "request_message_count": 72,
+      "active_capabilities_observed": [
+        "accounting",
+        "actions",
+        "async_reads",
+        "attachments",
+        "cross_instance",
+        "diagnostics",
+        "employee",
+        "knowledge",
+        "migration",
+        "time_off"
+      ],
+      "review_kind": "independent_prefix_semantic_review",
+      "reviewer": "trace_case_inventory",
+      "review_status": "completed_independent_review_pending_acceptance",
+      "response_inspected": false,
+      "prediction_inspected": false,
+      "allowed_injection_sets": [
+        [],
+        [
+          "actions"
+        ]
+      ],
+      "required_groups": [],
+      "uncertain_groups": [
+        "diagnostics"
+      ],
+      "phase": "Complete plan verification or prepare the requested business writes",
+      "rationale": "The task requests ordinary sales, procurement, and linked invoice operations, not upgrade analysis or API migration. The prefix already has working native MCP reads, method-diagnostic previews, product configuration, 30 Days terms, account.move fields, and journals. Base planning/verification or actions for preview/validation are reasonable. Another JSON-2 payload preview is not established as necessary by the prefix.",
+      "sampling_target_group_assessment": "Migration is unsupported as an immediate need; prior diagnostics containing JSON-2 examples do not create a migration task.",
+      "information_limits": [
+        "Method diagnostics explicitly lack source inspection and cannot prove execution safety. Additional targeted diagnostics could be defensible, so diagnostics is left uncertain.",
+        "Procurement feasibility, vendor caps, approval requirements, and exact write contents still need their own evidence; catalog membership and syntax success do not settle them."
+      ],
+      "source_pointers": [
+        {
+          "purpose": "MCP-only contract and original business task without migration/upgrade request.",
+          "json_pointers": [
+            "/messages/0",
+            "/messages/1"
+          ]
+        },
+        {
+          "purpose": "Past method diagnostics, recovered product-field mismatch, product/payment-term/schema/journal reads.",
+          "json_pointers": [
+            "/messages/58",
+            "/messages/59",
+            "/messages/60",
+            "/messages/61",
+            "/messages/62",
+            "/messages/63",
+            "/messages/64",
+            "/messages/65",
+            "/messages/66",
+            "/messages/67",
+            "/messages/68",
+            "/messages/69",
+            "/messages/70",
+            "/messages/71"
+          ]
+        }
+      ],
+      "inspection_notes": "Original goal and last fourteen messages inspected; earlier planning was not re-audited as a full acceptance check.",
+      "unrelated_groups": [
+        "accounting",
+        "async_reads",
+        "attachments",
+        "cross_instance",
+        "employee",
+        "knowledge",
+        "migration",
+        "time_off"
+      ]
+    },
+    {
+      "id": "E01:r_fe648d5406d04caa81099b77d8dc4ea0:0001",
+      "split": "test",
+      "selection_stratum": "base_empty",
+      "business_group": "enterprise:E01",
+      "request_path": "E:\\GPTProject2\\erp-harness-refactor\\.runtime\\backend-final-live-20260924\\E01\\profile\\data\\runs\\r_fe648d5406d04caa81099b77d8dc4ea0\\requests\\0001.request.json",
+      "request_sha256": "07838633c6226da7740fc0adf28ccb6f30b1850741d1e7335fe9a2d48a99b849",
+      "request_message_count": 2,
+      "active_capabilities_observed": [],
+      "review_kind": "independent_prefix_semantic_review",
+      "reviewer": "trace_case_inventory",
+      "review_status": "completed_independent_review_pending_acceptance",
+      "response_inspected": false,
+      "prediction_inspected": false,
+      "allowed_injection_sets": [
+        [],
+        [
+          "actions"
+        ]
+      ],
+      "required_groups": [],
+      "uncertain_groups": [],
+      "phase": "Initial discovery for an explicit partial stock-write goal",
+      "rationale": "Base tools can first resolve source documents, stock records, and the applicable procedure. Preloading actions is also reasonable because the user explicitly requests partial receipt/delivery and an approval workflow. The empty historical target does not make base-only the sole acceptable choice.",
+      "sampling_target_group_assessment": "Empty is reasonable; action preload is also prefix-grounded.",
+      "information_limits": [
+        "Only IDs and desired quantities are present. Current states, exact moves, company scope, and valid fields must be verified.",
+        "The explicit host-approval requirement remains; exposing actions grants no approval."
+      ],
+      "source_pointers": [
+        {
+          "purpose": "Full initial prefix with quantities, linked source IDs, backorder and approval requirements.",
+          "json_pointers": [
+            "/messages/0",
+            "/messages/1"
+          ]
+        }
+      ],
+      "inspection_notes": "Both prefix messages inspected.",
+      "unrelated_groups": [
+        "accounting",
+        "async_reads",
+        "attachments",
+        "cross_instance",
+        "diagnostics",
+        "employee",
+        "knowledge",
+        "migration",
+        "time_off"
+      ]
+    },
+    {
+      "id": "E01:r_fe648d5406d04caa81099b77d8dc4ea0:0004",
+      "split": "test",
+      "selection_stratum": "base_empty",
+      "business_group": "enterprise:E01",
+      "request_path": "E:\\GPTProject2\\erp-harness-refactor\\.runtime\\backend-final-live-20260924\\E01\\profile\\data\\runs\\r_fe648d5406d04caa81099b77d8dc4ea0\\requests\\0004.request.json",
+      "request_sha256": "3bb598a403cb015eb59753d2c1cb97e342a064cf64d1659456dbfffd800723f1",
+      "request_message_count": 11,
+      "active_capabilities_observed": [
+        "actions"
+      ],
+      "review_kind": "independent_prefix_semantic_review",
+      "reviewer": "trace_case_inventory",
+      "review_status": "completed_independent_review_pending_acceptance",
+      "response_inspected": false,
+      "prediction_inspected": false,
+      "allowed_injection_sets": [
+        [],
+        [
+          "actions"
+        ],
+        [
+          "diagnostics"
+        ],
+        [
+          "actions",
+          "diagnostics"
+        ]
+      ],
+      "required_groups": [],
+      "uncertain_groups": [],
+      "phase": "Repair stock.picking field selection with actions already published",
+      "rationale": "The last read fails on move_ids_without_package and suggests live metadata/candidate fields. Base repair is sufficient. Retaining actions for the explicit partial-processing goal is reasonable, and adding diagnostics for the field mismatch is an optional alternative. A complete-set router may drop optional groups for a base-only recovery round.",
+      "sampling_target_group_assessment": "Empty is reasonable but not uniquely correct; active actions need not be automatically kept or automatically dropped.",
+      "information_limits": [
+        "Successful configure actions is a publication receipt, not a write-approval receipt.",
+        "The stock SOP describes required backorder/readback behavior, but exact records and quantities have not yet been established by the failed read."
+      ],
+      "source_pointers": [
+        {
+          "purpose": "Full prefix through procedure lookup, action publication, and failed stock.picking read.",
+          "json_pointers": [
+            "/messages/0",
+            "/messages/1",
+            "/messages/2",
+            "/messages/3",
+            "/messages/4",
+            "/messages/5",
+            "/messages/6",
+            "/messages/7",
+            "/messages/8",
+            "/messages/9",
+            "/messages/10"
+          ]
+        }
+      ],
+      "inspection_notes": "All eleven prefix messages inspected.",
+      "unrelated_groups": [
+        "accounting",
+        "async_reads",
+        "attachments",
+        "cross_instance",
+        "employee",
+        "knowledge",
+        "migration",
+        "time_off"
+      ]
+    }
+  ]
+}

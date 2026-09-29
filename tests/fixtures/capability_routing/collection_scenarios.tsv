@@ -1,0 +1,61 @@
+id	split	preferred	base_allowed	goal
+sale_cancel	train	actions	false	请取消这张过期销售报价，保留取消原因。先预检，得到审批后才能执行。
+purchase_draft	train	actions	false	供应商和产品已选定，接下来准备一张采购询价草稿；先展示拟写入内容，等审批。
+invoice_credit	train	actions	false	这张已过账发票需要开对应贷项通知，先准备退款动作并核验来源，不能直接改原分录。
+chatter_note	train	actions	false	请把刚刚确认的交期写进订单内部备注，先给我看备注内容和关联订单再提交审批。
+stock_return	dev	actions	false	准备原收货的部分退货动作，只退两件，先检查原调拨并走审批，不产生退款。
+bom_update	test	actions	false	下一步修改这份物料清单中的原料用量；先对比旧值和新值，审批通过后才能写。
+receivable_aging	train	accounting	true	财务要按未到期、逾期三十天、六十天和更久分组看应收余额，请生成账龄概览，不催款不记账。
+payable_aging	train	accounting	true	帮我整理供应商欠款的账龄分布，区分已到期和未到期，不安排付款。
+ledger_health	train	accounting	true	对当前公司的账务做健康摘要，只统计开放应收、开放应付和草稿发票积压，不修复任何分录。
+customer_debt	train	accounting	true	我要客户欠款老化情况，用现有的应收账龄报告能力提供截至今天的只读结果，不改客户资料。
+close_health	dev	accounting	true	月结前先汇总开放应收、开放应付项目数量与草稿发票积压，不发起结账或付款。
+supplier_exposure	test	accounting	true	从应付视角生成逾期区间的风险概览，按账龄看供应商余额，保持只读。
+pdf_bytes	train	attachments	false	订单 PDF 附件标识已经给出，请读取实际文件内容让我下载，不重新生成也不发送邮件。
+invoice_file	train	attachments	false	请把指定发票现有的 PDF 附件读取出来，我需要下载文件；现在不要开票或发邮件。
+signed_scan	train	attachments	false	业务记录上已定位到签字扫描件，接下来只读取这个附件的文件内容，遵守大小限制。
+attachment_preview	train	attachments	false	附件编号已确认，请读取附件的 MIME、文件名和受限预览内容，不把整个附件库全部取出。
+packing_sheet	dev	attachments	false	我已经给出装箱单附件 ID，请读取该文件的受限内容并提供可下载入口，不创建新附件。
+contract_download	test	attachments	false	请获取已绑定合同附件的内容供我下载；只读该文件，不变更合同、不查其他公司的附件。
+task_submit	train	async_reads	false	把这个已获准的只读查询放入后台任务，返回任务号供后续查看。不要修改订单。
+task_poll	train	async_reads	false	刚才提交的后台只读任务编号已给出，请检查它是否完成并读取任务结果，不重复提交。
+task_cancel	train	async_reads	false	请取消指定的后台只读检索任务，取消的是任务，不是业务订单。
+task_list	train	async_reads	false	列出当前身份已经提交的后台只读任务及状态，不启动新的查询。
+failed_job	dev	async_reads	false	查看那个后台只读汇总任务失败的错误详情，不重试，不读取其他人的任务。
+pending_jobs	test	async_reads	false	我想看看自己的后台检索还有哪些在排队，只列任务状态，不执行或取消任何单据。
+branch_lookup	train	cross_instance	false	在已配置且获权的两个 Odoo 实例分别检索这个产品型号，保留每条结果的实例来源，不新建连接。
+branch_totals	train	cross_instance	false	对已配置的两个实例分别聚合销售额，并比较总量；不要把两个公司的币种或来源混在一起。
+branch_health	train	cross_instance	false	比较配置名单中的各 Odoo 实例财务健康摘要，只读，不访问名单以外的地址。
+branch_supplier	train	cross_instance	false	跨已配置的实例查找这个供应商的记录，分别保留实例和记录标识，不合并或写入。
+branch_stock	dev	cross_instance	false	用已有实例连接分别查询同一产品库存，输出带来源的跨实例比较；没有配置的实例不要猜地址。
+branch_backlog	test	cross_instance	false	汇总已配置实例的未完成采购单数量，按实例分别统计，不能把一个数据库当成所有实例。
+acl_diagnosis	train	diagnostics	false	请只诊断当前身份为何读不了指定业务模型，检查访问规则，不换管理员，不猜记录内容。
+relationship_audit	train	diagnostics	false	请检查这两个模型之间声明的关系和字段关联，做关系诊断报告，不创建任何关联记录。
+data_quality	train	diagnostics	false	对给定客户模型做数据质量报告，找重复和缺失信息，不自动修复。
+fit_gap	train	diagnostics	false	根据已给出的业务要求生成能力差距诊断，指出当前实例哪些模型或字段缺失，不安装模块。
+pack_readiness	dev	diagnostics	false	检查这个业务包在当前实例的适配和准备情况，列出不满足的依赖，不执行业务。
+call_diagnosis	test	diagnostics	false	请分析已经失败的 Odoo 调用接口与访问约束，返回诊断依据，不重新执行失败写入。
+knowledge_index	train	knowledge	false	请在本地知识库为当前可读的产品资料刷新索引，沿用当前身份隔离，不写 Odoo 产品。
+knowledge_search	train	knowledge	false	请在已经建好的本地知识索引里检索耐腐蚀密封件的资料，给少量候选及来源，不用全表回包。
+knowledge_stats	train	knowledge	false	查看本地知识索引的规模、刷新时间和覆盖范围，不刷新、不修改业务记录。
+knowledge_phrase	train	knowledge	false	需要从本地知识资料检索含锻造工艺的相关片段，返回来源供核验，不生成工单。
+knowledge_refresh	dev	knowledge	false	产品名称最近改过，先刷新当前身份的本地产品知识索引，再让我搜索，不写产品表。
+knowledge_source	test	knowledge	false	从当前可用的本地知识库找工业轴承选型说明，列出可回读的来源，不把检索结果当作实时库存。
+json2_conversion	train	migration	false	把给出的旧 XML-RPC 读取调用转换成 JSON-2 请求示例，仅生成迁移载荷，不发送请求。
+upgrade_logs	train	migration	false	请分析这段用于演练的示例升级日志，指出迁移错误和相关模块：ERROR registry loading custom_sale failed: Invalid field x_delivery_note on model sale.order。只分析文本，不对实例升级。
+model_history	train	migration	false	查询这个模型在 Odoo 版本迁移中的历史变化，用于接口升级评估，不读或改业务记录。
+addon_scan	train	migration	false	附加模块源码目录已由宿主配置，请检查其升级风险，只扫描源文件，不执行模块代码。
+upgrade_risk	dev	migration	false	评估已配置附加模块从旧版迁到新版的风险，生成迁移报告，不安装、不修改数据库。
+payload_plan	test	migration	false	为现有只读调用设计 JSON-2 迁移载荷，保留模型、方法和参数说明，不执行这个调用。
+base_order	train	-	true	只查 S00001 当前状态、客户和总金额，别确认、取消、开票或写任何内容。
+base_invoice	train	-	true	读取 INV/2026/00001 的金额和残额，不需要账龄报告，也不收款或核销。
+base_purchase	train	-	true	只查 P00001 的供应商和当前状态，不收货，不创建其他单据。
+base_company	train	-	true	查询当前数据库里两个公司的名称与币种；它们属于同一实例，不连接其他实例。
+base_metadata	train	-	true	我只需要指定附件的名称和 MIME 字段，不读取文件内容、不下载。用普通记录查询就够了。
+base_field	train	-	true	确认 sale.order 有没有承诺日期字段，只读取字段定义，不做整库诊断，不写日期。
+base_done	train	-	true	刚才的报告已经读完了，现在只解释表中已展示的数字，不再调用财务或其他工具。
+base_noauth	train	-	true	我还没决定要创建什么单据。先问清业务目标，不要预检或执行任何写入。
+base_lock	dev	-	true	运行提示 ActionStore 的动作锁忙，请用已有运行诊断查看当前状态，不把动作锁当作后台任务。
+base_smtp	dev	-	true	刚才邮件发送结果需要核验，只回读已有邮件的状态，禁止再次发送，不查询 PDF 内容。
+base_schema_error	test	-	true	上轮读取报了字段名拼错；先用已有字段定义工具查正确名称，再做合法读取，不启动升级或源码扫描。
+base_mail_done	test	-	true	发送已经结束，此时只用基础只读工具核对邮件回执，不创建、重发或下载附件。

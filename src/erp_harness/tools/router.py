@@ -358,6 +358,9 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
         description = tool.description
         if direct_action and name == "validate_write":
             description += (
+                " Includes preview and live metadata checks; call directly when values are ready. "
+                "Relation commands have three items: [0,0,values], [1,id,values], "
+                "[2,id,0] (delete), [3,id,0] (unlink), [4,id,0], [5,0,0], [6,0,ids]. "
                 " A successful persisted validation returns execution_request with "
                 "action_id and token; pass it unchanged to execute_approved_write."
             )

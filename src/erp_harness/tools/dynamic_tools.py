@@ -147,8 +147,11 @@ class DynamicToolController:
         tools: Sequence[AgentTool],
         log_path: Path,
         next_sequence: Callable[[], int],
+        *,
+        host_owned: bool = False,
     ) -> None:
         self._all = tuple(tools)
+        self.host_owned = host_owned
         names = [_base_name(tool.name) for tool in self._all]
         available = set(names)
         self._base_tools = _FIND_BASE_TOOLS if "find_records" in available else BASE_TOOLS
@@ -168,19 +171,34 @@ class DynamicToolController:
         self._publisher: Callable[[Sequence[AgentTool]], None] | None = None
         self._active: tuple[str, ...] = ()
         self._availability: dict[str, dict[str, Any]] | None = None
+        self._probe_groups = set(CAPABILITY_GROUPS)
+        self._module_cache = None
+        self._module_scope = None
         self._controls = self._build_controls()
+        self._recovery_control = self._build_recovery()
 
     @property
     def tools(self) -> tuple[AgentTool, ...]:
-        selected = (self._base_tools | (OPTIONAL_NATIVE_BASE_TOOLS & {_base_name(tool.name) for tool in self._all})) | {
+        base = self._base_tools | OPTIONAL_NATIVE_BASE_TOOLS
+        selected = {
             name
             for group_id in self._active
             for name in CAPABILITY_GROUPS[group_id]["tools"]
         }
+        optional = [tool for tool in self._all if _base_name(tool.name) in selected - base]
+        if self.host_owned:
+            # Append groups in publication order so a new group cannot reorder old schemas.
+            optional = list({tool.name: tool for group_id in self._active for tool in optional
+                             if _base_name(tool.name) in CAPABILITY_GROUPS[group_id]['tools']}.values())
         return (
-            *(tool for tool in self._all if _base_name(tool.name) in selected),
-            *self._controls,
+            *(tool for tool in self._all if _base_name(tool.name) in base),
+            *(self._controls if not self.host_owned else (self._recovery_control,)),
+            *optional,
         )
+
+    async def publish(self, call_id: str, groups: list[str]) -> AgentToolResult:
+        """Host publication uses the same checks and durable receipt as model routing."""
+        return await self._execute("configure_odoo_tools", call_id, lambda: self._configure(call_id, groups))
 
     def bind(self, publisher: Callable[[Sequence[AgentTool]], None]) -> None:
         self._publisher = publisher
@@ -190,14 +208,29 @@ class DynamicToolController:
         with self._log_path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(event) + "\n")
 
+    def bind_probe_scope(self, groups, identity) -> None:
+        """Cache only positive model-existence facts within this run and credential identity."""
+        if not set(groups) <= set(CAPABILITY_GROUPS):
+            raise ValueError('Unknown probe group')
+        self._probe_groups = set(groups)
+        if identity:
+            self._module_scope = sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+            self._module_cache = self._log_path.with_name('routing-modules.json')
+
     async def _installed_models(self, call_id: str) -> set[str] | None:
         required = sorted(
             {
                 model
-                for group in CAPABILITY_GROUPS.values()
-                for model in group["required_models"]
+                for group in self._probe_groups
+                for model in CAPABILITY_GROUPS[group]["required_models"]
             }
         )
+        if not required:
+            return set()
+        if self._module_cache and self._module_cache.exists():
+            cached = json.loads(self._module_cache.read_text(encoding='utf8'))
+            if cached.get('identity') == self._module_scope and set(required) <= set(cached.get('models', [])):
+                return set(required)
         finder_name = "find_records" if "find_records" in {_base_name(tool.name) for tool in self._all} else "search_records"
         finder = next(tool for tool in self._all if _base_name(tool.name) == finder_name)
         arguments = {
@@ -217,11 +250,16 @@ class DynamicToolController:
         rows = payload.get("result")
         if not isinstance(rows, list):
             return None
-        return {
+        installed = {
             row["model"]
             for row in rows
             if isinstance(row, dict) and isinstance(row.get("model"), str)
         }
+        if self._module_cache:
+            temporary = self._module_cache.with_suffix('.tmp')
+            temporary.write_text(json.dumps({'identity': self._module_scope, 'models': sorted(installed)}), encoding='utf8')
+            temporary.replace(self._module_cache)
+        return installed
 
     async def _list(self, call_id: str) -> dict[str, Any]:
         try:
@@ -232,10 +270,11 @@ class DynamicToolController:
         availability = {}
         for group_id, spec in CAPABILITY_GROUPS.items():
             required = spec["required_models"]
-            missing = [] if installed is None else sorted(set(required) - installed)
+            known = installed if group_id in self._probe_groups else None
+            missing = [] if known is None else sorted(set(required) - known)
             status = (
                 "unknown"
-                if installed is None and required
+                if known is None and required
                 else "module_missing"
                 if missing
                 else "available"
@@ -363,9 +402,38 @@ class DynamicToolController:
                 "active": payload.get("active"),
                 "published_tools": payload.get("published_tools"),
                 "tool_contract_sha256": payload.get("tool_contract_sha256"),
+                "recovery_groups": payload.get("recovery_groups"),
             }
         )
         return AgentToolResult(content=json.dumps(payload, separators=(",", ":")), details=payload)
+
+    def _build_recovery(self) -> AgentTool:
+        async def recover(call_id, arguments, _signal=None, _on_update=None):
+            requested = arguments.get('capabilities')
+            before = self._active
+
+            async def build():
+                if (not isinstance(requested, list) or not requested
+                        or any(not isinstance(g, str) for g in requested)
+                        or len(requested) != len(set(requested))):
+                    return {'success': False, 'error': 'Provide distinct missing capability names.'}
+                result = await self._configure(call_id, [*before, *sorted(set(requested) - set(before))])
+                if result.get('success'):
+                    result.update(tool='recover_capabilities', recovery_groups=requested)
+                return result
+
+            try:
+                return await self._execute('recover_capabilities', call_id, build)
+            except Exception:
+                self._active = before
+                if self._publisher:
+                    self._publisher(self.tools)
+                raise
+
+        return AgentTool(name='recover_capabilities', label='Recover missing tools',
+            description='Recovery only: if tools needed for the confirmed task are absent, request their capability groups. '
+                        'Adds tools next turn; executes no business action and grants no approval. Do not use for routine routing.',
+            parameters=self._controls[1].parameters, execute_fn=recover, execution_mode='sequential')
 
     def _build_controls(self) -> tuple[AgentTool, AgentTool]:
         async def list_tool(call_id, _arguments, _signal=None, _on_update=None):
@@ -374,11 +442,7 @@ class DynamicToolController:
             )
 
         async def configure_tool(call_id, arguments, _signal=None, _on_update=None):
-            return await self._execute(
-                "configure_odoo_tools",
-                call_id,
-                lambda: self._configure(call_id, arguments.get("capabilities")),
-            )
+            return await self.publish(call_id, arguments.get("capabilities"))
 
         return (
             AgentTool(
