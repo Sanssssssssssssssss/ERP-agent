@@ -217,7 +217,7 @@ def consumption_fixture():
           bom_product_template_attribute_value_ids=[], child_bom_id=False)
     runtime = SimpleNamespace(client=c)
     production = {"id": 7, "bom_id": 5, "product_id": 3, "product_qty": 2, "product_uom_id": 1, "consumption": "strict"}
-    move = {"product_id": 4, "product_uom": 2, "product_uom_qty": 1, "quantity": 1}
+    move = {"product_id": 4, "product_uom": 2, "product_uom_qty": 1, "quantity": 1, "picked": True, "move_line_ids": []}
     return runtime, production, move
 
 
@@ -235,6 +235,23 @@ def test_strict_bom_detects_tampered_demand_while_flexible_policy_reports_deviat
     c.records["mrp.bom.line"][6]["bom_product_template_attribute_value_ids"] = [42]
     with pytest.raises(ValueError, match="native explosion"):
         _bom_consumption(_Evidence(runtime, payload), production, [move], True)
+
+
+def test_completion_counts_only_picked_move_lines_with_unit_conversion():
+    runtime, production, move = consumption_fixture()
+    move.update(product_uom_qty=2, quantity=2, move_line_ids=[11, 12])
+    runtime.client.add("stock.move.line", 11, product_uom_id=1, quantity=2, picked=True)
+    runtime.client.add("stock.move.line", 12, product_uom_id=2, quantity=1, picked=False)
+    guard = _Evidence(runtime, {"instance": "default"})
+    with pytest.raises(ValueError, match="actual picked consumption"):
+        _bom_consumption(guard, production, [move], True)
+    production["consumption"] = "flexible"
+    assert _bom_consumption(guard, production, [move], True)["component_variances"][0]["actual_quantity"] == 2
+    production["consumption"] = "strict"
+    # Preparation remains legal while material has not yet been picked.
+    assert _bom_consumption(guard, production, [move], False)["component_variances"] == []
+    runtime.client.records["stock.move.line"][12]["picked"] = True
+    assert _bom_consumption(_Evidence(runtime, {"instance": "default"}), production, [move], True)["component_variances"] == []
 
 
 @pytest.mark.parametrize("mo_policy,bom_policy,error", [
@@ -260,10 +277,13 @@ def test_consumption_uses_confirmed_mo_policy(mo_policy, bom_policy, error):
     assert _bom_consumption(guard, production, [move], True)["component_variances"] == []
 
 
-def test_warning_deviation_rejected_before_approval_or_write_rpc(tmp_path, monkeypatch):
+@pytest.mark.parametrize("policy,unpicked,error", [("warning", False, "human review"), ("strict", True, "set_qty_producing")])
+def test_warning_deviation_rejected_before_approval_or_write_rpc(tmp_path, monkeypatch, policy, unpicked, error):
     runtime, production, move = consumption_fixture()
     c = runtime.client
-    production.update(consumption="warning", company_id=1, qty_producing=2, qty_produced=0,
+    if unpicked:
+        move.update(product_uom_qty=2, quantity=2, picked=False)
+    production.update(consumption=policy, company_id=1, qty_producing=2, qty_produced=0,
                       state="progress", date_start="2026-01-01 00:00:00", date_deadline=False,
                       move_raw_ids=[8], move_finished_ids=[9], workorder_ids=[])
     c.add("mrp.production", 7, **{k: v for k, v in production.items() if k != "id"})
@@ -278,7 +298,7 @@ def test_warning_deviation_rejected_before_approval_or_write_rpc(tmp_path, monke
     try:
         actions = NativeActions(reads, store=store, clients={"default": writer}, approval_mode="host")
         result = actions.execute_method("mrp.production", "button_mark_done", kwargs={"ids": [7]})
-        assert result["success"] is False and "human review" in result["error"]
+        assert result["success"] is False and error in result["error"]
         assert not result.get("approval_required")
         assert store.summary()["receipts"] == []
         writer.execute_method.assert_not_called()
@@ -410,7 +430,7 @@ def _batch_business_case(kind):
           bom_product_template_attribute_value_ids=[], child_bom_id=False)
     for record_id, product_id, quantity in [(8, 4, 4), (18, 14, 6)]:
         c.add("stock.move", record_id, _MOVE, company_id=1, product_id=product_id, product_uom=1,
-              product_uom_qty=quantity, quantity=quantity, location_id=8, state="assigned")
+              product_uom_qty=quantity, quantity=quantity, location_id=8, state="assigned", picked=True, move_line_ids=[])
     c.add("stock.move", 9, _MOVE, company_id=1)
     c.add("stock.location", 8, usage="supplier", company_id=False)
     return runtime, {"instance": "default", "model": "mrp.production", "method": "button_mark_done", "kwargs": {"ids": [7]}}

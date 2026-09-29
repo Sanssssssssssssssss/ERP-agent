@@ -71,7 +71,7 @@ DYNAMIC_TOOL_POLICY = (
 )
 HOST_ROUTING_POLICY = (
     " The host manages tool availability before every request. Work on the business task "
-    "using the current tool definitions. Tool selection and publication require no model action."
+    "using the current tool definitions. Routine tool selection and publication require no model action. If a needed tool is absent, use recover_capabilities to request its group; this is recovery, not permission to execute."
     " Use diagnose_current_run for execution or publication failures; it cannot establish business facts."
     + EXACT_TOOL_NAME_POLICY
 )
@@ -171,7 +171,7 @@ def _receipt_dynamic_selection(path: Path) -> tuple[bool, tuple[str, ...] | None
     except (OSError, json.JSONDecodeError):
         return True, None
     for row in reversed(rows):
-        if not isinstance(row, dict) or row.get("event") != "end" or row.get("tool") != "configure_odoo_tools":
+        if not isinstance(row, dict) or row.get("event") != "end" or row.get("tool") not in {"configure_odoo_tools", "recover_capabilities"}:
             continue
         if row.get("success") is not True:
             continue
@@ -377,11 +377,11 @@ async def run(args: argparse.Namespace) -> None:
     )
     receipt_start_number = receipts.number
     provider_class = OpenAICompatibleProvider
-    if os.environ.get("ERP_LAYA_MODEL"):
-        if tool_mode != "dynamic" or runtime_mode != "native" or not os.environ.get("ERP_LAYA_PYTHON"):
-            raise ValueError("Laya requires native dynamic tools and ERP_LAYA_PYTHON")
-        from erp_harness.app.capability_routing import LayaProvider
-        provider_class = LayaProvider
+    if (os.environ.get("ERP_CAPABILITY_ROUTER_CONFIG") or os.environ.get("ERP_OPENJEV_CONFIG")):
+        if tool_mode != "dynamic" or runtime_mode != "native":
+            raise ValueError("Capability routing requires native dynamic tools")
+        from erp_harness.app.capability_routing import CapabilityRoutingProvider
+        provider_class = CapabilityRoutingProvider
     provider = provider_class(
         transport_config(api_key, base_url, provider_name, thinking, receipts, max_tokens=max_output_tokens)
     )
@@ -467,7 +467,7 @@ async def run(args: argparse.Namespace) -> None:
                     full_tools,
                     receipt_dir / "dynamic-tools.jsonl",
                     next_tool_sequence,
-                    host_owned=bool(os.environ.get("ERP_LAYA_MODEL")),
+                    host_owned=bool((os.environ.get("ERP_CAPABILITY_ROUTER_CONFIG") or os.environ.get("ERP_OPENJEV_CONFIG"))),
                 )
                 session_tools = list(dynamic_tools.tools)
             else:
@@ -525,7 +525,7 @@ async def run(args: argparse.Namespace) -> None:
                         tool_mode=tool_mode,
                         runtime_date=runtime_date,
                         runtime_timezone=runtime_now.strftime("UTC%z"),
-                        host_routing=bool(os.environ.get("ERP_LAYA_MODEL")),
+                        host_routing=bool((os.environ.get("ERP_CAPABILITY_ROUTER_CONFIG") or os.environ.get("ERP_OPENJEV_CONFIG"))),
                     ),
                     auto_compact_enabled=not budget_enabled,
                     # 关闭的是任务结束后的自动摘要。请求前和溢出恢复由 session 管理。
@@ -542,17 +542,17 @@ async def run(args: argparse.Namespace) -> None:
                 # last published set from its append-only receipt before the
                 # continuation model turn is built.
                 dynamic_log = receipt_dir / "dynamic-tools.jsonl"
-                _restore_dynamic_selection(dynamic_tools, session, dynamic_log,
-                                           restore_history=not bool(os.environ.get("ERP_LAYA_MODEL")))
                 # 工具集合的变更留到下一轮发布，避免同一轮请求与执行使用不同契约。
                 dynamic_tools.bind(session.stage_tools_for_next_turn)
-                if os.environ.get("ERP_LAYA_MODEL"):
+                if (os.environ.get("ERP_CAPABILITY_ROUTER_CONFIG") or os.environ.get("ERP_OPENJEV_CONFIG")):
                     provider.bind_router(
                         dynamic_tools, actions.store, receipt_dir,
                         goal=args.instruction_file.read_text(encoding="utf-8"),
                         stage=getattr(getattr(actions, "task_evidence", None), "stage", None),
                         identity=native_runtime.identity_context(), world=world,
                     )
+                _restore_dynamic_selection(dynamic_tools, session, dynamic_log,
+                                           restore_history=not bool((os.environ.get("ERP_CAPABILITY_ROUTER_CONFIG") or os.environ.get("ERP_OPENJEV_CONFIG"))))
             try:
                 system_prompt_path = args.session_file.with_name(
                     "pi-agent-system-prompt.txt"

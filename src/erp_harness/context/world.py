@@ -366,7 +366,7 @@ class WorldStore:
             reference = None
             if (include_reference and integrity == "verified" and receipt["tool"] in READ_TOOLS
                     and len(encoded) >= ARTIFACT_REFERENCE_BYTES):
-                reference = self._observation_summary(receipt)
+                reference = self._observation_summary(receipt, historical=True)
             return {"receipt_id": receipt["receipt_id"], "tool": receipt.get("tool"),
                     "result_sha256": receipt["result_sha256"], "integrity": integrity,
                     "reference": reference}
@@ -517,7 +517,7 @@ class WorldStore:
         return matches
 
     def _observation_summary(
-        self, receipt: dict[str, Any], *, include_discovery: bool = True,
+        self, receipt: dict[str, Any], *, include_discovery: bool = True, historical: bool = False,
     ) -> dict[str, Any]:
         request = receipt.get("request") if isinstance(receipt.get("request"), dict) else {}
         identity = receipt.get("identity") if isinstance(receipt.get("identity"), dict) else {}
@@ -547,6 +547,11 @@ class WorldStore:
                 "live_refresh_required_for_current_state": generation != self._generation.get(identity_id, 0),
             },
         }
+        if historical:
+            # Historical references must not rewrite old provider messages after a write.
+            # Current freshness is evaluated only by a new read_observation/search call.
+            summary["freshness"].pop("stale_after_write", None)
+            summary["freshness"]["live_refresh_required_for_current_state"] = True
         if include_discovery:
             summary["paths"] = self._payload_paths(payload)
             summary["preview"] = self._payload_preview(payload)

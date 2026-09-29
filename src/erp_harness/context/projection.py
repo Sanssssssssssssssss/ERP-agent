@@ -153,7 +153,7 @@ def _table_projection(
         "rows_are_in_original_order": True,
         "full_result_retained": True,
     }
-    text = json.dumps(projected, ensure_ascii=False, separators=(",", ":"))
+    text = json.dumps(projected, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return text if len(text.encode()) < len(source_text.encode()) else None
 
 
@@ -186,7 +186,7 @@ def project_messages(world: WorldStore, messages: Iterable[Any]) -> list[Any]:
                         "result_sha256": candidate["result_sha256"],
                         "full_result_retained": True,
                     },
-                }, ensure_ascii=False, separators=(",", ":"))
+                }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
                 output[index] = message.model_copy(update={"content": [TextContent(text=compact)]}, deep=True)
                 original_bytes += len(message.text.encode())
                 projected_bytes += len(compact.encode())
@@ -281,7 +281,7 @@ def _supply_workorder_projection(
         "kind": "supply_unstarted_workorders", "receipt_id": reference["observation_ref"],
         "result_sha256": reference["result_sha256"], "full_result_retained": True,
     }}
-    text = json.dumps(projected, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    text = json.dumps(projected, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return text if len(text.encode()) < len(source_text.encode()) else None
 
 
@@ -357,7 +357,7 @@ def project_read_history(world: WorldStore, messages: Iterable[Any]) -> list[Any
                             ),
                         },
                     }
-                    encoded = json.dumps(candidate, ensure_ascii=False, separators=(",", ":"))
+                    encoded = json.dumps(candidate, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
                     if len(encoded.encode()) < len(message.text.encode()):
                         compact = encoded
                 elif receipt["integrity"] == "corrupt":

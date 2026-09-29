@@ -469,7 +469,8 @@ class WorldStoreTest(unittest.TestCase):
             self.assertIn("without deducting actual duration", view["scope_notice"])
             self.assertEqual(view["full_rows"]["access_scope"]["identity_id"], receipt["identity"]["identity_id"])
             self.assertEqual(view["full_rows"]["freshness"]["snapshot_at"], receipt["finished_at"])
-            self.assertFalse(view["full_rows"]["freshness"]["stale_after_write"])
+            self.assertNotIn("stale_after_write", view["full_rows"]["freshness"])
+            self.assertTrue(view["full_rows"]["freshness"]["live_refresh_required_for_current_state"])
             # Only this field and the explicit projection marker change.
             actual.pop("world_projection")
             actual["result"]["manufacturing"]["shared_workorders"] = rows
@@ -492,6 +493,8 @@ class WorldStoreTest(unittest.TestCase):
             ref = view["full_rows"]
             # Recovery uses the durable full visible payload, not the provider view.
             world = self.store(root)
+            self.assertEqual(project_read_history(world, [message])[0].text,
+                             json.dumps(projected, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
             cursor, recovered = 0, []
             while cursor is not None:
                 page = world.read_observation(receipt["identity"], ref["observation_ref"], path=ref["path"], cursor=cursor, limit=17)
@@ -502,8 +505,10 @@ class WorldStoreTest(unittest.TestCase):
                 world.read_observation({**receipt["identity"], "identity_id": "different-user"}, ref["observation_ref"], path=ref["path"])
             world.invalidate(instance="default", reason="write", call_id="after-write")
             stale_view = json.loads(project_read_history(world, [message])[0].text)["result"]["manufacturing"]["shared_workorders"]
-            self.assertTrue(stale_view["full_rows"]["freshness"]["stale_after_write"])
+            self.assertEqual(stale_view, view)
             self.assertTrue(stale_view["full_rows"]["freshness"]["live_refresh_required_for_current_state"])
+            current = world.read_observation(receipt["identity"], ref["observation_ref"], path=ref["path"])
+            self.assertTrue(current["observation"]["freshness"]["stale_after_write"])
             old = project_read_history(world, [message, *[AssistantMessage(content="used") for _ in range(3)]])
             self.assertEqual(json.loads(old[0].text)["world_observation"]["kind"], "externalized_read")
 

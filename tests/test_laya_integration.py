@@ -5,7 +5,7 @@ from itertools import count
 from pathlib import Path
 from unittest.mock import AsyncMock
 
-from erp_harness.app.capability_routing import LayaProvider
+from erp_harness.app.capability_routing import OpenJevProvider
 from erp_harness.app.model_config import provider_config
 from erp_harness.erp.store import ActionStore
 from erp_harness.providers.env import OpenAICompatibleConfig
@@ -24,9 +24,117 @@ def setup(tmp_path):
     controller=DynamicToolController(fake_tools(set(),calls),tmp_path/'dynamic-tools.jsonl',count().__next__,host_owned=True)
     controller.bind(lambda tools: None)
     store=ActionStore(tmp_path/'actions.sqlite3')
-    provider=LayaProvider(OpenAICompatibleConfig(api_key='test',base_url='http://unused.invalid'))
+    provider=OpenJevProvider(OpenAICompatibleConfig(api_key='test',base_url='http://unused.invalid'))
     provider.bind_router(controller,store,tmp_path)
     return provider,controller,store,calls
+
+
+def test_explicit_missing_tool_recovery_persists_without_business_execution(tmp_path):
+    provider, controller, store, calls = setup(tmp_path)
+    async def check():
+        recover = next(t for t in controller.tools if t.name == 'recover_capabilities')
+        assert not (await recover.execute('invalid', {'capabilities': ['not_registered']})).details['success']
+        assert controller._active == ()
+        result = await recover.execute('recovery', {'capabilities': ['attachments']})
+        assert result.details['success'] and controller._active == ('attachments',)
+        from erp_harness.app.runner import _receipt_dynamic_selection
+        assert _receipt_dynamic_selection(tmp_path / 'dynamic-tools.jsonl') == (True, ('attachments',))
+        assert set(calls) <= {'find_records'}
+        # A new provider sees the receipt even if the selector again omits the group.
+        resumed = OpenJevProvider(provider._config)
+        resumed.bind_router(controller, store, tmp_path)
+        resumed._decide = AsyncMock(return_value={'status': 'ok', 'capabilities': []})
+        kwargs = {'model': 'test', 'system': 'ERP', 'messages': [UserMessage(content='Read attachment')],
+                  'tools': list(controller.tools)}
+        await resumed._publish(kwargs)
+        assert controller._active == ('attachments',)
+        assert resumed.routing_diagnostic()['dependencies'][0]['source'] == 'executor_recovery'
+        assert set(calls) <= {'find_records'}
+        await resumed.aclose(); await provider.aclose()
+    asyncio.run(check()); store.close()
+
+
+def test_recovery_receipt_failure_rolls_back_publication(tmp_path, monkeypatch):
+    provider, controller, store, _ = setup(tmp_path)
+    published = []
+    controller.bind(lambda tools: published.append({t.name for t in tools}))
+    original = controller._log
+    def fail_end(row):
+        if row['event'] == 'end' and row.get('tool') == 'recover_capabilities':
+            raise OSError('receipt disk unavailable')
+        original(row)
+    monkeypatch.setattr(controller, '_log', fail_end)
+    async def check():
+        import pytest
+        with pytest.raises(OSError):
+            await next(t for t in controller.tools if t.name == 'recover_capabilities').execute(
+                'recover', {'capabilities': ['attachments']})
+        assert controller._active == ()
+        assert published[-1] == {t.name for t in controller.tools}
+        await provider.aclose()
+    asyncio.run(check()); store.close()
+
+
+def test_selector_protocol_rejects_missing_mismatched_and_undeclared_decisions(tmp_path):
+    from types import SimpleNamespace
+    import pytest
+    provider, _, store, _ = setup(tmp_path)
+    packet = {'id': 'one', 'groups': ['attachments']}
+    good = {'id': 'one', 'scope': 'capability_publication_only', 'status': 'ok',
+            'capabilities': ['attachments'], 'result': {'decisions': {'attachments': {'answer': 'A'}}}}
+    async def check():
+        for update in ({}, {'id': 'other'}, {'capabilities': []}, {'result': []}, {'result': {'decisions': []}}, {'result': {'decisions': {}}},
+                       {'result': {'decisions': {'attachments': {'answer': 'yes'}}}}):
+            response = {**good, **update}
+            provider.process = SimpleNamespace(stdin=SimpleNamespace(write=lambda _: None, drain=AsyncMock()),
+                stdout=SimpleNamespace(readline=AsyncMock(return_value=json.dumps(response).encode())))
+            if update:
+                with pytest.raises(ValueError):
+                    await provider._decide(packet)
+            else:
+                assert await provider._decide(packet) == good
+        provider.process = None
+        await provider.aclose()
+    asyncio.run(check()); store.close()
+
+
+def test_worker_launch_avoids_stdlib_shadowing_and_business_credentials(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    provider, _, store, _ = setup(tmp_path)
+    provider.selector = {'python': 'isolated-python'}
+    provider.selector_config = 'pinned-config.json'
+    response = {'id': 'x', 'scope': 'capability_publication_only', 'status': 'fallback'}
+    process = SimpleNamespace(stdin=SimpleNamespace(write=lambda _: None, drain=AsyncMock()),
+        stdout=SimpleNamespace(readline=AsyncMock(return_value=json.dumps(response).encode())))
+    launch = AsyncMock(return_value=process)
+    monkeypatch.setattr(asyncio, 'create_subprocess_exec', launch)
+    for name in ('ODOO_API_KEY', 'LLM_API_KEY', 'COMMAND_CODE_API_KEY'):
+        monkeypatch.setenv(name, 'must-not-reach-selector')
+    async def check():
+        assert await provider._decide({'id': 'x', 'groups': ['actions']}) == response
+        assert launch.call_args.args[:2] == ('isolated-python', '-P')
+        assert not any(k.startswith(('ODOO_', 'LLM_', 'COMMAND_CODE_')) for k in launch.call_args.kwargs['env'])
+        provider.process = None
+        await provider.aclose()
+    asyncio.run(check()); store.close()
+
+
+def test_unknown_modules_do_not_expand_the_declared_selector_candidates(tmp_path):
+    from erp_harness.tools.dynamic_tools import CAPABILITY_GROUPS
+    provider, controller, store, _ = setup(tmp_path)
+    provider.candidate_groups = [g for g in CAPABILITY_GROUPS if g not in ('employee', 'time_off')]
+    controller._availability = {g: {'status': 'unknown'} for g in CAPABILITY_GROUPS}
+    provider._decide = AsyncMock(return_value={'status': 'ok', 'capabilities': []})
+    async def check():
+        await provider._publish({'model': 'test', 'system': 'ERP', 'messages': [UserMessage(content='Read')],
+                                 'tools': list(controller.tools)})
+        assert provider._decide.await_args.args[0]['groups'] == provider.candidate_groups
+        # Excluded experiment groups remain accessible through explicit recovery.
+        result = await next(t for t in controller.tools if t.name == 'recover_capabilities').execute(
+            'explicit', {'capabilities': ['employee']})
+        assert result.details['success'] and controller._active == ('employee',)
+        await provider.aclose()
+    asyncio.run(check()); store.close()
 
 
 def test_published_tools_are_dispatchable_in_the_same_turn(tmp_path,monkeypatch):
@@ -69,7 +177,7 @@ def test_sop_dependencies_survive_restart_without_model_routing(tmp_path):
         provider._decide=AsyncMock(return_value={'status':'ok','capabilities':[]})
         await provider._publish(kwargs)
         assert controller._active==('actions',)
-        resumed=LayaProvider(provider._config);resumed.bind_router(controller,store,tmp_path)
+        resumed=OpenJevProvider(provider._config);resumed.bind_router(controller,store,tmp_path)
         resumed._decide=AsyncMock(return_value={'status':'ok','capabilities':['diagnostics']})
         await resumed._publish(kwargs)
         assert set(controller._active)=={'actions','diagnostics'}
@@ -107,15 +215,21 @@ def test_pending_ledger_retains_actions_and_worker_failure_uses_host_fallback(tm
     provider,controller,store,_=setup(tmp_path)
     kwargs={'model':'test','system':'ERP','messages':[UserMessage(content='Continue')],'tools':list(controller.tools)}
     async def check():
+        base = controller.tools
+        await controller.publish('prior-turn', ['actions', 'migration', 'diagnostics'])
+        kwargs['tools'][:] = controller.tools
+        assert controller.tools[:len(base)] == base
         for status in ['pending_approval','approved','executing','sending','needs_reconciliation','unknown']:
             monkeypatch.setattr(ActionStore,'read_receipts',staticmethod(lambda _p:[{'status':status}]))
             provider._decide=AsyncMock(return_value={'status':'ok','capabilities':[]})
             await provider._publish(kwargs)
             assert controller._active==('actions',)
             provider._decide.assert_awaited_once()
-            state=provider._decide.await_args.args[0]
-            assert state['version']=='host_facts_v1' and 'messages' not in state
-            assert state['action_ledger']['unresolved'][0]['status']==status
+            packet=provider._decide.await_args.args[0]
+            state=json.loads(packet['messages'][1]['content'])['context']
+            assert state['version']=='capability_context_v12'
+            assert state['action_ledger']['actions'][0]['status']==status
+            assert 'actions' in state['runtime_retained_capabilities']
         monkeypatch.setattr(ActionStore,'read_receipts',staticmethod(lambda _p:[]))
         provider._decide=AsyncMock(side_effect=RuntimeError('Worker failed'))
         await provider._publish(kwargs)
@@ -296,3 +410,127 @@ def test_mixed_history_removes_routing_pairs_preserving_business_calls(tmp_path)
     assert view[1].content==[call] and view[2]==messages[3]
     assert len(messages)==4 and len(messages[1].content)==3
     store.close()
+
+
+def test_v7_uses_trained_state_and_same_publication_boundary(tmp_path, monkeypatch):
+    config = tmp_path / 'selector.json'
+    config.write_text(json.dumps({'backend': 'laya', 'contract': 'host_facts_v1',
+                                 'candidate_groups': ['actions']}), encoding='utf8')
+    monkeypatch.setenv('ERP_CAPABILITY_ROUTER_CONFIG', str(config))
+    provider, controller, store, _ = setup(tmp_path)
+    provider._decide = AsyncMock(return_value={'status': 'ok', 'capabilities': ['actions']})
+    async def check():
+        kwargs = {'model': 'test', 'system': 'ERP', 'messages': [UserMessage(content='Confirm S00006')],
+                  'tools': list(controller.tools)}
+        await provider._publish(kwargs)
+        packet = provider._decide.call_args.args[0]
+        assert packet['context_version'] == 'host_facts_v1' and 'messages' not in packet
+        assert 'available_base_tools' in packet['state']
+        assert packet['state']['task']['goal'] == 'Confirm S00006'
+        assert controller._active == ('actions',)
+        assert kwargs['tools'] == list(controller.tools)
+        await provider.aclose()
+    asyncio.run(check()); store.close()
+
+
+def test_laya_packet_filters_unavailable_groups_without_reinterpreting_scores():
+    from types import SimpleNamespace
+    import pytest
+    from erp_harness.providers.laya_worker import select_packet
+    router = SimpleNamespace(questions={'actions': {}, 'attachments': {}},
+        route=lambda state, *, groups: {'status': 'ok', 'capabilities': groups,
+            'probabilities': {'actions': .6, 'attachments': .9}, 'scope': 'capability_publication_only'})
+    packet = {'id': 'call', 'groups': ['actions'], 'state': {}, 'context_version': 'host_facts_v1'}
+    receipt = select_packet(router, packet)
+    assert receipt['id'] == 'call' and receipt['capabilities'] == ['actions']
+    assert receipt['result']['decisions'] == {'actions': {'answer': 'A', 'scores': [.6, .4]}}
+    with pytest.raises(ValueError):
+        select_packet(router, {**packet, 'context_version': 'capability_context_v12'})
+    with pytest.raises(ValueError):
+        select_packet(router, {**packet, 'groups': ['unknown']})
+
+
+def test_laya_additions_preserve_full_prefix_and_resume_order(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from erp_harness.app.runner import _restore_dynamic_selection
+    from erp_harness.tools.dynamic_tools import CAPABILITY_GROUPS
+    config = tmp_path / 'additive.json'
+    config.write_text(json.dumps({'backend': 'laya', 'contract': 'host_facts_v1',
+        'candidate_groups': ['actions', 'attachments', 'diagnostics']}))
+    monkeypatch.setenv('ERP_CAPABILITY_ROUTER_CONFIG', str(config))
+    provider, controller, store, calls = setup(tmp_path)
+    controller._availability = {g: {'status': 'unknown'} for g in CAPABILITY_GROUPS}
+    kwargs = {'model': 'test', 'system': 'ERP', 'messages': [UserMessage(content='Continue')],
+              'tools': list(controller.tools)}
+
+    async def check():
+        for additions, candidates in [(['diagnostics'], ['actions', 'attachments', 'diagnostics']),
+                                       ([], ['actions', 'attachments']),
+                                       (['actions'], ['actions', 'attachments'])]:
+            previous = list(controller.tools)
+            retained = list(controller._active)
+            provider._decide = AsyncMock(return_value={'status': 'ok', 'capabilities': additions})
+            await provider._publish(kwargs)
+            packet = provider._decide.await_args.args[0]
+            assert packet['groups'] == candidates
+            assert packet['state']['runtime_retained_capabilities'] == sorted(retained)
+            assert list(controller.tools[:len(previous)]) == previous
+            assert kwargs['tools'] == list(controller.tools)
+            assert kwargs['system'] == 'ERP'
+        assert controller._active == ('diagnostics', 'actions')
+        monkeypatch.setattr(ActionStore, 'read_receipts', staticmethod(lambda _: [{'status': 'unknown'}]))
+        provider._decide = AsyncMock(return_value={'status': 'ok', 'capabilities': []})
+        await provider._publish(kwargs)
+        assert controller._active == ('diagnostics', 'actions')
+        assert provider._decide.await_args.args[0]['state']['action_ledger']['unresolved'][0]['status'] == 'unknown'
+        monkeypatch.setattr(ActionStore, 'read_receipts', staticmethod(lambda _: []))
+        # Same-run approval restart restores the append order, not alphabetical order.
+        resumed = DynamicToolController(fake_tools(set(), calls), tmp_path/'dynamic-tools.jsonl',
+                                        count().__next__, host_owned=True)
+        resumed.bind(lambda _: None)
+        _restore_dynamic_selection(resumed, SimpleNamespace(messages=[], stage_tools_for_next_turn=lambda _: None),
+                                   tmp_path/'dynamic-tools.jsonl', restore_history=False)
+        assert [t.name for t in resumed.tools] == [t.name for t in controller.tools]
+        previous = list(controller.tools)
+        await next(t for t in controller.tools if t.name == 'recover_capabilities').execute(
+            'recover', {'capabilities': ['attachments']})
+        kwargs['tools'][:] = controller.tools
+        assert list(controller.tools[:len(previous)]) == previous
+        provider._decide = AsyncMock(side_effect=AssertionError('Already available; do not infer again'))
+        await provider._publish(kwargs)
+        provider._decide.assert_not_awaited()
+        assert controller._active == ('diagnostics', 'actions', 'attachments')
+        assert set(calls) <= {'find_records'}  # Selection/recovery never executes a business write.
+        await provider.aclose()
+    asyncio.run(check())
+    store.close()
+
+
+def test_laya_question_batches_preserve_complete_answers():
+    from types import SimpleNamespace
+    from erp_harness.providers.laya_worker import CapabilityRouter
+    router = object.__new__(CapabilityRouter)
+    router.device_type = 'cuda'; router.question_batch_size = 2
+    batches = []
+    def infer(state, questions):
+        batches.append(list(questions))
+        return {'answers': {g: {'choice': 'A', 'probabilities': {'A': .9, 'B': .1}}
+                            for g in questions}, 'usage': {'input_tokens': len(questions)*10, 'output_tokens': 0}}
+    router.agent = SimpleNamespace(device=SimpleNamespace(type='cuda'), system_one=infer)
+    result, selected = router._predict('complete input', dict.fromkeys(['a','b','c','d','e']), 'A')
+    assert batches == [['a','b'],['c','d'],['e']]
+    assert selected == ['a','b','c','d','e'] and result['usage']['input_tokens'] == 50
+
+
+def test_module_probe_cache_is_run_and_identity_scoped(tmp_path):
+    calls = []
+    async def check():
+        for identity in ('same', 'same', 'changed'):
+            controller = DynamicToolController(fake_tools({'account.move'}, calls), tmp_path/'dynamic-tools.jsonl',
+                                               count().__next__, host_owned=True)
+            controller.bind_probe_scope(['actions', 'accounting'], {'credential_scope_sha256': identity})
+            result = await controller._list('probe')
+            assert controller._availability['accounting']['status'] == 'available'
+            assert controller._availability['employee']['status'] == 'unknown'
+        assert calls == ['find_records', 'find_records']
+    asyncio.run(check())

@@ -181,12 +181,23 @@ def _bom_consumption(g: _Evidence, production: dict, moves: list[dict], completi
     for move in moves:
         product_id = _id(move["product_id"])
         planned[product_id] = planned.get(product_id, 0) + quantity(product_id, _id(move["product_uom"]), move["product_uom_qty"])
-        actual[product_id] = actual.get(product_id, 0) + quantity(product_id, _id(move["product_uom"]), move["quantity"])
+        consumed = quantity(product_id, _id(move["product_uom"]), move["quantity"])
+        if completing:
+            # Match Odoo's _get_consumption_issues / _get_picked_quantity.
+            # Reserved quantity alone is not evidence of consumption.
+            if not move["picked"]:
+                consumed = 0
+            else:
+                details = g.many("stock.move.line", move["move_line_ids"], ("product_uom_id", "quantity", "picked"))
+                if any(not line["picked"] for line in details):
+                    consumed = sum(quantity(product_id, _id(line["product_uom_id"]), line["quantity"])
+                                   for line in details if line["picked"])
+        actual[product_id] = actual.get(product_id, 0) + consumed
     variances = [{"product_id": p, "bom_quantity": expected.get(p, 0), "planned_quantity": planned.get(p, 0), "actual_quantity": actual.get(p, 0)}
                  for p in sorted(set(expected) | set(planned) | set(actual))
                  if abs(expected.get(p, 0) - planned.get(p, 0)) > tolerances[p] or (completing and abs(expected.get(p, 0) - actual.get(p, 0)) > tolerances[p])]
     if consumption == "strict" and variances:
-        raise ValueError("strict BOM quantities disagree with component demand or consumption; restore quantities derived from the BOM before completing")
+        raise ValueError("strict BOM quantities disagree with component demand or actual picked consumption; reserved quantity is not consumed. Verify the BOM and producing quantity; use the approved mrp.production.set_qty_producing method to prepare actual consumption, then read back components before requesting completion. No completion method was sent")
     if consumption == "warning" and variances:
         raise ValueError("manufacturing consumption deviation requires human review; the consumption-warning wizard is not supported, so no method was sent")
     return {"production_id": production["id"], "bom_id": bom_id, "consumption": consumption,
@@ -198,7 +209,7 @@ def _production(g: _Evidence, ids: list[int], method: str) -> dict:
               "bom_id", "consumption", "date_start", "date_deadline", "move_raw_ids", "move_finished_ids", "workorder_ids")
     rows = g.many("mrp.production", ids, fields)
     company = _same(rows, "company_id")
-    raw = g.many("stock.move", [i for row in rows for i in row["move_raw_ids"]], _MOVE)
+    raw = g.many("stock.move", [i for row in rows for i in row["move_raw_ids"]], _MOVE + ("move_line_ids",))
     finished = g.many("stock.move", [i for row in rows for i in row["move_finished_ids"]], _MOVE)
     if method == "button_mark_done" and all(row["state"] == "done" for row in rows):
         return {"kind": "production", "records": rows, "moves": raw, "finished": finished, "method": method}

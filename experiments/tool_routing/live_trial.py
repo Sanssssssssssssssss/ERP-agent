@@ -1,4 +1,4 @@
-"""Three isolated businesses with opt-in Laya and V4.1 Flash. One attempt each."""
+"""Isolated businesses with opt-in OpenJev and V4.1 Flash. One attempt each."""
 import argparse
 import hashlib
 import json
@@ -24,7 +24,7 @@ PORT=18189
 DATA='/tmp/laya-integrated-20260926'
 DATABASES={k:f'erp_laya_{v}_20260926' for k,v in [('SALE','sale'),('E01','stock'),('E06','refund')]}
 MODEL='deepseek/deepseek-v4.1-flash'
-LAYA_MODEL=ROOT/'.runtime/capability-routing-phase-20260925/model-v14-intent'
+SELECTOR_CONFIG=None
 
 
 def read(path): return json.loads(path.read_text(encoding='utf8'))
@@ -100,7 +100,7 @@ print('ENTERPRISE_RESULT='+json.dumps({'database':env.cr.dbname,'smtp':'localhos
     assert set(existing)<=set(after)
     save(OUT/'environment.json',{'databases':DATABASES,'url':f'http://127.0.0.1:{PORT}','container':CONTAINER,
          'snapshot_sha256':manifest['sha256']['database.dump'],'initialization':initialization,'existing_containers_preserved':True})
-    print('Prepared three isolated database copies; no model calls.',flush=True)
+    print(f'Prepared {len(DATABASES)} isolated database copies; no model calls.',flush=True)
 
 
 def verify(case,label):
@@ -158,12 +158,12 @@ print('ENTERPRISE_RESULT='+json.dumps({'initial':True,'bill':bill.read(['name','
 
 def freeze():
     assert not (OUT/'frozen.json').exists()
+    assert SELECTOR_CONFIG and SELECTOR_CONFIG.is_file(), 'Specify the validated selector config'
     files=[*sorted((ROOT/'src').rglob('*.py')),*sorted((ROOT/'experiments/tool_routing').glob('*.py')),ROOT/'experiments/enterprise_validation/evaluate.py']
     save(OUT/'frozen.json',{'commit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
          'source_hashes':{p.relative_to(ROOT).as_posix():sha(p) for p in files},
          'input_hashes':{case:sha(OUT/case/'input.json') for case in DATABASES},'model':MODEL,'reasoning':'high',
-         'memory':'off','laya_model':str(LAYA_MODEL.resolve()),'laya_model_sha256':sha(LAYA_MODEL/'model.safetensors'),
-         'laya_manifest_sha256':sha(LAYA_MODEL/'router.json'),
+         'memory':'off','selector_config':str(SELECTOR_CONFIG.resolve()),'selector_config_sha256':sha(SELECTOR_CONFIG),
          'environment':read(OUT/'environment.json'),'environment_sha256':sha(OUT/'environment.json'),
          'attempts_per_case':1,'limits':{'run':None,'request':None,'output':None},'snapshot':read(OUT/'environment.json')['snapshot_sha256']})
 
@@ -174,9 +174,8 @@ def run(case):
     assert sha(folder/'input.json')==frozen['input_hashes'][case]
     assert sha(OUT/'environment.json')==frozen['environment_sha256']
     assert (f'http://127.0.0.1:{PORT}',DATABASES,CONTAINER)==tuple(frozen['environment'][k] for k in ('url','databases','container'))
-    assert str(LAYA_MODEL.resolve())==frozen['laya_model']
-    assert sha(LAYA_MODEL/'router.json')==frozen['laya_manifest_sha256']
-    assert sha(LAYA_MODEL/'model.safetensors')==frozen['laya_model_sha256']
+    assert SELECTOR_CONFIG and str(SELECTOR_CONFIG.resolve())==frozen['selector_config']
+    assert sha(SELECTOR_CONFIG)==frozen['selector_config_sha256']
     account=read(SNAP/'accounts.json')[spec['role']]
     config={'ODOO_URL':f'http://127.0.0.1:{PORT}','ODOO_DB':DATABASES[case],
             'ODOO_USERNAME':account['login'],'ODOO_API_KEY':account['api_key']}
@@ -184,8 +183,7 @@ def run(case):
     with (folder/'attempt.json').open('x',encoding='utf8') as stream:json.dump({'started':time.time(),'model':MODEL,'automatic_business_retries':0},stream)
     os.environ.update(config,LLM_API_KEY=os.environ['COMMAND_CODE_API_KEY'],LLM_BASE_URL='https://api.commandcode.ai/provider/v1',
         LLM_MODEL=MODEL,LLM_THINKING_TYPE='high',ERP_MEMORY_MODE='off',PYTHONUTF8='1',
-        ERP_LAYA_PYTHON=str(ROOT/'.runtime/laya-routing-20260924/venv/Scripts/python.exe'),
-        ERP_LAYA_MODEL=str(LAYA_MODEL.resolve()))
+        ERP_CAPABILITY_ROUTER_CONFIG=str(SELECTOR_CONFIG.resolve()))
     events=(folder/'host-events.jsonl').open('a',encoding='utf8');started=time.monotonic()
     host=Workbench(folder/'profile/data',ROOT,worker_timeout_seconds=None,event_sink=lambda e:(events.write(json.dumps(e,ensure_ascii=False,default=str)+'\n'),events.flush()))
     summary={'case':case,'business_passed':False}
@@ -228,7 +226,7 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('command',choices=['setup','finish-setup','freeze','SALE','E01','E02','E03','E06'])
     parser.add_argument('--trial',help='New isolated trial name; never reuse a paid attempt')
     parser.add_argument('--port',type=int,default=PORT)
-    parser.add_argument('--laya-model',type=Path,default=LAYA_MODEL)
+    parser.add_argument('--selector-config',type=Path)
     parser.add_argument('--cases',nargs='+',choices=['SALE','E01','E02','E03','E06'],default=list(DATABASES))
     args=parser.parse_args()
     if args.trial:
@@ -240,7 +238,7 @@ if __name__=='__main__':
             DATABASES=read(OUT/'environment.json')['databases']
             assert all(re.fullmatch(re.escape(args.trial.replace('-','_'))+r'_[a-z0-9]+', db) for db in DATABASES.values())
     assert set(args.cases)==set(DATABASES), 'Custom cases require a new isolated --trial'
-    PORT=args.port;LAYA_MODEL=args.laya_model
+    PORT=args.port;SELECTOR_CONFIG=args.selector_config
     if args.command in {'setup','finish-setup'}:setup(resume=args.command=='finish-setup')
     elif args.command=='freeze':freeze()
     else:run(args.command)

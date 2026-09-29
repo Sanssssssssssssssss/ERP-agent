@@ -1,12 +1,14 @@
-"""Opt-in Laya publication with runtime-owned dependencies and recovery."""
+"""Opt-in OpenJev publication with runtime-owned dependencies and recovery."""
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 from pathlib import Path
 import sqlite3
 import sys
+import time
 import uuid
 
 from erp_harness.erp.store import ActionStore
@@ -16,14 +18,15 @@ from erp_harness.app.request_receipts import routing_decision_id
 from erp_harness.runtime.messages import AssistantMessage, TextContent, ToolCall, ToolResultMessage
 from erp_harness.tools.dynamic_tools import CAPABILITY_GROUPS, tool_contract_sha256
 from erp_harness.tools.sops import SOPS
-from erp_harness.app.routing_state import VERSION, build_routing_state, ledger_state, sop_requirements
+from erp_harness.app.routing_state import sop_requirements
+from erp_harness.app.routing_context import VERSION, assemble_context, host_ledger, selection_batch
 
 ROUTING_CONTROLS = frozenset({"configure_odoo_tools", "list_odoo_capabilities"})
 
 
 def project_routing_result(name, content):
     """Remove historical publication state, retaining availability and failure evidence."""
-    if name not in {"configure_odoo_tools", "list_odoo_capabilities", "diagnose_current_run"}:
+    if name not in {"configure_odoo_tools", "list_odoo_capabilities", "recover_capabilities", "diagnose_current_run"}:
         return content
     try:
         value = json.loads(content)
@@ -49,15 +52,25 @@ def project_routing_result(name, content):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
-class LayaProvider(OpenAICompatibleProvider):
+class CapabilityRoutingProvider(OpenAICompatibleProvider):
     """Update the actual turn tool list before building or sending its request."""
 
     def bind_router(self, controller, store, directory: Path, *, goal=None, stage=None, identity=None, world=None) -> None:
-        model = os.environ.get("ERP_LAYA_MODEL")
-        if model and json.loads((Path(model)/"router.json").read_text(encoding="utf8")).get("projection") != VERSION:
-            raise ValueError("Laya bundle uses an older state contract; select a validated host_facts_v1 bundle")
+        self.selector_config = os.environ.get("ERP_CAPABILITY_ROUTER_CONFIG") or os.environ.get("ERP_OPENJEV_CONFIG")
+        self.selector = json.loads(Path(self.selector_config).read_text(encoding='utf8')) if self.selector_config else {}
+        self.backend = self.selector.get('backend', 'openjev')
+        if self.backend not in {'openjev', 'laya'}:
+            raise ValueError('Unknown capability selector')
+        if self.selector and self.selector.get('contract') != ('host_facts_v1' if self.backend == 'laya' else VERSION):
+            raise ValueError('Selector context contract mismatch')
+        self.candidate_groups = self.selector.get('candidate_groups', list(CAPABILITY_GROUPS))
+        if (not isinstance(self.candidate_groups, list) or not self.candidate_groups
+                or any(not isinstance(g, str) or g not in CAPABILITY_GROUPS for g in self.candidate_groups)
+                or len(set(self.candidate_groups)) != len(self.candidate_groups)):
+            raise ValueError('Invalid selector candidate groups')
         self.controller, self.store = controller, store
-        self.directory = directory / "laya"
+        controller.bind_probe_scope(self.candidate_groups, identity)
+        self.directory = directory / "routing"
         self.process = None
         self.stderr = None
         self.failed = False
@@ -119,7 +132,7 @@ class LayaProvider(OpenAICompatibleProvider):
             temporary.write_text(json.dumps({"reason": reason}), encoding="utf8")
             temporary.replace(path)
         except OSError:
-            print("Laya state unavailable; runtime owns fallback publication.", file=sys.stderr)
+            print("Selector state unavailable; runtime owns fallback publication.", file=sys.stderr)
 
     def _hold_reason(self, rows=None):
         if self.failed or (self.directory / "host-owner.json").exists():
@@ -137,6 +150,15 @@ class LayaProvider(OpenAICompatibleProvider):
         # ponytail: Dependencies live for this host-confirmed run; expiry needs verified phase boundaries.
         events = [json.loads(line) for line in path.read_text(encoding='utf8').splitlines()] if path.exists() else []
         groups, evidence = sop_requirements(events, CAPABILITY_GROUPS, SOPS)
+        recovery_path = self.directory.parent / 'dynamic-tools.jsonl'
+        for line in recovery_path.read_text(encoding='utf8').splitlines() if recovery_path.exists() else []:
+            row = json.loads(line)
+            if row.get('event') == 'end' and row.get('tool') == 'recover_capabilities' and row.get('success') is True:
+                recovered = row.get('recovery_groups')
+                if not isinstance(recovered, list) or any(g not in CAPABILITY_GROUPS for g in recovered):
+                    raise ValueError('Invalid recovery receipt')
+                groups.update(recovered)
+                evidence.append({'source': 'executor_recovery', 'tool_call_id': row['tool_call_id'], 'groups': recovered})
         # Only the latest assistant/result block can recover a missing dispatch. No old-run pinning.
         latest = next((m for m in reversed(messages) if isinstance(m, AssistantMessage)), None)
         calls = {c.id: c.name for c in latest.tool_calls} if latest else {}
@@ -153,28 +175,48 @@ class LayaProvider(OpenAICompatibleProvider):
         return groups, evidence, recovery
 
     async def _decide(self, payload):
-        if self.process is None:
+        endpoint = os.environ.get('ERP_SELECTOR_ENDPOINT') if self.backend == 'laya' else None
+        if endpoint:
+            from erp_harness.providers.selector_service import decide
+            endpoint = json.loads(endpoint)
+            if endpoint['run_id'] != os.environ.get('HARBOR_TRIAL_ID'):
+                raise ValueError('Selector endpoint scope mismatch')
+            if endpoint['config_sha256'] != hashlib.sha256(Path(self.selector_config).read_bytes()).hexdigest():
+                raise ValueError('Selector configuration changed during the run')
+            result = await asyncio.to_thread(decide, endpoint, {**payload, 'run_id': endpoint['run_id']})
+        elif self.process is None:
             self.stderr = (self.directory / "worker.stderr.log").open("ab")
             # This worker only needs local model files; do not inherit business credentials.
             env = {k: v for k, v in os.environ.items() if not k.startswith(("LLM_", "ODOO_", "COMMAND_CODE_"))}
             self.process = await asyncio.create_subprocess_exec(
-                os.environ["ERP_LAYA_PYTHON"], "-u", "-X", "utf8", "-m", "experiments.tool_routing.router",
-                "--model", os.environ["ERP_LAYA_MODEL"], "--verify-labels", "--jsonl",
+                self.selector['python'], '-P', '-u', '-X', 'utf8',
+                str(Path(__file__).parents[1] / ('providers/laya_worker.py' if self.backend == 'laya' else 'providers/openjev_worker.py')),
+                self.selector_config, str(self.directory),
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=self.stderr, env=env,
             )
-        # This watchdog only abandons a stuck local selector; paid requests stay unlimited.
-        async with asyncio.timeout(300):
+        if not endpoint:
             self.process.stdin.write((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf8"))
             await self.process.stdin.drain()
             result = json.loads(await self.process.stdout.readline())
-        if not isinstance(result, dict):
+        if (not isinstance(result, dict) or result.get('id') != payload['id']
+                or result.get('scope') != 'capability_publication_only'):
             raise ValueError("Invalid router response")
+        if result.get('status') == 'ok':
+            detail = result.get('result')
+            decisions = detail.get('decisions') if isinstance(detail, dict) else None
+            if (not isinstance(decisions, dict) or set(decisions) != set(payload['groups'])
+                    or any(not isinstance(d, dict) or d.get('answer') not in ('A', 'B') for d in decisions.values())
+                    or result.get('capabilities') != [g for g in payload['groups'] if decisions[g]['answer'] == 'A']):
+                raise ValueError('Incomplete or inconsistent selector decisions')
         return result
 
     async def _publish(self, kwargs, call_id=None):
-        call_id = call_id or "laya:" + uuid.uuid4().hex
+        started = time.perf_counter()
+        call_id = call_id or "selector:" + uuid.uuid4().hex
         row = {"call_id": call_id, "request_number": getattr(self._config.provider_hooks, "number", 0) + 1}
         before = self.controller._active
+        additive = self.backend == 'laya'
+        row.update(publication_policy='add_until_run_end' if additive else 'replace', retained_before=list(before))
         published = False
         status, reason, proposed = "fallback", None, None
         required, evidence, recovery = set(), [], []
@@ -184,23 +226,42 @@ class LayaProvider(OpenAICompatibleProvider):
             unresolved = reason == "unresolved_write"
             required, evidence, recovery = self._dependencies(kwargs["messages"])
             required.update(g for item in recovery for g in item["groups"])
+            if unresolved:
+                required.add("actions")
+            row['dependency_ms'] = round((time.perf_counter() - started) * 1000, 2)
+            context_started = time.perf_counter()
             payload = _build_chat_payload(
                 model=kwargs["model"], system=kwargs["system"], messages=kwargs["messages"], tools=kwargs["tools"],
                 compat=self._config.compat, reasoning_effort=self._config.reasoning_effort,
                 supports_images=self._config.supports_images, provider=self._config.provider_name, api=self._config.api,
             )
             # A live ledger and World state replace the selector's former transcript truncation.
-            payload = build_routing_state(
-                payload, goal=self.task_goal, stage=self.task_stage,
-                ledger=ledger_state(ledger_rows, identity=self.identity),
-                identity=self.identity, world=self.world, required=required,
-            )
+            if self.backend == 'laya':
+                from erp_harness.app.laya_state import build_routing_state, ledger_state
+                context = build_routing_state(payload, goal=self.task_goal, stage=self.task_stage,
+                    ledger=ledger_state(ledger_rows, identity=self.identity),
+                    identity=self.identity, world=self.world, required=required | set(before))
+            else:
+                context = assemble_context(payload, goal=self.task_goal, stage=self.task_stage,
+                    ledger=host_ledger(ledger_rows, self.identity),
+                    identity=self.identity, world=self.world, required=required)
+            row['context_build_ms'] = round((time.perf_counter() - context_started) * 1000, 2)
             decision = {"status": "fallback", "reason": "host_takeover"}
             if reason != "host_takeover":
+                if self.controller._availability is None:
+                    await self.controller._list(call_id)
+                groups = [g for g in self.candidate_groups
+                          if self.controller._availability[g]['status'] != 'module_missing'
+                          and (not additive or g not in required | set(before))]
+                payload = {'id': call_id.replace(':', '-'), 'groups': groups,
+                           'context_version': context['version']}
+                payload.update({'state': context} if self.backend == 'laya' else
+                               {'messages': selection_batch(context, groups)})
                 (self.directory / (call_id.replace(":", "-") + ".request.json")).write_text(
                     json.dumps(payload, ensure_ascii=False), encoding="utf8")
                 try:
-                    decision = await self._decide(payload)
+                    decision = (await self._decide(payload) if groups else
+                                {'status': 'ok', 'capabilities': [], 'inference_skipped': True})
                 except (OSError, ValueError, TypeError, KeyError, RuntimeError) as error:
                     decision = {"status": "fallback", "reason": "router_error", "error_type": type(error).__name__}
                 self._record({**row, "event": "decision", **decision})
@@ -220,10 +281,11 @@ class LayaProvider(OpenAICompatibleProvider):
                         await self.controller._list(call_id)
                     selected = {g for g in CAPABILITY_GROUPS
                                 if self.controller._availability[g]["status"] != "module_missing"}
-            if unresolved:
-                required.update(before)
-                required.add("actions")
             selected = sorted(selected | required)
+            if additive:
+                # A negative decision means no addition, never revoke tools mid-action.
+                # Durable run receipts preserve this order across approval resumes.
+                selected = [*before, *(g for g in selected if g not in before)]
             if set(selected) == set(self.controller._active):
                 status = "unchanged" if decision.get("status") == "ok" else "fallback"
                 self._record({**row, "status": status, "dependencies": evidence, "recovery": recovery})
@@ -253,19 +315,24 @@ class LayaProvider(OpenAICompatibleProvider):
             try:
                 self._record({**row, "status": "fallback", "error_type": type(error).__name__})
             except OSError:
-                print("Laya receipt unavailable; current tools retained.", file=sys.stderr)
+                print("Selector receipt unavailable; current tools retained.", file=sys.stderr)
             if self.process is not None and self.process.returncode is None:
                 self.process.kill()
                 await self.process.wait()
         finally:
             self.routing_state = {"decision_id": call_id, "status": status, "reason": reason,
                                   "proposed": proposed, "required_by_runtime": sorted(required),
+                                  "publication_policy": row['publication_policy'], "retained_before": list(before),
                                   "dependencies": evidence, "recovery": recovery}
+            try:
+                self._record({**row, 'event': 'timing', 'elapsed_ms': round((time.perf_counter() - started) * 1000, 2)})
+            except OSError:
+                self._takeover('routing_timing_unavailable')
 
     async def stream_response(self, **kwargs):
         call_id = None
         if provider_request_kind.get() == "normal" and kwargs["tools"] and hasattr(self, "controller"):
-            call_id = "laya:" + uuid.uuid4().hex
+            call_id = "selector:" + uuid.uuid4().hex
             await self._publish(kwargs, call_id)
             kwargs["messages"], projected = self.project_model_context(kwargs["messages"])
             kwargs["system"] += self.publication_notice()
@@ -311,3 +378,7 @@ class LayaProvider(OpenAICompatibleProvider):
             if getattr(self, "stderr", None) is not None:
                 self.stderr.close()
             await super().aclose()
+
+
+# Compatibility for existing experiment imports.
+OpenJevProvider = CapabilityRoutingProvider

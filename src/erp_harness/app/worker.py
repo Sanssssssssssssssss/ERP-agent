@@ -53,7 +53,7 @@ def child_environment(session_id: str, run_id: str) -> dict[str, str]:
     allowed = ("PATH", "SystemRoot", "TEMP", "TMP", "PYTHONUTF8", "PYTHONDONTWRITEBYTECODE",
                "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "LLM_THINKING_TYPE",
                "ODOO_URL", "ODOO_DB", "ODOO_USERNAME", "ODOO_API_KEY", "ERP_MEMORY_MODE", "ERP_KNOWLEDGE_DIR", "ERP_KNOWLEDGE_MAX_DOCS",
-               "ERP_LAYA_PYTHON", "ERP_LAYA_MODEL")
+               "ERP_OPENJEV_CONFIG", "ERP_CAPABILITY_ROUTER_CONFIG")
     env = {key: os.environ[key] for key in allowed if key in os.environ}
     env.setdefault("ERP_MEMORY_MODE", "off")
     env["PI_AGENT_SESSION_ID"] = session_id

@@ -229,6 +229,7 @@ class Workbench:
         self._lock = threading.RLock()
         self._processes: dict[str, subprocess.Popen[str]] = {}
         self._threads: dict[str, threading.Thread] = {}
+        self._selectors = {}
         self._session_entry_baselines: dict[str, set[str]] = {}
         self._session_compaction_totals: dict[str, dict[str, Any]] = {}
         self._closing = False
@@ -310,6 +311,9 @@ class Workbench:
             ledger.close()
 
     def _finalize_run(self, run: dict[str, Any], status: str, error: str | None = None) -> None:
+        selector = self._selectors.pop(run['id'], None)
+        if selector is not None:
+            selector.close()
         try:
             statuses = self._ledger_statuses(run)
             if any(value in {"sending", "executing", "needs_reconciliation"} for value in statuses.values()):
@@ -948,6 +952,15 @@ class Workbench:
             session_file = self.store.root / "sessions" / run["business_id"] / "pi-agent-session.jsonl"
             evidence_file = instruction.with_name("task-sources.json")
             evidence_env = {"ODOO_TASK_EVIDENCE_FILE": str(evidence_file)} if evidence_file.exists() else {}
+            selector_path = os.environ.get('ERP_CAPABILITY_ROUTER_CONFIG')
+            if selector_path and json.loads(Path(selector_path).read_text(encoding='utf8')).get('backend') == 'laya':
+                from erp_harness.providers.selector_service import SelectorService
+                selector = self._selectors.get(run['id'])
+                if selector is None:
+                    selector = SelectorService(selector_path, usage.parent / 'routing', run['id'])
+                    self._selectors[run['id']] = selector
+                # A dead selector falls back at publication; never restart it silently.
+                evidence_env['ERP_SELECTOR_ENDPOINT'] = json.dumps(selector.endpoint)
             proc = self._open_worker(run, session_file,
                 worker_command(self.root, instruction, usage, session_file, continue_run=continue_run),
                 {**child_environment(run["session_id"], run["id"]), **evidence_env, "ERP_MEMORY_DIR": str(self.store.root / "memory")})
