@@ -358,6 +358,8 @@ export type WorkbenchMethod =
   | "confirm_business"
   | "get_business"
   | "check_business_connection"
+  | "resume_run"
+  | "reconcile_business"
   | "start_run"
   | "decide_approval"
   | "request_approval_revision"

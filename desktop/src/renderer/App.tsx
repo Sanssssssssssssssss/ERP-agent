@@ -164,6 +164,7 @@ export default function App() {
           onTabChange={setTab}
           onRunSelect={(id) => { setTraceTarget(null); setSelectedRunId(id) }}
           onRefresh={() => void refreshBusiness()}
+          onReconcileBusiness={() => void refreshBusiness(true)}
           onStart={() => void startRun()}
           onCancel={(run) => void cancelRun(run)}
           onApproval={(approval, decision) => void decideApproval(approval, decision)}

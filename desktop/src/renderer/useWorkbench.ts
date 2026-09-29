@@ -720,7 +720,11 @@ export function useWorkbench() {
     runStartInFlightRef.current.add(runKey)
     setLoading(true)
     try {
-      const run = await call<Run>('start_run', { session_id: requestSessionId, business_id: requestBusinessId })
+      const latest = businessDetail?.runs.find((run) => run.id === businessDetail.business.active_run_id) ?? businessDetail?.runs?.[0]
+      const recovering = latest && ['interrupted', 'failed', 'cancelled'].includes(latest.status)
+      const run = await call<Run>(recovering ? 'resume_run' : 'start_run', {
+        session_id: requestSessionId, business_id: requestBusinessId, ...(recovering ? { run_id: latest.id } : {})
+      })
       if (sessionIdRef.current !== requestSessionId || businessIdRef.current !== requestBusinessId) return
       setSelectedRunId(run.id)
       await reloadCurrent()
@@ -849,20 +853,24 @@ export function useWorkbench() {
     }
   }
 
-  const refreshBusiness = async () => {
+  const refreshBusiness = async (reconcile = false) => {
     if (!selectedSessionId || !selectedBusinessId) return
     const requestSessionId = selectedSessionId
     const requestBusinessId = selectedBusinessId
+    const recoveryKey = `reconcile:${requestSessionId}:${requestBusinessId}`
+    if (reconcile && approvalInFlightRef.current.has(recoveryKey)) return
+    if (reconcile) approvalInFlightRef.current.add(recoveryKey)
     const requestId = ++businessRequestRef.current
     setBusinessLoading(true)
     try {
-      const result = await call<BusinessDetailProjection>('refresh_business', { session_id: requestSessionId, business_id: requestBusinessId })
+      const result = await call<BusinessDetailProjection>(reconcile ? 'reconcile_business' : 'refresh_business', { session_id: requestSessionId, business_id: requestBusinessId })
       if (requestId !== businessRequestRef.current || sessionIdRef.current !== requestSessionId || businessIdRef.current !== requestBusinessId) return
       setBusinessDetail(result)
       if (sessionIdRef.current === requestSessionId) await loadSession(requestSessionId)
     } catch (reason) {
       if (requestId === businessRequestRef.current && sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) setError(messageForError(reason))
     } finally {
+      if (reconcile) approvalInFlightRef.current.delete(recoveryKey)
       if (requestId === businessRequestRef.current && sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) setBusinessLoading(false)
     }
   }

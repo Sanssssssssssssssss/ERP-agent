@@ -73,7 +73,9 @@ def test_mail_live_missing_and_revoked_never_uses_old_green():
     reads.client.records["mail.notification"][301]["notification_status"] = "exception"
     result = read(context, reads)
     assert result["verification_status"] == "unknown"
-    assert result["delivery_receipts"][0]["delivery"] == "unconfirmed"
+    assert result["delivery_receipts"][0]["delivery"] == "failed"
+    assert result["delivery_receipts"][0]["message_created"] is True
+    assert result["recovery"]["retry_safe"] is False
     reads.denied.add("account.move")
     result = read(context, reads)
     assert result["status"] == "permission_denied"
