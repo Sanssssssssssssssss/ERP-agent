@@ -33,6 +33,6 @@ API 用量：**24 POST，241,224 token**。新增输入 44,644、缓存输入 18
 
 验证：30 个离线测试及 3 个 subtest 通过。后续优先维护阶段与完成信息、能力边界和稀有正例；不继续用扩大同类步骤数替代业务覆盖。
 
-证据：[API 汇总](../../.runtime/capability-routing-20260924/reviewed-v3/comparison-summary.json)、[原请求/响应](../../.runtime/capability-routing-20260924/reviewed-v3/api/)、[本地训练](../../.runtime/capability-routing-20260924/reviewed-head-v3-batched/summary.json)、[中断记录](../../.runtime/capability-routing-20260924/reviewed-head-v3/interrupted.json)、[案例索引](../../tests/fixtures/capability_routing/reviewed_expansion.json)。
+证据：[API 汇总](../../../.runtime/capability-routing-20260924/reviewed-v3/comparison-summary.json)、[原请求/响应](../../../.runtime/capability-routing-20260924/reviewed-v3/api)、[本地训练](../../../.runtime/capability-routing-20260924/reviewed-head-v3-batched/summary.json)、[中断记录](../../../.runtime/capability-routing-20260924/reviewed-head-v3/interrupted.json)、[案例索引](../../../tests/fixtures/capability_routing/reviewed_expansion.json)。
 
 参考：[作者关于标签、选项顺序和表示的说明](https://github.com/NandhaKishorM/laya/issues/171)、[中性标签与 API 契约讨论](https://github.com/NandhaKishorM/laya/issues/156)、[冻结编码器、训练决策头的复现实验](https://n.demir.io/articles/testing-and-fine-tuning-laya/)。复现实验使用数千训练样本，不能将其成绩直接外推到本 ERP 小样本。

@@ -146,4 +146,4 @@ def run(output):
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('action',choices=['prepare','run','summarize']);p.add_argument('--output',type=Path,required=True);p.add_argument('--pilot',action='store_true');p.add_argument('--variants',nargs='+',default=['clean_v7_shape','context_v12','clean_v7_compact']);a=p.parse_args()
-    {'prepare':lambda:prepare(a.output,a.pilot,a.variants),'run':lambda:run(a.output),'summarize':lambda:summarize(a.output)}[a.action]()
+    {'prepare':lambda:prepare(a.output,a.pilot,a.variants),'run':lambda:run(a.output),'summarize':lambda:summarize(a.output)}[a.action]()

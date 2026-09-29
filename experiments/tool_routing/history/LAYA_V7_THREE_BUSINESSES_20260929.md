@@ -30,6 +30,6 @@
 - 三题未缓存输入合计从 242,780 升至 1,362,187（5.61 倍）。总 token 基本持平不等于实际费用持平；本轮未计算价格。
 - E02 有字段猜测、空 ID、空查询条件、观察路径错误及未开放方法试探；E03 有字段和 SOP 参数错误。均从实际请求定位，未改答案或中途干预模型策略。E01 的 88.2% reasoning 集中在写入前第 6、7 轮。
 
-证据：[结果及错误节点索引](../../.runtime/laya-host-live-20260926/results-v7.json)、[冻结清单](../../.runtime/laya-host-live-20260926/frozen.json)、[只读审计入口](../../.runtime/laya-host-live-20260926/audit-v7.py)。目录日期沿用未消费的旧快照，实际调用日期为 2026-09-29。
+证据：[结果及错误节点索引](../../../.runtime/laya-host-live-20260926/results-v7.json)、[冻结清单](../../../.runtime/laya-host-live-20260926/frozen.json)、[只读审计入口](../../../.runtime/laya-host-live-20260926/audit-v7.py)。目录日期沿用未消费的旧快照，实际调用日期为 2026-09-29。
 
-完整记录：[E01](../../.runtime/laya-host-live-20260926/E01)、[E02](../../.runtime/laya-host-live-20260926/E02)、[E03](../../.runtime/laya-host-live-20260926/E03)。每题包含请求、响应、Laya 输入和决策、审批回执、动作账本及独立 `after.json`。99 个请求与决策一一关联，传输 attempt 均为 1，实际发布的工具契约哈希全部一致。旧对照位于 `.runtime/laya-contract-live-20260926`；近期 v7 对照位于 `.runtime/openjev-live-20260928`。
+完整记录：[E01](../../../.runtime/laya-host-live-20260926/E01)、[E02](../../../.runtime/laya-host-live-20260926/E02)、[E03](../../../.runtime/laya-host-live-20260926/E03)。每题包含请求、响应、Laya 输入和决策、审批回执、动作账本及独立 `after.json`。99 个请求与决策一一关联，传输 attempt 均为 1，实际发布的工具契约哈希全部一致。旧对照位于 `.runtime/laya-contract-live-20260926`；近期 v7 对照位于 `.runtime/openjev-live-20260928`。

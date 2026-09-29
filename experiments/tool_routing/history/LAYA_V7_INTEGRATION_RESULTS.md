@@ -21,6 +21,6 @@ GPU固定每批2个问题，保留完整上下文及原问题。长例从107秒�
 
 启用：`ERP_CAPABILITY_ROUTER_CONFIG` 指向本机 `.runtime/laya-v7-integration-20260929/config.json`。停用该变量即可回到原入口；如设置过旧 `ERP_OPENJEV_CONFIG`，也需停用才能回到基础入口。权重未改，原bundle保留；新bundle使用硬链接。
 
-证据：[局部回归](../../.runtime/laya-v7-integration-20260929/validation.json)、[完整业务与用量](../../.runtime/laya-v7-integration-20260929/business-results.json)、[SALE回读](../../.runtime/openjev-live-20260928/SALE/after.json)、[E01回读](../../.runtime/openjev-live-20260928/E01/after.json)。沿用已准备的隔离目录，其frozen配置明确指向Laya。
+证据：[局部回归](../../../.runtime/laya-v7-integration-20260929/validation.json)、[完整业务与用量](../../../.runtime/laya-v7-integration-20260929/business-results.json)、[SALE回读](../../../.runtime/openjev-live-20260928/SALE/after.json)、[E01回读](../../../.runtime/openjev-live-20260928/E01/after.json)。沿用已准备的隔离目录，其frozen配置明确指向Laya。
 
 新观察已冻结在 `tests/fixtures/capability_routing/laya_v7_live_observations.json`，待后续候选局部重放；本轮未修改预期答案。

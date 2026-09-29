@@ -1,6 +1,6 @@
 **结果：测试池可用；Laya 本轮调优未达到替换要求，生产代码未接入。**
 
-从三个本地仓库扫描得到 1,944 个历史响应；1,939 个原始请求、1 个明确标记的重建前缀可恢复，4 个无前缀。覆盖 8/10 组、23/32 个可选工具。employee/time_off 未找到真实调用，attachments 只有一个可用于训练的节点。[测试入口与索引](../../tests/fixtures/capability_routing/README.md)
+从三个本地仓库扫描得到 1,944 个历史响应；1,939 个原始请求、1 个明确标记的重建前缀可恢复，4 个无前缀。覆盖 8/10 组、23/32 个可选工具。employee/time_off 未找到真实调用，attachments 只有一个可用于训练的节点。[测试入口与索引](../../../tests/fixtures/capability_routing/README.md)
 
 | 能力组 | 模型实际发出的调用数 |
 |---|---:|
@@ -34,4 +34,4 @@
 
 本轮：13 项离线测试＋3 个 subtest 通过；1,232 次本地 SDK 调用、8,736,420 encoder 输入 token、0 生成输出、0 付费 API、0 Odoo 调用。十组问题会重复编码输入，不能把本地 token 数当付费模型账单。224 节点 SDK P50/P95 约 224/344 ms。
 
-完整材料：`.runtime/capability-routing-20260924/` 下的 `dataset-v2/`、`dataset-v3/`、`scorer-v1/`、`input-and-review-v1/`、`input-and-review-v2/`；[汇总证据](../../.runtime/capability-routing-20260924/audit-summary.json)。旧结果不覆盖，训练和回放均拒绝覆盖输出目录。
+完整材料：`.runtime/capability-routing-20260924/` 下的 `dataset-v2/`、`dataset-v3/`、`scorer-v1/`、`input-and-review-v1/`、`input-and-review-v2/`；[汇总证据](../../../.runtime/capability-routing-20260924/audit-summary.json)。旧结果不覆盖，训练和回放均拒绝覆盖输出目录。

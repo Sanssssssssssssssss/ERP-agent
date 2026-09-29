@@ -1,81 +1,22 @@
-本实验评估：在主模型请求前，由 Laya 建议注入哪些 capabilities。支持显式开启的接入实验，默认关闭；不预测工具参数，不执行业务工具，不授予写权限。
+# 工具能力编排实验
 
-2026-09-25 数据补充入口为 `collect_dataset`。先 `freeze` 固定意图、真实读取材料和历史前缀，再 `paid` 每节点调用一次模型，最后 `export` 隔离训练分歧；开发/测试分歧保留。员工、请假不在本轮范围。真实 HTTP 请求和用量均由现有单请求运行器记录，无业务工具执行。
-最新训练状态见 [数据补充结果](DATASET_RESULTS.md)；V4.1 Flash 三条完整业务见 [接入结果](LIVE_RESULTS.md)。
+当前接入：Laya v7 在主模型请求前判断需要追加的 capability。同一 run 保留已发布工具及 schema 顺序；候选为空时跳过选择。审批、动作校验和业务回读仍由 runtime 负责。
 
-训练已跑完；v15 未超过 v14，交付 v14 权重＋已验证的历史意图输入修复。数据池与检查点保留，完整成绩见结果报告。
+- [E02 修复与验收](E02_CONSUMPTION_FIX_20260929.md)：9/9 通过。
+- [E02 / E03 实跑](LAYA_ADDITIVE_LIVE_20260929.md)：E03 5/5；其中 E02 旧失败已由上项修复。
+- [模型回归池](../../tests/fixtures/capability_routing/README.md)。
+- [历史报告与命令](history/README-20260929.md)：按报告日期解释，不作为当前启动说明。
 
-本地调用入口（默认格式 52/60，仍有 3 个漏选、5 个待复核）：
+| 入口 | 用途 |
+|---|---|
+| `src/erp_harness/app/capability_routing.py` | 请求前选择、追加发布及失败恢复 |
+| `src/erp_harness/providers/selector_service.py` | host 管理本地常驻选择器 |
+| `src/erp_harness/providers/laya_worker.py` | Laya 推理与模型清单验证 |
+| `laya_context_replay.py` | 冻结真实请求的本地上下文对照 |
+| `laya_additive_replay.py` | 追加能力语义的离线重放 |
+| `live_trial.py` | 隔离业务验证；付费运行需明确授权 |
+| `router.py` | 历史实验入口与模型导出，复用生产推理实现 |
 
-```powershell
-# 一次调用；request.json 是原模型请求，包含完整 messages 和 tools
-.runtime/laya-routing-20260924/venv/Scripts/python.exe -X utf8 -m experiments.tool_routing.router --model .runtime/capability-routing-phase-20260925/model-v14-intent --request request.json
-# 常驻进程；UTF-8 标准输入每行一个完整请求，标准输出每行一个 JSON 结果
-.runtime/laya-routing-20260924/venv/Scripts/python.exe -u -X utf8 -m experiments.tool_routing.router --model .runtime/capability-routing-phase-20260925/model-v14-intent --jsonl
-```
+启动前设置 `ERP_CAPABILITY_ROUTER_CONFIG` 指向本机已验收的配置 JSON。配置、GPU 环境、权重和清单需配套；仓库不包含权重。旧名称 `ERP_OPENJEV_CONFIG` 保留兼容，优先使用新名称。未配置时沿用原能力选择路径。
 
-`status=ok` 的 `capabilities` 是本轮建议的完整可选集合，空集合表示保留基础工具。`status=fallback` 时沿用现有编排，不把失败当成空集合。接口核对权重和投射代码哈希，拒绝超窗输入；概率未校准。宿主通过现有 `DynamicToolController` 发布，保留安装检查、审批和未知写入保护。独立调用与宿主接入共用这个路由接口。
-
-Python 调用可复用同一个 `CapabilityRouter(model_path)` 实例，逐轮调用 `.route(request)`；异常由调用方回退。验收结果和权重路径以[结果报告](DATASET_RESULTS.md)为准。下文是历史实验复现入口。
-
-可选加 `--verify-labels`，或 `.route(request, verify_labels=True)`：本地再做一次等价判定；不一致返回 `fallback`，不提供可发布的 `capabilities`。实测拦住 2 个漏选，仍有 1 个稳定漏选。暖态约 0.59 秒；不调用付费模型作裁判。
-
-离线发布实验可用 `await publish_next_turn(controller, decision, call_id, host_owns_selection=..., unresolved_write=...)`。真实接入读取 ActionStore；未决写入保留当前工具，回退保留现有工具和 list/configure。
-
-2026-09-26 接入实验：业务 worker 同时设置 `ERP_LAYA_PYTHON`（隔离 ML Python 的绝对路径）与 `ERP_LAYA_MODEL`（已验收 bundle 的绝对路径）即可启用；删除这两个进程环境变量恢复原编排。默认关闭。接入在实际请求及执行共用的工具列表上发布，并告知主模型当前集合；主模型明确选定、移除的组由日志恢复并保留，正常 configure 不再永久关闭 Laya。标签判定不一致仅保留当前轮工具；基础设施故障才持久降级。审批与未决写入保护不变。原输入、决定、发布结果保存于各 run 的 `laya/`，请求回执以 `routing_decision_id` 显式关联。主模型为 `deepseek/deepseek-v4.1-flash`。
-
-本地选择器等待 300 秒后降级，关停等待 5 秒；不限制付费模型或完整业务。输入投射由 bundle 声明：旧版保持原样，`evidence_v2` 只修复压缩 schema 的字段名读取。扩充 SOP、表格与意图字段的版本因历史节点退化未采用。权重未重训，不能把接入完整性视为路由准确率保证。
-
-`b2f7a1f` 清理主模型看到的历史启用状态，保留原始 trace 和冻结的 Laya 投射。新 run 不继承上一 run 的工具；同一 run 继续从账本恢复。`diagnose_current_run` 可读取当前路由建议、实际集合与回退原因，仍无业务真相或重试权限。路由日志新增 `publication` 回执，`decision` 新增 `projection` 与 `state_sha256`。局部验证和未解决项见[管理诊断](MANAGEMENT_DIAGNOSIS.md)。
-
-三条业务入口：`python -m experiments.tool_routing.live_trial`。使用新建数据库副本、固定原输入和既有验收器；`setup → freeze → SALE / E01 / E06`，每条仅一次，审批依据原目标人工核对。已有目录有启动标记，不重复执行。证据在 `.runtime/laya-integrated-20260926/`；本轮同时更换主模型，成本变化不能单独归因于 Laya。
-
-复测使用 `--trial laya-live-v2-20260926 --port 18190 --laya-model .runtime/laya-integration-v2-20260926/model`；三个阶段都带相同参数。新建数据库、附件目录和 profile，旧运行保留。冻结源码、输入、bundle 清单及权重哈希后才能启动。
-
-后续训练可用 `train_joint --source .runtime/capability-routing-phase-20260925/dataset-v5-intent --output .runtime/routing-joint-new --initial-model .runtime/capability-routing-phase-20260925/model-v14-intent --epochs 4 --balance-sources --balance-phases --cover-weighted-pairs`。使用上述隔离 Python，通过 `-m experiments.tool_routing.train_joint` 调用；这批重投射数据尚未再次训练。旧 bundle 需配套旧源码，保留哈希检查。
-
-历史池包含 1,944 个响应。早期对照采用具体选项、完整决策头和历史计划输入：[论坛调优结果](FORUM_TUNING.md)。此前结果：[scorer 微调](TUNING.md)、[原始模板](RESULTS.md)；[测试入口](../../tests/fixtures/capability_routing/README.md)。
-
-早期复核池有 62 个节点，包含原始完整请求与同摘要能力选择的 24 次真实 API 对照。见[早期审查结果](REVIEWED_RESULTS.md)。旧训练器默认拒绝弱标签，显式复现才使用 `--allow-reference-labels`。
-
-早期仅训练决策头的结果见[训练审计](TRAINING_AUDIT.md)：14 轮、2,478 次更新，测试默认格式 6/21、四格式合计 19/84。该方案未通过，已改为上述联合训练。
-
-当前主模型会自己调用 list/configure，再在下一轮拿到工具。Laya 可以前置能力选择，但包含业务读取的混合轮不能直接删掉。使用本地多语言 checkpoint，每个 capability 一个 `noul` 问题；一次 `system_one(state, questions)` 批量输出本轮八组概率，员工与请假排除。0.5 只是固定实验阈值，不代表已校准。
-
-运行入口：
-
-```powershell
-# 冻结本轮复核池；输出目录必须不存在
-.venv/Scripts/python.exe -m experiments.tool_routing.model_comparison freeze --output .runtime/routing-reviewed-new
-# 已授权后运行 12 节点 × 2 分支；每分支一次 POST，返回工具不执行
-.venv/Scripts/python.exe -m experiments.tool_routing.model_comparison paid --output .runtime/routing-reviewed-new
-# 修正标签后的独立本地训练；不调用付费 API
-.runtime/laya-routing-20260924/venv/Scripts/python.exe -m experiments.tool_routing.train_reviewed --source .runtime/routing-reviewed-new --output .runtime/routing-head-new
-.venv/Scripts/python.exe -m experiments.tool_routing.model_comparison summary --output .runtime/routing-reviewed-new --laya .runtime/routing-head-new
-# 原项目 Python：从真实 trace 构建；不调用 API/Odoo
-.venv/Scripts/python.exe -m experiments.tool_routing.build_cases --self-check
-.venv/Scripts/python.exe -m experiments.tool_routing.laya_probe --self-check
-# 独立实验 Python：真实本地 Laya 推理
-.runtime/laya-routing-20260924/venv/Scripts/python.exe -m experiments.tool_routing.laya_probe
-# 独立审阅节点；不覆盖主池
-.venv/Scripts/python.exe -m experiments.tool_routing.build_cases --reviewed --self-check
-.runtime/laya-routing-20260924/venv/Scripts/python.exe -m experiments.tool_routing.laya_probe --dataset .runtime/laya-routing-20260924/dataset-reviewed --output .runtime/laya-routing-20260924/reviewed-noul-v2
-# 已跑首轮后，开发节点的格式/顺序诊断；结果目录禁止覆盖
-.runtime/laya-routing-20260924/venv/Scripts/python.exe -m experiments.tool_routing.format_probe
-```
-
-依赖、权重、下载版本、完整回放和结果均在 `.runtime/laya-routing-20260924/`。Laya 上游锁定 `23a17522aa4942da6cce53a995a275760320b691`；多语言权重锁定 `e4e9ddf21a7b1903b7acffd8814ad4307bf63a67`。只安装到实验 venv，生产依赖不变。新结果目录不得覆盖已有运行。
-
-数据按整条业务家族划分 dev/heldout，重复网络请求合并但保留来源。原请求、响应和 schema 均保留路径与 SHA256。模型只读 `input.state`：请求发生前的原文片段；oracle、历史下一步、后续结果不进入模型。片段裁剪与模型实际 token 截断分别记录。留出数据已有历史开发接触，不冒称全新未见 benchmark。
-
-评测分三项：
-
-- **注入相关性**：所需新增组是否漏选、多注入多少组/工具、base-only/无新增组、复合能力。历史下一步仅作覆盖代理；独立审阅允许多个合理注入集合，不要求 Golden Trace 相同。
-- **边界**：conversation 固定工具合同不参与动态路由；建议不能改变审批、身份校验或未知写入保护。历史旁路实验只验证建议，2026-09-26 接入实验另行验证真实发布与执行。
-- **开销**：冷启动、暖态 P50/P95、本地输入 token、额外可见工具数，以及纯编排/混合编排响应数量。保持历史 active 的预加载只可能增加 schema；不能包装成 schema 节省。未做闭环对照前，不报告主模型调用或业务总成本下降。
-
-`reviewed_cases.json` 是子 agent 独立审阅的12个旧回归截面，其中8个动态节点、4个conversation负控制；不是365主池里已经审核的12题，也不是人类签字验收。
-
-依据：[BFCL多轮评测](https://gorilla.cs.berkeley.edu/blogs/13_bfcl_v3_multi_turn.html)覆盖缺工具、缺参数、多步骤；[ToolSandbox](https://github.com/apple-aiml-research/ToolSandbox#evaluation)按状态与里程碑允许不同轨迹；[Anthropic工具搜索](https://www.anthropic.com/engineering/advanced-tool-use)说明延迟与schema开销需要共同测量。
-
-[Laya官方源码](https://github.com/NandhaKishorM/laya/tree/23a17522aa4942da6cce53a995a275760320b691)说明多语言默认1024 token、head256，支持显式提高上下文长度，且出厂概率未充分校准。原始实验沿用默认窗口；完整决策头实验按实际状态长度分配窗口，保留输入摘要的省略标记。它是本地非生成式分类接口，不能按聊天 completion API 调用，也不能因为输出结构固定就认为决策一定正确。
+OpenJev 作为可选实验后端保留；其[上下文契约](history/CONTEXT_CONTRACT.md)与 Laya 不混用。训练脚本路径保留，避免破坏冻结清单和历史复现。完整请求、权重、数据库及日志位于忽略的 `.runtime/`；本目录只保存代码、索引和无密钥结果。

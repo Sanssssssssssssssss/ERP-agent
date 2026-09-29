@@ -4,7 +4,7 @@
 
 验证：82 tests＋26 subtests；75 个真实请求逐项验证只改变允许位置。4 次 API 单轮对照中，R04 原样重复 configure，候选直接提出预检；R06 两分支均正确请求缺少的 actions，恢复路径保留。R04 候选同时 preview＋validate，token 17,754→19,606，效率待审。本次共 **50,413 token**：新输入 21,891、缓存 21,504、输出 7,018（含 reasoning 6,240）；未执行返回工具、未重跑完整业务。
 
-仍未解决：Laya 输入与权重保持冻结，本地两节点选择未变；没有可靠的阶段结束信号，现有模型选择保留规则仍在。因此本次只能确认接口清理和诊断可用，不能称为完整接管或稳定省 token。[冻结、脚本与日志](../../.runtime/laya-clean-integration-20260926/) · [结果审查](../../.runtime/laya-clean-integration-20260926/review.json)
+仍未解决：Laya 输入与权重保持冻结，本地两节点选择未变；没有可靠的阶段结束信号，现有模型选择保留规则仍在。因此本次只能确认接口清理和诊断可用，不能称为完整接管或稳定省 token。[冻结、脚本与日志](../../../.runtime/laya-clean-integration-20260926) · [结果审查](../../../.runtime/laya-clean-integration-20260926/review.json)
 
 ---
 
@@ -35,6 +35,6 @@
 
 本次付费 **6 POST、104,530 token**：新输入 4,656，缓存输入 91,136，输出 8,738（含 reasoning 7,324）；本地 18 次前向输入 561,046 token 单独计量。单轮候选多带工具 schema，单请求 token 不代表完整业务节省；本次没有完整业务重跑或 Odoo 写入。
 
-[逐轮分类](../../.runtime/laya-management-diagnosis-20260926/rounds.json) · [汇总](../../.runtime/laya-management-diagnosis-20260926/diagnosis-summary.json) · [发布 A/B](../../.runtime/laya-management-diagnosis-20260926/api-results.json) · [过期状态 A/B](../../.runtime/laya-management-diagnosis-20260926/E01-stale/results.json) · [输入消融](../../.runtime/laya-management-diagnosis-20260926/local-results.json)
+[逐轮分类](../../../.runtime/laya-management-diagnosis-20260926/rounds.json) · [汇总](../../../.runtime/laya-management-diagnosis-20260926/diagnosis-summary.json) · [发布 A/B](../../../.runtime/laya-management-diagnosis-20260926/api-results.json) · [过期状态 A/B](../../../.runtime/laya-management-diagnosis-20260926/E01-stale/results.json) · [输入消融](../../../.runtime/laya-management-diagnosis-20260926/local-results.json)
 
 冻结输入、生成脚本、完整 SSE 和来源哈希均在上述忽略目录；重放入口为 `node_probe.py`、`stale_probe.py`、`local_probe.py`，已运行分支不自动重发。此次观察过的 E01/E06 节点以后属于诊断集，不再当未见验收题。

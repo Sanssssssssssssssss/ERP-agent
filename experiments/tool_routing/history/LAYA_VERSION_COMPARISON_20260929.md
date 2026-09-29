@@ -40,7 +40,7 @@ E02：工具返回的日期是真实记录；未来开工保护正常生效，�
 
 DeepSeek 官方说明前缀必须匹配已持久化的缓存单元，缓存构造有延迟，命中不保证；Command Code 的具体模板与路由尚未证明一致。[官方说明](https://api-docs.deepseek.com/guides/kv_cache/)
 
-原始对照：[A](../../.runtime/laya-contract-live-20260926)、[B](../../.runtime/laya-host-live-20260926)、[C](../../.runtime/laya-prefix-live-20260929)。逐轮统计：[version-comparison.json](../../.runtime/laya-prefix-live-20260929/version-comparison.json)。E02 日期源码：[failure-evidence.json](../../.runtime/laya-prefix-live-20260929/E02/failure-evidence.json)。
+原始对照：[A](../../../.runtime/laya-contract-live-20260926)、[B](../../../.runtime/laya-host-live-20260926)、[C](../../../.runtime/laya-prefix-live-20260929)。逐轮统计：[version-comparison.json](../../../.runtime/laya-prefix-live-20260929/version-comparison.json)。E02 日期源码：[failure-evidence.json](../../../.runtime/laya-prefix-live-20260929/E02/failure-evidence.json)。
 
 
 本次进一步审查（未修改 runtime）：真正的主模型选工具旧链路，E01 配置 actions 一次；E02/E03 各列能力一次、配置 actions 一次，三题工具面各只变一次。旧 configure 也是全量替换，但只有显式调用才更新，其余请求沿用。现在 Laya 每次模型请求前都重算并替换可选集合，加上宿主必需依赖；未默认并入 previous。recover_capabilities 才是追加并集语义。变化涉及发布频率和集合生命周期，不能只说替换了一次模型调用。
@@ -49,4 +49,4 @@ DeepSeek 官方说明前缀必须匹配已持久化的缓存单元，缓存构�
 
 建议审查方向：静态总政策约束时区、计划/实际区分和回读；制造SOP补镜像验证过的字段转移语义；异常回包提供当前UTC、计划值和合法恢复路径。不要随轮改system时间、不要用通用过去日期禁令替代语义检查。工具发布先对标旧按需持久语义，必要能力追加、退出有明确阶段依据；不先重训。局部对照待另行实施。
 
-审查证据：[routing-date-audit.json](../../.runtime/laya-prefix-live-20260929/routing-date-audit.json)。
+审查证据：[routing-date-audit.json](../../../.runtime/laya-prefix-live-20260929/routing-date-audit.json)。

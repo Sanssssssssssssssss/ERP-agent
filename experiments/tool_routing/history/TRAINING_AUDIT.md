@@ -29,9 +29,9 @@
 
 用量：付费 API 0、Odoo 调用 0。两个完成分支分别用时 27.1、32.7 分钟，各做 840 次本地 SDK 复算；它们不是付费模型调用。中止诊断另留日志，不计作完成训练。
 
-证据：[汇总](../../.runtime/capability-routing-20260924/full-training-results.json)、[类别覆盖](../../.runtime/capability-routing-20260924/full-training-data-audit.json)、[待审历史候选](../../.runtime/capability-routing-20260924/full-training-pending-data.json)、[v6 完整日志与权重](../../.runtime/capability-routing-20260924/reviewed-head-v6/)、[v7 完整日志与权重](../../.runtime/capability-routing-20260924/reviewed-head-v7/)。中止试跑见同目录下 `reviewed-head-v4`、`v4b`、`v5` 的 `interrupted.json` 及控制台日志。
+证据：[汇总](../../../.runtime/capability-routing-20260924/full-training-results.json)、[类别覆盖](../../../.runtime/capability-routing-20260924/full-training-data-audit.json)、[待审历史候选](../../../.runtime/capability-routing-20260924/full-training-pending-data.json)、[v6 完整日志与权重](../../../.runtime/capability-routing-20260924/reviewed-head-v6)、[v7 完整日志与权重](../../../.runtime/capability-routing-20260924/reviewed-head-v7)。中止试跑见同目录下 `reviewed-head-v4`、`v4b`、`v5` 的 `interrupted.json` 及控制台日志。
 
-配对前源码：`2c84b7d`；配对版：`6a2300c`。各运行目录保存实际源码、输入及模型哈希、逐轮指标、选中权重和最后一轮优化器状态。此前四节点拟合检查仍见 [均衡格式控制](../../.runtime/capability-routing-20260924/trainability-balanced-384/)，16/16 只证明这些训练节点可拟合。
+配对前源码：`2c84b7d`；配对版：`6a2300c`。各运行目录保存实际源码、输入及模型哈希、逐轮指标、选中权重和最后一轮优化器状态。此前四节点拟合检查仍见 [均衡格式控制](../../../.runtime/capability-routing-20260924/trainability-balanced-384)，16/16 只证明这些训练节点可拟合。
 
 复现 v7，在仓库根目录执行；输出目录必须不存在：
 

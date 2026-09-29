@@ -17,7 +17,7 @@ E01 参考为上轮 Laya `c4796e3`，同为 V4.1 Flash；E02／E03 参考为稳�
 - 库存 SOP 提供当前权限下真实字段片段；说明退货 API 必填项、validate 已含 preview。字段写入 SOP 明确一次只接收一种操作。
 - runtime 从实际成功返回的 SOP 契约保留工具依赖，兼容旧日志；未决动作继续保留工具。保留到 run 结束仍是保守策略。
 
-173 项离线测试及 48 个子检查通过。局部模型验证共 3 POST：R07 操作名、R09 库存读取避开原错误；R03 仍输出两项命令，说明提示不足，随后由上述确定性规范化解决格式。真实 Odoo 局部预检证明缺产品拒绝、正确绑定接受，未执行该退货写入；本轮未重跑 E06。[局部证据](../../.runtime/laya-contract-nodes-20260926/)
+173 项离线测试及 48 个子检查通过。局部模型验证共 3 POST：R07 操作名、R09 库存读取避开原错误；R03 仍输出两项命令，说明提示不足，随后由上述确定性规范化解决格式。真实 Odoo 局部预检证明缺产品拒绝、正确绑定接受，未执行该退货写入；本轮未重跑 E06。[局部证据](../../../.runtime/laya-contract-nodes-20260926)
 
 trace 结论：
 
@@ -28,7 +28,7 @@ trace 结论：
 - E03 read_record 15 → 25，工具回包累计约 71.1 万 → 101.9 万，历史推理累计约 48.9 万 → 110.5 万。先猜财务字段，再查看无关历史付款学习结构，扩大探索范围。
 - 上述字符统计包含每次请求重复携带的内容，不是独立 token 归因。E02／E03 新生成 reasoning 也分别从 11,211 → 19,878、7,737 → 13,355。减少能力配置不能自动消除业务探索、审批轮次和反复推理。
 
-26 个写动作最终 verified，无未知或失败写入；验收依赖实际 Odoo 回读。新错误 R11–R18 及 R09 复现已冻结原请求、首次纠正节点、响应与源码哈希，尚未预防性修复，未追加付费重放。[回归索引](../agent_regression/README.md)
+26 个写动作最终 verified，无未知或失败写入；验收依赖实际 Odoo 回读。新错误 R11–R18 及 R09 复现已冻结原请求、首次纠正节点、响应与源码哈希，尚未预防性修复，未追加付费重放。[回归索引](../../agent_regression/README.md)
 
 | API 用量 | 三条完整业务 | 三次局部验证 | 合计 |
 |---|---:|---:|---:|
@@ -43,4 +43,4 @@ trace 结论：
 
 复现入口：`python -m experiments.tool_routing.live_trial --help`。已有运行目录禁止重跑。只读复核：`python .runtime/laya-contract-live-20260926/audit.py`。
 
-证据：[冻结配置](../../.runtime/laya-contract-live-20260926/frozen.json) · [逐轮与账本审计](../../.runtime/laya-contract-live-20260926/audit.json) · [内容及错误对比](../../.runtime/laya-contract-live-20260926/trace-comparison.json) · Odoo 回读：[E01](../../.runtime/laya-contract-live-20260926/E01/after.json)、[E02](../../.runtime/laya-contract-live-20260926/E02/after.json)、[E03](../../.runtime/laya-contract-live-20260926/E03/after.json)。完整原请求、响应和审批记录位于同目录各案例 profile/data/runs 中。
+证据：[冻结配置](../../../.runtime/laya-contract-live-20260926/frozen.json) · [逐轮与账本审计](../../../.runtime/laya-contract-live-20260926/audit.json) · [内容及错误对比](../../../.runtime/laya-contract-live-20260926/trace-comparison.json) · Odoo 回读：[E01](../../../.runtime/laya-contract-live-20260926/E01/after.json)、[E02](../../../.runtime/laya-contract-live-20260926/E02/after.json)、[E03](../../../.runtime/laya-contract-live-20260926/E03/after.json)。完整原请求、响应和审批记录位于同目录各案例 profile/data/runs 中。

@@ -1,4 +1,5 @@
-"""Explicit model settings shared by the two desktop worker entry points."""
+"""Model and selector settings shared by desktop host and workers."""
+import os
 
 from erp_harness.providers.config import OpenAICompatibleProviderConfig, ProviderModelMetadata
 from erp_harness.providers.env import OpenAICompatibleConfig
@@ -29,3 +30,8 @@ def provider_config(base_url, model, provider_name, thinking):
         thinking_models=(model,), thinking_default=thinking,
         thinking_parameter="reasoning_effort", thinking_defaults={model: thinking},
     )
+
+
+def capability_router_config():
+    """Keep the historical environment alias at one boundary."""
+    return os.environ.get("ERP_CAPABILITY_ROUTER_CONFIG") or os.environ.get("ERP_OPENJEV_CONFIG")

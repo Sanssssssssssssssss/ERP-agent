@@ -34,7 +34,7 @@ from erp_harness.runtime.session import HarnessSession, SessionConfig
 
 from erp_harness.tools.router import native_tool_catalog, route_tools
 from erp_harness.app.request_receipts import RequestReceipts, _message_usage, _sum_usage_bucket
-from erp_harness.app.model_config import CONTEXT_WINDOW, MODEL_COMPAT, provider_config as _provider_config, transport_config
+from erp_harness.app.model_config import capability_router_config, CONTEXT_WINDOW, MODEL_COMPAT, provider_config as _provider_config, transport_config
 from erp_harness.app.business import completion_target_instruction, valid_target
 from erp_harness.context.projection import project_messages, project_read_history
 from erp_harness.erp.actions import NativeActions
@@ -377,7 +377,7 @@ async def run(args: argparse.Namespace) -> None:
     )
     receipt_start_number = receipts.number
     provider_class = OpenAICompatibleProvider
-    if (os.environ.get("ERP_CAPABILITY_ROUTER_CONFIG") or os.environ.get("ERP_OPENJEV_CONFIG")):
+    if capability_router_config():
         if tool_mode != "dynamic" or runtime_mode != "native":
             raise ValueError("Capability routing requires native dynamic tools")
         from erp_harness.app.capability_routing import CapabilityRoutingProvider
@@ -467,7 +467,7 @@ async def run(args: argparse.Namespace) -> None:
                     full_tools,
                     receipt_dir / "dynamic-tools.jsonl",
                     next_tool_sequence,
-                    host_owned=bool((os.environ.get("ERP_CAPABILITY_ROUTER_CONFIG") or os.environ.get("ERP_OPENJEV_CONFIG"))),
+                    host_owned=bool(capability_router_config()),
                 )
                 session_tools = list(dynamic_tools.tools)
             else:
@@ -525,7 +525,7 @@ async def run(args: argparse.Namespace) -> None:
                         tool_mode=tool_mode,
                         runtime_date=runtime_date,
                         runtime_timezone=runtime_now.strftime("UTC%z"),
-                        host_routing=bool((os.environ.get("ERP_CAPABILITY_ROUTER_CONFIG") or os.environ.get("ERP_OPENJEV_CONFIG"))),
+                        host_routing=bool(capability_router_config()),
                     ),
                     auto_compact_enabled=not budget_enabled,
                     # 关闭的是任务结束后的自动摘要。请求前和溢出恢复由 session 管理。
@@ -544,7 +544,7 @@ async def run(args: argparse.Namespace) -> None:
                 dynamic_log = receipt_dir / "dynamic-tools.jsonl"
                 # 工具集合的变更留到下一轮发布，避免同一轮请求与执行使用不同契约。
                 dynamic_tools.bind(session.stage_tools_for_next_turn)
-                if (os.environ.get("ERP_CAPABILITY_ROUTER_CONFIG") or os.environ.get("ERP_OPENJEV_CONFIG")):
+                if capability_router_config():
                     provider.bind_router(
                         dynamic_tools, actions.store, receipt_dir,
                         goal=args.instruction_file.read_text(encoding="utf-8"),
@@ -552,7 +552,7 @@ async def run(args: argparse.Namespace) -> None:
                         identity=native_runtime.identity_context(), world=world,
                     )
                 _restore_dynamic_selection(dynamic_tools, session, dynamic_log,
-                                           restore_history=not bool((os.environ.get("ERP_CAPABILITY_ROUTER_CONFIG") or os.environ.get("ERP_OPENJEV_CONFIG"))))
+                                           restore_history=not bool(capability_router_config()))
             try:
                 system_prompt_path = args.session_file.with_name(
                     "pi-agent-system-prompt.txt"

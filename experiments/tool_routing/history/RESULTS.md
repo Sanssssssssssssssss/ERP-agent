@@ -26,12 +26,12 @@
 
 评测池尚有覆盖缺口：实际可选工具调用的正例主要是actions，其余9组无实际调用正例；accounting和diagnostics分别有3次、1次历史配置请求。154个动态节点按业务家族留出；历史曾用于开发，不称全新未见集。主池只有1个纯能力配置响应，另13个配置响应同时读取业务，不能宣称省掉14轮。后续应补真实能力切换轨迹和稳定性验收，再考虑领域适配；当前不接入业务执行。
 
-复现源码：[构建历史池](build_cases.py)、[本地决策](laya_probe.py)、[格式诊断](format_probe.py)、[预先审阅规则](reviewed_cases.json)。
+复现源码：[构建历史池](../build_cases.py)、[本地决策](../laya_probe.py)、[格式诊断](../format_probe.py)、[预先审阅规则](../reviewed_cases.json)。
 
 完整本机证据：
 
-- [主池统计](../../.runtime/laya-routing-20260924/noul-v1/summary.json) · [逐节点决策](../../.runtime/laya-routing-20260924/noul-v1/predictions.jsonl) · [冻结问题与版本](../../.runtime/laya-routing-20260924/noul-v1/frozen.json)
-- [审阅节点统计](../../.runtime/laya-routing-20260924/reviewed-noul-v1/summary.json) · [格式诊断](../../.runtime/laya-routing-20260924/format-controls-v1/predictions.jsonl)
-- [来源与覆盖](../../.runtime/laya-routing-20260924/dataset/coverage.json) · [完整请求指针与哈希](../../.runtime/laya-routing-20260924/dataset/cases.jsonl) · [环境版本](../../.runtime/laya-routing-20260924/environment.txt)
-- [紧凑输入与实际可见token](../../.runtime/laya-routing-20260924/input-controls-v1/predictions.jsonl) · [语义题干对照](../../.runtime/laya-routing-20260924/semantic-controls-v1/predictions.jsonl)
-- [标签对照](../../.runtime/laya-routing-20260924/label-controls-v1/predictions.jsonl) · [官方示例/精度/选项顺序](../../.runtime/laya-routing-20260924/route-controls-v1/predictions.jsonl)；两个目录内各有独立runner与冻结输入。
+- [主池统计](../../../.runtime/laya-routing-20260924/noul-v1/summary.json) · [逐节点决策](../../../.runtime/laya-routing-20260924/noul-v1/predictions.jsonl) · [冻结问题与版本](../../../.runtime/laya-routing-20260924/noul-v1/frozen.json)
+- [审阅节点统计](../../../.runtime/laya-routing-20260924/reviewed-noul-v1/summary.json) · [格式诊断](../../../.runtime/laya-routing-20260924/format-controls-v1/predictions.jsonl)
+- [来源与覆盖](../../../.runtime/laya-routing-20260924/dataset/coverage.json) · [完整请求指针与哈希](../../../.runtime/laya-routing-20260924/dataset/cases.jsonl) · [环境版本](../../../.runtime/laya-routing-20260924/environment.txt)
+- [紧凑输入与实际可见token](../../../.runtime/laya-routing-20260924/input-controls-v1/predictions.jsonl) · [语义题干对照](../../../.runtime/laya-routing-20260924/semantic-controls-v1/predictions.jsonl)
+- [标签对照](../../../.runtime/laya-routing-20260924/label-controls-v1/predictions.jsonl) · [官方示例/精度/选项顺序](../../../.runtime/laya-routing-20260924/route-controls-v1/predictions.jsonl)；两个目录内各有独立runner与冻结输入。

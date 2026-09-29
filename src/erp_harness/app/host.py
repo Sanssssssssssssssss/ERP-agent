@@ -32,6 +32,7 @@ from typing import Any, Callable
 from .sale_view import business_detail, collect_documents, refresh_business as readback_business
 from .materials import MAX_FILES_PER_SESSION, parse_material, read_material_text
 from .storage import StateStore
+from .model_config import capability_router_config
 from .business import completion_target_instruction, default_target, valid_target
 from .worker import conversation_command, conversation_environment, child_environment, worker_command
 
@@ -952,7 +953,7 @@ class Workbench:
             session_file = self.store.root / "sessions" / run["business_id"] / "pi-agent-session.jsonl"
             evidence_file = instruction.with_name("task-sources.json")
             evidence_env = {"ODOO_TASK_EVIDENCE_FILE": str(evidence_file)} if evidence_file.exists() else {}
-            selector_path = os.environ.get('ERP_CAPABILITY_ROUTER_CONFIG')
+            selector_path = capability_router_config()
             if selector_path and json.loads(Path(selector_path).read_text(encoding='utf8')).get('backend') == 'laya':
                 from erp_harness.providers.selector_service import SelectorService
                 selector = self._selectors.get(run['id'])

@@ -29,6 +29,6 @@
 
 排除项：主模型当前不再暴露 configure/list 能力选择工具；Mem0 关闭；ERP 系统提示覆盖通用 Pi Coding prompt；session 的 context usage cache 是本地计数缓存，不是远端 KV。Laya 私有状态不直接拼入主模型历史；双份状态消费不能直接当作付费输入重复。
 
-代码定位：[发布与保留规则](../../src/erp_harness/app/capability_routing.py)、[工具顺序](../../src/erp_harness/tools/dynamic_tools.py)、[历史投射](../../src/erp_harness/context/projection.py)、[历史引用与持久化](../../src/erp_harness/context/world.py)、[worker 生命周期](../../src/erp_harness/app/runner.py)、[Laya 批量分类](../../src/erp_harness/providers/laya_worker.py)。
+代码定位：[发布与保留规则](../../../src/erp_harness/app/capability_routing.py)、[工具顺序](../../../src/erp_harness/tools/dynamic_tools.py)、[历史投射](../../../src/erp_harness/context/projection.py)、[历史引用与持久化](../../../src/erp_harness/context/world.py)、[worker 生命周期](../../../src/erp_harness/app/runner.py)、[Laya 批量分类](../../../src/erp_harness/providers/laya_worker.py)。
 
-复现：`.venv/Scripts/python.exe -X utf8 .runtime/laya-v7-ecosystem-audit-20260929/audit.py`。完整逐轮数据、runtime 增补、历史改写及排序回放见 [audit.json](../../.runtime/laya-v7-ecosystem-audit-20260929/audit.json)；原始请求保留在 [三题日志](../../.runtime/laya-host-live-20260926)。
+复现：`.venv/Scripts/python.exe -X utf8 .runtime/laya-v7-ecosystem-audit-20260929/audit.py`。完整逐轮数据、runtime 增补、历史改写及排序回放见 [audit.json](../../../.runtime/laya-v7-ecosystem-audit-20260929/audit.json)；原始请求保留在 [三题日志](../../../.runtime/laya-host-live-20260926)。

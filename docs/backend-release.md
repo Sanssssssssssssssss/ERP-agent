@@ -45,4 +45,4 @@ Frozen source checkpoint `backend-baseline-20260922-memory-off`: optional Mem0 a
 
 Offline checks establish mechanism coverage. Real business regression requires isolated Odoo runs with the source/configuration, logs, `reward.txt`, and `verifier_details.json` retained; two cases establish only those cases. Current run receipts belong with the release validation report, not the historical scores.
 
-Historical evidence remains indexed in [the lab entry point](history/README-lab.md) and [the stage reports](../experiments/README.md). Stage 7 acceptance applies to its recorded static native run, not every later dynamic-tool change.
+Historical evidence remains indexed in [the lab entry point](history/README-lab.md) and [the stage reports](../experiments/history/INITIAL_PLAN.md). Stage 7 acceptance applies to its recorded static native run, not every later dynamic-tool change.

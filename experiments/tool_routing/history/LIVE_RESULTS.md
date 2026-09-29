@@ -18,9 +18,9 @@ Laya 实际决策由上一轮 9 次增至 **57 次**：51 次稳定、6 次标�
 
 E01 增量伴随更多查询与推理历史：工具 schema 累计字符仅 +0.3%，重复 reasoning 字符 97,010→538,548，工具观察字符 257,518→474,851；字符不是 token 归因。E06 第 12 轮 Laya 撤下 actions 后，模型单独 configure 加回。输入、发布和兜底已可核验，但冗余 configure、工具切换和字段/参数探索仍存在，不能宣称全面替代原编排或节省费用。E01 超过 20% token 阈值，列为待审。
 
-真实问题已冻结为 [R04：重复 configure](../../.runtime/laya-live-v2-20260926/R04/manifest.json)、[R05：工具撤下再加回](../../.runtime/laya-live-v2-20260926/R05/manifest.json)，未追加 API 对照；原 R03 的关系命令参数错误本轮再次被校验挡住并纠正。
+真实问题已冻结为 [R04：重复 configure](../../../.runtime/laya-live-v2-20260926/R04/manifest.json)、[R05：工具撤下再加回](../../../.runtime/laya-live-v2-20260926/R05/manifest.json)，未追加 API 对照；原 R03 的关系命令参数错误本轮再次被校验挡住并纠正。
 
-[完整汇总及逐请求用量](../../.runtime/laya-live-v2-20260926/results.json) · [SALE](../../.runtime/laya-live-v2-20260926/SALE/after.json) · [E01](../../.runtime/laya-live-v2-20260926/E01/after.json) · [E06](../../.runtime/laya-live-v2-20260926/E06/after.json) · [接入审计](../../.runtime/laya-integrated-20260926/audit-review/candidate-review.md) · [最终证据审计](../../.runtime/laya-integrated-20260926/audit-review/final-evidence-review.md) · [输入回放](../../.runtime/laya-integration-v2-20260926/validation-schema/summary.json)
+[完整汇总及逐请求用量](../../../.runtime/laya-live-v2-20260926/results.json) · [SALE](../../../.runtime/laya-live-v2-20260926/SALE/after.json) · [E01](../../../.runtime/laya-live-v2-20260926/E01/after.json) · [E06](../../../.runtime/laya-live-v2-20260926/E06/after.json) · [接入审计](../../../.runtime/laya-integrated-20260926/audit-review/candidate-review.md) · [最终证据审计](../../../.runtime/laya-integrated-20260926/audit-review/final-evidence-review.md) · [输入回放](../../../.runtime/laya-integration-v2-20260926/validation-schema/summary.json)
 
 回退：清除 worker 的 `ERP_LAYA_MODEL`、`ERP_LAYA_PYTHON` 即恢复默认编排；改动前提交 `60232c8` 保留。运行前后源码哈希一致，旧日志和数据库未覆盖。
 
@@ -40,15 +40,15 @@ E01 增量伴随更多查询与推理历史：工具 schema 累计字符仅 +0.3
 
 Laya 每条只参与前三轮：共 9 次决策及发布；之后三条均由主模型 configure 接管。E01 第三轮预发布 actions，其余八次保留基础工具。每次决策含两次本地标签一致性推理，无付费裁判。此次验证证明这三个业务及兜底可运行，不能证明全面替换编排或减少调用。
 
-仍有两处观察：E01 在已发布 actions 后重复 configure；E06 明细删除参数一次不合法，校验拒绝后自行修正。已冻结真实截面 [R02](../../.runtime/laya-integrated-20260926/R02/manifest.json)、[R03](../../.runtime/laya-integrated-20260926/R03/manifest.json)，未追加 API 对照。E06 的 83 次工具调用中，42 次读记录、8 次查字段；本轮未调整业务执行策略。
+仍有两处观察：E01 在已发布 actions 后重复 configure；E06 明细删除参数一次不合法，校验拒绝后自行修正。已冻结真实截面 [R02](../../../.runtime/laya-integrated-20260926/R02/manifest.json)、[R03](../../../.runtime/laya-integrated-20260926/R03/manifest.json)，未追加 API 对照。E06 的 83 次工具调用中，42 次读记录、8 次查字段；本轮未调整业务执行策略。
 
-SALE 首次启动有 4 次 ConnectError，无有效模型回复、无业务工具执行。保留未知用量；检查数据库未变后，在新 profile 手动续跑并通过。网络故障没有复现出确定原因，[原证据](../../.runtime/laya-integrated-20260926/SALE/)与[恢复记录](../../.runtime/laya-integrated-20260926/network-recovery/infrastructure-recovery.json)完整保留。未自动重复失败业务。
+SALE 首次启动有 4 次 ConnectError，无有效模型回复、无业务工具执行。保留未知用量；检查数据库未变后，在新 profile 手动续跑并通过。网络故障没有复现出确定原因，[原证据](../../../.runtime/laya-integrated-20260926/SALE)与[恢复记录](../../../.runtime/laya-integrated-20260926/network-recovery/infrastructure-recovery.json)完整保留。未自动重复失败业务。
 
 相关离线检查 146 passed、35 subtests passed；加强后的真实会话发布测试 3 passed。覆盖同轮工具可见与可执行一致、审批重启后主模型接管、未决写入保护及路由失败兜底。两项变更同时发生（V4.1 与 Laya），历史 token 差异不作因果结论；未将含人工审批等待的墙钟时间当模型速度。
 
-启用与回退见 [README](README.md)：接入默认关闭，清除 worker 的 `ERP_LAYA_MODEL`、`ERP_LAYA_PYTHON` 即恢复原编排。代码在 `1860b55`，依赖、权重和完整日志留在本机忽略目录。
+启用与回退见 [README](README-20260929.md)：接入默认关闭，清除 worker 的 `ERP_LAYA_MODEL`、`ERP_LAYA_PYTHON` 即恢复原编排。代码在 `1860b55`，依赖、权重和完整日志留在本机忽略目录。
 
-[汇总与证据哈希](../../.runtime/laya-integrated-20260926/results.json) · [SALE 回读](../../.runtime/laya-integrated-20260926/network-recovery/SALE/after.json) · [E01 回读](../../.runtime/laya-integrated-20260926/E01/after.json) · [E06 回读](../../.runtime/laya-integrated-20260926/E06/after.json)
+[汇总与证据哈希](../../../.runtime/laya-integrated-20260926/results.json) · [SALE 回读](../../../.runtime/laya-integrated-20260926/network-recovery/SALE/after.json) · [E01 回读](../../../.runtime/laya-integrated-20260926/E01/after.json) · [E06 回读](../../../.runtime/laya-integrated-20260926/E06/after.json)
 
 历史对照审计：三条输入目标与岗位一致；SALE/E01 参考 9 月 24 日，E06 参考 9 月 22 日。旧模型为 V4 Flash，后端版本也有差异，不能单独归因于模型或 Laya。
 
@@ -66,4 +66,4 @@ Laya 实际九个输入为 927–2,347 token，未超窗。输入含完整目标
 
 下一步只需局部验证：同步实际发布状态与主模型指令，避免仍要求重复 configure；区分正常选择与确有失败的兜底接管；给真实前缀补明确的预加载偏好，训练和推理使用同一投射。保持现有审批和未决写入保护。本次未修改后端或权重。
 
-[逐项对照](../../.runtime/laya-integrated-20260926/input-audit/comparison.json) · [输入敏感性](../../.runtime/laya-integrated-20260926/input-audit/sensitivity.json) · [单因素检查](../../.runtime/laya-integrated-20260926/input-audit/factor-check.json) · [Laya 实际输入](../../.runtime/laya-integrated-20260926/input-audit/)
+[逐项对照](../../../.runtime/laya-integrated-20260926/input-audit/comparison.json) · [输入敏感性](../../../.runtime/laya-integrated-20260926/input-audit/sensitivity.json) · [单因素检查](../../../.runtime/laya-integrated-20260926/input-audit/factor-check.json) · [Laya 实际输入](../../../.runtime/laya-integrated-20260926/input-audit)

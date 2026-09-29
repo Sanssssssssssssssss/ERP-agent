@@ -27,7 +27,7 @@ from erp_harness.context.projection import expand_lossless_tables
 from erp_harness.context.world import WorldStore
 from erp_harness.context.world_tools import build_world_tools
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 
 
 class BaselineFixTest(unittest.TestCase):

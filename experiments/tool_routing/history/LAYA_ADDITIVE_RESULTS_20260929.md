@@ -16,6 +16,6 @@
 
 三个真实日期节点已冻结完整请求及候选：MD01 规划、MD02 错误恢复、MD03 历史成功保护。仅替换生产 builder 生成的制造 SOP 步骤，逆替换还原原请求；模型行为尚未付费验证。
 
-配置：[config.json](../../.runtime/laya-additive-20260929/config.json)。原 bundle 未改；旧配置有源码哈希校验，当前源码应配新配置。回退原件：[before](../../.runtime/laya-additive-20260929/before)。证据：[GPU 回放](../../.runtime/laya-additive-20260929/gpu-replay/summary.json)、[日期节点](../agent_regression/manufacturing_dates.json)。
+配置：[config.json](../../../.runtime/laya-additive-20260929/config.json)。原 bundle 未改；旧配置有源码哈希校验，当前源码应配新配置。回退原件：[before](../../../.runtime/laya-additive-20260929/before)。证据：[GPU 回放](../../../.runtime/laya-additive-20260929/gpu-replay/summary.json)、[日期节点](../../agent_regression/manufacturing_dates.json)。
 
 复现：`.venv/Scripts/python.exe -m experiments.tool_routing.laya_additive_replay --trial .runtime/laya-prefix-live-20260929 --config .runtime/laya-additive-20260929/config.json --output <新的本机目录>`。这只运行本地 GPU，不执行 ERP 工具。

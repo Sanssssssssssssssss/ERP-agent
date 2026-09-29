@@ -1,4 +1,4 @@
-"""Opt-in OpenJev publication with runtime-owned dependencies and recovery."""
+"""Opt-in capability publication with runtime-owned dependencies and recovery."""
 from __future__ import annotations
 
 import asyncio
@@ -11,6 +11,7 @@ import sys
 import time
 import uuid
 
+from erp_harness.app.model_config import capability_router_config
 from erp_harness.erp.store import ActionStore
 from erp_harness.providers.openai_compatible import OpenAICompatibleProvider, _build_chat_payload
 from erp_harness.runtime.provider import provider_request_kind
@@ -56,7 +57,7 @@ class CapabilityRoutingProvider(OpenAICompatibleProvider):
     """Update the actual turn tool list before building or sending its request."""
 
     def bind_router(self, controller, store, directory: Path, *, goal=None, stage=None, identity=None, world=None) -> None:
-        self.selector_config = os.environ.get("ERP_CAPABILITY_ROUTER_CONFIG") or os.environ.get("ERP_OPENJEV_CONFIG")
+        self.selector_config = capability_router_config()
         self.selector = json.loads(Path(self.selector_config).read_text(encoding='utf8')) if self.selector_config else {}
         self.backend = self.selector.get('backend', 'openjev')
         if self.backend not in {'openjev', 'laya'}:

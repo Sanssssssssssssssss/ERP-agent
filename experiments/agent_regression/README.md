@@ -1,8 +1,8 @@
 # 单次决策回归
 
-Laya 接入审查新增真实前缀 E01/5、E02/26、E03/21、E03/33：冻结原输入及 state 哈希，保留 E03 银行分录被投射省略的问题；只有本地选择器对照，未追加付费调用。主模型历史业务成功不等于 Laya 原始发布正确，[审查及局部结果](../tool_routing/INTEGRATION_REVIEW.md)。
+Laya 接入审查新增真实前缀 E01/5、E02/26、E03/21、E03/33：冻结原输入及 state 哈希，保留 E03 银行分录被投射省略的问题；只有本地选择器对照，未追加付费调用。主模型历史业务成功不等于 Laya 原始发布正确，[审查及局部结果](../tool_routing/history/INTEGRATION_REVIEW.md)。
 
-E01／E02／E03 完整业务新增真实节点：[R09 复现](../../.runtime/laya-contract-live-20260926/R09-recurrence/)、[R11 制造旧字段](../../.runtime/laya-contract-live-20260926/R11/)、[R12 猜子记录 ID](../../.runtime/laya-contract-live-20260926/R12/)、[R13 空查询条件](../../.runtime/laya-contract-live-20260926/R13/)、[R14 未设投产数量](../../.runtime/laya-contract-live-20260926/R14/)、[R15 提前完工](../../.runtime/laya-contract-live-20260926/R15/)、[R16 不存在的工具](../../.runtime/laya-contract-live-20260926/R16/)、[R17 缺 SOP 输入](../../.runtime/laya-contract-live-20260926/R17/)、[R18 财务旧字段](../../.runtime/laya-contract-live-20260926/R18/)。已保存完整出错／首次纠正请求、响应、哈希及业务约束，未追加付费重放，尚未预防性修复。R12 的上游诱因仍需验证。[完整业务与成本对比](../tool_routing/CONTRACT_RESULTS.md)
+E01／E02／E03 完整业务新增真实节点：[R09 复现](../../.runtime/laya-contract-live-20260926/R09-recurrence/)、[R11 制造旧字段](../../.runtime/laya-contract-live-20260926/R11/)、[R12 猜子记录 ID](../../.runtime/laya-contract-live-20260926/R12/)、[R13 空查询条件](../../.runtime/laya-contract-live-20260926/R13/)、[R14 未设投产数量](../../.runtime/laya-contract-live-20260926/R14/)、[R15 提前完工](../../.runtime/laya-contract-live-20260926/R15/)、[R16 不存在的工具](../../.runtime/laya-contract-live-20260926/R16/)、[R17 缺 SOP 输入](../../.runtime/laya-contract-live-20260926/R17/)、[R18 财务旧字段](../../.runtime/laya-contract-live-20260926/R18/)。已保存完整出错／首次纠正请求、响应、哈希及业务约束，未追加付费重放，尚未预防性修复。R12 的上游诱因仍需验证。[完整业务与成本对比](../tool_routing/history/CONTRACT_RESULTS.md)
 
 R09／R10：来自 E01 的旧库存字段试错及重复 preview，[冻结节点](../../.runtime/laya-contracts-20260926/)。`python -m experiments.agent_regression.contract_recovery --output <新目录>` 生成真实 SOP／工具契约候选；加 `--paid` 对 R07、R09、R03 各发一次请求，不执行返回工具。首次结果：R07／R09 避开原错误，R03 仍输出两项删除命令；后者改由共享预检在审批前规范化，非法命令继续拒绝。[原始响应](../../.runtime/laya-contract-nodes-20260926/)。R08 已补退货明细身份预检，真实 Odoo 局部检查确认缺产品拒绝、正确绑定接受；不宣称覆盖任意模型的所有缺省字段。
 
@@ -22,7 +22,7 @@ R04／R06 接口整理复测（`b2f7a1f`）：R04 原样再次重复 configure�
 
 R04／R05／R06 宿主独占编排实验：`python -m experiments.agent_regression.host_routing freeze --output <新目录>`，随后同目录执行 `paid`。真实 Laya 决策＋真实 controller 生成候选，主模型不再看到目录／配置入口及其历史调用；当前 run 的成功 SOP 回执提供工具依赖。三节点 A/B 各一次，共 6 POST，返回工具不执行。输入和约束见 [冻结记录](../../.runtime/laya-exclusive-nodes-20260926/frozen.json)。依赖兜底单独计数，不算 Laya 原始预测正确。回退点 `724a1c9`。
 
-上述候选三个节点的目标／安全检查通过，R04 仍有额外 preview；三个完整业务也通过。结果见 [宿主编排实验](../tool_routing/EXCLUSIVE_RESULTS.md)。
+上述候选三个节点的目标／安全检查通过，R04 仍有额外 preview；三个完整业务也通过。结果见 [宿主编排实验](../tool_routing/history/EXCLUSIVE_RESULTS.md)。
 
 R07：本轮 SALE 请求 2 将 SOP 操作写成 `write+confirm`，请求 3 自行修正；[原请求、首次纠正节点及哈希](../../.runtime/laya-exclusive-20260926/R07/manifest.json)。R08：E06 请求 11 的嵌套退货明细缺 `product_id`，预检未提示，请求 12 的创建被 Odoo 拒绝并记为 `known_failed`；请求 13 补字段重新预检，[证据](../../.runtime/laya-exclusive-20260926/R08/manifest.json)。二者已归档，未追加付费重放、未宣称预防性修复完成。
 

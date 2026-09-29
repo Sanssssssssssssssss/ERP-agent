@@ -41,3 +41,16 @@ def test_service_survives_separate_clients_and_closes_with_host(tmp_path, monkey
     assert service.process.poll() == 0
     assert not (tmp_path / 'routing/service.stderr.log').read_text()
     service.close()  # Terminalization and host close may both clean up.
+
+
+def test_selector_config_alias_and_precedence(monkeypatch):
+    from erp_harness.app.model_config import capability_router_config
+    monkeypatch.delenv('ERP_CAPABILITY_ROUTER_CONFIG', raising=False)
+    monkeypatch.delenv('ERP_OPENJEV_CONFIG', raising=False)
+    assert capability_router_config() is None
+    monkeypatch.setenv('ERP_OPENJEV_CONFIG', 'legacy.json')
+    assert capability_router_config() == 'legacy.json'
+    monkeypatch.setenv('ERP_CAPABILITY_ROUTER_CONFIG', 'laya.json')
+    assert capability_router_config() == 'laya.json'
+    monkeypatch.setenv('ERP_CAPABILITY_ROUTER_CONFIG', '')
+    assert capability_router_config() == 'legacy.json'

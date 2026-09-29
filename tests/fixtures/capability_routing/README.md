@@ -41,4 +41,4 @@
 .runtime/laya-routing-20260924/venv/Scripts/python.exe -m experiments.tool_routing.train_decider --dataset .runtime/capability-dataset-new --output .runtime/capability-scorer-new --max-len 4096 --allow-reference-labels
 ```
 
-历史下一工具仅是覆盖参考；`training_eligible` 表示材料可恢复、工具结果明确，不代表当时的业务选择正确。未来新增案例仍先审最早决策点，再补允许行为。详见[调优结果](../../../experiments/tool_routing/TUNING.md)。
+历史下一工具仅是覆盖参考；`training_eligible` 表示材料可恢复、工具结果明确，不代表当时的业务选择正确。未来新增案例仍先审最早决策点，再补允许行为。详见[调优结果](../../../experiments/tool_routing/history/TUNING.md)。

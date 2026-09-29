@@ -1,6 +1,6 @@
 # 前缀稳定与 Laya 生命周期修复
 
-**前缀检查通过；真实业务 E01、E03 通过，E02 未通过。候选尚未整体验收。** 回退原件：[before](../../.runtime/laya-prefix-fix-20260929/before)。
+**前缀检查通过；真实业务 E01、E03 通过，E02 未通过。候选尚未整体验收。** 回退原件：[before](../../../.runtime/laya-prefix-fix-20260929/before)。
 
 - 基础工具和恢复入口固定前置；动态能力置后，schema 与 dispatcher 共用同一集合。
 - 未决写入保留 actions、SOP 和恢复依赖，不再冻结上一轮所有能力。
@@ -12,13 +12,13 @@
 
 大幅重写问题定义的候选未采用：多选从 5 增至 16。最终仅反转可选组的“基础工具替代不排除启用”规则；动作组与训练状态保持原样。138 个状态的已知标签结果全部不变，累计开放组数 350→283。133 个已知判断含 5 个漏选、5 个多选；宿主依赖与恢复机制仍需保留。旧标签衡量能力可用性，不能当作唯一业务路径。
 
-真实 GPU 接入：两个 provider 生命周期共享一个已加载模型，选择与回放一致，关闭无 stderr 异常。启动约 7.8 秒；业务内审批不再重复支付此加载时间。完整证据：[服务验证](../../.runtime/laya-prefix-fix-20260929/service-smoke-final/result.json)、[最终问题对照](../../.runtime/laya-prefix-fix-20260929/base-first/summary.json)。
+真实 GPU 接入：两个 provider 生命周期共享一个已加载模型，选择与回放一致，关闭无 stderr 异常。启动约 7.8 秒；业务内审批不再重复支付此加载时间。完整证据：[服务验证](../../../.runtime/laya-prefix-fix-20260929/service-smoke-final/result.json)、[最终问题对照](../../../.runtime/laya-prefix-fix-20260929/base-first/summary.json)。
 
 已有读取外置阶段仍会转换历史消息；本轮去除无意义的重复改写。工具数组稳定前置不能保证网关的最终 prompt 排列；实际收益以缓存用量与业务结果为准。
 
 重复构造 payload／扫描日志尚无耗时瓶颈证据，先新增分项计时，未重写这条链路。
 
-证据：[历史回放](../../.runtime/laya-prefix-fix-20260929/prefix-replay/summary.json)、[子集一致性](../../.runtime/laya-prefix-fix-20260929/subset-parity.json)、[GPU 对照](../../.runtime/laya-prefix-fix-20260929/scratch-check)、[观察到的故障节点](../../tests/fixtures/capability_routing/laya_prefix_failures.json)。新业务副本：[laya-prefix-live-20260929](../../.runtime/laya-prefix-live-20260929)。
+证据：[历史回放](../../../.runtime/laya-prefix-fix-20260929/prefix-replay/summary.json)、[子集一致性](../../../.runtime/laya-prefix-fix-20260929/subset-parity.json)、[GPU 对照](../../../.runtime/laya-prefix-fix-20260929/scratch-check)、[观察到的故障节点](../../../tests/fixtures/capability_routing/laya_prefix_failures.json)。新业务副本：[laya-prefix-live-20260929](../../../.runtime/laya-prefix-live-20260929)。
 
 三题各运行一次，未付费重跑。对照为上一轮 v7、同题独立快照；单次比较不能证明因果。
 
@@ -44,4 +44,4 @@ E02 结论更正：模型在第 40 轮未来开工拦截后，混淆预测／实
 
 真实故障截面已留档：E01 字段错误后自行纠正，E02 时间语义混淆及审批干预待复核。未增加合成题或修改预期答案。下一步应先用这两个截面做局部修复验证，再申请需要的付费重跑，不能直接晋级候选。
 
-完整证据：[三题统计](../../.runtime/laya-prefix-live-20260929/comparison.json)、[E02 来源核对](../../.runtime/laya-prefix-live-20260929/E02/failure-evidence.json)、[真实故障索引](../../tests/fixtures/capability_routing/laya_prefix_failures.json)。回退原件与原 v7 bundle 已保留。
+完整证据：[三题统计](../../../.runtime/laya-prefix-live-20260929/comparison.json)、[E02 来源核对](../../../.runtime/laya-prefix-live-20260929/E02/failure-evidence.json)、[真实故障索引](../../../tests/fixtures/capability_routing/laya_prefix_failures.json)。回退原件与原 v7 bundle 已保留。
