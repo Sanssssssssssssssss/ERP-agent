@@ -604,13 +604,32 @@ def arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def load_business_context():
+    """An absent host handoff is different from an explicitly unscoped chat."""
+    path = os.environ.get("ERP_CONVERSATION_BUSINESS")
+    expected = os.environ.get("ERP_CONVERSATION_BUSINESS_ID", "")
+    try:
+        context = json.loads(Path(path).read_text(encoding="utf-8")) if path else None
+        if not isinstance(context, dict):
+            raise ValueError("missing context")
+        if expected and context.get("business_id") != expected and context.get("success") is not False:
+            raise ValueError("business mismatch")
+        if context.get("business_id") and context.get("session_id") != os.environ.get("PI_AGENT_SESSION_ID"):
+            raise ValueError("session mismatch")
+        return context
+    except (OSError, ValueError, TypeError):
+        return {"success": False, "status": "unavailable", "reason_code": "business_context_unavailable",
+                "business_id": expected or None, "business_status": "unknown", "retry_safe": False,
+                "next_action": "restart_workbench_then_read_status",
+                "error": "The host-to-worker business context is missing or invalid. This is an internal handoff failure, not a user selection mistake. Preserve the task, restart the workbench when idle, then recheck. Never restart the business, resend, or claim a business outcome from this error."}
+
+
 async def run(args: argparse.Namespace) -> None:
     global _SOURCE_MESSAGES, _TASK_ENTITIES, _BUSINESS_CONTEXT
     _TASK_ENTITIES = None
     source_file = os.environ.get("ERP_CONVERSATION_SOURCES")
     _SOURCE_MESSAGES = json.loads(Path(source_file).read_text(encoding="utf-8")) if source_file else []
-    status_file = os.environ.get("ERP_CONVERSATION_BUSINESS")
-    _BUSINESS_CONTEXT = json.loads(Path(status_file).read_text(encoding="utf-8")) if status_file else None
+    _BUSINESS_CONTEXT = load_business_context()
     api_key = os.environ.get("LLM_API_KEY")
     base_url = os.environ.get("LLM_BASE_URL", "").rstrip("/")
     model = os.environ.get("LLM_MODEL")

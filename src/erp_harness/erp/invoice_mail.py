@@ -136,8 +136,11 @@ def verify(runtime, payload, evidence, *, historical=False):
     sent = bool(matches) and all(m["notification"].get("notification_status") == "sent" for m in matches)
     if not historical:
         sent = sent and len(matches) == 1
+    delivery_failed = bool(matches) and all(m["notification"].get("notification_status") in {"exception", "bounce", "canceled"} for m in matches)
     return {"status": "satisfied" if sent else "no_match" if historical and not matches else "unconfirmed", "evidence": {
-        "delivery": "smtp_accepted" if sent else "unconfirmed", "invoice_id": evidence["invoice"]["id"],
+        "delivery": "smtp_accepted" if sent else "failed" if delivery_failed else "unconfirmed",
+        "message_created": bool(matches), "retry_safe": False,
+        "next_action": "inspect_mail_failure_then_reconcile_existing_message" if delivery_failed else "read_status", "invoice_id": evidence["invoice"]["id"],
         "recipient_id": evidence["recipient"]["id"], "email_to": evidence["email_to"], "messages": matches,
         **({"scope": "current_role_visible_history; no match is not proof that no delivery ever occurred"} if historical else {}),
         "notice": "SMTP acceptance does not prove recipient opening or reading."}}

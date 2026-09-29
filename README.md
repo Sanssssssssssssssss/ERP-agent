@@ -1,6 +1,6 @@
 # ERP-agent
 
-[Long-term memory](docs/long-term-memory.md) · [Persistent Odoo demo](experiments/demo_odoo/README.md)
+[Long-term memory](docs/long-term-memory.md) · [Persistent Odoo demo](experiments/demo_odoo/README.md) · [Tests by capability](TESTING.md)
 
 Native ERP Agent Harness
 
@@ -10,15 +10,15 @@ English · [简体中文](README.zh-CN.md)
 
 ERP-agent drafts proposed Odoo business actions, requests approval before writes, and checks the resulting records. The repository contains the Windows desktop workbench, its native Odoo 19 runtime, and the ERP-Bench research harness behind it.
 
-**Windows preview · v0.5.4 · Odoo 19**
+**Windows preview · v0.6.0 · Odoo 19**
 
 ![ERP-agent](docs/media/hero.svg)
 
-## Windows preview (0.5.4)
+## Windows preview (0.6.0)
 
-[Download the unsigned Windows preview](https://github.com/Sanssssssssssssssss/ERP-agent/releases/download/v0.5.4/Odoo-Workbench-0.5.4-windows-x64.zip) · [Release notes](https://github.com/Sanssssssssssssssss/ERP-agent/releases/tag/v0.5.4)
+[Download the unsigned Windows preview](https://github.com/Sanssssssssssssssss/ERP-agent/releases/download/v0.6.0/Odoo-Workbench-0.6.0-windows-x64.zip) · [Release notes](https://github.com/Sanssssssssssssssss/ERP-agent/releases/tag/v0.6.0)
 
-1. Download and unzip the archive, then run `Odoo-Workbench-0.5.4-portable.exe`.
+1. Download and unzip the archive, then run `Odoo-Workbench-0.6.0-portable.exe`.
 2. Open connection settings and provide your Odoo 19 and model configuration.
 3. Create a session, describe the business, and optionally attach a CSV/TXT file.
 
@@ -62,7 +62,7 @@ The current workbench business projections cover `sale_invoice`, `sale_purchase_
 
 The [standard validation enterprise](experiments/enterprise_validation/README.md) provides an isolated Chinese/CNY Odoo company pair, role accounts, and 10,000 source documents. See its [acceptance ledger](docs/enterprise-validation.md) for actual results and remaining gates. Long-term memory defaults to off.
 
-The desktop worker uses `native` execution with `dynamic` tools, `controlled` SOPs, and `record` world state. This source tree combines the desktop baseline with newer benchmark backend changes; the v0.5.4 download above is the earlier published preview. See [backend integration and validation boundaries](docs/backend-release.md) for the pinned inputs and offline checks. Benchmark `TaskEvidence` requires explicit host configuration and is not enabled by the desktop worker.
+The desktop worker uses `native` execution with `dynamic` tools, `controlled` SOPs, and `record` world state. The v0.6.0 package includes the integrated backend and interrupted-business recovery. The desktop host supplies the confirmed task evidence; writes remain subject to approval and readback. See [release notes](docs/release-0.6.0.md) and [backend validation boundaries](docs/backend-release.md).
 
 ## Quick start: Windows development
 

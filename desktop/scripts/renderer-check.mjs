@@ -115,10 +115,14 @@ const bridgeScript = String.raw`
           await wait(params.session_id === 'session-a' ? 220 : 12)
           return sessionDetails[params.session_id]
         }
-        if (method === 'get_business' || method === 'refresh_business') {
+        if (method === 'get_business' || method === 'refresh_business' || method === 'reconcile_business') {
           const id = params.business_id
           await wait(id === 'business-b1' ? 180 : 12)
           const result = details(sessions.flatMap((item) => item.businesses).find((item) => item.id === id))
+          if (id === 'business-b3' && window.__recoveryResolved) {
+            result.runs[1].status = 'interrupted'; result.business = { ...b3, status: 'interrupted' }
+            result.approvals = result.approvals.map(row => ({ ...row, status: 'verified' }))
+          }
           if (id === 'business-b2' && !window.__businessBusy) { result.runs[1].status = 'completed'; result.approvals = []; result.business = { ...result.business, status: 'completed' } }
           if (id === 'business-b4') {
             result.receipts = [
@@ -223,6 +227,7 @@ const bridgeScript = String.raw`
           return { ok: true, run_id: 'conversation-run-b' }
         }
         if (method === 'start_run') return { id: params.business_id + '-started-run', business_id: params.business_id, session_id: params.session_id, status: 'running', tool_count: 0, model_rounds: 0, elapsed_seconds: 0 }
+        if (method === 'resume_run') return { id: params.run_id, business_id: params.business_id, session_id: params.session_id, status: 'running', tool_count: 0, model_rounds: 0, elapsed_seconds: 0 }
         if (method === 'cancel_conversation') {
           sessionDetails['session-b'].conversation_runs[0].status = 'cancel_requested'
           window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', run_id: params.run_id, run_status: 'cancel_requested' } })
@@ -886,6 +891,9 @@ await page.locator('.goal-details').getByText(fullB3Goal, { exact: true }).waitF
 const currentActivity = await page.locator('.activity-card').textContent()
 assert.ok(currentActivity?.includes('写入结果待核对'))
 assert.equal(await page.getByRole('button', { name: /开始执行|继续执行|重新执行/ }).count(), 0)
+await page.getByRole('button', { name: '核对当前状态', exact: true }).click()
+await page.waitForFunction(() => window.__bridgeCalls.some(({ method }) => method === 'reconcile_business'))
+assert.equal(await page.getByRole('button', { name: '继续剩余步骤', exact: true }).count(), 0)
 await page.getByRole('tab', { name: /^运行详情/ }).click()
 await page.locator('.trace-toolbar select').selectOption('business-b3-old-run')
 await page.locator('.trace-page .loading-line').waitFor({ state: 'hidden' })
@@ -1181,6 +1189,16 @@ const revisionCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ m
 assert.equal(revisionCalls.length, 2)
 assert.deepEqual(revisionCalls[1].params, { session_id: 'session-b', business_id: 'business-b2', run_id: 'business-b2-run', action_id: 'action-b2', text: '数量改为 5 件，先保留草稿。' })
 assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => ['send_message', 'start_run', 'decide_approval'].includes(method)).length), executionsBeforeRevision)
+// After reconciliation, continue the original run even when viewing an older trace.
+await page.evaluate(() => { window.__recoveryResolved = true })
+await page.getByRole('tab', { name: /Business B3/ }).click()
+await page.getByRole('tab', { name: /^执行台/ }).click()
+await page.getByRole('button', { name: '继续剩余步骤', exact: true }).click()
+await page.waitForFunction(() => window.__bridgeCalls.some(({ method }) => method === 'resume_run'))
+assert.deepEqual(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'resume_run').map(x => x.params)),
+  [{ session_id: 'session-b', business_id: 'business-b3', run_id: 'business-b3-run' }])
+await page.getByRole('tab', { name: /Business B2/ }).click()
+await page.getByRole('heading', { name: 'Business B2', exact: true }).waitFor()
 assert.equal(pageErrors.length, 0, pageErrors.join('\n'))
 
 const calls = await page.evaluate(() => window.__bridgeCalls.map(({ method }) => method))

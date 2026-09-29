@@ -243,6 +243,7 @@ const SAFE_LOCAL_ERROR_MESSAGES: Record<string, string> = {
   "VALUEERROR\u0000审批已过期，请先结束旧运行，再重新提出需求。": "审批已过期，请先结束旧运行，再重新提出需求。",
   "VALUEERROR\u0000approval scope is invalid": "当前审批已变化，请读取最新状态。",
   "VALUEERROR\u0000action scope or state is invalid": "当前动作已变化，请读取最新状态。",
+  "RUNTIMEERROR\u0000Backend source changed; restart the workbench before continuing": "后端已更新，请关闭并重新打开工作台，再核对当前业务；不要重新创建业务。",
   "RUNTIMEERROR\u0000business is blocked by an unresolved write; refresh and reconcile first": "存在结果不确定的写入，请先核对实际落库状态。",
   "VALUEERROR\u0000content_base64 is required": "材料内容为空，请重新选择文件。",
   "VALUEERROR\u0000content_base64 is invalid": "材料编码无效，请重新选择文件。",

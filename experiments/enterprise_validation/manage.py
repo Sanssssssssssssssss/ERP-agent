@@ -83,7 +83,32 @@ def seed(count, log):
     (RUN / "fixtures.json").write_text(json.dumps(result.pop("fixtures"), ensure_ascii=False, indent=2), encoding="utf-8")
     (RUN / "seed-report.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     compose("up", "-d", "odoo", stdout=log, stderr=log)
+    configure_mail(log)
     print(json.dumps(result, ensure_ascii=False))
+
+
+def configure_mail(log):
+    """Deliver simulated company mail to a persistent local inbox."""
+    compose("up", "-d", "--no-deps", "mailpit", stdout=log, stderr=log)
+    result = shell("""import json
+assert env.cr.dbname == 'erp_harness_enterprise_v1'
+servers = env['ir.mail_server'].with_context(active_test=False)
+server = servers.search([('name','=','Enterprise local test inbox')])
+assert len(server) <= 1, 'Duplicate test mail servers require inspection'
+values = {'name':'Enterprise local test inbox', 'smtp_host':'mailpit', 'smtp_port':1025,
+          'smtp_encryption':'none', 'smtp_authentication':'login', 'smtp_user':False,
+          'smtp_pass':False, 'from_filter':False, 'sequence':1, 'active':True}
+if server:
+    server.write(values)
+else:
+    server = servers.create(values)
+server.test_smtp_connection()
+env.cr.commit()
+print('ENTERPRISE_RESULT='+json.dumps({'server_id':server.id,'smtp':'mailpit:1025',
+ 'inbox':'http://127.0.0.1:18080','external_delivery':False}))
+""")
+    (RUN / 'mail-configuration.json').write_text(json.dumps(result, indent=2), encoding='utf8')
+    print(json.dumps(result))
 
 
 def snapshot(name, restore, log):
@@ -137,7 +162,7 @@ def snapshot(name, restore, log):
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["seed", "status", "snapshot", "restore"])
+    parser.add_argument("command", choices=["seed", "status", "snapshot", "restore", "mail"])
     parser.add_argument("--source-count", type=int, choices=[100, 10000], default=100)
     parser.add_argument("--name", default="baseline-100")
     args = parser.parse_args()
@@ -148,6 +173,8 @@ def main():
         if args.command == "seed":
             bootstrap(log)
             seed(args.source_count, log)
+        elif args.command == "mail":
+            configure_mail(log)
         elif args.command == "status":
             compose("ps")
             if (RUN / "seed-report.json").exists():

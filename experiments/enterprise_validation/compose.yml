@@ -1,5 +1,15 @@
 name: erp-harness-enterprise-validation
 services:
+  mailpit:
+    image: axllent/mailpit:v1.31.3@sha256:ed9b00c609e77e99c79b93f1178255ebc271868920f2c69a8d166bd5634ed10d
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:18080:8025
+    environment:
+      MP_DATABASE: /data/mailpit.db
+      MP_MAX_MESSAGES: 5000
+    volumes:
+      - mail:/data
   db:
     image: postgres:16@sha256:c1b3783309b6499c795eed7c20135a1a4d25cae1b575c3d52c6f536129a1b109
     environment:
@@ -30,3 +40,4 @@ services:
 volumes:
   database:
   filestore:
+  mail:

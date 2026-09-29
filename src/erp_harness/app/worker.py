@@ -6,6 +6,7 @@ from __future__ import annotations
 # PI_AGENT_SESSION_ID 等旧键继续保留，用于关联已有日志与账本。
 
 import os
+import hashlib
 import sys
 from pathlib import Path
 
@@ -91,3 +92,10 @@ def conversation_environment(session_id: str, run_id: str) -> dict[str, str]:
     env["HARBOR_TRIAL_ID"] = run_id
     env.update(_field_policy_environment())
     return env
+
+
+def worker_source_revision():
+    """Identify the host/worker boundary, including uncommitted local edits."""
+    directory = Path(__file__).parent
+    return hashlib.sha256(b"".join((directory / name).read_bytes() for name in
+        ("host.py", "worker.py", "conversation.py", "runner.py", "business_status.py"))).hexdigest()

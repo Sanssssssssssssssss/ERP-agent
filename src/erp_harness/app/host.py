@@ -34,7 +34,7 @@ from .materials import MAX_FILES_PER_SESSION, parse_material, read_material_text
 from .storage import StateStore
 from .model_config import capability_router_config
 from .business import completion_target_instruction, default_target, valid_target
-from .worker import conversation_command, conversation_environment, child_environment, worker_command
+from .worker import conversation_command, conversation_environment, child_environment, worker_command, worker_source_revision
 
 _SECRET = re.compile(r"(?i)(token|secret|password|api[_-]?key|authorization|cookie)")
 _HIDDEN = {"reasoning_content", "reasoningContent", "thinking", "thought_signature", "thoughtSignature"}
@@ -227,6 +227,7 @@ class Workbench:
         self._worker_timeout_seconds = worker_timeout_seconds
         self.store = StateStore(data_dir)
         self.root = Path(repo or Path.cwd())
+        self._worker_source_revision = worker_source_revision()
         self._lock = threading.RLock()
         self._processes: dict[str, subprocess.Popen[str]] = {}
         self._threads: dict[str, threading.Thread] = {}
@@ -704,7 +705,8 @@ class Workbench:
             session_file = self._session_file_for_run(run)
             proc = self._open_worker(run, session_file,
                 conversation_command(self.root, instruction, usage, session_file),
-                {**conversation_environment(run["session_id"], run["id"]), "ERP_CONVERSATION_SOURCES": str(source_file), "ERP_CONVERSATION_BUSINESS": str(status_file)},
+                {**conversation_environment(run["session_id"], run["id"]), "ERP_CONVERSATION_SOURCES": str(source_file), "ERP_CONVERSATION_BUSINESS": str(status_file),
+                 "ERP_CONVERSATION_BUSINESS_ID": run.get("context_business_id") or ""},
             )
         except Exception as exc:
             self._finalize_conversation(run, "failed", f"worker_launch_{type(exc).__name__}")
@@ -936,6 +938,58 @@ class Workbench:
         self._launch(run, continue_run=False)
         return run
 
+    def resume_run(self, session_id: str, business_id: str, run_id: str) -> dict[str, Any]:
+        """Explicitly continue a terminal segment; retain its original session and ledger."""
+        business = self._business(session_id, business_id)
+        self._require_idle()
+        self._ensure_business_connection(business, bind=False)
+        self._require_known_writes(business)
+        self._validate_materials_available(session_id, business.get("material_ids", []))
+        run = self.store.data["runs"].get(run_id)
+        if (not run or run.get("session_id") != session_id or run.get("business_id") != business_id
+                or run.get("status") not in {"interrupted", "failed", "cancelled"}):
+            raise ValueError("run cannot be resumed")
+        latest = max((r for r in self.store.data["runs"].values() if r.get("business_id") == business_id),
+                     key=lambda r: (r.get("started_at", ""), r["id"]))
+        if latest["id"] != run_id or business.get("requires_goal_confirmation") or business.get("status") == "awaiting_input":
+            raise ValueError("only the latest unchanged business can be resumed")
+        if any(m.get("business_id") == business_id and m.get("role") == "user" and not m.get("submitted_run_id")
+               for m in self.store.data["messages"].get(session_id, [])):
+            raise ValueError("confirm changed instructions before resuming")
+        if not (self.store.root / "sessions" / business_id / "pi-agent-session.jsonl").is_file():
+            raise ValueError("original business session is missing; resume refused")
+        statuses = self._ledger_statuses(run)
+        if any(value not in {"verified", "known_failed"} for value in statuses.values()):
+            raise RuntimeError("unresolved actions must be reconciled before resuming")
+        # Re-read current business facts; historical action postconditions may legitimately have advanced.
+        detail = self.refresh_business(session_id, business_id)
+        readback = business.get("readback") or {}
+        if (detail.get("stale") or not readback.get("observed_at")
+                or any(str(c.get("name", "")).startswith("read_") for c in readback.get("checks", []))):
+            raise RuntimeError("fresh business readback is unavailable; resume refused")
+        evidence = {"observed_at": readback["observed_at"], "outcome": readback.get("outcome"), "actions": statuses}
+        self._trace(run, "resume", {"previous_status": run["status"], "previous_ended_at": run.get("ended_at"),
+                                    "reason": "recovery", "verified_actions": evidence})
+        run.update(status="running", ended_at=None, error=None, resume_reason="recovery", recovery_evidence=evidence)
+        run.pop("summary", None)
+        self.store.data["sessions"][session_id].update(active_run_id=run_id, status="running")
+        business.update(active_run_id=run_id, status="running")
+        self._event("run_changed", {"session_id": session_id, "business_id": business_id, "run_id": run_id, "status": "running"})
+        self._launch(run, continue_run=True)
+        return run
+
+    def reconcile_business(self, session_id: str, business_id: str) -> dict[str, Any]:
+        """One visible entry for read-only reconciliation of this business's uncertain actions."""
+        self._business(session_id, business_id)
+        self._require_idle()
+        for run in list(self.store.data["runs"].values()):
+            if run.get("business_id") != business_id:
+                continue
+            for action_id, status in self._ledger_statuses(run).items():
+                if status in {"sending", "needs_reconciliation"}:
+                    self.reconcile_action(session_id, business_id, run["id"], action_id)
+        return self.refresh_business(session_id, business_id)
+
     def _launch(self, run: dict[str, Any], *, continue_run: bool) -> None:
         # 审批续跑复用 run_id、session 文件和动作账本，只创建新的 worker 进程。
         # 每段 worker 单独写 usage；会话条目基线用于避免重复累计旧用量。
@@ -953,6 +1007,8 @@ class Workbench:
             session_file = self.store.root / "sessions" / run["business_id"] / "pi-agent-session.jsonl"
             evidence_file = instruction.with_name("task-sources.json")
             evidence_env = {"ODOO_TASK_EVIDENCE_FILE": str(evidence_file)} if evidence_file.exists() else {}
+            if run.get("resume_reason"):
+                evidence_env["ERP_RUN_RESUME"] = json.dumps({"reason": run["resume_reason"], **run.get("recovery_evidence", {}), "actions": self._ledger_statuses(run)})
             selector_path = capability_router_config()
             if selector_path and json.loads(Path(selector_path).read_text(encoding='utf8')).get('backend') == 'laya':
                 from erp_harness.providers.selector_service import SelectorService
@@ -981,6 +1037,9 @@ class Workbench:
         thread.start()
 
     def _open_worker(self, run, session_file, command, environment):
+        if worker_source_revision() != self._worker_source_revision:
+            raise RuntimeError("Backend source changed; restart the workbench before continuing")
+        run["worker_source_revision"] = self._worker_source_revision
         session_file.parent.mkdir(parents=True, exist_ok=True)
         self._session_entry_baselines.setdefault(run["id"], self._session_entry_ids(session_file))
         runtime_home = self.store.root / "runtime-home"
@@ -1946,6 +2005,8 @@ class Workbench:
                     self.store.data["sessions"][session_id]["updated_at"] = now()
                     self._event("approval_changed", {"session_id": session_id, "business_id": business_id, "run_id": run_id, "action_id": action_id, "status": "approved", "remaining_action_ids": remaining})
                     return {"ok": True, "status": "approved", "run_id": run_id, "action_id": action_id, "awaiting_action_ids": remaining}
+                run.pop("resume_reason", None)
+                run.pop("recovery_evidence", None)
                 run["status"] = "running"
                 self.store.data["businesses"][business_id]["status"] = "running"
                 self.store.data["sessions"][session_id]["status"] = "running"
@@ -2107,7 +2168,7 @@ class Workbench:
     def _dispatch(self, method: str, params: dict[str, Any]) -> Any:
         # RPC 方法必须显式列入表。禁止按传入名称直接 getattr 调用宿主对象。
         # 带下划线的内部入口由桌面主进程使用；renderer 可达范围还受 preload 限制。
-        methods = {"list_sessions": lambda: self.list_sessions(), "create_session": lambda: self.create_session(params.get("title")), "rename_session": lambda: self.rename_session(params["session_id"], params["title"]), "archive_session": lambda: self.archive_session(params["session_id"]), "get_session": lambda: self.get_session(params["session_id"]), "send_message": lambda: self.send_message(params["session_id"], params["text"], params.get("business_id"), params.get("context_business_id"), params.get("material_ids")), "confirm_business": lambda: self.confirm_business(params["session_id"], params["proposal_id"], _must_bool(params["confirmed"], "confirmed")), "start_run": lambda: self.start_run(params["session_id"], params["business_id"]), "decide_approval": lambda: self.decide_approval(params["session_id"], params["business_id"], params["run_id"], params["action_id"], params["decision"]), "request_approval_revision": lambda: self.request_approval_revision(params["session_id"], params["business_id"], params["run_id"], params["action_id"], params["text"]), "cancel_run": lambda: self.cancel_run(params["session_id"], params["business_id"], params["run_id"]), "cancel_conversation": lambda: self.cancel_conversation(params["session_id"], params["run_id"]), "reconcile_action": lambda: self.reconcile_action(params["session_id"], params["business_id"], params["run_id"], params["action_id"]), "get_business": lambda: self.get_business(params["session_id"], params["business_id"]), "check_business_connection": lambda: self.check_business_connection(params["session_id"], params["business_id"]), "refresh_business": lambda: self.refresh_business(params["session_id"], params["business_id"]), "get_trace": lambda: self.get_trace(params["session_id"], params["business_id"], params.get("run_id"), params.get("summary_only", False)), "get_trace_detail": lambda: self.get_trace_detail(params["session_id"], params["business_id"], params["run_id"], params["kind"], params["id"]), "_import_material": lambda: self._import_material(params["session_id"], params["name"], params["content_base64"]), "_export_document": lambda: self._export_document(params["session_id"], params["business_id"], params["model"], params["record_id"], params["format"]), "_record_artifact": lambda: self._record_artifact(params["session_id"], params["business_id"], params["path"], params["name"], params.get("run_id"), params.get("kind", "business_receipt"), params.get("model"), params.get("record_id")), "health": self.health, "check_connection": self.check_connection}
+        methods = {"list_sessions": lambda: self.list_sessions(), "create_session": lambda: self.create_session(params.get("title")), "rename_session": lambda: self.rename_session(params["session_id"], params["title"]), "archive_session": lambda: self.archive_session(params["session_id"]), "get_session": lambda: self.get_session(params["session_id"]), "send_message": lambda: self.send_message(params["session_id"], params["text"], params.get("business_id"), params.get("context_business_id"), params.get("material_ids")), "confirm_business": lambda: self.confirm_business(params["session_id"], params["proposal_id"], _must_bool(params["confirmed"], "confirmed")), "start_run": lambda: self.start_run(params["session_id"], params["business_id"]), "resume_run": lambda: self.resume_run(params["session_id"], params["business_id"], params["run_id"]), "reconcile_business": lambda: self.reconcile_business(params["session_id"], params["business_id"]), "decide_approval": lambda: self.decide_approval(params["session_id"], params["business_id"], params["run_id"], params["action_id"], params["decision"]), "request_approval_revision": lambda: self.request_approval_revision(params["session_id"], params["business_id"], params["run_id"], params["action_id"], params["text"]), "cancel_run": lambda: self.cancel_run(params["session_id"], params["business_id"], params["run_id"]), "cancel_conversation": lambda: self.cancel_conversation(params["session_id"], params["run_id"]), "reconcile_action": lambda: self.reconcile_action(params["session_id"], params["business_id"], params["run_id"], params["action_id"]), "get_business": lambda: self.get_business(params["session_id"], params["business_id"]), "check_business_connection": lambda: self.check_business_connection(params["session_id"], params["business_id"]), "refresh_business": lambda: self.refresh_business(params["session_id"], params["business_id"]), "get_trace": lambda: self.get_trace(params["session_id"], params["business_id"], params.get("run_id"), params.get("summary_only", False)), "get_trace_detail": lambda: self.get_trace_detail(params["session_id"], params["business_id"], params["run_id"], params["kind"], params["id"]), "_import_material": lambda: self._import_material(params["session_id"], params["name"], params["content_base64"]), "_export_document": lambda: self._export_document(params["session_id"], params["business_id"], params["model"], params["record_id"], params["format"]), "_record_artifact": lambda: self._record_artifact(params["session_id"], params["business_id"], params["path"], params["name"], params.get("run_id"), params.get("kind", "business_receipt"), params.get("model"), params.get("record_id")), "health": self.health, "check_connection": self.check_connection}
         if method == "_prepare_session_snapshot":
             from .session_snapshot import export_session_snapshot
             business = self._business(params["session_id"], params["business_id"])

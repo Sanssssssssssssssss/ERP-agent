@@ -144,9 +144,16 @@ def read_business_status(context, reads, *, session_id, connection):
     for receipt in business.get("delivery_receipts", []):
         evidence = receipt.get("evidence") or {}
         result["delivery_receipts"].append({"status": receipt.get("status"), **_pick(evidence,
-            ("delivery", "invoice_id", "recipient_id", "email_to", "notice")),
+            ("delivery", "message_created", "retry_safe", "next_action", "invoice_id", "recipient_id", "email_to", "notice")),
             "message_ids": [m.get("message_id") for m in evidence.get("messages", [])]})
     result["truncated"] = len(documents) > 20 or len(checks) > 40
+    if any(receipt.get("delivery") == "failed" for receipt in result["delivery_receipts"]):
+        result["recovery"] = {"reason": "mail_delivery_failed", "retry_safe": False,
+            "next_action": "inspect_mail_failure_then_reconcile_existing_message",
+            "message": "消息已创建，邮件通知报错。请检查邮件队列和 SMTP 配置；在业务执行台点击‘核对当前状态’。不得重复创建消息或擅自重发。"}
+    elif any(r.get("status") in {"needs_reconciliation", "blocked", "interrupted", "failed", "cancelled"} for r in state.get("runs", {}).values()):
+        result["recovery"] = {"next_action": "reconcile_in_business_workspace", "retry_safe": False,
+            "message": "在业务执行台点击‘核对当前状态’。核对通过后可继续剩余步骤；历史审批不能批准新写入。"}
     result["next_read"] = "read_odoo_reference for exact document fields; this status query never authorizes a write or resend"
     # Keep full source evidence in host logs. The model can request exact record fields next.
     for key in ("documents", "checks", "delivery_receipts"):

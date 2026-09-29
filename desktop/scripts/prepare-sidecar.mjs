@@ -16,7 +16,8 @@ const pythonZip = process.env.WORKBENCH_PYTHON_ZIP ||
   join(repoRoot, ".runtime", "cache", "python-3.13.12-embed-amd64.zip");
 const pythonSha256 = (process.env.WORKBENCH_PYTHON_SHA256 ||
   "76f238f606250c87c6beac75dccd35ee99070a13490555936abb6cb64ecce3d0").toLowerCase();
-const backendWheel = process.env.WORKBENCH_BACKEND_WHEEL || join(repoRoot, "dist", "erp_harness-0.5.4-py3-none-any.whl");
+const { version } = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+const backendWheel = process.env.WORKBENCH_BACKEND_WHEEL || join(repoRoot, "dist", `erp_harness-${version}-py3-none-any.whl`);
 const sitePackages = process.env.WORKBENCH_SITE_PACKAGES ||
   join(repoRoot, ".venv", "Lib", "site-packages");
 const pythonUrl = process.env.WORKBENCH_PYTHON_URL ||

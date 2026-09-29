@@ -271,6 +271,16 @@ def _handoff_required(result: object) -> bool:
     return isinstance(failure, dict) and failure.get("requires_user_input") is True
 
 
+def build_recovery_resume_message(recovery: dict) -> str:
+    if recovery.get("reason") != "recovery" or any(s not in {"verified", "known_failed"} for s in recovery.get("actions", {}).values()):
+        raise ValueError("unresolved recovery state")
+    return ("The user requested continuation of the interrupted, unchanged business. The host reconciled uncertain actions and refreshed business facts. "
+            "This is recovery, not approval. Continue only remaining work within the original task contract. "
+            "Never repeat completed writes or sends. New or changed writes require fresh preflight and human approval. "
+            "If the goal is already satisfied, report the verified result and finish. Host recovery evidence: "
+            + json.dumps(recovery, sort_keys=True))
+
+
 def build_approval_resume_message(stage: dict | None = None) -> str:
     """Remind the model of the bound phase; approval never changes its authority."""
     phase = "Resume the existing business goal. "
@@ -609,9 +619,10 @@ async def run(args: argparse.Namespace) -> None:
                 if getattr(args, "continue_run", False) and getattr(args, "pause_on_approval", False):
                     # Persist the host notification in the same Pi session. The
                     # native action ledger remains the execution authority.
+                    recovery = json.loads(os.environ["ERP_RUN_RESUME"]) if os.environ.get("ERP_RUN_RESUME") else None
                     source = session.prompt(
-                        build_approval_resume_message(getattr(getattr(actions, "task_evidence", None), "stage", None)),
-                        source="extension", custom_type="odoo_approval_resume",
+                        build_recovery_resume_message(recovery) if recovery else build_approval_resume_message(getattr(getattr(actions, "task_evidence", None), "stage", None)),
+                        source="extension", custom_type="odoo_recovery_resume" if recovery else "odoo_approval_resume",
                     )
                 elif getattr(args, "continue_run", False):
                     source = session.continue_()

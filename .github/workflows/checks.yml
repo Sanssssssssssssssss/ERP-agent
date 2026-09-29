@@ -36,6 +36,12 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: python -m unittest discover -s tests -p 'test_workbench*.py'
 
+      - name: Check interrupted recovery and test index
+        shell: pwsh
+        run: |
+          python -m pytest tests/test_interrupted_recovery.py -q
+          python -m experiments.test_index --check
+
       - name: Check native storage
         shell: pwsh
         env:
