@@ -1,5 +1,12 @@
 # Backend integration
 
+
+2026-09-29：并入 Laya v7 追加能力编排及制造耗料预检修复。真实业务 E02 9/9、E03 5/5；详情见 [E02](../experiments/tool_routing/E02_CONSUMPTION_FIX_20260929.md) 与 [E03 对照](../experiments/tool_routing/LAYA_ADDITIVE_LIVE_20260929.md)。归档 tag：`archive/laya-v7-e02-20260929`。
+
+清理：配置别名集中解析；四个历史 MCP 测试移至 `bench/reference/tests`；26 份旧文档归档，当前入口见[实验索引](../experiments/README.md)。原生回归 1,267 项、182 subtests 通过（4 项条件跳过）；独立 MCP 对照 36 项通过；桌面类型、构建、自检及交互检查通过。
+
+发布复核发现旧 bundle 清单与提交后 `laya_worker.py` 的字节哈希不一致。保留旧清单，以当前提交源码生成独立清单、复用相同权重和问题；GPU 重放 E02/E03 的 37 次真实选择，37/37 集合一致。此项只验证选择器兼容，不替代业务验收。本机新配置：`.runtime/release-cleanup-20260929/config.json`，通过 `ERP_CAPABILITY_ROUTER_CONFIG` 显式启用；证据在同目录 `bundle-revalidation.json`、`gpu-replay/`。未新增付费 API 调用。
+
 This source tree integrates desktop baseline `6821615186d18b42855bfd0692b471d0568adf5b` with benchmark backend `302102d46d7a0fb511d15a0ff3796a5aba9f07b5`. These inputs are recorded in [sources.lock.json](../sources.lock.json). The published v0.5.4 desktop archive predates this integration.
 
 ## Runtime and configuration
