@@ -10,15 +10,15 @@ Native ERP Agent Harness
 
 ERP-agent 用于起草 Odoo 业务动作，在写入前请求审批，并核对结果记录。本仓库包含 Windows 桌面工作台、原生 Odoo 19 运行时及其背后的 ERP-Bench 研究 Harness。
 
-**Windows 预览版 · v0.5.4 · Odoo 19**
+**Windows 预览版 · v0.6.0 · Odoo 19**
 
 ![ERP-agent](docs/media/hero.svg)
 
-## Windows 预览版（0.5.4）
+## Windows 预览版（0.6.0）
 
-[下载未签名 Windows 预览版](https://github.com/Sanssssssssssssssss/ERP-agent/releases/download/v0.5.4/Odoo-Workbench-0.5.4-windows-x64.zip) · [Release 说明](https://github.com/Sanssssssssssssssss/ERP-agent/releases/tag/v0.5.4)
+[下载未签名 Windows 预览版](https://github.com/Sanssssssssssssssss/ERP-agent/releases/download/v0.6.0/Odoo-Workbench-0.6.0-windows-x64.zip) · [Release 说明](https://github.com/Sanssssssssssssssss/ERP-agent/releases/tag/v0.6.0)
 
-1. 下载并解压，然后运行 `Odoo-Workbench-0.5.4-portable.exe`。
+1. 下载并解压，然后运行 `Odoo-Workbench-0.6.0-portable.exe`。
 2. 在连接设置中填写自己的 Odoo 19 和模型配置。
 3. 新建会话，说明业务目标，可选地附加 CSV/TXT 文件。
 
@@ -60,7 +60,7 @@ Trace 展示运行、工具和用量记录；截图使用合成演示数据。
 
 当前工作台业务投影包括 `sale_invoice`、`sale_purchase_invoice` 和 `purchase`。原生运行时已有受控 SOP 工具及 knowledge index/search/stats。独立的 `experiments/company_records_rag` 向量实验没有接入 Agent 或工作台。ERP-Bench 独立负责评分；工作台回读不等于 ERP-Bench 得分。
 
-桌面 worker 使用 `native` 执行、`dynamic` 工具、`controlled` SOP 和 `record` 业务状态记录。当前源码整合了桌面底座与后续 benchmark 后端改动；上方 v0.5.4 下载仍是此前发布的预览版。固定来源与离线检查见[后端整合及验证边界](docs/backend-release.md)。Benchmark 的 `TaskEvidence` 需要宿主显式配置，桌面 worker 尚未启用。
+桌面 worker 使用 `native` 执行、`dynamic` 工具、`controlled` SOP 和 `record` 业务状态记录。v0.6.0 安装包包含整合后的后端和中断业务恢复。桌面宿主提供已确认任务的依据，写入继续受审批和回读保护。详见[发布说明](docs/release-0.6.0.md)及[后端验证边界](docs/backend-release.md)。
 
 ## Windows 开发快速开始
 

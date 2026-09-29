@@ -1,5 +1,7 @@
 # 标准验证企业
 
+测试收件箱：[http://127.0.0.1:18080](http://127.0.0.1:18080)。Mailpit 持久保存邮件和附件，不向外部邮箱投递；模拟客户不需要注册邮箱。配置入口：`python experiments/enterprise_validation/manage.py mail`，可重复执行，不重发历史邮件。初始化企业时也会配置。恢复旧数据库快照后按需重新执行 `mail`。SMTP 只供 Docker 内部访问，网页只绑定本机。实现参考 [Mailpit 官方部署说明](https://mailpit.axllent.org/docs/install/docker/)。
+
 独立 Odoo 19 Community / PostgreSQL 16，端口 `18079`，数据库 `erp_harness_enterprise_v1`。澄川工业部件有限公司与澄川机电贸易有限公司；人民币、中文科目模板。全部资料为合成数据。
 
 在仓库根目录执行：
