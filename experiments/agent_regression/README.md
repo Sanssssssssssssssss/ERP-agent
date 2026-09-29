@@ -1,5 +1,7 @@
 # 单次决策回归
 
+[按能力查找全部测试](../../TESTING.md) · [IR01/IR02 中断恢复结果](../../docs/interrupted-recovery.md)。新故障保留原请求及来源哈希；索引不要求移动历史文件。
+
 Laya 接入审查新增真实前缀 E01/5、E02/26、E03/21、E03/33：冻结原输入及 state 哈希，保留 E03 银行分录被投射省略的问题；只有本地选择器对照，未追加付费调用。主模型历史业务成功不等于 Laya 原始发布正确，[审查及局部结果](../tool_routing/history/INTEGRATION_REVIEW.md)。
 
 E01／E02／E03 完整业务新增真实节点：[R09 复现](../../.runtime/laya-contract-live-20260926/R09-recurrence/)、[R11 制造旧字段](../../.runtime/laya-contract-live-20260926/R11/)、[R12 猜子记录 ID](../../.runtime/laya-contract-live-20260926/R12/)、[R13 空查询条件](../../.runtime/laya-contract-live-20260926/R13/)、[R14 未设投产数量](../../.runtime/laya-contract-live-20260926/R14/)、[R15 提前完工](../../.runtime/laya-contract-live-20260926/R15/)、[R16 不存在的工具](../../.runtime/laya-contract-live-20260926/R16/)、[R17 缺 SOP 输入](../../.runtime/laya-contract-live-20260926/R17/)、[R18 财务旧字段](../../.runtime/laya-contract-live-20260926/R18/)。已保存完整出错／首次纠正请求、响应、哈希及业务约束，未追加付费重放，尚未预防性修复。R12 的上游诱因仍需验证。[完整业务与成本对比](../tool_routing/history/CONTRACT_RESULTS.md)

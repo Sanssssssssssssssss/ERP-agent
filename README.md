@@ -1,6 +1,6 @@
 # ERP-agent
 
-[Long-term memory](docs/long-term-memory.md) · [Persistent Odoo demo](experiments/demo_odoo/README.md)
+[Long-term memory](docs/long-term-memory.md) · [Persistent Odoo demo](experiments/demo_odoo/README.md) · [Tests by capability](TESTING.md)
 
 Native ERP Agent Harness
 
