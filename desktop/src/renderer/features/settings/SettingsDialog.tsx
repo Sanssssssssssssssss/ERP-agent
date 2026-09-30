@@ -1,5 +1,5 @@
 import { Button as RadixButton,Dialog as RadixDialog } from '@radix-ui/themes'
-import { LoaderCircle,RefreshCw } from 'lucide-react'
+import { ExternalLink,LoaderCircle,RefreshCw } from 'lucide-react'
 import { useEffect,useRef } from 'react'
 import { connectionLabel,environmentLabel,healthLabel,odooHealthStatus } from '../../presentation'
 import {
@@ -33,7 +33,7 @@ export function ConnectionDetailsDialog({ health, connection, busy, open, onOpen
   </RadixDialog.Root>
 }
 
-export function SettingsDialog({ settings, draft, saving, onChange, onClose, onSave }: { settings: Settings | null; draft: Record<string, string>; saving: boolean; onChange: (key: string, value: string) => void; onClose: () => void; onSave: () => void }) {
+export function SettingsDialog({ settings, draft, saving, onChange, onClose, onSave, onOpenOdoo, openingOdoo = false }: { onOpenOdoo?: () => void; openingOdoo?: boolean; settings: Settings | null; draft: Record<string, string>; saving: boolean; onChange: (key: string, value: string) => void; onClose: () => void; onSave: () => void }) {
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useRef<HTMLElement>(null)
   useEffect(() => {
@@ -66,6 +66,7 @@ export function SettingsDialog({ settings, draft, saving, onChange, onClose, onS
       <section ref={dialogRef} className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <header><div><span className="eyebrow">Connection settings</span><h2 id="settings-title">连接设置</h2></div><button ref={closeButtonRef} className="modal-close" onClick={onClose} aria-label="关闭设置">×</button></header>
         <p className="settings-note">配置模型与 Odoo 连接。密钥留空表示保留已有密钥。</p>
+        {onOpenOdoo && <div className="settings-note"><RadixButton variant="soft" disabled={openingOdoo} onClick={onOpenOdoo}><ExternalLink size={15} />在浏览器登录 Odoo</RadixButton><p>使用已保存的 Odoo 地址和数据库。网页登录使用 Odoo 登录方式，连接密钥不会填入登录页。</p></div>}
         <div className="settings-grid">{field('model', '模型')}{field('base_url', '模型地址')}{field('odoo_url', 'Odoo 地址')}{field('odoo_db', 'Odoo 数据库')}{field('odoo_username', 'Odoo 用户名')}{field('model_key', settings?.has_model_key ? '模型密钥（留空保留）' : '模型密钥', 'password')}{field('odoo_key', settings?.has_odoo_key ? 'Odoo 密钥（留空保留）' : 'Odoo 密钥', 'password')}</div>
         <div className="settings-note">
           <label><input type="checkbox" checked={draft.long_term_memory === 'on'} disabled={saving} onChange={(event) => onChange('long_term_memory', event.target.checked ? 'on' : 'off')} aria-describedby="memory-setting-help" /> 启用长期记忆（Mem0）</label>

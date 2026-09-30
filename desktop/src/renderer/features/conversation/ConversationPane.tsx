@@ -1,6 +1,6 @@
-import { AlertDialog as RadixAlertDialog,Button as RadixButton,IconButton as RadixIconButton,Tooltip as RadixTooltip } from '@radix-ui/themes'
+import { AlertDialog as RadixAlertDialog,Button as RadixButton,IconButton as RadixIconButton,Tooltip as RadixTooltip,Select as RadixSelect } from '@radix-ui/themes'
 import { Archive,FilePlus2,FileText,FolderPlus,LoaderCircle,PanelLeftClose,PanelLeftOpen,Search,Send,Settings2,Square,Trash2,Upload } from 'lucide-react'
-import { useEffect,useRef,useState,type FormEvent } from 'react'
+import { useEffect,useRef,useState,type FormEvent,type ReactNode } from 'react'
 import { EmptyState,MessageText } from '../../components/common'
 import { businessTypeMeta,completionTargetLabel,materialRowLabel } from '../../presentation'
 import {
@@ -32,7 +32,8 @@ export function SessionRail({
   query,
   onQueryChange,
   collapsed,
-  onToggle
+  onToggle,
+  footer
 }: {
   sessions: SessionSummary[]
   selectedId: string
@@ -47,6 +48,7 @@ export function SessionRail({
   onQueryChange: (value: string) => void
   collapsed: boolean
   onToggle: () => void
+  footer?: ReactNode
 }) {
   const visibleSessions = sessions.filter((item) => `${item.title} ${item.id}`.toLowerCase().includes(query.trim().toLowerCase()))
   return (
@@ -74,7 +76,7 @@ export function SessionRail({
           </div>
         ))}
       </div>
-      {!collapsed && <div className="rail-footer"><span className="rail-footer-dot" />本地工作区</div>}
+      <div className="rail-footer">{footer || (!collapsed && <span>本地工作区</span>)}</div>
     </aside>
   )
 }
@@ -93,7 +95,7 @@ export function ConversationPane({ session, draft, liveMessages, conversationRun
   pendingApprovals: Approval[]
   approvalBusinessName: string
   approvalProgress: ApprovalProgress | null
-  onOpenApprovals: () => void
+  onOpenApprovals: (actionId?: string) => void
   onOpenExecution: () => void
   approvalActivity?: NonNullable<BusinessDetail['activity']>
   businesses: Business[]
@@ -142,7 +144,7 @@ export function ConversationPane({ session, draft, liveMessages, conversationRun
   const scrollToLatest = () => {
     const element = scrollRef.current
     if (!element) return
-    element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' })
+    element.scrollTo({ top: element.scrollHeight, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
     setAtLatest(true)
     setHasNew(false)
   }
@@ -153,7 +155,7 @@ export function ConversationPane({ session, draft, liveMessages, conversationRun
       return
     }
     setHasNew(true)
-  }, [atLatest, liveMessages, messages, pendingApprovals.length, approvalProgress?.status, showThinking])
+  }, [atLatest, liveMessages, messages, pendingApprovals.length, approvalProgress?.status, showThinking, proposalBusy, pendingProposal])
   return (
     <section className={`conversation-pane ${terminalConversation ? 'has-run-status' : ''}`}>
       <header className="conversation-header">
@@ -167,7 +169,8 @@ export function ConversationPane({ session, draft, liveMessages, conversationRun
         {orderedMessages.map((item) => item.kind === 'receipt' ? <article className="proposal-receipt" key={item.message.id}><strong>{item.message.proposal?.title}</strong><span>业务已确认</span><RadixButton variant="soft" onClick={() => onOpenBusiness(item.message.business_id!)}>打开业务</RadixButton></article> : item.kind === 'message' ? (() => { const ids = (item.message as MessageWithMaterials).material_ids ?? []; const inherited = ids.filter((id) => materialSeen.has(id)); ids.forEach((id) => materialSeen.add(id)); return <MessageRow key={`message:${item.message.id}`} message={item.message} inheritedMaterialIds={inherited} /> })() : <article className="message assistant live-message" key={`live:${item.message.run_id}:${item.message.id}`}><span className="avatar agent-avatar">A</span><div><div className="message-meta"><strong>Agent</strong><span>{item.message.status === 'ended' ? '回复完成' : item.message.status === 'interrupted' || item.message.status === 'failed' ? '已停止 · 回复未完成' : '实时回复'}</span></div><MessageText text={item.message.text} collapsible={false} /></div></article>)}
         {showThinking && <article className="message assistant thinking-message" aria-live="polite"><span className="avatar agent-avatar">A</span><div><div className="message-meta"><strong>Agent</strong></div><p className="thinking-copy">正在思考…</p></div></article>}
         {(pendingApprovals.length > 0 || approvalProgress?.businessId === selectedBusinessId || Boolean(selectedBusinessId && approvalActivity && approvalActivity.phase !== 'idle')) && <ApprovalInboxCard approvals={pendingApprovals} businessName={approvalBusinessName} progress={approvalProgress} activity={approvalActivity} onOpenApprovals={onOpenApprovals} onOpenExecution={onOpenExecution} />}
-        {pendingProposal && <ProposalCard proposal={pendingProposal} disabled={loading || proposalBusy || Boolean(proposalUnavailable)} preparing={proposalBusy} unavailable={proposalUnavailable} onDecision={onProposal} />}
+        {pendingProposal && proposalBusy && <p className="proposal-preparing" role="status"><LoaderCircle size={15} className="spin" />正在整理业务方案，回复完成后可确认。</p>}
+        {pendingProposal && !proposalBusy && <ProposalCard proposal={pendingProposal} disabled={loading || proposalBusy || Boolean(proposalUnavailable)} preparing={proposalBusy} unavailable={proposalUnavailable} onDecision={onProposal} onOpenBusiness={onOpenBusiness} />}
         {hasNew && <button className="new-message-indicator" type="button" onClick={scrollToLatest}>有新消息 · 回到最新</button>}
       </div>
       <form className="composer" onSubmit={onSubmit} onDragOver={(event) => { event.preventDefault(); event.currentTarget.classList.add('drop-active') }} onDragLeave={(event) => event.currentTarget.classList.remove('drop-active')} onDrop={(event) => { event.preventDefault(); event.currentTarget.classList.remove('drop-active'); onFiles(Array.from(event.dataTransfer.files)) }}>
@@ -175,8 +178,8 @@ export function ConversationPane({ session, draft, liveMessages, conversationRun
         {inheritedMaterials.length > 0 && <MaterialReuseTray materials={inheritedMaterials} hasNewMaterials={pendingMaterials.length > 0} />}
         <textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={!session || loading} placeholder={session ? '输入要查询或办理的业务…' : '先选择或创建一个会话'} aria-label="会话消息" />
         <div className="composer-footer">
-          <div className="composer-context"><label htmlFor="message-business-target">讨论范围</label><select id="message-business-target" value={messageBusinessId} onChange={(event) => onMessageBusinessChange(event.target.value)} disabled={!session || loading}><option value="">{selectedBusiness ? `跟随当前业务：${selectedBusiness.title || '未命名业务'}` : '普通讨论（尚未选择业务）'}</option><option value="__conversation__">整个会话（普通讨论）</option>{businesses.map((business) => <option key={business.id} value={business.id}>{business.title || '未命名业务'} · {labelFor(businessStatusLabel, business.status)}</option>)}</select><span>{messageBusinessId === '__conversation__' || (!messageBusinessId && !selectedBusiness) ? '查询执行结果前，请选择具体业务。' : '可核对所选业务的执行结果；写入仍需审批。'}</span></div>
-        <div className="composer-actions"><label className="material-picker"><FilePlus2 size={15} />添加材料<input type="file" accept=".csv,.txt,text/csv,text/plain" multiple disabled={!session || loading || materialsBusy} onChange={(event) => { onFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = '' }} /></label><RadixButton type="submit" disabled={!session || loading || materialsBusy || (!draft.trim() && !pendingMaterials.length)}>{loading ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}{loading ? '处理中…' : '发送'}</RadixButton></div>
+          <div className="composer-context">{businesses.length > 0 ? <><label htmlFor="message-business-target">讨论范围</label><RadixSelect.Root value={messageBusinessId || '__current__'} onValueChange={(value) => onMessageBusinessChange(value === '__current__' ? '' : value)} disabled={!session || loading}><RadixSelect.Trigger id="message-business-target" data-scope={messageBusinessId} aria-label="讨论范围" /><RadixSelect.Content position="popper"><RadixSelect.Item value="__current__">{selectedBusiness ? `当前业务：${selectedBusiness.title || '未命名业务'}` : '新业务讨论'}</RadixSelect.Item><RadixSelect.Item value="__conversation__">整个会话 · 新业务讨论</RadixSelect.Item>{businesses.map((business) => <RadixSelect.Item key={business.id} value={business.id}>{business.title || '未命名业务'} · {labelFor(businessStatusLabel, business.status)}</RadixSelect.Item>)}</RadixSelect.Content></RadixSelect.Root><span>{messageBusinessId === '__conversation__' || (!messageBusinessId && !selectedBusiness) ? '可查询资料或讨论新业务；核对执行结果时选择对应业务。' : '讨论当前业务；执行中的变更请使用审批卡“提出修改”。'}</span></> : <span>新业务讨论 · 描述需求后确认业务方案</span>}</div>
+        <div className="composer-actions"><label className="material-picker"><FilePlus2 size={15} />添加材料<input type="file" accept=".csv,.txt,.xlsx,.pdf,.png,.jpg,.jpeg,text/csv,text/plain,application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple disabled={!session || loading || materialsBusy} onChange={(event) => { onFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = '' }} /></label><RadixButton type="submit" disabled={!session || loading || materialsBusy || pendingMaterials.some((material) => material.status === 'parsing' || material.status === 'failed') || (!draft.trim() && !pendingMaterials.length)}>{loading ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}{loading ? '处理中…' : '发送'}</RadixButton></div>
         </div>
       </form>
     </section>
@@ -200,17 +203,17 @@ export function ConversationWelcome({ onStarter }: { onStarter: (goal: string) =
 }
 
 export function MaterialTray({ materials, busy, onRemove, onFiles }: { materials: MaterialRecord[]; busy: boolean; onRemove: (id: string) => void; onFiles: (files: File[]) => void }) {
-  if (!materials.length && !busy) return <div className="material-drop-hint"><Upload size={14} />拖入 CSV/TXT，或点击“添加材料”（每个文件 ≤ 2 MiB，最多 3 个）</div>
-  return <div className="material-tray" aria-label="本次消息材料"><div className="material-tray-head"><span><FileText size={14} />本次消息材料</span>{busy && <span className="material-uploading"><LoaderCircle className="spin" size={13} />正在上传与解析…</span>}</div>{materials.map((material) => <div className="material-chip" key={material.id}><div><strong>{material.name}</strong><span>{materialRowLabel(material)} · {material.preview || '暂无预览'}</span></div><button type="button" aria-label={`移除 ${material.name}`} onClick={() => onRemove(material.id)}><Trash2 size={14} /></button></div>)}{!busy && materials.length < 3 && <label className="material-inline-drop">继续添加<input type="file" accept=".csv,.txt,text/csv,text/plain" multiple onChange={(event) => { onFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = '' }} /></label>}</div>
+  if (!materials.length && !busy) return <div className="material-drop-hint"><Upload size={14} />拖入 CSV、TXT、XLSX、PDF 或图片，或点击“添加材料”（每个文件 ≤ 10 MiB，最多 3 个）</div>
+  return <div className="material-tray" aria-label="本次消息材料"><div className="material-tray-head"><span><FileText size={14} />本次消息材料</span>{busy && <span className="material-uploading"><LoaderCircle className="spin" size={13} />正在上传与解析…</span>}</div>{materials.map((material) => <div className={`material-chip material-${material.status || 'ready'}`} key={material.id}><div><strong>{material.name}</strong><span>{material.status === 'parsing' ? '正在解析…' : material.status === 'failed' ? `解析失败：${material.error || '请移除后重新上传'}` : `${materialRowLabel(material)} · ${material.preview || '暂无预览'}`}{material.warnings?.length ? ` · ${material.warnings.join('；')}` : ''}</span></div><button type="button" aria-label={`移除 ${material.name}`} onClick={() => onRemove(material.id)}><Trash2 size={14} /></button></div>)}{!busy && materials.length < 3 && <label className="material-inline-drop">继续添加<input type="file" accept=".csv,.txt,.xlsx,.pdf,.png,.jpg,.jpeg,text/csv,text/plain,application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple onChange={(event) => { onFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = '' }} /></label>}</div>
 }
 
 export function MaterialReuseTray({ materials, hasNewMaterials }: { materials: MaterialRecord[]; hasNewMaterials: boolean }) {
-  return <details className="material-reuse-tray"><summary><span><FileText size={14} />沿用历史材料</span><small>{materials.length} 个文件 · {hasNewMaterials ? '本轮不附加' : '发送时按业务上下文沿用'}</small></summary><div className="material-reuse-list">{materials.map((material) => <div className="material-reuse-row" key={material.id}><strong>{material.name}</strong><span>{materialRowLabel(material)} · {material.preview || '暂无预览'}</span></div>)}</div></details>
+  return <details className="material-reuse-tray"><summary><span><FileText size={14} />沿用历史材料</span><small>{materials.length} 个文件 · {hasNewMaterials ? '本轮不附加' : '发送时按业务上下文沿用'}</small></summary><div className="material-reuse-list">{materials.map((material) => <div className="material-reuse-row" key={material.id}><strong>{material.name}</strong><span>{material.status === 'parsing' ? '正在解析…' : material.status === 'failed' ? `解析失败：${material.error || '请移除后重新上传'}` : `${materialRowLabel(material)} · ${material.preview || '暂无预览'}`}{material.warnings?.length ? ` · ${material.warnings.join('；')}` : ''}</span></div>)}</div></details>
 }
 
-export function ProposalCard({ proposal, disabled, preparing, unavailable, onDecision }: { proposal: ProposalLike; disabled: boolean; preparing?: boolean; unavailable?: string; onDecision: (proposal: ProposalLike, confirmed: boolean) => void }) {
+export function ProposalCard({ proposal, disabled, preparing, unavailable, onDecision, onOpenBusiness }: { onOpenBusiness?: (id: string) => void; proposal: ProposalLike; disabled: boolean; preparing?: boolean; unavailable?: string; onDecision: (proposal: ProposalLike, confirmed: boolean) => void }) {
   const continuesBusiness = Boolean(proposal.existing_business_id)
-  return <section className="proposal-card"><div className="proposal-icon"><FolderPlus size={18} /></div><div className="proposal-kicker">{continuesBusiness ? '延续当前业务' : '业务提案'} · {businessTypeMeta(proposal.type).title}</div><h3>{proposal.title}</h3><p>{proposal.goal}</p>{proposal.source_messages?.length ? <details className="proposal-sources"><summary>执行依据：用户原话</summary>{proposal.source_messages.map((message) => <p key={message.id}>{message.text}</p>)}<small>提案是摘要，执行时保留上述原始要求。</small></details> : <small>历史提案：开始执行前请核对目标。</small>}<div className="proposal-references">{proposal.resolved_references?.map((r) => <small key={`${r.model}:${r.id}`}>{r.quote}<br /></small>)}</div><div className="proposal-target">完成目标：{completionTargetLabel(proposal.completion_target, proposal.type)}</div>{(preparing || unavailable) && <p role="status">{unavailable || "正在完善提案，回复结束后可确认。"}</p>}<div className="proposal-actions"><RadixButton className="secondary-button" variant="soft" disabled={disabled} onClick={() => onDecision(proposal, false)}>{continuesBusiness ? '暂不更新' : '暂不创建'}</RadixButton><RadixButton className="primary-button" disabled={disabled} onClick={() => onDecision(proposal, true)}><FolderPlus size={15} />{continuesBusiness ? '更新业务目标' : '创建业务工作区'}</RadixButton></div></section>
+  return <section className="proposal-card"><div className="proposal-icon"><FolderPlus size={18} /></div><div className="proposal-kicker">{continuesBusiness ? '延续当前业务' : '业务提案'} · {businessTypeMeta(proposal.type).title}</div><h3>{proposal.title}</h3><p>{proposal.goal}</p>{proposal.source_messages?.length ? <details className="proposal-sources"><summary>执行依据：用户原话</summary>{proposal.source_messages.map((message) => <p key={message.id}>{message.text}</p>)}<small>提案是摘要，执行时保留上述原始要求。</small></details> : <small>历史提案：开始执行前请核对目标。</small>}<div className="proposal-references">{proposal.resolved_references?.map((r) => <small key={`${r.model}:${r.id}`}>{r.quote}<br /></small>)}</div><div className="proposal-target">完成目标：{completionTargetLabel(proposal.completion_target, proposal.type)}</div>{(preparing || unavailable) && <p role="status">{unavailable || "正在完善提案，回复结束后可确认。"}</p>}{unavailable && proposal.existing_business_id && onOpenBusiness && <RadixButton variant="soft" onClick={() => onOpenBusiness(proposal.existing_business_id!)}>打开当前业务核对</RadixButton>}<div className="proposal-actions"><RadixButton className="secondary-button" variant="soft" disabled={disabled} onClick={() => onDecision(proposal, false)}>{continuesBusiness ? '暂不更新' : '暂不创建'}</RadixButton><RadixButton className="primary-button" disabled={disabled} onClick={() => onDecision(proposal, true)}><FolderPlus size={15} />{continuesBusiness ? '更新业务目标' : '创建业务工作区'}</RadixButton></div></section>
 }
 
 export function BlockedSendDialog({ message, onClose }: { message: string; onClose: () => void }) {

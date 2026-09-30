@@ -13,6 +13,7 @@ import type {
   ConversationRun,
   LiveMessage,
   Message,
+  Material,
   Round,
   Run,
   SessionSummary,
@@ -71,7 +72,7 @@ export interface SessionDetail {
   businesses: Business[]
   conversation_runs?: ConversationRun[]
   live_messages?: LiveMessage[]
-  materials?: Array<{ id: string; session_id: string; name: string; size: number; sha256: string; created_at: string; row_count?: number; preview?: string; media_type?: string }>
+  materials?: Array<Omit<Material, 'preview' | 'media_type'> & Partial<Pick<Material, 'preview' | 'media_type'>>>
 }
 
 export type ToolReceipt = Tool

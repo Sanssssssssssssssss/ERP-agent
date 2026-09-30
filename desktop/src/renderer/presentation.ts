@@ -179,7 +179,7 @@ export function activityPhaseLabel(phase?: string) { return ({ idle: '待执行'
 
 export function businessTypeMeta(type?: string) { return ({ invoice_delivery: { title: '发票发送', short: '发送发票' }, inventory: { title: '库存收发与退货', short: '库存' }, manufacturing: { title: '制造与补货', short: '制造' }, payment: { title: '客户收款与供应商付款', short: '收付款' }, refund: { title: '退货退款与贷项', short: '退款' }, reconciliation: { title: '银行与账务核销', short: '核销' }, sale_invoice: { title: '销售与开票', short: '销售发票' }, purchase: { title: '采购', short: '采购流程' }, sale_purchase_invoice: { title: '销售 → 采购 → 开票', short: '业务链' } } as Record<string, { title: string; short: string }>)[type || ''] || { title: '业务工作区', short: '业务' } }
 
-export function completionTargetLabel(target?: string, type?: string) { const effective = target || (type === 'purchase' ? 'confirmed' : ['inventory', 'manufacturing'].includes(type || '') ? 'done' : ['payment', 'refund', 'reconciliation'].includes(type || '') ? 'reconciled' : 'posted'); return ({ sent: '交付邮件服务器', read_only: '只读浏览', draft: '保留草稿', confirmed: '完成确认', posted: ['payment', 'refund'].includes(type || '') ? '单据已过账' : '发票已过账', done: '业务已完成', reconciled: '账务与银行已核销' } as Record<string, string>)[effective] || '完成目标未知' }
+export function completionTargetLabel(target?: string, type?: string) { const effective = target || (type === 'purchase' ? 'confirmed' : ['inventory', 'manufacturing'].includes(type || '') ? 'done' : ['payment', 'refund', 'reconciliation'].includes(type || '') ? 'reconciled' : 'posted'); return ({ cancelled: '单据已取消', sent: '交付邮件服务器', read_only: '只读浏览', draft: '保留草稿', confirmed: '完成确认', posted: ['payment', 'refund'].includes(type || '') ? '单据已过账' : '发票已过账', done: '业务已完成', reconciled: '账务与银行已核销' } as Record<string, string>)[effective] || '完成目标未知' }
 
 export function materialRowLabel(material: MaterialRecord) { if (material.row_count == null) return '行数未知'; return material.media_type === 'text/csv' ? `${Math.max(0, material.row_count - 1)} 条数据` : `${material.row_count} 行`; }
 
@@ -195,6 +195,7 @@ export function outcomeScopeLabel(scope?: string) { const kind = scope?.split('_
   sale_invoice_basic_checks: '销售订单与客户发票基础核验',
   purchase_read_only_checks: '采购订单只读浏览',
   purchase_draft_checks: '采购订单草稿核验',
+  purchase_cancelled_checks: '采购订单取消核验',
   purchase_confirmed_checks: '采购订单确认核验',
   sale_purchase_invoice_read_only_checks: '销售、采购与开票只读浏览',
   sale_purchase_invoice_draft_checks: '销售、采购与开票草稿核验',

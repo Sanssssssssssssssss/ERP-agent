@@ -225,7 +225,7 @@ const bridgeScript = String.raw`
           }
           return { ok: true, run_id: 'conversation-run-b' }
         }
-        if (method === 'start_run') return { id: params.business_id + '-started-run', business_id: params.business_id, session_id: params.session_id, status: 'running', tool_count: 0, model_rounds: 0, elapsed_seconds: 0 }
+        if (method === 'start_run') { await wait(150); return { id: params.business_id + '-started-run', business_id: params.business_id, session_id: params.session_id, status: 'running', tool_count: 0, model_rounds: 0, elapsed_seconds: 0 } }
         if (method === 'resume_run') return { id: params.run_id, business_id: params.business_id, session_id: params.session_id, status: 'running', tool_count: 0, model_rounds: 0, elapsed_seconds: 0 }
         if (method === 'cancel_conversation') {
           sessionDetails['session-b'].conversation_runs[0].status = 'cancel_requested'
@@ -261,6 +261,11 @@ page.on('console', (message) => { if (message.type() === 'error') console.error(
 await page.goto(`http://127.0.0.1:${serverAddress.port}/`)
 await page.getByRole('button', { name: /Session A/ }).waitFor()
 await page.getByText('主机已连接').waitFor()
+const selectScope = async (value) => {
+  await page.getByLabel('讨论范围').click()
+  const name = value === '__conversation__' ? '整个会话 · 新业务讨论' : value === '' ? /^当前业务：/ : new RegExp(`^Business ${value.replace('business-', '').toUpperCase()} ·`)
+  await page.getByRole('option', { name }).click()
+}
 await page.getByRole('button', { name: '打开 Odoo', exact: true }).click()
 await page.getByText('已请求在浏览器打开已配置的 Odoo。', { exact: true }).waitFor()
 assert.deepEqual(await page.evaluate(() => window.__bridgeCalls.find(({ method }) => method === 'open_odoo')?.params), {})
@@ -270,8 +275,8 @@ assert.deepEqual(await page.evaluate(() => window.__bridgeCalls.find(({ method }
 await page.getByRole('button', { name: /Session A/ }).click()
 await page.getByRole('heading', { name: 'Session A' }).waitFor()
 await page.getByText('处理业务', { exact: true }).waitFor()
-assert.equal(await page.getByLabel('讨论范围').inputValue(), '')
-assert.equal(await page.getByLabel('讨论范围').locator('option:checked').textContent(), '跟随当前业务：Business A1')
+assert.equal(await page.getByLabel('讨论范围').getAttribute('data-scope'), '')
+assert.equal(await page.getByLabel('讨论范围').textContent(), '当前业务：Business A1')
 // A conversation trace without a business must never issue get_business('', ...).
 const emptyBusinessCallsBefore = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'get_business' && !params.business_id).length)
 await page.evaluate(() => window.__emitWorkbench({ event: 'trace', data: { session_id: 'session-a', business_id: null, run_id: 'conversation-only' } }))
@@ -291,11 +296,11 @@ const materialSend = await page.evaluate(() => window.__bridgeCalls.find(({ meth
 assert.deepEqual(materialSend?.params.material_ids, ['material-1'])
 await page.getByRole('button', { name: /Session B/ }).click()
 await page.getByRole('heading', { name: 'Session B' }).waitFor()
-assert.equal(await page.getByLabel('讨论范围').inputValue(), '')
-await page.getByLabel('讨论范围').selectOption('__conversation__')
+assert.equal(await page.getByLabel('讨论范围').getAttribute('data-scope'), '')
+await selectScope('__conversation__')
 await page.getByRole('button', { name: /Session A/ }).click()
 await page.getByRole('heading', { name: 'Session A' }).waitFor()
-assert.equal(await page.getByLabel('讨论范围').inputValue(), '')
+assert.equal(await page.getByLabel('讨论范围').getAttribute('data-scope'), '')
 await page.locator('input[type="file"]').first().setInputFiles({ name: 'cross.csv', mimeType: 'text/csv', buffer: Buffer.from('客户,产品\nA,B') })
 await page.getByRole('button', { name: /Session B/ }).click()
 await page.getByRole('heading', { name: 'Session B' }).waitFor()
@@ -320,8 +325,8 @@ await proposalButton.waitFor()
 assert.equal(await page.locator('.proposal-card').count(), 1)
 assert.equal(await page.locator('.proposal-card h3').textContent(), '新业务意图')
 await page.evaluate(() => { window.__setRunState(false, 'running'); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
-await page.getByText('正在完善提案，回复结束后可确认。', { exact: true }).waitFor()
-assert.equal(await proposalButton.isDisabled(), true)
+await page.getByText('正在整理业务方案，回复完成后可确认。', { exact: true }).waitFor()
+assert.equal(await proposalButton.count(), 0)
 await page.evaluate(() => { window.__setRunState(false); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
 await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent === '创建业务工作区' && !button.disabled))
 for (const status of ['failed', 'interrupted']) {
@@ -429,7 +434,7 @@ const sendsBeforeBusy = await page.evaluate(() => window.__bridgeCalls.filter(({
 for (const scope of ['approval', 'execution', 'conversation']) {
   await page.evaluate((value) => { window.__showAcceptedProjection(value === 'execution'); window.__setRunState(value !== 'conversation', value === 'conversation' ? 'running' : 'completed'); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) }, scope)
   await page.waitForTimeout(60)
-  await messageTarget.selectOption('__conversation__')
+  await selectScope('__conversation__')
   await composer.fill('执行中暂存的修改要求')
   await composer.press('Enter')
   assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'send_message').length), sendsBeforeBusy)
@@ -442,18 +447,18 @@ for (const scope of ['approval', 'execution', 'conversation']) {
 }
 await page.evaluate(() => window.__showAcceptedProjection(false))
 await page.getByRole('tab', { name: /Business B2/ }).click()
-assert.equal(await messageTarget.inputValue(), 'business-b2')
-await messageTarget.selectOption('')
+assert.equal(await messageTarget.getAttribute('data-scope'), 'business-b2')
+await selectScope('')
 await readyComposer()
-assert.equal(await messageTarget.inputValue(), '')
-assert.equal(await messageTarget.locator('option:checked').textContent(), '跟随当前业务：Business B2')
+assert.equal(await messageTarget.getAttribute('data-scope'), '')
+assert.equal(await messageTarget.textContent(), '当前业务：Business B2')
 assert.ok((await page.locator('.material-reuse-tray').textContent()).includes('订单材料.csv'))
 await composer.fill('继续处理当前业务')
 await page.getByRole('button', { name: '发送' }).click()
 await page.waitForTimeout(25)
-await messageTarget.selectOption('__conversation__')
+await selectScope('__conversation__')
 await readyComposer()
-assert.equal(await messageTarget.inputValue(), '__conversation__')
+assert.equal(await messageTarget.getAttribute('data-scope'), '__conversation__')
 await composer.fill('开始一个新的业务意图')
 await page.getByRole('button', { name: '发送' }).click()
 await page.waitForTimeout(25)
@@ -462,7 +467,7 @@ assert.deepEqual(sentMessages.map(({ params }) => params), [
   { session_id: 'session-b', text: '继续处理当前业务', context_business_id: 'business-b2' },
   { session_id: 'session-b', text: '开始一个新的业务意图' }
 ])
-await messageTarget.selectOption('__conversation__')
+await selectScope('__conversation__')
 await readyComposer()
 await composer.fill('thinking hold')
 await page.getByRole('button', { name: '发送' }).click()
@@ -476,7 +481,7 @@ await page.getByRole('heading', { name: 'Session B' }).waitFor()
 await page.waitForTimeout(220)
 await page.getByRole('tab', { name: /Business B2/ }).click()
 await page.getByRole('heading', { name: 'Business B2' }).waitFor()
-await messageTarget.selectOption('business-b2')
+await selectScope('business-b2')
 await readyComposer()
 await composer.fill('dedupe send')
 await page.evaluate(() => {
@@ -518,7 +523,14 @@ await page.evaluate(() => {
 await page.waitForTimeout(40)
 assert.equal(await page.getByText('最终回答：当前能力与业务范围已确认。', { exact: true }).count(), 1)
 assert.equal(await page.locator('.conversation-pane .message-markdown table').count(), 1)
-assert.equal(await page.locator('.conversation-pane .message-full h2').count(), 1)
+const longMessage = page.locator('.message.assistant').filter({ hasText: '长摘要' })
+assert.equal(await longMessage.locator('h2').count(), 1)
+await longMessage.getByRole('button', { name: /查看完整消息/ }).click()
+assert.equal(await longMessage.locator('h2').count(), 1)
+assert.equal(await longMessage.locator('.message-markdown').count(), 1)
+assert.equal((await longMessage.locator('.message-markdown').textContent()).match(/公开业务内容/g).length, 200)
+await longMessage.getByRole('button', { name: '收起消息' }).click()
+assert.ok((await longMessage.locator('.message-markdown').textContent()).length < 400)
 assert.equal(await page.getByText('## 长摘要', { exact: true }).count(), 0)
 const tableOverflow = await page.locator('.conversation-pane .message-table-wrap').evaluate((element) => ({ scrollWidth: element.scrollWidth, clientWidth: element.clientWidth, pageWidth: document.documentElement.scrollWidth, viewport: window.innerWidth }))
 assert.ok(tableOverflow.pageWidth <= tableOverflow.viewport + 1, JSON.stringify(tableOverflow))
@@ -560,7 +572,7 @@ assert.equal(await page.locator('.thinking-message').count(), 0)
 await page.evaluate(() => window.__removeConversationMessage('snapshot-public'))
 
 // A delayed send response from the old session must not reload that session over a newer selection.
-await messageTarget.selectOption('business-b2')
+await selectScope('business-b2')
 await readyComposer()
 await composer.fill('delayed mutation')
 await page.getByRole('button', { name: '发送' }).click()
@@ -597,6 +609,7 @@ await page.evaluate(() => {
 await page.waitForTimeout(30)
 const startCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'start_run'))
 assert.equal(startCalls.length, 1)
+assert.equal(await page.getByRole('button', { name: '正在启动…', exact: true }).isDisabled(), true)
 assert.equal(await page.getByRole('button', { name: '取消运行' }).count(), 0)
 assert.equal(await page.locator('.tool-row').count(), 0)
 await page.getByRole('tab', { name: /Business B2/ }).click()
@@ -1183,7 +1196,7 @@ await page.getByRole('button', { name: '取消运行', exact: true }).waitFor()
 await page.getByRole('tab', { name: /^变更与审批/ }).click()
 await page.waitForFunction(() => !document.querySelector('.business-content .loading-line'))
 assert.equal(await page.locator('.approval-row.pending').count(), 0)
-assert.equal(await page.getByLabel('讨论范围').inputValue(), 'business-b2')
+assert.equal(await page.getByLabel('讨论范围').getAttribute('data-scope'), 'business-b2')
 const revisionCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'request_approval_revision'))
 assert.equal(revisionCalls.length, 2)
 assert.deepEqual(revisionCalls[1].params, { session_id: 'session-b', business_id: 'business-b2', run_id: 'business-b2-run', action_id: 'action-b2', text: '数量改为 5 件，先保留草稿。' })
@@ -1291,6 +1304,75 @@ await page.getByRole('button', { name: '打开 Odoo', exact: true }).click()
 await page.getByRole('dialog', { name: '连接设置' }).waitFor()
 await page.getByText('请先填写 Odoo 地址与数据库，再打开 Odoo。', { exact: true }).waitFor()
 await page.keyboard.press('Escape')
+assert.equal(pageErrors.length, 0, pageErrors.join('\n'))
+// Reproduce the observed UI boundaries against the same bridge, without Odoo or model calls.
+await page.evaluate(() => {
+  window.__originalUiCall = window.workbench.call
+  window.__uiScenario = ''
+  window.workbench.call = async (method, params = {}) => {
+    const hold = method === 'get_business' && window.__holdNextRead
+    if (hold) window.__holdNextRead = false
+    const result = await window.__originalUiCall(method, params)
+    if (method === 'get_session' && window.__uiScenario === 'empty') return { ...result, businesses: [], messages: [], conversation_runs: [], live_messages: [] }
+    if (method === 'import_material' && params.name === 'async.pdf') {
+      window.__asyncMaterial = { ...result, status: 'parsing', preview: '' }
+      return window.__asyncMaterial
+    }
+    if (method === 'get_session' && window.__asyncMaterial?.session_id === params.session_id) return { ...result, materials: [...(result.materials || []), window.__asyncMaterial] }
+    if (method === 'get_business' || method === 'refresh_business') {
+      if (window.__uiScenario === 'display') {
+        if (method === 'refresh_business') window.__displayReady = true
+        result.approvals[0].approval_display = { ready: Boolean(window.__displayReady), missing: window.__displayReady ? [] : ['公司名称尚未读取'], effect: '核对后处理本次变更。' }
+        result.approvals[0].values.note = '<p>换供应商承接单</p><script>bad()</script>'
+      }
+      if (hold) {
+        result.business = { ...result.business, title: '旧快照不得覆盖' }
+        window.__heldReadReady = true
+        await new Promise((resolve) => { window.__releaseOldRead = resolve })
+      }
+    }
+    return result
+  }
+  window.__uiScenario = 'empty'
+})
+await page.getByRole('button', { name: /Session A/ }).click()
+await page.getByText('新业务讨论 · 描述需求后确认业务方案', { exact: true }).waitFor()
+assert.equal(await page.getByLabel('讨论范围').count(), 0)
+await page.evaluate(() => { window.__uiScenario = '' })
+await page.locator('input[type="file"]').first().setInputFiles({ name: 'async.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-fixture') })
+await page.locator('.material-parsing').waitFor()
+assert.equal(await page.getByRole('button', { name: '发送', exact: true }).isDisabled(), true)
+await page.evaluate(() => { window.__asyncMaterial.status = 'failed'; window.__asyncMaterial.error = '文件内容无法解析'; window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-a' } }) })
+await page.locator('.material-failed').getByText(/文件内容无法解析/).waitFor()
+assert.equal(await page.getByRole('button', { name: '发送', exact: true }).isDisabled(), true)
+await page.evaluate(() => { window.__asyncMaterial.status = 'ready'; window.__asyncMaterial.error = ''; window.__asyncMaterial.warnings = ['图片页需要人工核对']; window.__asyncMaterial.preview = '可读取的业务材料'; window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-a' } }) })
+await page.locator('.material-ready').getByText(/图片页需要人工核对/).waitFor()
+await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent === '发送' && !button.disabled))
+await page.getByRole('button', { name: '移除 async.pdf' }).click()
+await page.getByRole('button', { name: /Session B/ }).click()
+await page.getByRole('tab', { name: /Business B2/ }).click()
+await page.evaluate(() => { window.__enterpriseCase = null; window.__showAcceptedProjection(false); window.__uiScenario = 'display'; window.__revisionAccepted = false; window.__setRunState(true); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b2' } }) })
+await page.locator('.approval-inbox-item').filter({ hasText: '创建发票与贷项' }).click()
+const displayApproval = page.locator('#approval-action-b2')
+await displayApproval.getByText('审批信息尚不完整', { exact: true }).waitFor()
+assert.equal(await displayApproval.getByRole('button', { name: '批准这项业务动作' }).isDisabled(), true)
+assert.equal(await displayApproval.evaluate((element) => document.activeElement === element), true)
+assert.ok((await displayApproval.locator('.field-diff').textContent()).includes('换供应商承接单'))
+assert.ok(!(await displayApproval.locator('.field-diff').textContent()).includes('<p>'))
+assert.ok(!(await displayApproval.locator('.field-diff').textContent()).includes('bad()'))
+await displayApproval.getByRole('button', { name: '刷新审批信息' }).click()
+await displayApproval.getByText('审批信息尚不完整', { exact: true }).waitFor({ state: 'hidden' })
+assert.equal(await displayApproval.getByRole('button', { name: '批准这项业务动作' }).isDisabled(), false)
+await page.evaluate(() => { window.__uiScenario = ''; window.__holdNextRead = true; window.__emitWorkbench({ event: 'run_trace', data: { session_id: 'session-b', business_id: 'business-b2', run_id: 'business-b2-run' } }) })
+await page.waitForFunction(() => window.__heldReadReady)
+const readsBeforeFresh = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'get_business').length)
+await page.evaluate(() => window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b2' } }))
+await page.waitForFunction((count) => window.__bridgeCalls.filter(({ method }) => method === 'get_business').length > count, readsBeforeFresh)
+await page.waitForTimeout(60)
+await page.evaluate(() => window.__releaseOldRead())
+await page.waitForTimeout(60)
+assert.equal(await page.locator('.business-header h2').textContent(), 'Business B2')
+assert.equal(await page.getByRole('heading', { name: '旧快照不得覆盖' }).count(), 0)
 assert.equal(pageErrors.length, 0, pageErrors.join('\n'))
 console.log('renderer-check: PASS')
 console.log('checked: session/business/trace stale guards, same-run trace refresh, changed routing, host crash/retry, message scope, session search, approval scope+preflight labels, purchase/file approval labels, invoice PDF availability, business-chain scope labels, document selection across refresh, CONFIG_BUSY mapping, settings save+Escape, splitter overflow, evidence navigation, unknown-write no-retry, historical activity preservation, latest proposal guards, busy-send draft preservation, approval revision failure/success without automatic execution')

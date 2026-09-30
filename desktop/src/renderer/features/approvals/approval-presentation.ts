@@ -6,6 +6,37 @@ const object = (value: unknown): Row => value && typeof value === 'object' && !A
 const rows = (value: unknown): Row[] => Array.isArray(value) ? value.filter((item) => item && typeof item === 'object' && !Array.isArray(item)) as Row[] : Object.keys(object(value)).length ? [object(value)] : []
 const idOf = (value: unknown) => Array.isArray(value) ? value[0] : value
 
+// Display-only references retain model + ID identity. A line description is not a product readback.
+export function approvalDisplayDocuments(approval: Approval, documents: Document[]): Document[] {
+  const references = new Map(documents.map((document) => [`${document.model}:${document.id}`, document]))
+  const relationModels: Record<string, string> = { company_id: 'res.company', currency_id: 'res.currency', product_id: 'product.product', product_tmpl_id: 'product.template', partner_id: 'res.partner', partner_shipping_id: 'res.partner', partner_invoice_id: 'res.partner', product_uom_id: 'uom.uom', product_uom: 'uom.uom', journal_id: 'account.journal', payment_term_id: 'account.payment.term' }
+  const add = (model: string, id: unknown, name: unknown, fields: Row = {}) => {
+    if ((typeof id !== 'number' && typeof id !== 'string') || typeof name !== 'string' || !name.trim()) return
+    const key = `${model}:${id}`, previous = references.get(key)
+    references.set(key, { ...previous, model, id, name, fields: { ...previous?.fields, ...fields }, source: 'approval_evidence' })
+  }
+  const visit = (value: unknown) => {
+    if (Array.isArray(value)) { value.forEach(visit); return }
+    for (const [key, nested] of Object.entries(object(value))) {
+      if (relationModels[key] && Array.isArray(nested) && nested.length === 2) add(relationModels[key], nested[0], nested[1])
+      if (nested && typeof nested === 'object') visit(nested)
+    }
+  }
+  documents.forEach((document) => visit(document.fields))
+  visit(approval.prestate)
+  const sources = object(object(approval.prestate).host_task_evidence).sources
+  if (Array.isArray(sources)) for (const source of sources) {
+    if (!Array.isArray(source) || typeof source[1] !== 'string') continue
+    for (const row of rows(source[2])) add(source[1], row.id, row.display_name ?? row.name, row)
+  }
+  for (const reference of approval.display_references ?? []) {
+    // Explicit read failure takes precedence over an older World label.
+    if (reference.status !== 'ready') references.delete(`${reference.model}:${reference.id}`)
+    else add(reference.model, reference.id, reference.name)
+  }
+  return [...references.values()]
+}
+
 // Relations may be readback IDs or explicit ORM link/replace commands. Never treat a wizard ID as its source order.
 export function approvalRelationIds(value: unknown): (number | string)[] {
   if (typeof value === 'number' || typeof value === 'string') return [value]
@@ -43,6 +74,7 @@ export function approvalActionTitle(approval: Approval) {
 }
 
 export function approvalActionEffect(approval: Approval) {
+  if (approval.approval_display?.effect) return approval.approval_display.effect
   const effects: Record<string, string> = {
     'sale.advance.payment.inv.create': '保存所选销售订单和开票方式。生成发票需后续独立审批。',
     'sale.advance.payment.inv.create_invoices': '按来源订单和已保存的开票方式生成发票；过账与发送需另行审批。',

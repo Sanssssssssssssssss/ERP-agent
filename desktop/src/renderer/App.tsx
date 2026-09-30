@@ -1,6 +1,6 @@
 import { Button as RadixButton,IconButton as RadixIconButton,Tooltip as RadixTooltip } from '@radix-ui/themes'
 import { Activity,ArrowUpRight,ExternalLink,LoaderCircle,Minus,Settings2,X } from 'lucide-react'
-import { type CSSProperties } from 'react'
+import { useState,type CSSProperties } from 'react'
 import { BusinessWorkspace } from './features/business/BusinessWorkspace'
 import { ArchiveDialog,BlockedSendDialog,ConversationPane,SessionRail } from './features/conversation/ConversationPane'
 import { ConnectionDetailsDialog,SettingsDialog } from './features/settings/SettingsDialog'
@@ -25,6 +25,7 @@ export default function App() {
     draft,
     setDraft,
     loading,
+    startingBusinessId,
     businessLoading,
     traceLoading,
     loadTraceDetail,
@@ -108,14 +109,13 @@ export default function App() {
     proposalUnavailable
   } = useWorkbench()
 
+  const [focusedApprovalId, setFocusedApprovalId] = useState('')
+  const openApprovals = (actionId?: string) => { setFocusedApprovalId(actionId || ''); setTab('approvals') }
 
   return (
     <div className="app-shell">
       <header className="window-bar">
         <div className="brand-lockup"><span className="brand-mark"><Activity size={16} strokeWidth={2.5} /></span><span>ERP-agent</span><small>Odoo 业务执行</small></div>
-        <button className="window-bar-state" onClick={() => setConnectionDetailsOpen(true)} aria-label="查看连接状态"><span className={`connection-dot ${connection}`} />{connectionLabel(connection)}<span className="health-separator">·</span><span className={`odoo-health odoo-${odooHealthStatus(health)}`}>Odoo {healthLabel(odooHealthStatus(health))}</span><ArrowUpRight size={13} /></button>
-        <RadixTooltip content="配置模型与 Odoo 连接"><RadixButton ref={settingsButtonRef} className="settings-button" variant="soft" onClick={() => void openSettings()}><Settings2 size={15} />连接设置</RadixButton></RadixTooltip>
-        <RadixButton className="open-odoo-button" variant="soft" disabled={openingOdoo} onClick={() => void openOdoo()}>{openingOdoo ? <LoaderCircle className="spin" size={15} /> : <ExternalLink size={15} />}打开 Odoo</RadixButton>
         <div className="window-actions">
           <RadixTooltip content="最小化"><RadixIconButton variant="ghost" aria-label="最小化" onClick={() => void window.workbench?.windowControl('minimize')}><Minus size={16} /></RadixIconButton></RadixTooltip>
           <RadixTooltip content="最大化"><RadixIconButton variant="ghost" aria-label="最大化" onClick={() => void window.workbench?.windowControl('maximize')}><span className="window-maximize-glyph" /></RadixIconButton></RadixTooltip>
@@ -123,7 +123,7 @@ export default function App() {
         </div>
       </header>
 
-      {settingsOpen && <SettingsDialog settings={settings} draft={settingsDraft} saving={settingsSaving} onChange={(key, value) => setSettingsDraft((current) => ({ ...current, [key]: value }))} onClose={closeSettings} onSave={() => void saveSettings()} />}
+      {settingsOpen && <SettingsDialog onOpenOdoo={() => void openOdoo()} openingOdoo={openingOdoo} settings={settings} draft={settingsDraft} saving={settingsSaving} onChange={(key, value) => setSettingsDraft((current) => ({ ...current, [key]: value }))} onClose={closeSettings} onSave={() => void saveSettings()} />}
       <ConnectionDetailsDialog health={health} connection={connection} busy={hasActiveExecution} open={connectionDetailsOpen} onOpenChange={setConnectionDetailsOpen} onRetry={() => void checkConnection(true)} />
       <ArchiveDialog open={Boolean(archiveTarget)} onOpenChange={(open) => { if (!open) setArchiveTarget('') }} onConfirm={() => { const id = archiveTarget; setArchiveTarget(''); void archiveSession(id) }} />
       <BlockedSendDialog message={blockedSend} onClose={() => setBlockedSend('')} />
@@ -146,6 +146,9 @@ export default function App() {
           onQueryChange={setSessionQuery}
           collapsed={railCollapsed}
           onToggle={() => setRailCollapsed((value) => !value)}
+          footer={<div className="rail-connections"><button className="rail-connection-state" onClick={() => setConnectionDetailsOpen(true)} aria-label="查看连接状态"><span className={`connection-dot ${connection}`} />{connectionLabel(connection)}<span className="health-separator">·</span><span className={`odoo-health odoo-${odooHealthStatus(health)}`}>Odoo {healthLabel(odooHealthStatus(health))}</span><ArrowUpRight size={13} /></button>
+        <RadixTooltip content="配置模型与 Odoo 连接"><RadixButton aria-label="连接设置" ref={settingsButtonRef} className="settings-button" variant="soft" onClick={() => void openSettings()}><Settings2 size={15} />连接设置</RadixButton></RadixTooltip>
+        <RadixButton className="open-odoo-button" aria-label="打开 Odoo" variant="soft" disabled={openingOdoo} onClick={() => void openOdoo()}>{openingOdoo ? <LoaderCircle className="spin" size={15} /> : <ExternalLink size={15} />}打开 Odoo</RadixButton></div>}
         />
         <BusinessWorkspace
           session={session}
@@ -159,6 +162,8 @@ export default function App() {
           onLoadTraceDetail={loadTraceDetail}
           businessLoading={businessLoading}
           loading={loading}
+          starting={startingBusinessId === selectedBusinessId}
+          focusedApprovalId={focusedApprovalId}
           selectedRunId={selectedRunId}
           onBusinessSelect={chooseBusiness}
           onTabChange={setTab}
@@ -186,7 +191,7 @@ export default function App() {
           onOpenArtifact={(artifact) => void openArtifact(artifact)}
           onRevealArtifact={(artifact) => void openArtifact(artifact, true)}
           approvalProgress={approvalProgress}
-          onOpenApprovals={() => setTab('approvals')}
+          onOpenApprovals={openApprovals}
         />
         {conversationOpen && <div className="workspace-divider" role="separator" tabIndex={0} aria-label="调整会话辅助面板宽度" onPointerDown={resizeBusiness} onKeyDown={(event) => { const maxWidth = Math.max(320, window.innerWidth - 240 - 520 - 5); if (event.key === 'ArrowLeft') setBusinessWidth((width) => Math.min(maxWidth, 640, width + 24)); if (event.key === 'ArrowRight') setBusinessWidth((width) => Math.max(320, width - 24)) }} />}
         {conversationOpen && <ConversationPane
@@ -203,7 +208,7 @@ export default function App() {
           pendingApprovals={(businessDetail?.approvals ?? []).filter(isPendingApproval)}
           approvalBusinessName={activeBusiness?.title || '当前业务'}
           approvalProgress={approvalProgress}
-          onOpenApprovals={() => setTab('approvals')}
+          onOpenApprovals={openApprovals}
           onOpenExecution={() => setTab('execution')}
           approvalActivity={businessDetail?.activity}
           businesses={session?.businesses ?? []}

@@ -1,5 +1,5 @@
 export type BusinessType = "sale_invoice" | "sale_purchase_invoice" | "purchase" | "inventory" | "manufacturing" | "payment" | "refund" | "reconciliation" | "invoice_delivery";
-export type CompletionTarget = "read_only" | "draft" | "confirmed" | "posted" | "done" | "reconciled" | "sent";
+export type CompletionTarget = "read_only" | "draft" | "confirmed" | "posted" | "done" | "reconciled" | "sent" | "cancelled";
 export type Role = "user" | "assistant" | "system";
 export type ApprovalDecision = "approve" | "reject";
 
@@ -36,6 +36,9 @@ export interface Material {
   row_count?: number;
   preview: string;
   media_type: string;
+  status?: "parsing" | "ready" | "failed";
+  error?: string;
+  warnings?: string[];
 }
 
 export interface ConversationRun {
@@ -70,10 +73,11 @@ export interface BusinessProposal {
   title: string;
   goal: string;
   source_messages?: { id: string; text: string }[];
-  resolved_references?: { resource: string; id: number; quote: string; model: string }[];
+  resolved_references?: { resource: string; id: number; quote: string; model: string; expected_state?: "cancel" }[];
   status: "pending" | "confirmed" | "rejected";
   completion_target?: CompletionTarget;
   material_ids?: string[];
+  existing_business_id?: string;
 }
 
 export interface Business {
@@ -124,6 +128,8 @@ export interface Approval {
   source?: string;
   result?: unknown;
   verification?: unknown;
+  display_references?: { model: string; id: number | string; name?: string | null; status: string; observed_at?: string }[];
+  approval_display?: { ready: boolean; missing: string[]; effect?: string | null };
 }
 
 export interface Document {

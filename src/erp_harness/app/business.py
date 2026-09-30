@@ -2,7 +2,7 @@
 
 BUSINESS_TARGETS = {
     "sale_invoice": ("read_only", "draft", "confirmed", "posted"),
-    "purchase": ("read_only", "draft", "confirmed"),
+    "purchase": ("read_only", "draft", "cancelled", "confirmed"),
     "sale_purchase_invoice": ("read_only", "posted"),
     "inventory": ("read_only", "draft", "confirmed", "done"),
     "manufacturing": ("read_only", "draft", "confirmed", "done"),
@@ -17,7 +17,17 @@ BUSINESS_LABELS = {
     "refund": "退款与贷项", "reconciliation": "银行与账务核销",
     "invoice_delivery": "发票发送",
 }
-COMPLETION_TARGETS = ("read_only", "draft", "confirmed", "posted", "done", "reconciled", "sent")
+COMPLETION_TARGETS = ("read_only", "draft", "confirmed", "cancelled", "posted", "done", "reconciled", "sent")
+BUSINESS_COMMUNICATION = (
+    "面向用户的进度和最终回复一律用简体中文。只说完成事项、单据名称、数量金额、未完成事项及需要用户决定的下一步。"
+    "Keep tool names, action IDs, hashes, API steps and internal verification terminology in receipts, not in the customer-facing answer. "
+    "Posted invoices are accounting entries, not received money. An ended run is not a completed business. "
+    "Matching products/quantities do not prove a source relation; no manufacturing orders does not prove no BOM or manufacturing ability. "
+    "Historical purchase prices/dates are not current supplier offers or delivery promises. Recheck copied dates against the user's current request and the business calendar. "
+    "Unreserved quantity is not a stock shortage: distinguish on-hand stock, reservation, incoming supply and manufacturing requirements. "
+    "Planned arrival is not physical receipt. Ask the user to confirm actual received quantities before registering stock receipt. "
+    "Missing published fields are not proof of permission denial. State precisely what could not be read."
+)
 ENTERPRISE_TYPES = frozenset({"inventory", "manufacturing", "payment", "refund", "reconciliation"})
 
 
@@ -35,6 +45,7 @@ def completion_target_instruction(kind: str, target: str) -> str:
         return ("Stop at confirmed records. For sales confirmation do not invoice or deliver goods."
                 if kind == "sale_invoice" else "Stop at confirmed records; verify the confirmed state.")
     return {
+        "cancelled": "Cancel only the explicitly requested purchase orders through the reviewed button_cancel method and verify cancellation and linked transfers. Received goods or bills require a separate business choice; never write state directly.",
         "read_only": "Stop after factual reads; do not create or modify records.",
         "draft": "The completion target is draft documents; do not confirm or post them.",
         "posted": "Stop after the requested documents are posted and verified. Invoice delivery is a separate confirmed phase; do not send mail here.",

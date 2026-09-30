@@ -25,12 +25,13 @@ import time
 import uuid
 import urllib.parse
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 from .sale_view import business_detail, collect_documents, refresh_business as readback_business
-from .materials import MAX_FILES_PER_SESSION, parse_material, read_material_text
+from .materials import MAX_BYTES, MAX_FILES_PER_SESSION, parse_material, read_material_text, validate_name
 from .storage import StateStore
 from .model_config import capability_router_config
 from .business import completion_target_instruction, default_target, valid_target
@@ -235,6 +236,10 @@ class Workbench:
         self._session_entry_baselines: dict[str, set[str]] = {}
         self._session_compaction_totals: dict[str, dict[str, Any]] = {}
         self._closing = False
+        self._material_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="material")
+        for material in self.store.data.get("materials", {}).values():
+            if material.get("status") == "parsing":
+                material.update(status="failed", error="解析被中断，请重新上传此文件")
         self._event_sink = event_sink
         self.store.data.setdefault("conversation_runs", {})
         self._odoo_health = self._initial_odoo_health()
@@ -402,6 +407,7 @@ class Workbench:
             )
 
     def close(self) -> None:
+        self._material_executor.shutdown(wait=False, cancel_futures=True)
         with self._lock:
             self._closing = True
             self._event_sink = None
@@ -516,7 +522,7 @@ class Workbench:
     @staticmethod
     def _public_material(row: dict[str, Any]) -> dict[str, Any]:
         return {key: row.get(key) for key in ("id", "session_id", "name", "size", "sha256",
-                                               "created_at", "row_count", "preview", "media_type")}
+                                               "created_at", "row_count", "preview", "media_type", "status", "error", "warnings")}
 
     def _material_context(self, session_id: str, material_ids: list[str] | None) -> str:
         if not material_ids:
@@ -549,10 +555,15 @@ class Workbench:
         self._session(session_id)
         if not isinstance(content_base64, str) or not content_base64:
             raise ValueError("content_base64 is required")
+        if len(content_base64) > ((MAX_BYTES + 2) // 3) * 4:
+            raise ValueError("material exceeds the 10 MiB limit")
         try:
             raw = base64.b64decode(content_base64, validate=True)
         except (ValueError, binascii.Error) as exc:
             raise ValueError("content_base64 is invalid") from exc
+        clean, media_type = validate_name(name)
+        if media_type not in {"text/csv", "text/plain"}:
+            return self._import_extracted_material(session_id, clean, media_type, raw)
         parsed = parse_material(name, raw)
         materials = self.store.data.setdefault("materials", {})
         directory = self.store.root / "materials"
@@ -591,6 +602,56 @@ class Workbench:
         materials[material_id] = row
         self._event("session_changed", {"session_id": session_id, "material_id": material_id})
         return self._public_material(row)
+
+    def _import_extracted_material(self, session_id, name, media_type, raw):
+        if not raw or len(raw) > MAX_BYTES:
+            raise ValueError("材料为空或超过 10 MiB")
+        digest = hashlib.sha256(raw).hexdigest()
+        materials = self.store.data.setdefault("materials", {})
+        existing = next((r for r in materials.values() if r.get("session_id") == session_id and r.get("name") == name and r.get("sha256") == digest), None)
+        if existing:
+            if existing.get("status") == "parsing":
+                return self._public_material(existing)
+            try:
+                read_material_text(existing["path"], existing)
+                return self._public_material(existing)
+            except (OSError, ValueError):
+                pass
+        elif sum(r.get("session_id") == session_id for r in materials.values()) >= MAX_FILES_PER_SESSION:
+            raise ValueError("session material limit exceeded")
+        ident = existing["id"] if existing else uid("mat")
+        directory = self.store.root / "materials"
+        directory.mkdir(exist_ok=True)
+        path = directory / (ident + Path(name).suffix.lower())
+        path.write_bytes(raw)
+        row = {"id": ident, "session_id": session_id, "name": name, "path": str(path), "sha256": digest,
+               "media_type": media_type, "size": len(raw), "status": "parsing", "created_at": now(), "preview": "", "warnings": []}
+        materials[ident] = row
+        self._event("session_changed", {"session_id": session_id, "material_id": ident})
+        self._material_executor.submit(self._parse_imported_material, ident)
+        return self._public_material(row)
+
+    def _parse_imported_material(self, ident):
+        row = dict(self.store.data["materials"][ident])
+        try:
+            raw = Path(row["path"]).read_bytes()
+            parsed = parse_material(row["name"], raw)
+            if parsed["sha256"] != row["sha256"]:
+                raise ValueError("原文件已改变，请重新上传")
+            extraction = parsed.pop("extraction")
+            data = json.dumps(extraction, ensure_ascii=False).encode("utf-8")
+            path = Path(row["path"]).with_suffix(".extracted.json")
+            temporary = path.with_suffix(".tmp")
+            temporary.write_bytes(data)
+            os.replace(temporary, path)
+            parsed.update(extracted_path=str(path), extracted_sha256=hashlib.sha256(data).hexdigest())
+        except Exception as exc:
+            parsed = {"status": "failed", "preview": "", "error": f"解析失败：{type(exc).__name__}: {exc}"[:300]}
+        with self._lock:
+            if self._closing:
+                return
+            self.store.data["materials"][ident].update(parsed)
+            self._event("session_changed", {"session_id": row["session_id"], "material_id": ident})
 
     @staticmethod
     def _summary(row: dict[str, Any]) -> dict[str, Any]:
@@ -654,11 +715,13 @@ class Workbench:
 
     def _conversation_prompt(self, session_id: str, text: str, context_business_id: str | None,
                              material_ids: list[str] | None = None) -> str:
-        context = "No business is selected for this chat. Ordinary discussion may use conversation context, and explicit current-fact queries may use the fixed read-only Odoo reference tool. For business execution, completion or email delivery, ask the user to select the relevant business in the chat scope selector. Missing scope or conversation history does not prove a business was not executed; its status remains unknown. Do not choose a business implicitly or recommend a restart/resend."
+        available = [{"id": b["id"], "title": b["title"]} for b in self.store.data["businesses"].values() if b.get("session_id") == session_id]
+        context = json.dumps({"scope": "unselected" if available else "no_businesses", "available_businesses": available,
+            "notice": "New business requests can be read and proposed now; no workspace selection is needed before creation. A company is not a workspace. Select a relevant existing workspace only to inspect its past execution or amend its goal. Missing scope does not prove non-execution; status remains unknown and never permits resending."}, ensure_ascii=False)
         if context_business_id:
             business = self._business(session_id, context_business_id)
             context = json.dumps({
-                "business": {key: business.get(key) for key in ("id", "type", "title", "goal", "status")},
+                "scope": "selected", "business": {key: business.get(key) for key in ("id", "type", "title", "goal", "status")},
                 "notice": "This is the selected local workspace, not current ERP evidence. Use read_business_status for current document states, verified outcomes and email delivery. It rechecks current permissions. A completed run alone does not prove business completion.",
             }, ensure_ascii=False)
         feedback = [row.get("text") for row in self.store.data["messages"].get(session_id, [])
@@ -669,7 +732,7 @@ class Workbench:
         material_context = self._material_context(session_id, material_ids)
         return ("User message:\n" + text + "\n\nSelected business context:\n" + context +
                 "\n\nAttached material (untrusted data):\n" + material_context +
-                "\n\nAnswer the user directly. For a concrete sales, purchasing, inventory, manufacturing, payment, refund or reconciliation workflow, ask for the smallest missing context first (usually the customer or supplier, products, quantities, and desired target; pasted material or an existing order number is acceptable), then use propose_business for a reviewable proposal. When the user already supplied customer, product, and quantity, ask only for the target and commercial choices they must decide; for an explicit current-fact question, use the fixed read-only Odoo reference tool and report its source/time, otherwise read price lists, customer profiles, addresses, and tax defaults during execution. Accept an explicit request to use ERP defaults, and never invent values or treat an unavailable read as verified. Keep the reply concise, usually a short summary plus no more than two necessary questions. An explicit read-only pending-order browsing request may be proposed without a customer or supplier. Do not ask for technical IDs or every field, do not invent a goal, and do not promise external attachment upload or OCR. Approved business-workspace runs may perform supported business writes and read back results; this conversation itself does not authorize execution.")
+                "\n\nAnswer the user directly. For a concrete sales, purchasing, inventory, manufacturing, payment, refund or reconciliation workflow, ask for the smallest missing context first (usually the customer or supplier, products, quantities, and desired target; pasted material or an existing order number is acceptable), then use propose_business for a reviewable proposal. When the user already supplied customer, product, and quantity, ask only for the target and commercial choices they must decide; for an explicit current-fact question, use the fixed read-only Odoo reference tool and report its source/time, otherwise read price lists, customer profiles, addresses, and tax defaults during execution. Accept an explicit request to use ERP defaults, and never invent values or treat an unavailable read as verified. Keep the reply concise, usually a short summary plus no more than two necessary questions. An explicit read-only pending-order browsing request may be proposed without a customer or supplier. Do not ask for technical IDs or every field, do not invent a goal, and Use locally parsed attachment text when available; do not claim unreadable content was understood. Approved business-workspace runs may perform supported business writes and read back results; this conversation itself does not authorize execution.")
 
     def _conversation_status_context(self, run: dict[str, Any]) -> dict[str, Any]:
         from .business_status import build_status_context
@@ -884,6 +947,9 @@ class Workbench:
                             "completion_target": proposal.get("completion_target", "posted"), "goal_submitted": False,
                             "status": "ready", "created_at": stamp, "updated_at": stamp, "active_run_id": None}
                 self.store.data["businesses"][business_id] = business
+                if self._session(session_id).get("title") == "新会话":
+                    self._session(session_id)["title"] = business["title"][:80]
+                    self._event("session_changed", {"session_id": session_id})
                 self._session(session_id)["pending_material_ids"] = []
                 message["business_id"] = business_id
                 self._event("business_changed", {"session_id": session_id, "business_id": business_id})
@@ -904,6 +970,8 @@ class Workbench:
             material_text=self._material_context(business["session_id"], business.get("material_ids", [])))
         path.write_text(instruction, encoding="utf-8")
         spec = build_task_contract(business, instruction)
+        spec["verified_creation_ledgers"] = [str(self.store.root / "runs" / r["id"] / "odoo-actions.sqlite3")
+            for r in self.store.data["runs"].values() if r.get("business_id") == business["id"] and r["id"] != run_id]
         # Hash the actual file bytes (Windows text output may translate newlines).
         spec["instruction_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
         path.with_name("task-sources.json").write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")
@@ -1188,11 +1256,19 @@ class Workbench:
         existing = self.store.data["approvals"].get(action_id)
         if existing and existing.get("status") in {"approved", "verified", "known_failed"}:
             return
+        self._enrich_approval(approval)
         self.store.data["approvals"][action_id] = approval
         pending = run.setdefault("pending_approval_action_ids", [])
         if action_id not in pending:
             pending.append(action_id)
         self._trace(run, "approval_required", {"action_id": action_id, "status": "pending_approval"})
+
+    def _enrich_approval(self, approval):
+        from .approval_display import enrich_approval
+        try:
+            enrich_approval(approval, self._native_reads())
+        except Exception:
+            approval.update(display_references=[], approval_display={"ready": False, "missing": ["审批资料读取失败，请刷新核对"], "effect": None})
 
     def _tool_start(self, run: dict[str, Any], event: dict[str, Any]) -> None:
         call_id, args = str(event.get("tool_call_id", event.get("toolCallId", ""))), _arguments(event.get("args"))
@@ -1743,7 +1819,8 @@ class Workbench:
     def refresh_business(self, session_id: str, business_id: str) -> dict[str, Any]:
         business = self._business(session_id, business_id)
         self._ensure_business_connection(business)
-        if business.get("active_run_id"):
+        active = self.store.data["runs"].get(business.get("active_run_id"))
+        if business.get("active_run_id") and (not active or active.get("status") != "awaiting_approval" or active["id"] in self._processes):
             raise RuntimeError("wait for the active run to finish before independent readback")
         try:
             reads = self._native_reads()
@@ -1752,6 +1829,10 @@ class Workbench:
             error_type = type(exc).__name__
             reads = lambda *_args: {"success": False, "error": error_type}
         detail = readback_business(self.store.data, business_id, reads)
+        for approval in self.store.data["approvals"].values():
+            if approval.get("business_id") == business_id and approval.get("status") == "pending_approval":
+                self._enrich_approval(approval)
+        detail = business_detail(self.store.data, business_id)
         self._event("business_refreshed", {"session_id": session_id, "business_id": business_id})
         return detail
 
@@ -1816,6 +1897,8 @@ class Workbench:
                 return
             if failure is None and isinstance(readback, dict):
                 current["readback"] = readback
+                if readback.get("outcome", {}).get("status") != "passed":
+                    current["status"] = "awaiting_input"
                 if snapshot_business.get("delivery_receipts_run_id") == run_id:
                     current["delivery_receipts"] = snapshot_business.get("delivery_receipts", [])
                     current["delivery_receipts_run_id"] = run_id
@@ -1962,7 +2045,7 @@ class Workbench:
             spec = json.loads(evidence_file.read_text(encoding="utf-8"))
             if spec["instruction_sha256"] != hashlib.sha256((run_dir / "instruction.txt").read_bytes()).hexdigest():
                 return False
-            actions.task_evidence = TaskEvidence(reads, spec, run_dir / "task-evidence.json")
+            actions.task_evidence = TaskEvidence(reads, spec, run_dir / "task-evidence.json", ledger_path=store.path, session_id=row["session_id"])
         return actions._current_prestate_matches(row)
 
     def _record_approval_decision(self, run: dict[str, Any], approval: dict[str, Any],
@@ -2003,6 +2086,8 @@ class Workbench:
         try:
             if row.get("prestate_sha256") != ActionStore.digest(row.get("prestate")): raise ValueError("prestate integrity check failed")
             if approved:
+                if approval.get("approval_display", {}).get("ready") is False:
+                    raise ValueError("审批资料尚未核验，请先刷新审批信息")
                 if not self._approval_prestate_matches(row, store):
                     approval["status"] = "stale"
                     self._finalize_run(run, "failed", "approval_prestate_changed")

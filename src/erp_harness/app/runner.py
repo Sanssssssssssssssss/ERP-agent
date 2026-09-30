@@ -35,7 +35,7 @@ from erp_harness.runtime.session import HarnessSession, SessionConfig
 from erp_harness.tools.router import native_tool_catalog, route_tools
 from erp_harness.app.request_receipts import RequestReceipts, _message_usage, _sum_usage_bucket
 from erp_harness.app.model_config import capability_router_config, CONTEXT_WINDOW, MODEL_COMPAT, provider_config as _provider_config, transport_config
-from erp_harness.app.business import completion_target_instruction, valid_target
+from erp_harness.app.business import BUSINESS_COMMUNICATION, completion_target_instruction, valid_target
 from erp_harness.context.projection import project_messages, project_read_history
 from erp_harness.erp.actions import NativeActions
 from erp_harness.erp.capabilities import NativeCapabilities
@@ -93,6 +93,7 @@ def build_business_system_prompt(*, sop_mode: str, tool_mode: str,
         f"Runtime local date: {runtime_date}; host timezone: {runtime_timezone}. "
         "Use get_current_time when a precise current time is needed.\n"
         + ODOO_TOOL_POLICY
+        + "\n" + BUSINESS_COMMUNICATION + "\n"
         + BUSINESS_EXECUTION_POLICY
         + (SOP_POLICY if sop_mode == "controlled" else "")
         + ((HOST_ROUTING_POLICY if host_routing else DYNAMIC_TOOL_POLICY) if tool_mode == "dynamic" else "")
@@ -453,7 +454,7 @@ async def run(args: argparse.Namespace, *, source_toolset=None) -> None:
                     instruction_sha256 = hashlib.sha256(args.instruction_file.read_bytes()).hexdigest()
                     if specification.get("instruction_sha256") != instruction_sha256:
                         raise ValueError("host evidence is bound to a different instruction")
-                    actions.task_evidence = TaskEvidence(native_runtime, specification, receipt_dir / "task-evidence.json")
+                    actions.task_evidence = TaskEvidence(native_runtime, specification, receipt_dir / "task-evidence.json", ledger_path=actions.store.path)
             capabilities = (
                 NativeCapabilities(
                     native_runtime,

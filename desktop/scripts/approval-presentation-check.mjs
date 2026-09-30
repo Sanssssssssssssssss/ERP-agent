@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 
 const { outputFiles } = await build({ entryPoints: [fileURLToPath(new URL('../src/renderer/features/approvals/approval-presentation.ts', import.meta.url))], bundle: true, write: false, format: 'esm', platform: 'node' })
-const { approvalActionTitle, approvalActionEffect, approvalBusinessTargets, approvalBusinessFacts, approvalMethodOptions, approvalRelationIds, approvalWrittenValues } = await import(`data:text/javascript;base64,${Buffer.from(outputFiles[0].text).toString('base64')}`)
+const { approvalDisplayDocuments, approvalActionTitle, approvalActionEffect, approvalBusinessTargets, approvalBusinessFacts, approvalMethodOptions, approvalRelationIds, approvalWrittenValues } = await import(`data:text/javascript;base64,${Buffer.from(outputFiles[0].text).toString('base64')}`)
 const approval = (overrides = {}) => ({ action_id: 'test', run_id: 'test', business_id: 'test', status: 'pending', model: 'sale.advance.payment.inv', operation: 'create_invoices', record_ids: [1], values: { ids: [1] }, prestate: { wizard: [{ id: 1, sale_order_ids: [3499] }], orders: [{ id: 3499, invoice_ids: [] }], host_task_evidence: { sources: [['user_reference', 'res.partner', { id: 99, name: 'Unrelated customer' }]] } }, ...overrides })
 const documents = [
   { model: 'sale.order', id: 1, name: 'Wrong order', fields: { amount_total: 999 }, source: 'read' },
@@ -36,3 +36,13 @@ assert.equal(approvalMethodOptions(payment, documents)[0].value, '40.00 CNY') //
 const returns = approval({ model: 'stock.return.picking', operation: 'action_create_returns', prestate: { enterprise: { kind: 'return', lines: [{ product_id: [2, 'Valve'], move_id: [9, 'Move'], quantity: 3 }], moves: [{ id: 9, product_id: [2, 'Valve'], product_uom: [1, '件'] }] } } })
 assert.equal(approvalMethodOptions(returns, [])[0].value, '3 件')
 console.log('Approval presentation checks passed: real write fields, wizard/source identity, currency, payment/return quantities and chatter boundary.')
+
+// The observed purchase approval held names in bound evidence and nested lines, not top-level entities.
+const purchase = approval({ model: 'purchase.order', operation: 'create', values: { company_id: 1, currency_id: 6, order_line: [[0, 0, { product_id: 1, name: 'Submitted description' }]] }, prestate: { host_task_evidence: { sources: [['user_reference', 'purchase.order', { id: 5, name: 'P00001', company_id: [1, '澄川工业'], currency_id: [6, 'CNY'] }]] } } })
+const references = approvalDisplayDocuments(purchase, [{ model: 'purchase.order.line', id: 1, name: 'Source line', fields: { product_id: [1, '控制阀'] }, source: 'read' }, { model: 'res.partner', id: 1, name: 'Unrelated partner', fields: {}, source: 'read' }])
+assert.equal(references.find((row) => row.model === 'res.company' && row.id === 1)?.name, '澄川工业')
+assert.equal(references.find((row) => row.model === 'res.currency' && row.id === 6)?.name, 'CNY')
+assert.equal(references.find((row) => row.model === 'product.product' && row.id === 1)?.name, '控制阀')
+assert.equal(approvalDisplayDocuments(purchase, []).some((row) => row.model === 'product.product'), false)
+assert.equal(approvalDisplayDocuments({ ...purchase, display_references: [{ model: 'res.company', id: 1, name: 'Old secret', status: 'permission_denied' }] }, references).some((row) => row.model === 'res.company'), false)
+assert.equal(approvalDisplayDocuments({ ...purchase, display_references: [{ model: 'res.company', id: 1, name: 'Current verified name', status: 'ready' }] }, references).find((row) => row.model === 'res.company').name, 'Current verified name')
