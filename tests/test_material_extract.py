@@ -16,9 +16,10 @@ def image_document(title="采购订单 P00001"):
     font_path = next((p for p in [Path("C:/Windows/Fonts/msyh.ttc"), Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")] if p.exists()), None)
     if font_path is None:
         pytest.skip("Chinese print fixture requires a CJK font")
-    image = Image.new("RGB", (1400, 800), "white")
+    image = Image.new("RGB", (1400, 1000), "white")
     draw, font = ImageDraw.Draw(image), ImageFont.truetype(str(font_path), 42)
-    for i, text in enumerate([title, "澄川工业部件有限公司", "产品 CC-0980    数量 20    单价 120.00", "合计 2400.00 元", "交货日期 2026-10-09"]):
+    for i, text in enumerate([title, "澄川工业部件有限公司", "客户 华东机电007", "CC-0980 数量 20 单价 120.00 金额 2400.00",
+                             "CC-0800 数量 5 单价 12.00 金额 60.00", "合计 2460.00 元", "交货日期 2026-10-09"]):
         draw.text((60, 50 + i * 100), text, font=font, fill="black")
     return image
 
@@ -27,11 +28,13 @@ def text_pdf(mixed=False):
     import pypdfium2 as pdf
     doc = pdf.PdfDocument.new()
     page = doc.new_page(700, 600)
-    obj = pdf.raw.FPDFPageObj_NewTextObj(doc, b"Helvetica", 20)
-    encoded = ctypes.create_string_buffer("Order P00001 CC-0980 Qty 20 Total 2400.00".encode("utf-16-le") + b"\0\0")
-    assert pdf.raw.FPDFText_SetText(obj, ctypes.cast(encoded, ctypes.POINTER(ctypes.c_ushort)))
-    pdf.raw.FPDFPageObj_Transform(obj, 1, 0, 0, 1, 20, 550)
-    pdf.raw.FPDFPage_InsertObject(page, obj)
+    for i, text in enumerate(["Order P00001 Chengchuan Industrial", "Customer EastChina Machinery 007", "Date 2026-10-09",
+                              "CC-0980 Qty 20 Amount 2400.00", "CC-0800 Qty 5 Amount 60.00", "Total 2460.00"]):
+        obj = pdf.raw.FPDFPageObj_NewTextObj(doc, b"Helvetica", 16)
+        encoded = ctypes.create_string_buffer(text.encode("utf-16-le") + b"\0\0")
+        assert pdf.raw.FPDFText_SetText(obj, ctypes.cast(encoded, ctypes.POINTER(ctypes.c_ushort)))
+        pdf.raw.FPDFPageObj_Transform(obj, 1, 0, 0, 1, 20, 580-i*22)
+        pdf.raw.FPDFPage_InsertObject(page, obj)
     if mixed:
         image = pdf.PdfImage.new(doc)
         bitmap = pdf.PdfBitmap.from_pil(image_document())
@@ -54,10 +57,12 @@ def samples():
         result.append((f"{i}.{suffix}", out.getvalue()))
     from openpyxl import Workbook
     book = Workbook(); sheet = book.active
-    sheet.append(["单号", "商品", "数量", "单价", "金额"])
-    sheet.append(["P00001", "CC-0980", 20, 120, 2400])
+    rows = [["单号", "公司", "客户", "日期", "商品", "数量", "金额"],
+            ["P00001", "澄川工业部件有限公司", "华东机电007", "2026-10-09", "CC-0980", 20, 2400],
+            ["P00001", "澄川工业部件有限公司", "华东机电007", "2026-10-09", "CC-0800", 5, 60]]
+    for row in rows: sheet.append(row)
     out = io.BytesIO(); book.save(out); book.close()
-    result.extend([("order.xlsx", out.getvalue()), ("order.csv", "单号,商品,数量,单价,金额\nP00001,CC-0980,20,120,2400".encode())])
+    result.extend([("order.xlsx", out.getvalue()), ("order.csv", '\n'.join(','.join(map(str,row)) for row in rows).encode())])
     return result
 
 
@@ -69,7 +74,11 @@ def test_twelve_printed_business_documents(tmp_path):
         text = parsed.get("extraction", {}).get("text", parsed["preview"])
         assert parsed["status"] == "ready"
         assert all(value in text for value in ("P00001", "CC-0980", "20", "2400")), (name, text)
-        assert any("CC-0980" in line and "20" in line for line in text.splitlines()), (name, text)
+        assert "2026-10-09" in text, (name, text)
+        company, customer = ("Chengchuan Industrial", "EastChina Machinery 007") if name=='text.pdf' else ("澄川工业部件有限公司", "华东机电007")
+        assert company in text and customer in text, (name, text)
+        for product, quantity, amount in [("CC-0980", "20", "2400"), ("CC-0800", "5", "60")]:
+            assert any(product in line and quantity in line and amount in line for line in text.splitlines()), (name, product, text)
 
 
 def test_bad_files_formula_and_material_instructions_remain_data(tmp_path):

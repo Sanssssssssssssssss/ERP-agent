@@ -73,6 +73,7 @@
 | 真实模型节点 | [IR02](../experiments/agent_regression/interrupted_recovery.json) | business_readback |
 | 真实模型节点 | [M01](../experiments/agent_regression/manual_cases.json) | Host omitted no-business state |
 | 真实模型节点 | [M09](../experiments/agent_regression/manual_cases.json) | Pending write prevented applying saved goal update |
+| 真实模型节点 | [M13](../experiments/agent_regression/manual_followups.json) | Reviewed purchase cancellation was not explained as including unreceived receipts; unsupported picking cancellation forced handoff |
 | 离线测试套件 | [test_approval_resume_scope.py](../tests/test_approval_resume_scope.py) | 见入口中的断言 |
 | 离线测试套件 | [test_business_status.py](../tests/test_business_status.py) | 见入口中的断言 |
 | 离线测试套件 | [test_interrupted_recovery.py](../tests/test_interrupted_recovery.py) | 见入口中的断言 |
@@ -552,6 +553,7 @@
 | 真实模型节点 | [HITL02](../experiments/agent_regression/hitl_revision.json) | Approval revision routed to proposal worker; desktop resumed original unchanged instruction; runtime fixed mail copy. |
 | 真实模型节点 | [M03](../experiments/agent_regression/manual_cases.json) | Reviewed purchase cancellation method absent |
 | 真实模型节点 | [M07](../experiments/agent_regression/manual_cases.json) | New verified manufacturing document excluded from task targets |
+| 真实模型节点 | [M14](../experiments/agent_regression/manual_followups.json) | Order confirmation approved total and identity without presenting its product quantities |
 | 离线测试套件 | [test_actions.py](../tests/test_actions.py) | 见入口中的断言 |
 | 离线测试套件 | [test_approval_resume_scope.py](../tests/test_approval_resume_scope.py) | 见入口中的断言 |
 | 离线测试套件 | [test_business_facts.py](../tests/test_business_facts.py) | 见入口中的断言 |
@@ -586,6 +588,7 @@
 | 桌面检查 | [trace-check.mjs](../desktop/scripts/trace-check.mjs) | 见入口中的断言 |
 | 桌面检查 | [trace-model-check.mjs](../desktop/scripts/trace-model-check.mjs) | 见入口中的断言 |
 | 真实模型节点 | [M10](../experiments/agent_regression/manual_cases.json) | Final reply exposed implementation instead of business result |
+| 真实模型节点 | [M15](../experiments/agent_regression/manual_followups.json) | Model-facing Chinese requirement did not reliably control public progress language |
 | 离线测试套件 | [test_enterprise_workbench.py](../tests/test_enterprise_workbench.py) | 见入口中的断言 |
 | 离线测试套件 | [test_layout.py](../tests/test_layout.py) | 见入口中的断言 |
 | 离线测试套件 | [test_runtime_migration.py](../tests/test_runtime_migration.py) | 见入口中的断言 |
@@ -620,9 +623,6 @@
 | 实验入口（含准备/评估；并非全部付费） | [provenance.py](../experiments/agent_regression/provenance.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [runner.py](../experiments/agent_regression/runner.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [start.py](../experiments/demo_odoo/start.py) | 见入口中的断言 |
-| 真实模型节点 | [M13](../experiments/agent_regression/manual_followups.json) | Reviewed purchase cancellation was not explained as including unreceived receipts; unsupported picking cancellation forced handoff |
-| 真实模型节点 | [M14](../experiments/agent_regression/manual_followups.json) | Order confirmation approved total and identity without presenting its product quantities |
-| 真实模型节点 | [M15](../experiments/agent_regression/manual_followups.json) | Model-facing Chinese requirement did not reliably control public progress language |
 | 离线测试套件 | [test_agent_harness.py](../tests/runtime/test_agent_harness.py) | 见入口中的断言 |
 | 离线测试套件 | [test_agent_loop.py](../tests/runtime/test_agent_loop.py) | 见入口中的断言 |
 | 离线测试套件 | [test_agent_regression.py](../tests/test_agent_regression.py) | 见入口中的断言 |
@@ -759,6 +759,7 @@
 | 真实模型节点 | [M03](../experiments/agent_regression/manual_cases.json) | Reviewed purchase cancellation method absent |
 | 真实模型节点 | [M05](../experiments/agent_regression/manual_cases.json) | History used as current supplier commitment |
 | 真实模型节点 | [M11](../experiments/agent_regression/manual_cases.json) | Existing successful sales confirmation control |
+| 真实模型节点 | [M13](../experiments/agent_regression/manual_followups.json) | Reviewed purchase cancellation was not explained as including unreceived receipts; unsupported picking cancellation forced handoff |
 | 离线测试套件 | [test_business_mvp_verifier.py](../tests/test_business_mvp_verifier.py) | 见入口中的断言 |
 | 离线测试套件 | [test_enterprise_actions.py](../tests/test_enterprise_actions.py) | 见入口中的断言 |
 | 离线测试套件 | [test_enterprise_knowledge.py](../tests/test_enterprise_knowledge.py) | 见入口中的断言 |

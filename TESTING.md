@@ -4,7 +4,7 @@
 
 | 能力 / 问题 | 离线保护 | 真实模型与业务证据 |
 |---|---|---|
-| 9 月 30 日四条手动业务、取消/派生制造/审批/文件抽取 | [问题分类与入口](docs/manual-business-regression.md)、[材料](tests/test_material_extract.py) | [12 个真实节点](experiments/agent_regression/manual_business.py)、[四条完整业务](experiments/agent_regression/manual_business_live.py)；结果见本次报告 |
+| 9 月 30 日四条手动业务、取消/派生制造/审批/文件抽取 | [问题分类与入口](docs/manual-business-regression.md)、[材料](tests/test_material_extract.py) | [12 个真实节点](experiments/agent_regression/manual_business.py)、[四条完整业务](experiments/agent_regression/manual_business_live.py)、[结果](docs/manual-business-results.md) |
 | HITL 修改意见、邮件改稿、断点续跑 | [宿主](tests/test_workbench_host.py)、[续跑](tests/test_interrupted_recovery.py)、[邮件](tests/test_invoice_mail.py)、桌面交互检查 | [HITL01/02 与 B02/03 分类清单](experiments/agent_regression/hitl_revision.json)、[入口及手动模板](docs/hitl-mail-revision.md) |
 | 中断、待核对、聊天不知道状态 | [恢复测试](tests/test_interrupted_recovery.py)、[宿主](tests/test_workbench_host.py)、[状态回读](tests/test_business_status.py) | [IR01/IR02 原因与约束](experiments/agent_regression/interrupted_recovery.json)、[本次结果](docs/interrupted-recovery.md) |
 | 审批、授权范围、写入依据 | [动作](tests/test_actions.py)、[阶段](tests/test_stage_contract.py)、[证据](tests/test_task_evidence.py) | [A/B/C/D 节点](experiments/agent_regression/cases.py)、[结果](experiments/agent_regression/RESULTS.md) |

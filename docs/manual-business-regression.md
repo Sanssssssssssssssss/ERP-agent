@@ -2,6 +2,8 @@
 
 回退点：`manual-business-baseline-20260930`。四个原会话及其执行、对话请求共冻结 922 个文件；原 Demo 保留。
 
+本轮结果见 [验收报告](manual-business-results.md)：完整业务 3/4 通过；后补修不覆盖旧成绩。
+
 | 分类 | 根因与修复入口 | 回归 |
 |---|---|---|
 | 取消与诊断 | 采购取消缺少方法契约；策略拒绝被归为未知。`erp/actions.py`、`business_operations.py`、`tools/run_diagnostics.py` | M03、M04；P00001 |
@@ -19,6 +21,8 @@
 .venv/Scripts/python.exe -m experiments.agent_regression.manual_business freeze
 .venv/Scripts/python.exe -m experiments.agent_regression.manual_business prepare
 .venv/Scripts/python.exe -m experiments.agent_regression.manual_business paid
+# 修正已发现的旧宿主指令混入；只生成独立离线候选，零模型调用
+.venv/Scripts/python.exe -m experiments.agent_regression.manual_business repair_host_context
 # 四个隔离业务：每个 attempt 只允许一次启动
 .venv/Scripts/python.exe -m experiments.agent_regression.manual_business_live SALE
 # 只读工具并发与 10 个附件队列；需要 dev 依赖
