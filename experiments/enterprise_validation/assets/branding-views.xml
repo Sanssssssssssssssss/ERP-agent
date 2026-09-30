@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+  <template id="chengchuan_mail_logo" inherit_id="mail.mail_notification_layout" name="澄川：通知邮件公司标识">
+    <xpath expr="//div[@t-out='message.body']" position="before">
+      <div t-if="company and not company.uses_default_logo" style="margin: 0 0 16px;">
+        <img t-att-src="'/logo.png?company=%s' % company.id" t-att-alt="company.name" style="height: 48px; width: auto;"/>
+      </div>
+    </xpath>
+  </template>
+  <template id="chengchuan_manufacturing_logo" inherit_id="mrp.report_mrporder" name="澄川：制造工单公司标识">
+    <xpath expr="//div[@class='page']/div[@class='row'][1]" position="before">
+      <div t-if="o.company_id.logo" class="mb-3">
+        <img t-att-src="image_data_uri(o.company_id.logo)" t-att-alt="o.company_id.name" style="height: 40px; width: auto;"/>
+      </div>
+    </xpath>
+  </template>
+</odoo>
