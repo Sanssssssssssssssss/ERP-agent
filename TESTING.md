@@ -7,6 +7,7 @@
 | HITL 修改意见、邮件改稿、断点续跑 | [宿主](tests/test_workbench_host.py)、[续跑](tests/test_interrupted_recovery.py)、[邮件](tests/test_invoice_mail.py)、桌面交互检查 | [HITL01/02 与 B02/03 分类清单](experiments/agent_regression/hitl_revision.json)、[入口及手动模板](docs/hitl-mail-revision.md) |
 | 中断、待核对、聊天不知道状态 | [恢复测试](tests/test_interrupted_recovery.py)、[宿主](tests/test_workbench_host.py)、[状态回读](tests/test_business_status.py) | [IR01/IR02 原因与约束](experiments/agent_regression/interrupted_recovery.json)、[本次结果](docs/interrupted-recovery.md) |
 | 审批、授权范围、写入依据 | [动作](tests/test_actions.py)、[阶段](tests/test_stage_contract.py)、[证据](tests/test_task_evidence.py) | [A/B/C/D 节点](experiments/agent_regression/cases.py)、[结果](experiments/agent_regression/RESULTS.md) |
+| 员工岗位、跨公司、人事隐私 | [Odoo 事务与在线权限检查](experiments/enterprise_validation/access_check.py)，不调用模型 | [边界、结果与回退](docs/enterprise-access.md) |
 | 发票、邮件、附件 | [投递](tests/test_invoice_mail.py)、[开票条件](tests/test_invoice_eligibility.py)、[文件导出](tests/test_document_export.py) | [S01499 及历史故障](experiments/agent_regression/README.md)；邮件创建、SMTP 接受、实际送达分别判断 |
 | 采购、库存、制造、收付款、退款 | [企业动作](tests/test_enterprise_actions.py)、[供需](tests/test_supply_context.py) | [E01–E06 企业验收](experiments/enterprise_validation/README.md)、[全部 300 道 ERPBench](tests/INDEX.md) |
 | SOP、工具参数、Laya 能力注入 | [SOP](tests/test_sops.py)、[Laya](tests/test_laya_integration.py)、[路由状态](tests/test_host_routing_state.py) | [R01–R18](experiments/agent_regression/README.md)、[选择器数据来源](tests/fixtures/capability_routing/README.md)、[实验结果](experiments/tool_routing/README.md) |

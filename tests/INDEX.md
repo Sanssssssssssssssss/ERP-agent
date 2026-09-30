@@ -522,7 +522,10 @@
 
 | 类型 | 案例 / 文件 | 故障位置 / 检查范围 |
 |---|---|---|
+| 实验入口（含准备/评估；并非全部付费） | [access.py](../experiments/enterprise_validation/access.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [access_check.py](../experiments/enterprise_validation/access_check.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [hitl_revision.py](../experiments/agent_regression/hitl_revision.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [staff.py](../experiments/enterprise_validation/staff.py) | 见入口中的断言 |
 | 桌面检查 | [approval-presentation-check.mjs](../desktop/scripts/approval-presentation-check.mjs) | 见入口中的断言 |
 | 真实模型节点 | [B01 · first_mail_detour_after_posted_and_pdf](../experiments/agent_regression/cases.py) | phase_boundary |
 | 真实模型节点 | [B02](../experiments/agent_regression/hitl_revision.json) | 见冻结清单 |
@@ -715,6 +718,8 @@
 | ERPBench 完整业务 | [2297 · Portable Solar Generator Kit](../bench/tasks/2297_hard_repair_plan_hard/task.toml) | repair_plan_hard |
 | ERPBench 完整业务 | [2298 · Portable Solar Generator Kit](../bench/tasks/2298_hard_repair_plan_hard/task.toml) | repair_plan_hard |
 | ERPBench 完整业务 | [2299 · Carport Solar Canopy Module](../bench/tasks/2299_hard_repair_plan_hard/task.toml) | repair_plan_hard |
+| 实验入口（含准备/评估；并非全部付费） | [access.py](../experiments/enterprise_validation/access.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [access_check.py](../experiments/enterprise_validation/access_check.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [audit_business.py](../experiments/enterprise_validation/audit_business.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [audit_payments.py](../experiments/enterprise_validation/audit_payments.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [benchmark.py](../experiments/enterprise_validation/benchmark.py) | 见入口中的断言 |
@@ -726,6 +731,7 @@
 | 实验入口（含准备/评估；并非全部付费） | [report.py](../experiments/enterprise_validation/report.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [retrieval_check.py](../experiments/enterprise_validation/retrieval_check.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [selfcheck.py](../experiments/dynamic_business_mvp/tests/selfcheck.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [staff.py](../experiments/enterprise_validation/staff.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [verifier.py](../experiments/dynamic_business_mvp/verifier.py) | 见入口中的断言 |
 | 实验检查 | [test.sh](../experiments/dynamic_business_mvp/tests/test.sh) | 见入口中的断言 |
 | 离线测试套件 | [test_business_mvp_verifier.py](../tests/test_business_mvp_verifier.py) | 见入口中的断言 |

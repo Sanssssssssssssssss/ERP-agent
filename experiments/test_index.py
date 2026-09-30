@@ -11,7 +11,7 @@ INDEX = ROOT / 'tests/INDEX.md'
 # Multiple labels are intentional: one suite can protect several business capabilities.
 GROUPS = {
     '中断恢复与宿主交接': ('interrupted', 'recovery', 'resume', 'hitl', 'workbench_host', 'business_status', 'conversation'),
-    '授权、证据与写入安全': ('actions', 'approval', 'hitl', 'evidence', 'guards', 'relation', 'integrity', 'stage_contract', 'business_facts'),
+    '授权、证据与写入安全': ('actions', 'approval', 'hitl', 'evidence', 'guards', 'relation', 'integrity', 'stage_contract', 'business_facts', 'access', 'staff'),
     '开票、邮件与文件': ('invoice', 'mail', 'chatter', 'document', 'material', 'csv'),
     '制造、库存与业务日期': ('manufactur', 'supply', 'stock', 'bom', 'subassembl', 'workcenter'),
     '采购与业务状态': ('purchase', 'buy_only', 'repair_plan', 'business_mvp', 'sale_view', 'enterprise'),

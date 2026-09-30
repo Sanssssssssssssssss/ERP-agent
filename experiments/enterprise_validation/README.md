@@ -33,7 +33,9 @@
 | 生产协调 | 许川 | 叶青 |
 | 财务 | 沈清 | 顾言 |
 
-全部为模拟人物：11 人、12 份任职档案，各自关联既有账号。经理统办业务并维护员工；其他业务权限沿用原配置。系统管理员的原生档案保留。登录名、密码不变。核验和名单位于 `.runtime/enterprise-validation-20260922/staff-20260930/`；回退快照为 `before-staff-20260930`。
+全部为模拟人物：11 人、12 份任职档案，各自关联既有账号。经理统办业务并维护员工；原有岗位角色保留。系统管理员的原生档案保留。登录名、密码不变。核验和名单位于 `.runtime/enterprise-validation-20260922/staff-20260930/`；回退快照为 `before-staff-20260930`。
+
+岗位过滤：`python experiments/enterprise_validation/access.py`；检查：`python experiments/enterprise_validation/access_check.py`。员工新增核心单据写入边界，经理保持统办权限；具体矩阵与开票接入状态见 [权限说明](../../docs/enterprise-access.md)。从旧快照恢复后需重新应用员工组织和岗位规则。
 
 新审批在工作台状态与运行事件中保存 `decision/decided_at/decided_by`，覆盖批准、拒绝、提出修改。`decided_by` 记录当时的桌面 Odoo 账号、数据库与地址，标记 `human_authenticated=false`；桌面尚无独立人员登录，不能将共享账号当成自然人认证。旧审批不补造身份，权限过滤留到后续。源码宿主重启后生效，既有打包程序需下次发布。
 
