@@ -157,7 +157,8 @@ class CleanHarnessTest(unittest.TestCase):
         self.assertEqual(len(tools), 46)
         self.assertEqual(
             hashlib.sha256(json.dumps(contract, sort_keys=True).encode()).hexdigest(),
-            "9f8a9aae7f771685f87ba069bc6230c4182c12c8c5dba038ab42c344e51e7ac4",
+            # Reviewed purchase cancellation now documents its linked receipt effect.
+            "5babfc2be15967cf404f98e302109e9014c3e3a862b6679436e46f5849a36c8b",
         )
 
 

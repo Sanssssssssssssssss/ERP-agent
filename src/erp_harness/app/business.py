@@ -19,6 +19,7 @@ BUSINESS_LABELS = {
 }
 COMPLETION_TARGETS = ("read_only", "draft", "confirmed", "cancelled", "posted", "done", "reconciled", "sent")
 BUSINESS_COMMUNICATION = (
+    "assistant 的 text/content 会直接显示在用户聊天中，包括与工具调用同轮输出的说明，必须用简体中文。内部 reasoning 留在运行详情。"
     "面向用户的进度和最终回复一律用简体中文。只说完成事项、单据名称、数量金额、未完成事项及需要用户决定的下一步。"
     "Keep tool names, action IDs, hashes, API steps and internal verification terminology in receipts, not in the customer-facing answer. "
     "Posted invoices are accounting entries, not received money. An ended run is not a completed business. "

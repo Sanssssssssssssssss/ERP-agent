@@ -100,7 +100,7 @@ def test_legacy_evidence_keeps_existing_paths_and_readonly_still_blocks(action_f
 def test_normal_purchase_confirmation_remains_allowed(action_fixture, tmp_path, monkeypatch):
     actions, writer, runtime = action_fixture
     monkeypatch.setenv("ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS", "purchase.order.button_confirm")
-    runtime.client.records["purchase.order"][20] = {"id": 20, "state": "draft"}
+    runtime.client.records["purchase.order"][20] = {"id": 20, "state": "draft", "order_line": []}
     bind(actions, tmp_path / "purchase.json", kind="purchase", target="confirmed")
     result = actions.execute_method("purchase.order", "button_confirm", kwargs={"ids": [20]})
     assert result.get("approval_required") and not _handoff_required(result), result

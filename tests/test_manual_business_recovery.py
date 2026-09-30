@@ -32,7 +32,8 @@ def test_purchase_cancel_reads_related_effects_before_dispatch():
     c = Client()
     c.add("purchase.order", 1, name="P1", state="purchase", locked=False, company_id=1, partner_id=2, currency_id=6, amount_total=10, picking_ids=[3], invoice_ids=[], order_line=[4])
     c.add("stock.picking", 3, state="assigned", company_id=1, move_ids=[])
-    c.add("purchase.order.line", 4, qty_received=0, qty_invoiced=0, move_dest_ids=[])
+    c.add("purchase.order.line", 4, qty_received=0, qty_invoiced=0, move_dest_ids=[], order_id=1,
+          product_id=5, product_uom_id=1, price_unit=10, tax_ids=[], product_qty=1, date_planned="2026-10-01 00:00:00")
     runtime = SimpleNamespace(client=c)
     payload = {"instance": "default", "model": "purchase.order", "method": "button_cancel", "kwargs": {"ids": [1]}}
     before = method_prestate(runtime, payload)
@@ -109,3 +110,56 @@ def test_replacement_date_blocks_expired_copy_before_binding(tmp_path):
     payload["values"]["date_planned"] = (datetime.now()+timedelta(days=3)).isoformat()
     evidence.prestate("write", payload)
     assert evidence.session_id == "host-session"
+
+
+def test_confirmation_binds_order_lines_and_rejects_changes(monkeypatch):
+    from tests.test_actions import _actions
+    actions, writer, runtime = _actions(approval_mode="host")
+    monkeypatch.setenv("ODOO_MCP_ENABLE_WRITES", "1")
+    monkeypatch.setenv("ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS", "sale.order.action_confirm")
+    result = actions.execute_method("sale.order", "action_confirm", kwargs={"ids": [7]})
+    row = actions.store.get(result["action_id"])
+    assert row["prestate"]["order_lines"][0]["product_uom_qty"] == 3
+    assert actions._current_prestate_matches(row)
+    runtime.client.records["sale.order.line"][71]["product_uom_qty"] = 4
+    assert not actions._current_prestate_matches(row)
+    runtime.client.records["sale.order.line"][71]["order_id"] = [8, "Other"]
+    assert not actions.execute_method("sale.order", "action_confirm", kwargs={"ids": [7]}).get("approval_required")
+    runtime.client.records["sale.order"][7].pop("order_line")
+    assert not actions.execute_method("sale.order", "action_confirm", kwargs={"ids": [7]}).get("approval_required")
+    assert not writer.calls
+
+
+def test_unsupported_picking_cancel_guides_only_reviewed_purchase_route(monkeypatch):
+    from tests.test_actions import _actions
+    from erp_harness.app.runner import _handoff_required
+    from erp_harness.tools.sops import build_sop_payload
+    actions, writer, _ = _actions(approval_mode="host")
+    monkeypatch.setenv("ODOO_MCP_ENABLE_WRITES", "1")
+    monkeypatch.setenv("ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS", "purchase.order.button_cancel")
+    result = actions.execute_method("stock.picking", "action_cancel", args=[[2]])
+    assert result["failure"]["odoo_request_seen"] is False and not result["retry_safe"]
+    assert not _handoff_required(result)
+    assert "purchase_id" in result["failure"]["next_action"]
+    sop = build_sop_payload("safe_write_review", {"model": "purchase.order", "operation": "button_cancel"})
+    assert "do not call stock.picking.action_cancel" in str(sop)
+    assert "mcp_odoo_execute_method" in str(sop)
+    monkeypatch.setenv("ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS", "sale.order.action_confirm")
+    assert _handoff_required(actions.execute_method("stock.picking", "action_cancel", args=[[2]]))
+    assert not writer.calls
+
+
+def test_completed_state_method_reuses_fresh_receipt_without_another_approval(monkeypatch):
+    from tests.test_actions import _actions
+    actions, writer, runtime = _actions(approval_mode="host")
+    monkeypatch.setenv("ODOO_MCP_ENABLE_WRITES", "1")
+    monkeypatch.setenv("ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS", "sale.order.action_confirm")
+    pending = actions.execute_method("sale.order", "action_confirm", kwargs={"ids": [7]})
+    actions.store.approve(pending["action_id"], "test-host")
+    assert actions.execute_method("sale.order", "action_confirm", kwargs={"ids": [7]})["success"]
+    repeat = actions.execute_method("sale.order", "action_confirm", kwargs={"ids": [7]})
+    assert repeat["success"] and repeat["action_id"] == pending["action_id"]
+    assert len(actions.store.read_receipts(actions.store.path)) == 1 and len(writer.calls) == 1
+    runtime.client.records["sale.order"][7]["state"] = "draft"
+    assert actions.execute_method("sale.order", "action_confirm", kwargs={"ids": [7]})["action_status"] == "needs_reconciliation"
+    assert len(writer.calls) == 1

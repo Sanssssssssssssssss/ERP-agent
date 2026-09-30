@@ -80,6 +80,21 @@ def handles(payload: dict) -> bool:
     return f"{payload.get('model')}.{payload.get('method')}" in _METHODS
 
 
+def order_approval_lines(runtime, payload, records):
+    """Bind the displayed commercial lines to the same approval as the header."""
+    model = payload["model"]
+    fields = ("order_id", "product_id", "product_uom_id", "price_unit", "tax_ids")
+    fields += ("product_qty", "date_planned") if model == "purchase.order" else ("product_uom_qty", "discount")
+    if any(not isinstance(r.get("order_line"), list) for r in records):
+        raise ValueError("order lines unavailable; read the full order before approval")
+    ids = sorted({i for r in records for i in r["order_line"]})
+    lines = _Evidence(runtime, payload).many(model + ".line", ids, fields)
+    parents = {r["id"]: set(r["order_line"]) for r in records}
+    if any(r["id"] not in parents.get(_id(r["order_id"]), set()) for r in lines):
+        raise ValueError("approval line does not belong to its order")
+    return lines
+
+
 def execution_kwargs(payload: dict, prestate: dict) -> dict:
     """Derive UI-only wizard context from the already approved Odoo relationship."""
     kwargs = dict(payload.get("kwargs", {}))
@@ -334,6 +349,8 @@ def method_prestate(runtime: Any, payload: dict) -> dict | None:
         pickings = g.many("stock.picking", [i for r in rows for i in r["picking_ids"]], ("state", "company_id", "move_ids"))
         bills = g.many("account.move", [i for r in rows for i in r["invoice_ids"]], ("state", "company_id"))
         lines = g.many("purchase.order.line", [i for r in rows for i in r["order_line"]], ("qty_received", "qty_invoiced", "move_dest_ids"))
+        display = {r["id"]: r for r in order_approval_lines(runtime, payload, rows)}
+        lines = [{**r, **display[r["id"]]} for r in lines]
         if (any(r["locked"] for r in rows) or any(r["move_dest_ids"] for r in lines)
                 or any(r["state"] == "done" or _id(r["company_id"]) != company for r in pickings)
                 or any(r["state"] != "cancel" or _id(r["company_id"]) != company for r in bills)

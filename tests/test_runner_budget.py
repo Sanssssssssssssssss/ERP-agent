@@ -163,7 +163,7 @@ class RunnerBudgetTest(unittest.TestCase):
                 ):
                     await pi_odoo_runner.run(args, source_toolset=lambda _: ToolSet("unused"))
                     self.assertEqual(len(requests), 1)
-                    initial_usage = json.loads(args.usage_file.read_text())
+                    initial_usage = json.loads(args.usage_file.read_text(encoding="utf-8"))
                     self.assertEqual(initial_usage["modelCalls"], 1)
                     self.assertEqual(initial_usage["input"], 10)
                     self.assertEqual(initial_usage["output"], 2)
@@ -179,16 +179,16 @@ class RunnerBudgetTest(unittest.TestCase):
                 self.assertNotIn("Pi Agent", system)
                 self.assertNotIn("Available tools:", system)
                 self.assertIn("execute_method", {row["function"]["name"] for row in payload["tools"]})
-            resumed_usage = json.loads(args.usage_file.read_text())
+            resumed_usage = json.loads(args.usage_file.read_text(encoding="utf-8"))
             self.assertEqual(resumed_usage["modelCalls"], 1)
             self.assertEqual(resumed_usage["assistantEntries"], 1)
             self.assertEqual(resumed_usage["input"], 0)
             self.assertEqual(resumed_usage["output"], 0)
             self.assertEqual(resumed_usage["compactionCalls"], 0)
             self.assertEqual(resumed_usage["unreportedUsageRequests"], 0)
-            self.assertEqual(json.loads((args.receipt_dir / "requests" / "0001.request.json").read_text()), requests[0])
+            self.assertEqual(json.loads((args.receipt_dir / "requests" / "0001.request.json").read_text(encoding="utf-8")), requests[0])
             self.assertTrue((args.receipt_dir / "requests" / "0002.request.json").is_file())
-            rows = [json.loads(line) for line in args.session_file.read_text().splitlines()]
+            rows = [json.loads(line) for line in args.session_file.read_text(encoding="utf-8").splitlines()]
             self.assertTrue(any(
                 row.get("type") == "message"
                 and row.get("message", {}).get("role") == "toolResult"
@@ -259,7 +259,7 @@ class RunnerBudgetTest(unittest.TestCase):
                       contextlib.redirect_stdout(stdout)):
                     await pi_odoo_runner.run(args, source_toolset=lambda _: ToolSet("unused"))
             self.assertEqual(len(requests), 2)
-            self.assertEqual(json.loads(args.usage_file.read_text())["modelCalls"], 2)
+            self.assertEqual(json.loads(args.usage_file.read_text(encoding="utf-8"))["modelCalls"], 2)
             rows = [json.loads(line) for line in args.session_file.read_text(encoding="utf-8").splitlines()]
             assistant = [row["message"] for row in rows if row.get("type") == "message" and row.get("message", {}).get("role") == "assistant"]
             self.assertEqual(assistant[-1]["stopReason"], "stop")
@@ -431,8 +431,8 @@ class RunnerBudgetTest(unittest.TestCase):
                         resumed_requests.mkdir(parents=True)
                         (resumed_requests / "0001.request.json").write_text("{}", encoding="utf-8")
                         await pi_odoo_runner.run(args, source_toolset=lambda _: ToolSet("unused"))
-                        self.assertEqual(json.loads(args.usage_file.read_text())["modelCalls"], 1)
-                        self.assertEqual((resumed_requests / "0001.request.json").read_text(), "{}")
+                        self.assertEqual(json.loads(args.usage_file.read_text(encoding="utf-8"))["modelCalls"], 1)
+                        self.assertEqual((resumed_requests / "0001.request.json").read_text(encoding="utf-8"), "{}")
                         self.assertTrue((resumed_requests / "0002.request.json").is_file())
                         args.usage_file = root / "run3" / "usage.json"
                         args.receipt_dir = root / "run3"
@@ -450,8 +450,8 @@ class RunnerBudgetTest(unittest.TestCase):
 
             asyncio.run(check())
 
-            self.assertEqual(json.loads((root / "run1" / "usage.json").read_text())["modelCalls"], 2)
-            self.assertEqual(json.loads((root / "run3" / "usage.json").read_text())["modelCalls"], 1)
+            self.assertEqual(json.loads((root / "run1" / "usage.json").read_text(encoding="utf-8"))["modelCalls"], 2)
+            self.assertEqual(json.loads((root / "run3" / "usage.json").read_text(encoding="utf-8"))["modelCalls"], 1)
             first, second, third, fourth = map(tool_names, request_payloads)
             self.assertEqual(len(first), 14)
             self.assertNotIn("mcp_odoo_preview_write", first)
@@ -683,7 +683,7 @@ class RunnerBudgetTest(unittest.TestCase):
             self.assertTrue((root / ".pi-agent" / "logs" / "agent-calls.jsonl").is_file())
             session_rows = [
                 json.loads(line)
-                for line in (root / "session.jsonl").read_text().splitlines()
+                for line in (root / "session.jsonl").read_text(encoding="utf-8").splitlines()
             ]
             assistant_rows = [
                 row for row in session_rows
@@ -691,7 +691,7 @@ class RunnerBudgetTest(unittest.TestCase):
                 and row.get("message", {}).get("role") == "assistant"
             ]
             self.assertEqual(assistant_rows[-1]["message"]["stopReason"], "error")
-            self.assertEqual(json.loads((root / "usage.json").read_text())["modelCalls"], 1)
+            self.assertEqual(json.loads((root / "usage.json").read_text(encoding="utf-8"))["modelCalls"], 1)
 
         with tempfile.TemporaryDirectory() as directory:
             asyncio.run(check(Path(directory)))

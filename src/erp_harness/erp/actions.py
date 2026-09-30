@@ -674,6 +674,8 @@ class NativeActions:
             fields = ["id", state[0]]
             if model in {"sale.order", "purchase.order", "account.move"}:
                 fields.extend(_APPROVAL_DOCUMENT_FIELDS)
+            if model in {"sale.order", "purchase.order"}:
+                fields.append("order_line")
             records = self._read_rows(instance, model, ids, fields)
             requested_ids = {int(value) for value in ids}
             returned_ids = {int(row["id"]) for row in records if type(row.get("id")) is int}
@@ -681,7 +683,11 @@ class NativeActions:
                 missing_ids = sorted(requested_ids - returned_ids)
                 raise ValueError(f"native action target does not exist: {model} {missing_ids}")
             dependencies = manufacturing_confirm_prestate(self.reads.instances[instance], payload)
-            return {"records": records, **({"business_dependencies": dependencies} if dependencies else {})}
+            lines = {}
+            if model in {"sale.order", "purchase.order"}:
+                from .business_operations import order_approval_lines
+                lines = {"order_lines": order_approval_lines(self.reads.instances[instance], payload, records)}
+            return {"records": records, **lines, **({"business_dependencies": dependencies} if dependencies else {})}
         if (model, payload.get("method")) == (
             "sale.advance.payment.inv",
             "create_invoices",
@@ -1872,11 +1878,14 @@ class NativeActions:
                 }
             # Heuristic get_* names are not an authorization boundary.
             if f"{model}.{method}" not in allowed_methods:
+                purchase_route = (model, method) == ("stock.picking", "action_cancel") and "purchase.order.button_cancel" in allowed_methods
                 return {
                     "success": False,
                     "error": "This business method has no reviewed execution contract. No business method was sent. Ask for supported alternatives or maintainer review; chat approval cannot enable an unreviewed method.",
                     "retry_safe": False,
-                    "failure": {"code": "method_not_supported", "stage": "before_send", "layer": "action_policy", "odoo_request_seen": False, "next_action": "request_supported_alternative", "requires_user_input": True},
+                    "failure": {"code": "method_not_supported", "stage": "before_send", "layer": "action_policy", "odoo_request_seen": False,
+                                "next_action": ("Read the picking's purchase_id. If the confirmed goal authorizes cancelling that purchase, read safe_write_review for purchase.order.button_cancel; this reviewed method cancels eligible unreceived receipts too. Use the purchase ID, never the picking ID. It still needs fresh scope checks and exact HITL. Otherwise ask for business review." if purchase_route else "request_supported_alternative"),
+                                "requires_user_input": not purchase_route},
                     "classification": safety,
                 }
             args = list(args or [])
@@ -1943,6 +1952,15 @@ class NativeActions:
             }
             identity = self._identity(name)
             prestate = None
+            if (model, method) in _KNOWN_METHOD_STATES:
+                previous = self.store.find_sent(
+                    kind="method", payload=payload, identity=identity,
+                    run_id=os.environ.get("HARBOR_TRIAL_ID", os.environ.get("PI_AGENT_SESSION_ID", "local")),
+                    session_id=os.environ.get("PI_AGENT_SESSION_ID", "local"),
+                )
+                if previous is not None:
+                    self._prestate("method", payload)  # Current scope and role still apply to receipt reuse.
+                    return self._reconcile(previous)  # Fresh business evidence; no new approval or dispatch.
             if (model, method) == invoice_mail.METHOD:
                 # Bind the current host intent and role before accepting any historical receipt.
                 prestate = self._prestate("method", payload)

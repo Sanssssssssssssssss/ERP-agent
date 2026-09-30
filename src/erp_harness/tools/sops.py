@@ -327,6 +327,8 @@ def get_sop(sop_id: str, inputs: dict[str, Any] | None = None) -> dict[str, Any]
              "Only reviewed methods are supported. A business method is not a create/write/unlink operation."),
             "Wait for trusted host approval, then repeat that exact execute_method call. Read the resulting state.",
         ]}
+        if (supplied["model"], operation) == ("purchase.order", "button_cancel"):
+            spec["steps"].insert(0, "Read the purchase, received/invoiced quantities, linked receipts and bills. This method cancels eligible unreceived receipts with the purchase: do not call stock.picking.action_cancel first. Completed receipts, active bills or downstream demand require a business decision. Cancellation needs exact host approval; do not post an audit note claiming it happened until readback verifies it.")
         if (supplied["model"], operation) == ("account.move", "message_post"):
             spec = {**spec, "steps": [
                 "Read the confirmed invoice, company and billing contact; check current delivery evidence and reuse an existing official PDF. Never repeat a sent or uncertain delivery.",
