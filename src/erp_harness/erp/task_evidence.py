@@ -12,7 +12,9 @@ import copy
 import html
 import json
 import math
+import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 from erp_harness.erp.store import ActionStore
@@ -32,6 +34,7 @@ def failure_result(error: Exception) -> dict:
     if isinstance(error, TaskHandoff):
         result.update(approval_required=False, retry_safe=False, failure={
             "code": error.code, "next_action": error.next_action, "requires_user_input": True,
+            "stage": "before_send", "layer": "business_precondition" if error.code == "business_choice_required" else "authorization",
         })
     return result
 
@@ -48,7 +51,7 @@ def qualification_contract(value):
 
 
 class TaskEvidence:
-    def __init__(self, reads, specification: dict, receipt_path: Path):
+    def __init__(self, reads, specification: dict, receipt_path: Path, *, ledger_path=None, session_id=None):
         self.reads, self.spec = reads, copy.deepcopy(specification)
         self.path = receipt_path
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -57,9 +60,13 @@ class TaskEvidence:
             raise ValueError("task evidence requires a versioned host specification")
         self.instance = self.spec.get("instance", reads.instance)
         self.identity = reads.identity_context(self.instance)
+        self.session_id = session_id or os.environ.get("PI_AGENT_SESSION_ID")
         self.digest = ActionStore.digest(self.spec)
         self.bindings = copy.deepcopy(self.spec.get("bindings", []))
         self.references = copy.deepcopy(self.spec.get("references", []))
+        self.ledger_paths = [Path(p) for p in self.spec.get("verified_creation_ledgers", [])]
+        if ledger_path is not None:
+            self.ledger_paths.append(Path(ledger_path))
         self.release_fields = copy.deepcopy(self.spec.get("release_fields", []))
         self.stage = copy.deepcopy(self.spec.get("stage"))
         if self.stage is not None:
@@ -281,6 +288,18 @@ class TaskEvidence:
 
     def prestate(self, kind, payload):
         self.check_stage(kind, payload)
+        if (kind == "write" and payload.get("model") == "purchase.order" and payload.get("operation") == "create"
+                and any(r.get("model") == "purchase.order" and r.get("purpose") == "source" for r in self.references)):
+            # Replacement orders are current demand, not historical bookkeeping.
+            for values in payload.get("values_list") or [payload.get("values") or {}]:
+                dates = [values.get("date_planned")]
+                dates += [c[2].get("date_planned") for c in values.get("order_line", []) if isinstance(c, list) and len(c) == 3 and isinstance(c[2], dict)]
+                for value in dates:
+                    if value:
+                        planned = datetime.fromisoformat(str(value))
+                        local = planned.replace(tzinfo=timezone.utc).astimezone() if planned.tzinfo is None else planned.astimezone()
+                        if local.date() < datetime.now().astimezone().date():
+                            raise TaskHandoff("新承接采购单复制了已过去的交期。请核对当前供应商交期并确定新日期；历史单据补录需另行明确业务目标。", code="business_choice_required", next_action="confirm_replacement_delivery_date")
         sources = self.bind(payload) if kind == "write" else []
         sources.extend(self.reference_check(kind, payload))
         if kind == "method":
@@ -354,8 +373,16 @@ class TaskEvidence:
                 raise ValueError("mail target or recipient differs from the host-confirmed references")
         direct = [r["id"] for r in targets if r["model"] == model]
         if direct and ids and not set(ids).issubset(direct):
-            raise ValueError("write target differs from the user-quoted records")
-        if model in {"sale.order", "purchase.order", "account.move", "account.payment"}:
+            derived = self._created_targets(model, set(ids) - set(direct))
+            if set(ids) - set(direct) != {r["id"] for r in derived}:
+                raise TaskHandoff("write target differs from the user-quoted records and verified creations of this business", next_action="renew_proposal")
+            evidence.append(["verified_creation", model, derived])
+        cancelling = kind == "method" and model == "purchase.order" and payload.get("method") == "button_cancel"
+        if cancelling and self.stage:
+            allowed = {r["id"] for r in self.references if r["model"] == model and (r.get("expected_state") == "cancel" or self.stage.get("completion_target") == "cancelled")}
+            if not ids or not set(ids).issubset(allowed):
+                raise TaskHandoff("取消采购单需要在业务提案中明确确认要取消的原单；请更新当前业务目标。")
+        if model in {"sale.order", "purchase.order", "account.move", "account.payment"} and not cancelling:
             relations = {field: [r["id"] for r in targets if r["model"] == source]
                          for field, source in (("partner_id", "res.partner"), ("company_id", "res.company"))}
             relations = {f: allowed for f, allowed in relations.items() if allowed}
@@ -373,3 +400,32 @@ class TaskEvidence:
                             raise ValueError(f"{model}.{field} differs from the user-quoted identity")
                 evidence.append(["target_relations", model, rows])
         return evidence
+
+    def _created_targets(self, model, requested):
+        """Only host-bound ledgers establish provenance; names/origin alone never do."""
+        found = {}
+        identity = ActionStore.digest(self.identity)
+        session_id = self.session_id
+        for path in dict.fromkeys(self.ledger_paths):
+            for action in ActionStore.read_receipts(path):
+                payload = action.get("payload") or {}
+                if (action.get("status") != "verified" or action.get("kind") != "write"
+                        or payload.get("operation") != "create" or payload.get("model") != model
+                        or action.get("identity_sha256") != identity
+                        or not session_id or action.get("session_id") != session_id):
+                    continue
+                ids = (action.get("verification") or {}).get("evidence", {}).get("record_ids", [])
+                values = payload.get("values_list") or [payload.get("values") or {}]
+                if len(ids) != len(values):
+                    continue
+                for record_id, proposed in zip(ids, values):
+                    if record_id not in requested:
+                        continue
+                    bound = {k: v for k, v in proposed.items() if k in {"company_id", "partner_id", "currency_id", "product_id", "bom_id", "picking_type_id", "location_src_id", "location_dest_id", "origin"}}
+                    rows = self._search({"model": model, "domain": [["id", "=", record_id]]}, ["id", "name", *bound])
+                    if len(rows) != 1:
+                        continue
+                    row = rows[0]
+                    if all((row[k][0] if isinstance(row.get(k), list) and row[k] else row.get(k)) == v for k, v in bound.items()):
+                        found[record_id] = {"id": record_id, "action_id": action["action_id"], "fields": row}
+        return list(found.values())

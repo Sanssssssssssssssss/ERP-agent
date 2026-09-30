@@ -1874,14 +1874,9 @@ class NativeActions:
             if f"{model}.{method}" not in allowed_methods:
                 return {
                     "success": False,
-                    "error": (
-                        "Unreviewed side-effect methods are blocked by default. Review "
-                        "custom source, then add the exact 'model.method' to the policy "
-                        "file (ODOO_MCP_POLICY_FILE, default ./odoo_mcp_policy.json, "
-                        "re-read on every request — see odoo_mcp_policy.json.example) "
-                        "or to ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS=model.method. "
-                        "Broad unknown-method mode cannot bypass the native ledger."
-                    ),
+                    "error": "This business method has no reviewed execution contract. No business method was sent. Ask for supported alternatives or maintainer review; chat approval cannot enable an unreviewed method.",
+                    "retry_safe": False,
+                    "failure": {"code": "method_not_supported", "stage": "before_send", "layer": "action_policy", "odoo_request_seen": False, "next_action": "request_supported_alternative", "requires_user_input": True},
                     "classification": safety,
                 }
             args = list(args or [])

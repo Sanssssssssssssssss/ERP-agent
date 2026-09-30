@@ -342,6 +342,8 @@ class NativeActionCheckpointTests(unittest.TestCase):
             with self.subTest(model=model, method=method):
                 actions, writer, runtime = _actions()
                 runtime.client.records[model] = {7: {"id": 7, "state": before}}
+                if model == "purchase.order":
+                    runtime.client.records[model][7].update(name="P7", locked=False, company_id=1, partner_id=2, currency_id=6, amount_total=10, picking_ids=[], invoice_ids=[], order_line=[])
                 if model == "mrp.production":
                     runtime.client.records["mrp.bom"] = {1: {"id": 1, "produce_delay": 2}}
                     runtime.client.records[model][7].update(
