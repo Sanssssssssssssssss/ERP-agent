@@ -1965,6 +1965,14 @@ class Workbench:
             actions.task_evidence = TaskEvidence(reads, spec, run_dir / "task-evidence.json")
         return actions._current_prestate_matches(row)
 
+    def _record_approval_decision(self, run: dict[str, Any], approval: dict[str, Any],
+                                  action_id: str, decision: str) -> None:
+        # 当前桌面没有独立人员登录。记录当时的配置身份，不冒充已认证的自然人。
+        actor = {"source": "desktop_profile", **_connection_identity(), "human_authenticated": False}
+        approval.update(decision=decision, decided_at=now(), decided_by=actor)
+        self._trace(run, "approval_decision", {"action_id": action_id, "decision": decision,
+                    "decided_at": approval["decided_at"], "decided_by": actor})
+
     def decide_approval(self, session_id: str, business_id: str, run_id: str, action_id: str, decision: str) -> dict[str, Any]:
         # 同时核对桌面对话、业务、run 和 action。不能拿别处的审批 ID 放行。
         # 批准前重读 prestate。过期或状态变化都使本次审批失效。
@@ -2003,7 +2011,7 @@ class Workbench:
                 if not store.approve(action_id, "desktop_host"): raise ValueError("action was not pending approval")
                 approval["status"] = "approved"
                 approval["source"] = "desktop_host"
-                approval["decided_at"] = now()
+                self._record_approval_decision(run, approval, action_id, decision)
                 remaining = [item for item in run.get("pending_approval_action_ids", []) if item != action_id and self.store.data["approvals"].get(item, {}).get("status") == "pending_approval"]
                 if remaining:
                     self.store.data["sessions"][session_id]["status"] = "awaiting_approval"
@@ -2026,7 +2034,7 @@ class Workbench:
                     self._terminalize_action(run, item, "desktop approval rejected")
                 if item in self.store.data["approvals"]:
                     self.store.data["approvals"][item]["status"] = "rejected" if item == action_id else "cancelled"
-            approval["decided_at"] = now()
+            self._record_approval_decision(run, approval, action_id, decision)
             run["error"] = "approval_rejected"
             self._finalize_run(run, "failed", "approval_rejected")
             self._event("approval_changed", {"session_id": session_id, "business_id": business_id, "run_id": run_id, "action_id": action_id, "status": "rejected"})
@@ -2067,6 +2075,7 @@ class Workbench:
         self._finalize_run(run, "cancelled", "revision_requested_by_user")
         if run["status"] != "cancelled":
             raise RuntimeError("business is blocked by an unresolved write; refresh and reconcile first")
+        self._record_approval_decision(run, approval, action_id, "revise")
         message = {"id": uid("m"), "role": "user", "created_at": now(), "business_id": business_id,
                    "run_id": run_id, "submitted_run_id": run_id, "text": text.strip()}
         self.store.data["messages"].setdefault(session_id, []).append(message)

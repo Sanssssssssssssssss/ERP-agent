@@ -766,6 +766,13 @@ class WorkbenchHostTests(unittest.TestCase):
         result = self.host.decide_approval(self.sid, business["id"], run["id"], first["action_id"], "approve")
         self.assertEqual(result["status"], "approved")
         self.assertEqual(self.launches, [])
+        actor = self.host.store.data["approvals"][first["action_id"]]["decided_by"]
+        self.assertEqual(actor, {"source": "desktop_profile", "url": "https://odoo.test",
+                                 "database": "test", "principal": "tester", "human_authenticated": False})
+        self.assertNotIn("test-only", json.dumps(actor))
+        self.assertEqual(run["events"][-1]["type"], "approval_decision")
+        saved = json.loads(self.host.store.path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["approvals"][first["action_id"]]["decided_by"], actor)
         self.assertEqual(self.host.store.data["sessions"][self.sid]["status"], "awaiting_approval")
         result = self.host.decide_approval(self.sid, business["id"], run["id"], second["action_id"], "approve")
         self.assertEqual(result["status"], "approved")
@@ -836,6 +843,8 @@ class WorkbenchHostTests(unittest.TestCase):
             self.host.decide_approval("other-session", business["id"], run["id"], row["action_id"], "reject")
         result = self.host.decide_approval(self.sid, business["id"], run["id"], row["action_id"], "reject")
         self.assertEqual(result["status"], "rejected")
+        self.assertEqual(self.host.store.data["approvals"][row["action_id"]]["decided_by"]["principal"], "tester")
+        self.assertEqual(run["events"][-1]["decision"], "reject")
         self.assertEqual(self.host.store.data["runs"][run["id"]]["status"], "failed")
         self.assertNotIn("pending_approval_action_ids", self.host.store.data["runs"][run["id"]])
         ledger = ActionStore(Path(self.tmp.name) / "runs" / run["id"] / "odoo-actions.sqlite3")
@@ -1189,6 +1198,8 @@ class WorkbenchHostTests(unittest.TestCase):
         self.assertEqual(run["recovery_evidence"]["revision"]["text"], "只保留草稿，先不要确认")
         self.assertEqual(self.host.store.data["messages"][self.sid][-1]["submitted_run_id"], run["id"])
         self.assertEqual(run["resume_reason"], "revision")
+        self.assertEqual(self.host.store.data["approvals"][pending["action_id"]]["decision"], "revise")
+        self.assertEqual(self.host.store.data["approvals"][pending["action_id"]]["decided_by"]["principal"], "tester")
         with self.assertRaises(ValueError):
             self.host.decide_approval(self.sid, business["id"], run["id"], pending["action_id"], "approve")
         self.assertEqual(len(self.host.store.data["businesses"]), 1)

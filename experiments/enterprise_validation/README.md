@@ -22,6 +22,23 @@
 
 桌面岗位使用 `profiles/<role>`：制造公司为 `sales/purchase/warehouse/production/finance`，贸易公司加 `trade_` 前缀；`manager` 可跨公司。管理员不用于 Agent。已创建的设置使用系统加密，Mem0 关闭。
 
+员工组织：执行 `python experiments/enterprise_validation/staff.py`，首次备份后安装原生 `hr`，按固定外部 ID 建立档案。重复执行复用记录，不覆盖后续人员调整。经理刷新 Odoo 后打开“员工”，选中两家公司。
+
+| 岗位 | 工业公司员工 | 贸易公司员工 |
+|---|---|---|
+| 业务经理 | 陈澄 | 陈澄（跨公司任职） |
+| 销售 | 林悦 | 苏禾 |
+| 采购 | 陈航 | 陆远 |
+| 仓储 | 周宁 | 程安 |
+| 生产协调 | 许川 | 叶青 |
+| 财务 | 沈清 | 顾言 |
+
+全部为模拟人物：11 人、12 份任职档案，各自关联既有账号。经理统办业务并维护员工；其他业务权限沿用原配置。系统管理员的原生档案保留。登录名、密码不变。核验和名单位于 `.runtime/enterprise-validation-20260922/staff-20260930/`；回退快照为 `before-staff-20260930`。
+
+新审批在工作台状态与运行事件中保存 `decision/decided_at/decided_by`，覆盖批准、拒绝、提出修改。`decided_by` 记录当时的桌面 Odoo 账号、数据库与地址，标记 `human_authenticated=false`；桌面尚无独立人员登录，不能将共享账号当成自然人认证。旧审批不补造身份，权限过滤留到后续。源码宿主重启后生效，既有打包程序需下次发布。
+
+连续演示沿用经理账号：查询订单 → 确认 → 分批交付 → 开票 → 修改邮件草稿 → 批准发送 → 回读邮件与收款状态。按阶段继续同一业务并核对原单，不引入多员工审批流程。中国税务开票暂未连接；[百望官方沙箱](https://e.baiwang.com/)和[第三方 Odoo 对接说明](https://www.chinaodoo.com/en/documentation/zh_CN/yuanding/guides/finance/mkl_einvoice.html)可作为后续选型入口，未实测接入。
+
 ```powershell
 # 仓库根目录，先确保 desktop 已构建。
 $env:WORKBENCH_PYTHON = "$PWD/.venv/Scripts/python.exe"
