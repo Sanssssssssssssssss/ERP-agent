@@ -1,5 +1,6 @@
 # Backend integration
 
+2026-09-30：三批后端清理及两条真实业务验收完成，见[清理报告](backend-cleanup.md)。当前产品入口只使用原生 Odoo；MCP 对照和旧路由实验独立保存。
 
 2026-09-29：并入 Laya v7 追加能力编排及制造耗料预检修复。真实业务 E02 9/9、E03 5/5；详情见 [E02](../experiments/tool_routing/E02_CONSUMPTION_FIX_20260929.md) 与 [E03 对照](../experiments/tool_routing/LAYA_ADDITIVE_LIVE_20260929.md)。归档 tag：`archive/laya-v7-e02-20260929`。
 
@@ -11,7 +12,7 @@ This source tree integrates desktop baseline `6821615186d18b42855bfd0692b471d056
 
 ## Runtime and configuration
 
-The [desktop worker](../src/erp_harness/app/worker.py) invokes [pi_odoo_runner](../src/erp_harness/app/runner.py) with:
+The [desktop worker](../src/erp_harness/app/worker.py) invokes the [native runner](../src/erp_harness/app/runner.py) with:
 
 | Setting | Value |
 | --- | --- |
