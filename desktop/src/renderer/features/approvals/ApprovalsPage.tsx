@@ -74,7 +74,7 @@ export function ApprovalRow({ approval, documents, disabled, onDecision, onRecon
       <p className="approval-effect">{approvalActionEffect(approval)}</p>
       <section className="approval-business-context" aria-label="本次业务对象">
         <small className="approval-context-label">关联单据 · 最近读取</small>
-        {targets.length ? targets.map(({ model, fields }, index) => <dl className="approval-business-facts" key={`${model}:${String(fields.id ?? index)}`}>{approvalBusinessFacts(model, fields, documents).map(({ label, value }) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>) : <p className="muted">关联业务单据未读取，请核对原始数据后再批准。</p>}
+        {targets.length ? targets.map(({ model, fields }, index) => <dl className="approval-business-facts" key={`${model}:${String(fields.id ?? index)}`}>{approvalBusinessFacts(model, fields, documents, approval.operation).map(({ label, value }) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>) : <p className="muted">关联业务单据未读取，请核对原始数据后再批准。</p>}
         {methodOptions.length > 0 && <dl className="approval-business-facts">{methodOptions.map(({ label, value }, index) => <div key={`${label}:${index}`}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>}
       </section>
       <InvoiceMailPreview approval={approval} />

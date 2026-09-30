@@ -46,3 +46,32 @@ assert.equal(references.find((row) => row.model === 'product.product' && row.id 
 assert.equal(approvalDisplayDocuments(purchase, []).some((row) => row.model === 'product.product'), false)
 assert.equal(approvalDisplayDocuments({ ...purchase, display_references: [{ model: 'res.company', id: 1, name: 'Old secret', status: 'permission_denied' }] }, references).some((row) => row.model === 'res.company'), false)
 assert.equal(approvalDisplayDocuments({ ...purchase, display_references: [{ model: 'res.company', id: 1, name: 'Current verified name', status: 'ready' }] }, references).find((row) => row.model === 'res.company').name, 'Current verified name')
+
+// Observed manufacturing replenishment request: quantities are supplied, pricing is left to ERP defaults.
+const replenishment = approval({ model: 'purchase.order', operation: 'create', record_ids: [], prestate: {}, values: { company_id: 1, partner_id: 606, order_line: [[0, 0, { product_id: 801, product_qty: 120 }]] } })
+const replenishmentFacts = approvalBusinessFacts('purchase.order', replenishment.values, [], 'create')
+assert.equal(replenishmentFacts.find(({ label }) => label === '单据金额').value, '建草稿后回读金额与税额')
+assert.equal(replenishmentFacts[0].value, '新草稿（编号待生成）')
+assert.match(approvalActionEffect(replenishment), /单价、币种和日期按 ERP 默认规则.*建草稿后回读金额与税额.*确认订单另行审批/)
+assert.equal(approvalBusinessFacts('purchase.order', { id: 123 }, [], 'button_confirm').find(({ label }) => label === '单据金额').value, '未读取')
+assert.equal(approvalBusinessFacts('purchase.order', { amount_total: 0, currency_id: [6, 'CNY'] }, [], 'create').find(({ label }) => label === '单据金额').value, '0.00 CNY')
+assert.deepEqual(approvalWrittenValues(replenishment).order_line, [[0, 0, { product_id: 801, product_qty: 120 }]])
+
+// PO3003 confirmation exposed order totals but no lines. Keep relationship edge cases offline.
+const orderLine = { id: 9001, order_id: [3003, 'PO3003'], product_id: [801, '补货原料'], product_qty: 120, product_uom: [1, '件'], price_unit: 12, date_planned: '2026-10-01 08:00:00' }
+const orderConfirm = approval({ model: 'purchase.order', operation: 'button_confirm', record_ids: [3003], values: {}, prestate: { records: [{ id: 3003, name: 'PO3003', amount_total: 1627.2, currency_id: [6, 'CNY'] }], order_lines: [orderLine, { ...orderLine, id: 9002, order_id: 3004 }, { ...orderLine, id: 9003, order_id: undefined }] } })
+const orderOptions = approvalMethodOptions(orderConfirm, [])
+assert.equal(orderOptions.length, 1)
+assert.equal(orderOptions[0].label, '商品 · 补货原料')
+assert.equal(orderOptions[0].value, '数量 120 件 · 单价 12.00 CNY · 交期 2026-10-01 08:00:00')
+assert.match(approvalActionEffect(orderConfirm), /二次审批.*关联收货单.*不登记收货或付款/)
+const worldLines = [{ model: 'purchase.order', id: 3003, name: 'PO3003', fields: { order_line: [9001], currency_id: [6, 'CNY'] }, source: 'read' }, { model: 'purchase.order.line', id: 9001, name: '原料行', fields: orderLine, source: 'read' }, { model: 'sale.order.line', id: 9001, name: '错误模型', fields: { ...orderLine, product_id: [802, '错误模型产品'] }, source: 'read' }]
+assert.deepEqual(approvalBusinessTargets(orderConfirm, worldLines)[0].fields.order_line, [9001])
+assert.equal(approvalMethodOptions({ ...orderConfirm, prestate: {} }, worldLines).length, 1)
+assert.equal(approvalMethodOptions({ ...orderConfirm, prestate: {} }, [...worldLines, { model: 'purchase.order.line', id: 9004, name: '旧明细', fields: { ...orderLine, id: 9004 }, source: 'read' }]).length, 1)
+assert.deepEqual(approvalMethodOptions({ ...orderConfirm, prestate: { order_lines: [] } }, worldLines), [])
+assert.equal(approvalMethodOptions({ ...orderConfirm, operation: 'button_cancel', prestate: { enterprise: { kind: 'purchase_cancel', records: orderConfirm.prestate.records, lines: [orderLine] } } }, []).length, 1)
+assert.equal(approvalMethodOptions({ ...orderConfirm, prestate: { order_lines: [{ order_id: 3003 }] } }, [])[0].value, '数量 未读取 · 单价 未读取 · 交期 未读取')
+const saleConfirm = { ...orderConfirm, model: 'sale.order', operation: 'action_confirm', prestate: { order_lines: [{ ...orderLine, product_uom_qty: 4, product_qty: undefined }] } }
+assert.match(approvalMethodOptions(saleConfirm, [])[0].value, /数量 4 件/)
+assert.match(approvalActionEffect(saleConfirm), /关联交付或补货单.*不完成发货或开票/)

@@ -76,12 +76,13 @@ export function approvalActionTitle(approval: Approval) {
 export function approvalActionEffect(approval: Approval) {
   if (approval.approval_display?.effect) return approval.approval_display.effect
   const effects: Record<string, string> = {
+    'purchase.order.create': '创建采购草稿。未显式提交的单价、币种和日期按 ERP 默认规则处理；建草稿后回读金额与税额，确认订单另行审批。',
     'sale.advance.payment.inv.create': '保存所选销售订单和开票方式。生成发票需后续独立审批。',
     'sale.advance.payment.inv.create_invoices': '按来源订单和已保存的开票方式生成发票；过账与发送需另行审批。',
     'account.move.send.wizard.create': '保存发票处理选项。生成文件或发送邮件需后续独立审批。',
     'account.move.send.wizard.action_send_and_print': '为已过账客户发票生成正式 PDF；本动作不发送邮件。',
     'sale.order.action_confirm': '确认销售订单。Odoo 可生成关联交付或补货单；本动作不完成发货或开票。',
-    'purchase.order.button_confirm': '确认采购订单；启用二次审批时进入待批准状态。',
+    'purchase.order.button_confirm': '提交确认采购订单；启用二次审批时进入待批准状态。确认后 Odoo 可生成关联收货单，本动作不登记收货或付款。',
     'purchase.order.button_approve': '批准采购订单，进入后续收货流程。',
     'account.move.action_post': '将所选凭证过账，形成正式账务记录。',
     'stock.picking.action_confirm': '确认选定库存单，建立后续库存移动。',
@@ -144,18 +145,19 @@ export function approvalBusinessTargets(approval: Approval, documents: Document[
   })
 }
 
-export function approvalBusinessFacts(model: string, fields: Row, documents: Document[]) {
+export function approvalBusinessFacts(model: string, fields: Row, documents: Document[], operation?: string) {
+  const newPurchase = model === 'purchase.order' && operation === 'create' && fields.id == null
   const relationName = (value: unknown, expectedModel: string) => {
     const id = idOf(value)
     const name = Array.isArray(value) && typeof value[1] === 'string' ? value[1] : documents.find((item) => item.model === expectedModel && id != null && String(item.id) === String(id))?.name
     return name || (id != null && id !== false ? `名称未读取（记录 ${String(id)}）` : '未读取')
   }
   const facts = [
-    { label: modelLabel(model), value: typeof fields.name === 'string' ? fields.name : fields.id != null ? `名称未读取（记录 ${String(fields.id)}）` : '名称未读取' },
+    { label: modelLabel(model), value: typeof fields.name === 'string' ? fields.name : fields.id != null ? `名称未读取（记录 ${String(fields.id)}）` : newPurchase ? '新草稿（编号待生成）' : '名称未读取' },
     { label: model === 'purchase.order' ? '供应商' : '往来单位', value: fields.partner_id ? relationName(fields.partner_id, 'res.partner') : typeof fields.partner_name === 'string' ? fields.partner_name : '未读取' },
     { label: '公司', value: relationName(fields.company_id, 'res.company') }
   ]
-  if (['sale.order', 'purchase.order', 'account.move', 'account.payment'].includes(model)) facts.push({ label: '单据金额', value: documentMoney(fields.amount_total ?? fields.amount, { ...fields, currency: fields.currency_id ?? fields.currency ?? fields.currency_name }) || '未读取' })
+  if (['sale.order', 'purchase.order', 'account.move', 'account.payment'].includes(model)) facts.push({ label: '单据金额', value: documentMoney(fields.amount_total ?? fields.amount, { ...fields, currency: fields.currency_id ?? fields.currency ?? fields.currency_name }) || (newPurchase ? '建草稿后回读金额与税额' : '未读取') })
   if (model === 'mrp.production' || model === 'stock.move') facts.push({ label: '产品', value: relationName(fields.product_id, 'product.product') }, { label: '数量', value: documentQuantity(fields) || '未读取' })
   return facts
 }
@@ -163,6 +165,35 @@ export function approvalBusinessFacts(model: string, fields: Row, documents: Doc
 export function approvalMethodOptions(approval: Approval, documents: Document[]) {
   const state = object(approval.prestate), enterprise = object(state.enterprise)
   const wizard = rows(enterprise.wizard ?? state.wizard)[0] || {}
+  const orderMethods: Record<string, string[]> = { 'purchase.order': ['button_confirm', 'button_approve', 'button_cancel'], 'sale.order': ['action_confirm', 'action_cancel'] }
+  if (orderMethods[approval.model]?.includes(approval.operation)) {
+    const targets = approvalBusinessTargets(approval, documents)
+    // An explicit signed set, including an empty one, supersedes older World lines.
+    const signedLines = Object.hasOwn(state, 'order_lines') || Object.hasOwn(enterprise, 'lines')
+    const lines: Row[] = Object.hasOwn(state, 'order_lines') ? rows(state.order_lines)
+      : Object.hasOwn(enterprise, 'lines') ? rows(enterprise.lines)
+      : documents.filter((document) => document.model === `${approval.model}.line`).map((document) => ({ ...document.fields, id: document.id }))
+    const namedRelation = (value: unknown, model: string) => {
+      const id = idOf(value), name = documents.find((document) => document.model === model && String(document.id) === String(id))?.name
+      return Array.isArray(value) ? value : name ? [id, name] : value
+    }
+    return lines.filter((line) => {
+      if (!approval.record_ids.some((id) => String(id) === String(idOf(line.order_id)))) return false
+      const order = targets.find((target) => String(target.fields.id) === String(idOf(line.order_id)))?.fields
+      return signedLines || !Array.isArray(order?.order_line) || approvalRelationIds(order.order_line).some((id) => String(id) === String(line.id))
+    }).map((line) => {
+      const orderId = idOf(line.order_id)
+      const order = targets.find((target) => String(target.fields.id) === String(orderId))?.fields || {}
+      const product = namedRelation(line.product_id, 'product.product')
+      const unit = namedRelation(line.product_uom_id ?? line.product_uom, 'uom.uom')
+      const currency = namedRelation(line.currency_id ?? order.currency_id, 'res.currency')
+      const date = line.date_planned ?? order.commitment_date
+      return {
+        label: `${approval.record_ids.length > 1 ? `${order.name || `订单记录 ${String(orderId)}`} · ` : ''}商品 · ${Array.isArray(product) && typeof product[1] === 'string' ? product[1] : '名称未读取'}`,
+        value: `数量 ${documentQuantity({ ...line, product_uom_id: unit }) || '未读取'} · 单价 ${documentMoney(line.price_unit, { currency }) || '未读取'} · 交期 ${typeof date === 'string' && date ? date : '未读取'}`
+      }
+    })
+  }
   if (enterprise.kind === 'payment') return [{ label: '本次收付款金额', value: documentMoney(wizard.amount, wizard) || '未读取' }, { label: '收付款方向', value: wizard.payment_type === 'inbound' ? '收款' : wizard.payment_type === 'outbound' ? '付款' : '未读取' }]
   if (enterprise.kind === 'reversal') return [{ label: '贷项原因', value: readableValue(wizard.reason) }, { label: '业务日期', value: readableValue(wizard.date) }]
   if (enterprise.kind === 'return') return rows(enterprise.lines).map((line) => {
