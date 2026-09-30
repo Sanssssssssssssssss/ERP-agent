@@ -718,6 +718,8 @@
 | 实验入口（含准备/评估；并非全部付费） | [audit_business.py](../experiments/enterprise_validation/audit_business.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [audit_payments.py](../experiments/enterprise_validation/audit_payments.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [benchmark.py](../experiments/enterprise_validation/benchmark.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [channel_check.py](../experiments/enterprise_validation/channel_check.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [channel_setup.py](../experiments/enterprise_validation/channel_setup.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [evaluate.py](../experiments/enterprise_validation/evaluate.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [live.py](../experiments/enterprise_validation/live.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [manage.py](../experiments/enterprise_validation/manage.py) | 见入口中的断言 |
