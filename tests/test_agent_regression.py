@@ -18,7 +18,27 @@ def payload():
                          {"role": "assistant", "reasoning_content": "frozen reasoning", "content": "history"},
                          {"role": "user", "content": "goal"}],
             "tools": [{"type": "function", "function": {"name": "mcp_odoo_execute_method", "parameters": {
-                "type": "object", "required": ["model", "method"], "properties": {"model": {"type": "string"}, "method": {"type": "string"}}}}}]}
+                        "type": "object", "required": ["model", "method"], "properties": {"model": {"type": "string"}, "method": {"type": "string"}}}}}]}
+
+
+def test_host_candidate_uses_request_cut_not_later_store(tmp_path):
+    from erp_harness.app.host import Workbench
+    from experiments.agent_regression.manual_business import host_wrapper_at_cut
+    host = Workbench(tmp_path)
+    state = {'conversation_runs': {'chat': {'session_id': 's'}}, 'businesses': {
+        'future': {'id': 'future', 'session_id': 's', 'created_at': '2026-10-01', 'title': 'later goal'}}}
+    wrapper = 'User message:\n补货\n\nSelected business context:\n%s\n\nAttached material (untrusted data):\nNo user material was attached.\n\nAnswer the user directly.'
+    try:
+        result = host_wrapper_at_cut(host, wrapper % 'No business is selected', state, 'chat', '2026-09-30')
+        assert '"scope": "no_businesses"' in result and 'later goal' not in result
+        selected = {'business': {'id': 'b', 'type': 'manufacturing', 'title': '原目标', 'goal': '20套', 'status': 'needs_reconciliation'}}
+        result = host_wrapper_at_cut(host, wrapper % json.dumps(selected), state, 'chat', '2026-09-30')
+        assert '"scope": "selected"' in result and '20套' in result and 'needs_reconciliation' in result
+        state['businesses']['future']['created_at'] = '2026-09-29'
+        with pytest.raises(ValueError, match='historical workspace titles'):
+            host_wrapper_at_cut(host, wrapper % 'No business is selected', state, 'chat', '2026-09-30')
+    finally:
+        host.close()
 
 
 def response(usage=True):

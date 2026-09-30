@@ -112,6 +112,56 @@ def prepare():
         'payloads':{c[0]:{arm:digest((OUT/'pool'/c[0]/f'{arm}.json').read_bytes()) for arm in ['baseline','candidate']} for c in CASES}})
 
 
+def host_wrapper_at_cut(host, original, state, run_id, cutoff):
+    """Rebuild host instructions without importing later workspace state."""
+    text, context = original.split('User message:\n', 1)[1].split('\n\nSelected business context:\n', 1)
+    context, material = context.split('\n\nAttached material (untrusted data):\n', 1)
+    if material.split('\n\nAnswer the user directly.', 1)[0] != 'No user material was attached.':
+        raise ValueError('This repair requires a separately frozen attachment context')
+    sid = state['conversation_runs'][run_id]['session_id']
+    frozen_context, _, feedback = context.partition('\nPrevious host feedback:\n')
+    selected = json.loads(frozen_context).get('business') if frozen_context.startswith('{') else None
+    earlier = [b for b in state['businesses'].values() if b.get('session_id') == sid and b['created_at'] <= cutoff]
+    if not selected and earlier:
+        raise ValueError('Freeze historical workspace titles before repairing this unselected scope')
+    # Only the selected request's own fields are trustworthy at this cut. A final
+    # store snapshot can contain a later goal, status, or newly created workspace.
+    host.store.data['businesses'] = {selected['id']: {**selected, 'session_id': sid}} if selected else {}
+    host.store.data['messages'][sid] = [{'role': 'system', 'text': feedback}] if feedback else []
+    return host._conversation_prompt(sid, text, selected['id'] if selected else None, [])
+
+
+def repair_host_context():
+    """Offline-only revision. Keep all 24 paid requests and verdicts immutable."""
+    from erp_harness.app.host import Workbench
+    state = read(OBS/'workbench-state.json')
+    for spec in CASES:
+        if not spec[2].startswith('conversation-runs/'):
+            continue
+        folder = OUT/'pool'/spec[0]
+        original, source = read(folder/'baseline.json'), read(folder/'candidate.json')
+        target = OUT/'pool/host-repair-offline'/spec[0]
+        host = Workbench(target/'host')
+        try:
+            index = max(i for i,m in enumerate(original['messages']) if m['role']=='user')
+            value = host_wrapper_at_cut(host, original['messages'][index]['content'], state,
+                                        spec[2].split('/')[-1], read(folder/'history.meta.json')['started_at'])
+        finally:
+            host.close()
+        candidate, changes = copy.deepcopy(source), []
+        allowed = [f'/messages/{index}/content']
+        replace(candidate, source, changes, allowed, allowed[0], value, 'Workbench._conversation_prompt; request-cut scope')
+        validate_patches(source, candidate, changes, allowed)
+        write_once(target/'candidate.json', candidate)
+        write_once(target/'changes.json', changes)
+        write_once(target/'manifest.json', {'original_baseline_sha256': digest(canonical(original)),
+            'superseded_candidate_sha256': digest(canonical(source)), 'expected': read(folder/'manifest.json')['expected'],
+            'source_hashes': {str(p.relative_to(ROOT)): digest(p.read_bytes()) for p in
+                              [Path(__file__), ROOT/'src/erp_harness/app/host.py']},
+            'paid_calls': 0, 'status': 'offline_only_not_model_validated'})
+    print(json.dumps({'repaired_chat_contexts': 5, 'paid_calls': 0}))
+
+
 async def run():
     frozen=read(OUT/'pool/index.json');prepared=read(OUT/'pool/prepared.json')
     for case in frozen['cases']:
@@ -125,6 +175,6 @@ async def run():
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser();parser.add_argument('command',choices=['freeze','prepare','paid']);args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('command',choices=['freeze','prepare','paid','repair_host_context']);args=parser.parse_args()
     if args.command=='paid':asyncio.run(run())
     else:globals()[args.command]()
