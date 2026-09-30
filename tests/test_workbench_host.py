@@ -1129,6 +1129,13 @@ class WorkbenchHostTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.host.confirm_business(self.sid, proposal_id, False)
 
+    def test_first_business_names_default_session_without_overwriting_user_title(self):
+        self._business("custom title")
+        self.assertEqual(self.host.get_session(self.sid)["session"]["title"], "test")
+        self.sid = self.host.create_session()["id"]
+        business = self._business("default title")
+        self.assertEqual(self.host.get_session(self.sid)["session"]["title"], business["title"])
+
     def test_conversation_and_business_runs_exclude_other_sessions_before_message_is_saved(self):
         business, run = self._run("busy business")
         other = self.host.create_session("other")

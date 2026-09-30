@@ -15,6 +15,7 @@
 | 实验入口（含准备/评估；并非全部付费） | [run_module_slice.py](../experiments/dynamic-tools-budgeted/run_module_slice.py) | 见入口中的断言 |
 | 桌面检查 | [trace-check.mjs](../desktop/scripts/trace-check.mjs) | 见入口中的断言 |
 | 桌面检查 | [trace-model-check.mjs](../desktop/scripts/trace-model-check.mjs) | 见入口中的断言 |
+| 真实模型节点 | [M04](../experiments/agent_regression/manual_cases.json) | Policy refusal became unknown failure |
 | 离线测试套件 | [test_relation_receipts.py](../tests/test_relation_receipts.py) | 见入口中的断言 |
 | 离线测试套件 | [test_reporting.py](../tests/test_reporting.py) | 见入口中的断言 |
 | 离线测试套件 | [test_request_receipts.py](../tests/test_request_receipts.py) | 见入口中的断言 |
@@ -70,9 +71,12 @@
 | 真实模型节点 | [HITL02](../experiments/agent_regression/hitl_revision.json) | Approval revision routed to proposal worker; desktop resumed original unchanged instruction; runtime fixed mail copy. |
 | 真实模型节点 | [IR01](../experiments/agent_regression/interrupted_recovery.json) | host_worker_context |
 | 真实模型节点 | [IR02](../experiments/agent_regression/interrupted_recovery.json) | business_readback |
+| 真实模型节点 | [M01](../experiments/agent_regression/manual_cases.json) | Host omitted no-business state |
+| 真实模型节点 | [M09](../experiments/agent_regression/manual_cases.json) | Pending write prevented applying saved goal update |
 | 离线测试套件 | [test_approval_resume_scope.py](../tests/test_approval_resume_scope.py) | 见入口中的断言 |
 | 离线测试套件 | [test_business_status.py](../tests/test_business_status.py) | 见入口中的断言 |
 | 离线测试套件 | [test_interrupted_recovery.py](../tests/test_interrupted_recovery.py) | 见入口中的断言 |
+| 离线测试套件 | [test_manual_business_recovery.py](../tests/test_manual_business_recovery.py) | 见入口中的断言 |
 | 离线测试套件 | [test_transport_recovery.py](../tests/test_transport_recovery.py) | 见入口中的断言 |
 | 离线测试套件 | [test_workbench_conversation.py](../tests/test_workbench_conversation.py) | 见入口中的断言 |
 | 离线测试套件 | [test_workbench_host.py](../tests/test_workbench_host.py) | 见入口中的断言 |
@@ -293,6 +297,9 @@
 | ERPBench 完整业务 | [2259 · CO2 Total Flooding System](../bench/tasks/2259_hard_25_shared_component_subassemblies_branch_assigned_screened_all_seeded/task.toml) | 25_shared_component_subassemblies_branch_assigned_screened_all_seeded |
 | ERPBench 完整业务 | [2260 · Foam Deluge System Package](../bench/tasks/2260_hard_25_shared_component_subassemblies_branch_assigned_screened_all_seeded/task.toml) | 25_shared_component_subassemblies_branch_assigned_screened_all_seeded |
 | ERPBench 完整业务 | [2261 · Fire Alarm Control Panel FACP](../bench/tasks/2261_hard_25_shared_component_subassemblies_branch_assigned_screened_all_seeded/task.toml) | 25_shared_component_subassemblies_branch_assigned_screened_all_seeded |
+| 真实模型节点 | [M02](../experiments/agent_regression/manual_cases.json) | Read surface omitted BOM and stock facts |
+| 真实模型节点 | [M06](../experiments/agent_regression/manual_cases.json) | Replacement copied an expired delivery date |
+| 真实模型节点 | [M08](../experiments/agent_regression/manual_cases.json) | Partial allocation incorrectly marked uncertain |
 | 真实模型节点 | [MC01](../experiments/agent_regression/manufacturing_consumption.json) | Model skipped the SOP consumption step; runtime _bom_consumption counts quantity even when picked=false, unlike Odoo _get_consumption_issues. Completion returned a warning wizard; post-state check paused safely. |
 | 真实模型节点 | [MD01](../experiments/agent_regression/manufacturing_dates.json) | Missing planned/actual transition semantics; earliest historical introduction not proven |
 | 真实模型节点 | [MD02](../experiments/agent_regression/manufacturing_dates.json) | Missing planned/actual transition semantics; earliest historical introduction not proven |
@@ -512,10 +519,12 @@
 | 真实模型节点 | [B03](../experiments/agent_regression/hitl_revision.json) | 见冻结清单 |
 | 真实模型节点 | [HITL01](../experiments/agent_regression/hitl_revision.json) | Approval revision routed to proposal worker; desktop resumed original unchanged instruction; runtime fixed mail copy. |
 | 真实模型节点 | [HITL02](../experiments/agent_regression/hitl_revision.json) | Approval revision routed to proposal worker; desktop resumed original unchanged instruction; runtime fixed mail copy. |
+| 真实模型节点 | [M12](../experiments/agent_regression/manual_cases.json) | Existing successful fixed-deposit control |
 | 离线测试套件 | [test_chatter_verification.py](../tests/test_chatter_verification.py) | 见入口中的断言 |
 | 离线测试套件 | [test_document_export.py](../tests/test_document_export.py) | 见入口中的断言 |
 | 离线测试套件 | [test_invoice_eligibility.py](../tests/test_invoice_eligibility.py) | 见入口中的断言 |
 | 离线测试套件 | [test_invoice_mail.py](../tests/test_invoice_mail.py) | 见入口中的断言 |
+| 离线测试套件 | [test_material_extract.py](../tests/test_material_extract.py) | 见入口中的断言 |
 | 离线测试套件 | [test_workbench_materials.py](../tests/test_workbench_materials.py) | 见入口中的断言 |
 | 隔离完整业务 | [E05 · 客户退货退款](../experiments/enterprise_validation/README.md) | 最终状态＋安全约束＋效率；历史通过不代表当前通过 |
 | 隔离完整业务 | [E06 · 供应商退货退款](../experiments/enterprise_validation/README.md) | 最终状态＋安全约束＋效率；历史通过不代表当前通过 |
@@ -541,6 +550,8 @@
 | 真实模型节点 | [D04 · first model request consuming the unavailable status result, before the false only-proposal answer](../experiments/agent_regression/cases.py) | evidence_semantics |
 | 真实模型节点 | [HITL01](../experiments/agent_regression/hitl_revision.json) | Approval revision routed to proposal worker; desktop resumed original unchanged instruction; runtime fixed mail copy. |
 | 真实模型节点 | [HITL02](../experiments/agent_regression/hitl_revision.json) | Approval revision routed to proposal worker; desktop resumed original unchanged instruction; runtime fixed mail copy. |
+| 真实模型节点 | [M03](../experiments/agent_regression/manual_cases.json) | Reviewed purchase cancellation method absent |
+| 真实模型节点 | [M07](../experiments/agent_regression/manual_cases.json) | New verified manufacturing document excluded from task targets |
 | 离线测试套件 | [test_actions.py](../tests/test_actions.py) | 见入口中的断言 |
 | 离线测试套件 | [test_approval_resume_scope.py](../tests/test_approval_resume_scope.py) | 见入口中的断言 |
 | 离线测试套件 | [test_business_facts.py](../tests/test_business_facts.py) | 见入口中的断言 |
@@ -574,6 +585,7 @@
 | 桌面检查 | [self-check.mjs](../desktop/scripts/self-check.mjs) | 见入口中的断言 |
 | 桌面检查 | [trace-check.mjs](../desktop/scripts/trace-check.mjs) | 见入口中的断言 |
 | 桌面检查 | [trace-model-check.mjs](../desktop/scripts/trace-model-check.mjs) | 见入口中的断言 |
+| 真实模型节点 | [M10](../experiments/agent_regression/manual_cases.json) | Final reply exposed implementation instead of business result |
 | 离线测试套件 | [test_enterprise_workbench.py](../tests/test_enterprise_workbench.py) | 见入口中的断言 |
 | 离线测试套件 | [test_layout.py](../tests/test_layout.py) | 见入口中的断言 |
 | 离线测试套件 | [test_runtime_migration.py](../tests/test_runtime_migration.py) | 见入口中的断言 |
@@ -602,10 +614,15 @@
 |---|---|---|
 | 实验入口（含准备/评估；并非全部付费） | [freeze.py](../experiments/agent_regression/freeze.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [incidents.py](../experiments/agent_regression/incidents.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [manual_business.py](../experiments/agent_regression/manual_business.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [manual_business_live.py](../experiments/agent_regression/manual_business_live.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [prepare.py](../experiments/agent_regression/prepare.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [provenance.py](../experiments/agent_regression/provenance.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [runner.py](../experiments/agent_regression/runner.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [start.py](../experiments/demo_odoo/start.py) | 见入口中的断言 |
+| 真实模型节点 | [M13](../experiments/agent_regression/manual_followups.json) | Reviewed purchase cancellation was not explained as including unreceived receipts; unsupported picking cancellation forced handoff |
+| 真实模型节点 | [M14](../experiments/agent_regression/manual_followups.json) | Order confirmation approved total and identity without presenting its product quantities |
+| 真实模型节点 | [M15](../experiments/agent_regression/manual_followups.json) | Model-facing Chinese requirement did not reliably control public progress language |
 | 离线测试套件 | [test_agent_harness.py](../tests/runtime/test_agent_harness.py) | 见入口中的断言 |
 | 离线测试套件 | [test_agent_loop.py](../tests/runtime/test_agent_loop.py) | 见入口中的断言 |
 | 离线测试套件 | [test_agent_regression.py](../tests/test_agent_regression.py) | 见入口中的断言 |
@@ -732,12 +749,16 @@
 | 实验入口（含准备/评估；并非全部付费） | [invoice_demo.py](../experiments/enterprise_validation/invoice_demo.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [live.py](../experiments/enterprise_validation/live.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [manage.py](../experiments/enterprise_validation/manage.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [manual_pressure.py](../experiments/enterprise_validation/manual_pressure.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [report.py](../experiments/enterprise_validation/report.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [retrieval_check.py](../experiments/enterprise_validation/retrieval_check.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [selfcheck.py](../experiments/dynamic_business_mvp/tests/selfcheck.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [staff.py](../experiments/enterprise_validation/staff.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [verifier.py](../experiments/dynamic_business_mvp/verifier.py) | 见入口中的断言 |
 | 实验检查 | [test.sh](../experiments/dynamic_business_mvp/tests/test.sh) | 见入口中的断言 |
+| 真实模型节点 | [M03](../experiments/agent_regression/manual_cases.json) | Reviewed purchase cancellation method absent |
+| 真实模型节点 | [M05](../experiments/agent_regression/manual_cases.json) | History used as current supplier commitment |
+| 真实模型节点 | [M11](../experiments/agent_regression/manual_cases.json) | Existing successful sales confirmation control |
 | 离线测试套件 | [test_business_mvp_verifier.py](../tests/test_business_mvp_verifier.py) | 见入口中的断言 |
 | 离线测试套件 | [test_enterprise_actions.py](../tests/test_enterprise_actions.py) | 见入口中的断言 |
 | 离线测试套件 | [test_enterprise_knowledge.py](../tests/test_enterprise_knowledge.py) | 见入口中的断言 |

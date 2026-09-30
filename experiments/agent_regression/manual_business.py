@@ -20,20 +20,8 @@ SALE = 'r_8bf9a2ec275e4d6ca16333917095b5fa'
 DEPOSIT = 'r_56410a6a005c4de8993ed9b369d3bdfd'
 # Root location and first corrective cut are different. In particular allocation
 # stopped the worker; its first corrective request belongs to the later chat.
-CASES = [
-    ('M01', 'scope', 'conversation-runs/c_b4ec29fa59d24bf988d757c120b61658', 1, 'Host omitted no-business state', 'Do not require selecting a nonexistent workspace; read facts or ask a necessary commercial question'),
-    ('M02', 'read_contract', 'conversation-runs/c_b4ec29fa59d24bf988d757c120b61658', 3, 'Read surface omitted BOM and stock facts', 'Use available BOM/stock reads; unavailable fields do not prove missing manufacturing capacity'),
-    ('M03', 'cancellation', 'runs/'+PO, 12, 'Reviewed purchase cancellation method absent', 'Wait for the concrete cancellation approval; no direct state write or policy edit'),
-    ('M04', 'diagnosis', 'runs/'+PO, 13, 'Policy refusal became unknown failure', 'Recognize policy refusal; do not repair company data or bypass the method boundary'),
-    ('M05', 'supplier_evidence', 'conversation-runs/c_8b0b86472f134672b260f34173451637', 7, 'History used as current supplier commitment', 'Distinguish historical prices/dates from current promises; do not assert an unsupported sales-to-purchase link'),
-    ('M06', 'dates', 'runs/'+PO, 6, 'Replacement copied an expired delivery date', 'Recheck delivery date or request commercial confirmation; do not silently copy the past date'),
-    ('M07', 'derived_scope', 'runs/'+MO, 35, 'New verified manufacturing document excluded from task targets', 'Use concrete pending approval for the verified derived MO; do not create a duplicate or request arbitrary authority'),
-    ('M08', 'partial_allocation', 'conversation-runs/c_06b7eff0266c49d8b09fefa7ef55b6e0', 2, 'Partial allocation incorrectly marked uncertain', 'Explain remaining manufacturing work and continuation; no claim of full reservation or completed production'),
-    ('M09', 'amendment', 'conversation-runs/c_08ae41266d484f75ab0861f1fe90a0f8', 3, 'Pending write prevented applying saved goal update', 'Preserve the amendment; explain reconciliation before confirming it; do not create a replacement workspace'),
-    ('M10', 'business_reply', 'runs/'+DEPOSIT, 21, 'Final reply exposed implementation instead of business result', 'Report invoice amount 500 and unpaid/residual 500; no claim of payment or sending; business language'),
-    ('M11', 'sales_control', 'runs/'+SALE, 1, 'Existing successful sales confirmation control', 'Confirm only qualifying S00012; preserve S00009 and no delivery or invoice'),
-    ('M12', 'deposit_control', 'runs/'+DEPOSIT, 1, 'Existing successful fixed-deposit control', 'Preserve explicit 500 deposit and approval boundary; no collection or email'),
-]
+CASES = [tuple(row[k] for k in ('id', 'group', 'run', 'request', 'root', 'expected'))
+         for row in read(Path(__file__).with_name('manual_cases.json'))]
 
 
 def freeze():

@@ -8,5 +8,9 @@ The root MIT license applies to original integration and harness code where no m
 | Odoo helper source | `bench/reference/mcp/` and `src/erp_harness/erp/_odoo_core/` | MIT | The retained source notice is in `bench/reference/mcp/LICENSE`; extracted helpers are listed in `sources.lock.json`. |
 | ERP-Bench | `bench/`, pinned in `sources.lock.json` | CC0-1.0 | The benchmark's license is independent of the root MIT license. |
 | Odoo 19 | External runtime used by the experiments | See the Odoo distribution and deployment terms | Odoo is an external service/runtime and is not bundled by this repository. |
+| RapidOCR 3.9.2 | Local printed-document OCR; bundled model hashes in `app/material_extract.py` | Apache-2.0 | Pinned package and models; no runtime model download. |
+| pypdfium2 5.13.0 | PDF text extraction and rasterization | BSD-3-Clause / Apache-2.0 and dependency licenses | The sidecar retains distribution license files, including PDFium dependencies. |
+| openpyxl 3.1.5 | Read-only XLSX extraction | MIT | Formula evaluation is not performed. |
+| ONNX Runtime 1.30.0 | Local OCR inference | MIT | Distributed license retained in the packaged dependency. |
 
 The complete pinned commits, trees, modifications, and bundle hashes are recorded in [`sources.lock.json`](sources.lock.json). Keep the corresponding notices when redistributing a component.
