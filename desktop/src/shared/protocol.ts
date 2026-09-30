@@ -17,7 +17,7 @@ export interface Message {
   id: string;
   role: Role;
   text: string;
-  created_at: string;
+  created_at?: string;
   business_id?: string;
   context_business_id?: string | null;
   run_id?: string;

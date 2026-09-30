@@ -124,10 +124,15 @@ export function ConversationPane({ session, draft, liveMessages, conversationRun
   const visibleLiveMessages = liveMessages.filter((message) => message.session_id === session?.session.id && (message.business_id == null || message.business_id === selectedBusinessId))
   const persistedMessageKeys = new Set(messages.map((message) => `${message.business_id ?? '__conversation__'}:${message.id}`))
   const orderedMessages = [
-    ...messages.filter((message) => message.text.trim() && !message.proposal).map((message) => ({ kind: 'message' as const, message, created_at: message.created_at })),
-    ...messages.filter((message) => message.proposal?.status === 'confirmed' && businesses.some((business) => business.id === message.business_id)).map((message) => ({ kind: 'receipt' as const, message, created_at: message.created_at })),
-    ...visibleLiveMessages.filter((message) => !persistedMessageKeys.has(`${message.business_id ?? '__conversation__'}:${message.id}`)).map((message) => ({ kind: 'live' as const, message, created_at: message.created_at || '' }))
-  ].sort((left, right) => left.created_at.localeCompare(right.created_at))
+    ...messages.filter((message) => message.proposal ? message.proposal.status === 'confirmed' && businesses.some((business) => business.id === message.business_id) : message.text.trim()).map((message) => message.proposal
+      ? { kind: 'receipt' as const, message, created_at: message.created_at }
+      : { kind: 'message' as const, message, created_at: message.created_at }),
+    ...visibleLiveMessages.filter((message) => !persistedMessageKeys.has(`${message.business_id ?? '__conversation__'}:${message.id}`)).map((message) => ({ kind: 'live' as const, message, created_at: message.created_at }))
+  ]
+  // Legacy history can omit timestamps. Keep its stored order, including proposal receipts.
+  if (orderedMessages.every((item) => typeof item.created_at === 'string' && Number.isFinite(Date.parse(item.created_at)))) {
+    orderedMessages.sort((left, right) => String(left.created_at).localeCompare(String(right.created_at)))
+  }
   const localThinking = Boolean(thinkingRun && thinkingRun.sessionId === session?.session.id && (!thinkingRun.runId || latestConversation?.id === thinkingRun.runId))
   const activePublicText = activeConversation && (
     visibleLiveMessages.some((message) => message.run_id === activeConversation.id && message.text.trim())

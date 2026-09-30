@@ -381,6 +381,30 @@ await page.getByRole('heading', { name: 'Session A' }).waitFor()
 await page.getByText('处理业务', { exact: true }).waitFor()
 assert.equal(await page.locator('.welcome-card').count(), 3)
 assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'send_message').length), sendCallsBeforeProposalOnly)
+// Packaged SALE history starts with a confirmed frozen proposal without created_at.
+// Missing timestamps remain unknown; cards and messages retain the host's stored order.
+await page.evaluate(() => {
+  window.__setSessionMessages('session-a', [
+    { id: 'frozen-proposal', role: 'assistant', text: '固定实验业务输入', business_id: 'business-a1', proposal: { id: 'frozen', title: '历史确认卡片', goal: '保留已确认目标', type: 'sale_invoice', status: 'confirmed' } },
+    { id: 'history-read', role: 'assistant', text: '已读取历史订单。', created_at: '2026-09-30T14:30:18.607332Z' },
+    { id: 'history-user', role: 'user', text: '时间缺失的历史要求。' },
+    { id: 'history-second-proposal', role: 'assistant', text: '', created_at: null, business_id: 'business-a1', proposal: { id: 'frozen-second', title: '后续确认卡片', goal: '保留后续目标', type: 'sale_invoice', status: 'confirmed' } },
+    { id: 'history-ended', role: 'assistant', text: '历史业务已结束。', created_at: '2026-09-30T14:33:12.535853Z' }
+  ])
+  window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-a', status: 'completed' } })
+})
+await page.getByText('历史业务已结束。', { exact: true }).waitFor()
+const historyOrder = () => page.locator('.conversation-scroll > article').evaluateAll((articles) => articles.map((article) => article.querySelector('.message-markdown')?.textContent || article.querySelector('strong')?.textContent))
+assert.deepEqual(await historyOrder(), ['历史确认卡片', '已读取历史订单。', '时间缺失的历史要求。', '后续确认卡片', '历史业务已结束。'])
+assert.equal(await page.locator('.message.user').filter({ hasText: '时间缺失的历史要求。' }).locator('.message-meta span').textContent(), '未知时间')
+assert.equal(pageErrors.length, 0, pageErrors.join('\n'))
+await page.getByRole('button', { name: /Session B/ }).click()
+await page.getByRole('heading', { name: 'Session B' }).waitFor()
+await page.getByRole('button', { name: /Session A/ }).click()
+await page.getByText('历史业务已结束。', { exact: true }).waitFor()
+assert.deepEqual(await historyOrder(), ['历史确认卡片', '已读取历史订单。', '时间缺失的历史要求。', '后续确认卡片', '历史业务已结束。'])
+await page.locator('.proposal-receipt').filter({ hasText: '历史确认卡片' }).getByRole('button', { name: '打开业务' }).click()
+await page.getByRole('heading', { name: 'Business A1' }).waitFor()
 await page.evaluate(() => { window.__setSessionMessages('session-a', []); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-a', status: 'idle' } }) })
 await page.getByRole('button', { name: /Session B/ }).click()
 await page.getByRole('heading', { name: 'Session B' }).waitFor()
