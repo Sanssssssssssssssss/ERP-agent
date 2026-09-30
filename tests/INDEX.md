@@ -504,6 +504,7 @@
 | ERPBench 完整业务 | [2248 · Elevator Cab Interior Module](../bench/tasks/2248_hard_24_single_subassembly_shared_overflow_capacity_screened_invoicing/task.toml) | 24_single_subassembly_shared_overflow_capacity_screened_invoicing |
 | ERPBench 完整业务 | [2249 · Landing Door Assembly Single-Speed](../bench/tasks/2249_hard_24_single_subassembly_shared_overflow_capacity_screened_invoicing/task.toml) | 24_single_subassembly_shared_overflow_capacity_screened_invoicing |
 | ERPBench 完整业务 | [2250 · Elevator Cab Interior Module](../bench/tasks/2250_hard_24_single_subassembly_shared_overflow_capacity_screened_invoicing/task.toml) | 24_single_subassembly_shared_overflow_capacity_screened_invoicing |
+| 实验入口（含准备/评估；并非全部付费） | [invoice_demo.py](../experiments/enterprise_validation/invoice_demo.py) | 见入口中的断言 |
 | 桌面检查 | [document-presentation-check.mjs](../desktop/scripts/document-presentation-check.mjs) | 见入口中的断言 |
 | 真实模型节点 | [B02](../experiments/agent_regression/hitl_revision.json) | 见冻结清单 |
 | 真实模型节点 | [B03](../experiments/agent_regression/hitl_revision.json) | 见冻结清单 |
@@ -726,6 +727,7 @@
 | 实验入口（含准备/评估；并非全部付费） | [channel_check.py](../experiments/enterprise_validation/channel_check.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [channel_setup.py](../experiments/enterprise_validation/channel_setup.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [evaluate.py](../experiments/enterprise_validation/evaluate.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [invoice_demo.py](../experiments/enterprise_validation/invoice_demo.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [live.py](../experiments/enterprise_validation/live.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [manage.py](../experiments/enterprise_validation/manage.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [report.py](../experiments/enterprise_validation/report.py) | 见入口中的断言 |

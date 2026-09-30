@@ -1,0 +1,38 @@
+<t t-name="enterprise_invoice_demo.document">
+  <t t-call="web.html_container">
+    <t t-foreach="docs" t-as="o">
+      <t t-call="web.external_layout">
+        <div class="page" style="font-size:14px;color:#18383c;">
+          <h2 style="text-align:center;margin-top:16px;">模拟电子发票 · <t t-if="o.move_type == 'out_refund'">红字展示</t><t t-else="">蓝字展示</t></h2>
+          <div style="border:2px solid #aa3b32;padding:12px;color:#aa3b32;margin:18px 0;font-weight:bold;">
+            仅供业务演示 · 非税务发票 · 不可报销或抵扣 · 未连接税务平台
+          </div>
+          <table class="table table-borderless">
+            <tr><td>模拟编号：<strong>DEMO-<span t-out="o.id"/></strong></td><td>开单日期：<span t-field="o.invoice_date"/></td></tr>
+            <tr><td>ERP 单号：<span t-field="o.name"/></td><td>状态：已在 Odoo 记账</td></tr>
+            <tr><td>销售方：<span t-field="o.company_id.name"/></td><td>购买方：<span t-field="o.partner_id.name"/></td></tr>
+            <tr><td>销售方税号：未配置（模拟企业）</td><td>购买方税号：未配置（模拟客户）</td></tr>
+            <tr><td colspan="2">来源单据：<span t-field="o.invoice_origin"/></td></tr>
+            <tr t-if="o.reversed_entry_id"><td colspan="2">对应原账单：<span t-field="o.reversed_entry_id.name"/> / DEMO-<span t-out="o.reversed_entry_id.id"/></td></tr>
+          </table>
+          <t t-set="sign" t-value="-1 if o.move_type == 'out_refund' else 1"/>
+          <table class="table table-sm" style="border-top:2px solid #416c70;border-bottom:2px solid #416c70;">
+            <thead><tr><th>项目名称</th><th class="text-end">数量</th><th class="text-end">不含税单价</th><th class="text-end">税率</th><th class="text-end">不含税金额</th></tr></thead>
+            <tbody><tr t-foreach="o.invoice_line_ids.filtered(lambda l: l.display_type == 'product')" t-as="line">
+              <td><span t-field="line.name"/></td><td class="text-end" t-out="sign * line.quantity"/>
+              <td class="text-end"><span t-field="line.price_unit"/></td>
+              <td class="text-end" t-out="', '.join(line.tax_ids.mapped('name'))"/>
+              <td class="text-end"><span t-out="sign * line.price_subtotal" t-options="{'widget':'monetary','display_currency':o.currency_id}"/></td>
+            </tr></tbody>
+          </table>
+          <div style="text-align:right;line-height:2;">
+            不含税金额：<span t-out="sign * o.amount_untaxed" t-options="{'widget':'monetary','display_currency':o.currency_id}"/><br/>
+            税额：<span t-out="sign * o.amount_tax" t-options="{'widget':'monetary','display_currency':o.currency_id}"/><br/>
+            <strong style="font-size:20px;">价税合计：<span t-out="sign * o.amount_total" t-options="{'widget':'monetary','display_currency':o.currency_id}"/></strong>
+          </div>
+          <p style="margin-top:32px;">本文件根据本地 Odoo 单据生成。模拟编号不是税务发票号码；金额及来源核对不等于税务查验。红字展示对应 Odoo 贷项通知，不代表税局红冲。</p>
+        </div>
+      </t>
+    </t>
+  </t>
+</t>

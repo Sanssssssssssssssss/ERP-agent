@@ -9,6 +9,7 @@
 | 审批、授权范围、写入依据 | [动作](tests/test_actions.py)、[阶段](tests/test_stage_contract.py)、[证据](tests/test_task_evidence.py) | [A/B/C/D 节点](experiments/agent_regression/cases.py)、[结果](experiments/agent_regression/RESULTS.md) |
 | 员工岗位、跨公司、人事隐私 | [Odoo 事务与在线权限检查](experiments/enterprise_validation/access_check.py)，不调用模型 | [边界、结果与回退](docs/enterprise-access.md) |
 | 发票、邮件、附件 | [投递](tests/test_invoice_mail.py)、[开票条件](tests/test_invoice_eligibility.py)、[文件导出](tests/test_document_export.py) | [S01499 及历史故障](experiments/agent_regression/README.md)；邮件创建、SMTP 接受、实际送达分别判断 |
+| 本地模拟发票、贷项、实际邮件附件 | [只读复核入口](experiments/enterprise_validation/invoice_demo.py)：`--check` | [演示步骤和边界](docs/invoice-demo.md)；未接税局、不调用模型 |
 | 采购、库存、制造、收付款、退款 | [企业动作](tests/test_enterprise_actions.py)、[供需](tests/test_supply_context.py) | [E01–E06 企业验收](experiments/enterprise_validation/README.md)、[全部 300 道 ERPBench](tests/INDEX.md) |
 | SOP、工具参数、Laya 能力注入 | [SOP](tests/test_sops.py)、[Laya](tests/test_laya_integration.py)、[路由状态](tests/test_host_routing_state.py) | [R01–R18](experiments/agent_regression/README.md)、[选择器数据来源](tests/fixtures/capability_routing/README.md)、[实验结果](experiments/tool_routing/README.md) |
 | 搜索、中文检索、大查询回包 | [企业检索](tests/test_enterprise_knowledge.py)、[工具检索](tests/test_tool_retrieval.py) | [固定检索与并发检查](experiments/enterprise_validation/retrieval_check.py) |
