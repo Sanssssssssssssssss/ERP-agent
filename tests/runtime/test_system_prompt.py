@@ -34,16 +34,15 @@ def test_default_prompt_includes_tools_guidelines_and_cwd(tmp_path: Path) -> Non
         )
     )
 
-    assert "You are an expert coding assistant operating inside Pi" in prompt
+    assert "You are an ERP business assistant operating inside ERP Harness" in prompt
+    assert "Pi Agent" not in prompt
+    assert "coding assistant" not in prompt
     assert "Available tools:\n- read: Read file contents" in prompt
     assert "- Use bash for file operations like ls, rg, find" in prompt
     assert "- When using bash, include a brief present-participle description" in prompt
     assert "- Use read to examine files instead of cat or sed." in prompt
     assert "- Be concise in your responses" in prompt
     assert "- Show file paths clearly when working with files" in prompt
-    assert "Pi Agent documentation (read only when the user asks about Pi Agent itself" in prompt
-    assert "custom providers or adding built-in providers/models (docs/models.md)" in prompt
-    assert "creating or modifying extensions (docs/extensions.md" in prompt
     assert prompt.endswith(f"Current working directory: {tmp_path.as_posix()}")
 
 

@@ -123,3 +123,5 @@ The previous lab entry point remains in [`docs/history/README-lab.md`](docs/hist
 ## Provenance and contribution
 
 The repository combines locally written harness code with pinned source material listed in [`sources.lock.json`](sources.lock.json). Check the relevant [`LICENSE`](LICENSE), [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md), and [`docs/licenses/pi-agent-NOTICES.md`](docs/licenses/pi-agent-NOTICES.md) before redistributing a component. See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`SECURITY.md`](SECURITY.md).
+
+Backend memory dependencies are optional: `pip install ".[memory]"`. Desktop release builds include this extra to preserve the memory switch. Memory remains off by default.

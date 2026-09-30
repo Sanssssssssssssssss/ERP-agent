@@ -86,7 +86,7 @@ def export_session_html(
     entries: Sequence[SessionEntry],
     output_path: Path,
     *,
-    title: str = "Pi Agent Session Export",
+    title: str = "ERP Harness Session Export",
     source: str | None = None,
     system_prompt: str | None = None,
     usage_notice: str | None = None,
@@ -110,7 +110,7 @@ def export_session_artifact(
     entries: Sequence[SessionEntry],
     output_path: Path,
     *,
-    title: str = "Pi Agent Session Export",
+    title: str = "ERP Harness Session Export",
     source: str | None = None,
     format: str | None = None,
     system_prompt: str | None = None,
@@ -177,7 +177,7 @@ def _export_theme_css(theme: TuiTheme) -> str:
 def render_session_html(
     entries: Sequence[SessionEntry],
     *,
-    title: str = "Pi Agent Session Export",
+    title: str = "ERP Harness Session Export",
     source: str | None = None,
     system_prompt: str | None = None,
     usage_notice: str | None = None,
@@ -772,7 +772,7 @@ def render_session_html(
 <body>
   <header>
     <div class="header-top">
-      <p class="eyebrow">Pi Agent session export</p>
+      <p class="eyebrow">ERP Harness session export</p>
       <button
         type="button"
         class="theme-toggle"

@@ -4691,7 +4691,7 @@ def _session_export_title(session: HarnessSession) -> str:
         record = manager.get_session(session_id)
         if record is not None and record.title:
             return record.title
-    return f"Pi Agent session {session_id}" if session_id is not None else "Pi Agent Session Export"
+    return f"ERP Harness session {session_id}" if session_id is not None else "ERP Harness Session Export"
 
 
 @dataclass(frozen=True, slots=True)

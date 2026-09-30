@@ -52,7 +52,7 @@ Trace 展示运行、工具和用量记录；截图使用合成演示数据。
 
 ## 能做什么
 
-- 用 `odoo_runtime` 中的原生 Odoo 能力运行 Python Pi 风格会话循环。
+- 用 `src/erp_harness/erp` 的原生 Odoo 能力运行 Harness 会话循环。
 - 提供 Windows Electron 工作台，覆盖销售、采购、开票、审批、状态回读和运行 Trace。
 - 按工作台限制接收 UTF-8 CSV/TXT 材料，把已观测单据明细导出为 UTF-8 BOM CSV；客户发票只有在 Odoo 已生成并可读的正式 PDF 附件存在时才提供 PDF 下载。
 - ERP 写操作逐项审批，记录操作前状态、结果和独立回读。
@@ -121,3 +121,5 @@ node scripts/renderer-check.mjs
 ## 来源与贡献
 
 本仓库包含自写 Harness 代码和 `sources.lock.json` 中固定的来源材料。重新分发组件前请查看 [`LICENSE`](LICENSE)、[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) 和 [`docs/licenses/pi-agent-NOTICES.md`](docs/licenses/pi-agent-NOTICES.md)。贡献方式见 [`CONTRIBUTING.md`](CONTRIBUTING.md)，安全问题见 [`SECURITY.md`](SECURITY.md)。
+
+后端长期记忆依赖按需安装：`pip install ".[memory]"`。桌面发布保留该依赖组以支持现有开关；默认仍关闭。

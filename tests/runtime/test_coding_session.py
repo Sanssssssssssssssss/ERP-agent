@@ -3416,7 +3416,7 @@ async def test_session_reload_tracks_system_prompt_file_precedence(tmp_path: Pat
             resource_paths=ResourcePaths(root=pi_home, agents_root=None),
         )
     )
-    assert "You are an expert coding assistant operating inside Pi" in session.system_prompt
+    assert "You are an ERP business assistant operating inside ERP Harness" in session.system_prompt
 
     user_prompt.write_text("User base", encoding="utf-8")
     summary = await session.reload()
@@ -3444,7 +3444,7 @@ async def test_session_reload_tracks_system_prompt_file_precedence(tmp_path: Pat
     user_prompt.unlink()
     await session.reload()
     assert session.system_prompt.startswith(
-        "You are an expert coding assistant operating inside Pi"
+        "You are an ERP business assistant operating inside ERP Harness"
     )
     assert "Reloaded append" in session.system_prompt
 
