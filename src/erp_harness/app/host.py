@@ -2187,6 +2187,8 @@ class Workbench:
         if active is None:
             active = next((r["id"] for r in self.store.data.get("conversation_runs", {}).values() if r.get("status") in {"running", "cancel_requested"}), None)
         return {"host_ready": True, "odoo_status": "configured" if os.environ.get("ODOO_URL") and os.environ.get("ODOO_DB") else "unknown", "model_configured": bool(os.environ.get("LLM_API_KEY") and os.environ.get("LLM_BASE_URL") and os.environ.get("LLM_MODEL")), "environment": "configured" if os.environ.get("LLM_API_KEY") else "demo", "active_run_id": active, "data_dir": str(self.store.root), "odoo": dict(self._odoo_health),
+                "capability_routing": {"configured": bool(capability_router_config()),
+                    "loaded_runs": sorted(self._selectors), "mode": "laya" if capability_router_config() else "model"},
                 "storage": {"bytes": self.store.last_save_bytes, "last_save_ms": self.store.last_save_ms,
                             "notification_count": len(self.store.data["events"]),
                             "notification_limit": self.store.MAX_NOTIFICATIONS}}

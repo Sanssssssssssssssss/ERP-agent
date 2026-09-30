@@ -35,7 +35,7 @@ def prepare(extra=False, recovery=False, all_cases=False):
     expected = 14 if all_cases else len(selected_keys) if extra else 6
     assert len(source)==2*expected and len(labels)==expected
     files = [Path(__file__),Path(contract.__file__),Path(trial.__file__),Path(base.__file__),
-        base.ROOT/'src/erp_harness/app/routing_state.py',base.ROOT/'src/erp_harness/tools/dynamic_tools.py',
+        base.ROOT/'experiments/tool_routing/host_state_v1.py',base.ROOT/'src/erp_harness/tools/dynamic_tools.py',
         base.ROOT/'src/erp_harness/app/business.py',
         base.ROOT/'src/erp_harness/tools/router.py',base.ROOT/'src/erp_harness/tools/native_tool_catalog.json',
         FAILURES/'probe-inputs.json',FAILURES/'labels.json',base.OUT/'labels.json',

@@ -362,6 +362,7 @@
 | 实验入口（含准备/评估；并非全部付费） | [live_trial.py](../experiments/tool_routing/live_trial.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [model_comparison.py](../experiments/tool_routing/model_comparison.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [openjev_regression.py](../experiments/tool_routing/openjev_regression.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [openjev_worker.py](../experiments/tool_routing/openjev_worker.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [phase_dataset.py](../experiments/tool_routing/phase_dataset.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [publication_probe.py](../experiments/tool_routing/publication_probe.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [q4_decision_readout.py](../experiments/tool_routing/q4_decision_readout.py) | 见入口中的断言 |
@@ -375,6 +376,7 @@
 | 实验入口（含准备/评估；并非全部付费） | [q4_thinking_schema.py](../experiments/tool_routing/q4_thinking_schema.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [q4_thinking_surface.py](../experiments/tool_routing/q4_thinking_surface.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [recovery_check.py](../experiments/tool_routing/recovery_check.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [release_bundle.py](../experiments/tool_routing/release_bundle.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [replay_decider.py](../experiments/tool_routing/replay_decider.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [reviewed_dataset.py](../experiments/tool_routing/reviewed_dataset.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [router.py](../experiments/tool_routing/router.py) | 见入口中的断言 |

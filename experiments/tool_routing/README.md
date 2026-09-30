@@ -19,4 +19,6 @@
 
 启动前设置 `ERP_CAPABILITY_ROUTER_CONFIG` 指向本机已验收的配置 JSON。配置、GPU 环境、权重和清单需配套；仓库不包含权重。旧名称 `ERP_OPENJEV_CONFIG` 保留兼容，优先使用新名称。未配置时沿用原能力选择路径。
 
-OpenJev 作为可选实验后端保留；其[上下文契约](history/CONTEXT_CONTRACT.md)与 Laya 不混用。训练脚本路径保留，避免破坏冻结清单和历史复现。完整请求、权重、数据库及日志位于忽略的 `.runtime/`；本目录只保存代码、索引和无密钥结果。
+OpenJev 仅保留独立实验与回归入口，正式后端只接受 Laya；其[上下文契约](history/CONTEXT_CONTRACT.md)与 Laya 不混用。训练脚本路径保留，避免破坏冻结清单和历史复现。完整请求、权重、数据库及日志位于忽略的 `.runtime/`；本目录只保存代码、索引和无密钥结果。
+
+发布模型：`python -m experiments.tool_routing.release_bundle --config <旧配置> --output <新目录>`，随后对冻结请求做 GPU 重放。新清单校验安装包内的 runtime 文件，不依赖 experiments 或源码 checkout。桌面启动只从可信启动环境接收 `ERP_CAPABILITY_ROUTER_CONFIG`；不会把任意 Python 路径开放给模型或 renderer。

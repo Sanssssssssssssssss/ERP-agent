@@ -7,7 +7,9 @@ from pathlib import Path
 import sys
 import time
 
-ROOT = Path(__file__).resolve().parents[3]
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+RUNTIME_FILES = ("providers/laya_worker.py", "app/laya_state.py", "tools/dynamic_tools.py",
+                 "tools/native_tool_catalog.json", "context/world.py", "context/projection.py")
 def read(path): return json.loads(Path(path).read_text(encoding="utf8"))
 def sha(path): return sha256(Path(path).read_bytes()).hexdigest()
 
@@ -16,36 +18,39 @@ class CapabilityRouter:
 
 
     @staticmethod
-    def project(request):
-        from experiments.tool_routing.routing_state import routing_state
-        return routing_state(request)
+    def project(state):
+        return json.dumps(state, ensure_ascii=False, separators=(',', ':'))
+
+    def _configure_projection(self, manifest):
+        if manifest.get('projection') != 'host_facts_v1':
+            raise ValueError('Product selector requires host_facts_v1; use the historical experiment adapter')
+        self.projection = 'host_facts_v1'
+
+    def _verify_sources(self, manifest):
+        sources = manifest.get('runtime_files', {})
+        if set(sources) != set(RUNTIME_FILES):
+            raise ValueError('Deploy a validated selector bundle with runtime_files')
+        for name, digest in sources.items():
+            if sha(PACKAGE_ROOT / name) != digest:
+                raise ValueError('Routing runtime changed; revalidate the bundle: ' + name)
+
+    def _validate_request(self, request):
+        if (not isinstance(request, dict) or request.get('version') != self.projection
+                or not isinstance(request.get('task'), dict) or not isinstance(request.get('action_ledger'), dict)):
+            raise ValueError('Provide a versioned host fact snapshot')
 
     def __init__(self, directory, device='cuda'):
         import laya
         import torch
         directory = Path(directory)
         manifest = read(directory/'router.json')
-        self.projection = manifest.get('projection', 'legacy')
-        if manifest.get('projection', 'legacy') == 'evidence_v2':
-            from experiments.tool_routing.evidence_state import evidence_state
-            self.project = evidence_state
-        elif manifest.get('projection') == 'host_facts_v1':
-            self.project = lambda state: json.dumps(state, ensure_ascii=False, separators=(',', ':'))
-        elif manifest.get('projection', 'legacy') == 'legacy':
-            from experiments.tool_routing.routing_state import routing_state
-            self.project = routing_state
-        else:
-            raise ValueError('Unknown routing projection')
+        self._configure_projection(manifest)
         for name,digest in manifest['files'].items():
             if Path(name).is_absolute() or '..' in Path(name).parts:
                 raise ValueError('Invalid bundle path')
             if sha(directory/name)!=digest:
                 raise ValueError('Model bundle changed: '+name)
-        for name,digest in manifest['projection_sources'].items():
-            if Path(name).is_absolute() or '..' in Path(name).parts:
-                raise ValueError('Invalid source path')
-            if sha(ROOT/name)!=digest:
-                raise ValueError('Routing projection changed; revalidate the bundle: '+name)
+        self._verify_sources(manifest)
         torch.set_num_threads(4)
         self.agent = laya.load(str(directory.resolve()),device=device)
         self.device_type = torch.device(device).type
@@ -77,16 +82,7 @@ class CapabilityRouter:
         return result, [g for g,a in result['answers'].items() if a['choice']==positive]
 
     def route(self, request, *, verify_labels=False, groups=None):
-        if self.projection == 'host_facts_v1':
-            if (not isinstance(request,dict) or request.get('version') != self.projection
-                    or not isinstance(request.get('task'),dict) or not isinstance(request.get('action_ledger'),dict)):
-                raise ValueError('Provide a versioned host fact snapshot')
-        else:
-            if not isinstance(request,dict) or not isinstance(request.get('messages'),list) or not isinstance(request.get('tools'),list):
-                raise ValueError('Provide a complete model request with messages and tools')
-            if not all(isinstance(m,dict) and m.get('role') in {'system','developer','user','assistant','tool'}
-                       for m in request['messages']) or not any(m.get('role')=='user' for m in request['messages']):
-                raise ValueError('Request requires provider message roles and user context')
+        self._validate_request(request)
         if self.agent.device.type != self.device_type:
             raise RuntimeError('Inference device changed; use the existing router')
         started = time.perf_counter()

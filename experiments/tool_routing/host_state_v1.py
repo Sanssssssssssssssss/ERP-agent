@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections import Counter
 import json
 import re
+from erp_harness.app.laya_state import task_goal, sop_requirements, _json
 
 VERSION = "host_facts_v1"
 TERMINAL = frozenset({"verified", "known_failed", "rejected", "expired"})
@@ -16,31 +17,8 @@ FACT_FIELDS = frozenset({
 })
 
 
-def task_goal(text):
-    for marker in ("Confirmed current phase:\n", "New user instructions:\n"):
-        if marker in text:
-            text = text.split(marker, 1)[1].split("\nCompletion target:", 1)[0]
-            break
-    if '\n# Odoo Environment' in text:
-        before, setup = text.split('\n# Odoo Environment', 1)
-        suffix = re.search(r'(?m)^(?:Stage \d+ .*probe:|Scenario date anchor|Use mcp_odoo tools)', setup)
-        text = before + ('\n' + setup[suffix.start():] if suffix else '')
-    return text
 
 
-def sop_requirements(events, groups, sops):
-    owners = {tool: group for group, spec in groups.items() for tool in spec['tools']}
-    required, evidence = set(), []
-    for row in events:
-        if row.get('event') != 'end' or row.get('success') is not True or row.get('tool') != 'get_odoo_sop':
-            continue
-        tools = row.get('required_tools', sops.get(row.get('sop_id'), {}).get('required_tools', []))
-        selected = {owners[t.removeprefix('mcp_odoo_')] for t in tools if t.removeprefix('mcp_odoo_') in owners}
-        required.update(selected)
-        if selected:
-            evidence.append({'source': 'sop', 'tool_call_id': row['tool_call_id'],
-                             'required_tools': tools, 'groups': sorted(selected)})
-    return required, evidence
 
 
 def _packed_facts(value, path='result'):
@@ -54,11 +32,6 @@ def _packed_facts(value, path='result'):
     return value
 
 
-def _json(value):
-    try:
-        return json.loads(value) if isinstance(value, str) else value
-    except (ValueError, TypeError):
-        return None
 
 
 def _facts(record):

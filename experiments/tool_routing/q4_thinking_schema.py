@@ -18,7 +18,7 @@ SCHEMA='''Input schema semantics:
 def prepare():
     OUT.mkdir(exist_ok=True)
     files=[Path(__file__),Path(trial.__file__),PARENT/'frozen.json',
-        base.ROOT/'src/erp_harness/app/routing_state.py']
+        base.ROOT/'experiments/tool_routing/host_state_v1.py']
     for phase,name in [('dev','dev'),('protection','check')]:
         rows=[]
         for r in base.read(PARENT/f'{phase}-inputs.json'):

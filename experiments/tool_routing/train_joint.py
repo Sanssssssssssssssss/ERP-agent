@@ -137,7 +137,7 @@ def main(args):
     question_factory = joint_questions
     if source.get('projection') == 'host_facts_v1':
         sys.path.insert(0, str(Path(__file__).resolve().parents[2]/'src'))
-        from erp_harness.app.routing_state import disclosure_questions
+        from experiments.tool_routing.host_state_v1 import disclosure_questions
         question_factory = disclosure_questions
     specs = [question_factory(groups, label, first) for label in ['A', 'B'] for first in [False, True]]
     for spec in specs:

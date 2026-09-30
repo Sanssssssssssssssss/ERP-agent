@@ -115,6 +115,7 @@ export class HostClient {
       TEMP: process.env.TEMP ?? "",
       TMP: process.env.TMP ?? "",
       PYTHONUTF8: "1",
+      ...(process.env.ERP_CAPABILITY_ROUTER_CONFIG ? { ERP_CAPABILITY_ROUTER_CONFIG: process.env.ERP_CAPABILITY_ROUTER_CONFIG } : {}),
       ...(await secretEnvironment()),
     };
     if (generation !== this.lifecycleGeneration) throw error("HOST_START_CANCELLED", "Workbench host start was cancelled.");
