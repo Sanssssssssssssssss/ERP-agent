@@ -86,6 +86,8 @@ print('ENTERPRISE_RESULT='+json.dumps({'database':env.cr.dbname,'smtp':'localhos
         folder=OUT/case;folder.mkdir()
         if case in {'SALE','E01'}:
             spec=read(ROOT/f'.runtime/backend-final-live-20260924/{case}/input.json')
+        elif case == 'MAIL':
+            spec=prepare_mail(db)
         elif case in {'E02','E03'}:
             spec=read(ROOT/f'.runtime/enterprise-validation-20260922/live/{case}/input.json')
         else:
@@ -105,6 +107,8 @@ print('ENTERPRISE_RESULT='+json.dumps({'database':env.cr.dbname,'smtp':'localhos
 
 def verify(case,label):
     folder=OUT/case;db=DATABASES[case];fixtures=read(folder/'fixtures.json')
+    if case=='MAIL':
+        return verify_mail(folder, db, label)
     if case=='SALE':
         body="""s=env['sale.order'].browse(6).exists()
 result={'sale':s.read(['name','state','company_id','partner_id','amount_total','client_order_ref','invoice_ids']),
@@ -156,6 +160,67 @@ print('ENTERPRISE_RESULT='+json.dumps({'initial':True,'bill':bill.read(['name','
     return result
 
 
+def prepare_mail(db):
+    info=shell(db,"""import json
+invoice=env['account.move'].browse(1)
+assert invoice.state=='posted' and invoice.move_type=='out_invoice'
+assert invoice.partner_id.email.endswith('.example')
+server=env['ir.mail_server'].search([('active','=',True)])
+assert len(server)==1 and server.smtp_host=='127.0.0.1'
+server.write({'smtp_host':'mailpit','smtp_port':1025})
+if not invoice.company_id.email: invoice.company_id.write({'email':'billing@chengchuan.example'})
+result={'invoice':invoice.name,'company':invoice.company_id.name,'company_id':invoice.company_id.id,
+ 'partner':invoice.partner_id.name,'partner_id':invoice.partner_id.id,'amount':invoice.amount_total}
+env.cr.commit()
+print('ENTERPRISE_RESULT='+json.dumps(result,ensure_ascii=False))
+""")
+    return {'case':'hitl_mail_revision','type':'invoice_delivery','completion_target':'sent','role':'manager',
+        'title':'发票发送与审批改稿回归',
+        'goal':f"把{info['company']}的{info['invoice']}发票 PDF 发给{info['partner']}的登记邮箱。邮件主题包含 cleanup-20260930。仅发送一次，最后回读 SMTP 状态，不要新开票或修改金额。",
+        'references':[{'resource':'company','id':info['company_id'],'quote':info['company']},
+            {'resource':'invoice','id':1,'quote':info['invoice']},
+            {'resource':'contact','id':info['partner_id'],'quote':info['partner'],'purpose':'recipient'}]}
+
+
+def verify_mail(folder, db, label):
+    source="""import json,hashlib
+from odoo.tools import html2plaintext
+env.cr.execute('SET TRANSACTION READ ONLY')
+i=env['account.move'].browse(1)
+messages=env['mail.message'].search([('model','=','account.move'),('res_id','=',1),('subject','ilike','cleanup-20260930')])
+mails=env['mail.mail'].search([('mail_message_id','in',messages.ids)])
+result={'invoice':i.read(['name','state','amount_total','partner_id','company_id']),
+ 'messages':[{'id':m.id,'subject':m.subject,'body':html2plaintext(m.body),'recipients':m.partner_ids.ids,
+ 'attachments':[{'id':a.id,'name':a.name,'sha256':hashlib.sha256(a.raw).hexdigest()} for a in m.attachment_ids]} for m in messages],
+ 'mails':mails.read(['state','mail_message_id']), 'email':i.partner_id.email,
+ 'business_counts':{m:env[m].search_count([]) for m in ['sale.order','purchase.order','account.move']}}
+print('ENTERPRISE_RESULT='+json.dumps(result,ensure_ascii=False,default=str))
+env.cr.rollback()
+"""
+    result=shell(db,source)
+    if label=='before':
+        assert not result['messages']
+    else:
+        from urllib.request import urlopen
+        before=read(folder/'before.json')
+        captured=json.load(urlopen('http://127.0.0.1:18080/api/v1/messages'))['messages']
+        matches=[m for m in captured if 'cleanup-20260930' in m['Subject']]
+        result['checks']={'one_message':len(result['messages'])==1,
+            'invoice_unchanged':result['invoice']==before['invoice'],
+            'no_extra_documents':result['business_counts']==before['business_counts'],
+            'smtp_accepted':len(result['mails'])==1 and result['mails'][0]['state']=='sent',
+            'mailpit_once':len(matches)==1,'revision_applied':(folder/'revision-applied.json').exists()}
+        if len(matches)==1 and len(result['messages'])==1:
+            mail=json.load(urlopen('http://127.0.0.1:18080/api/v1/message/'+matches[0]['ID']))
+            result['mailpit_id']=matches[0]['ID']
+            result['checks']['recipient']=any(r['Address']==result['email'] for r in mail['To'])
+            result['checks']['pdf_attached']=len(mail['Attachments'])==1 and mail['Attachments'][0]['ContentType']=='application/pdf'
+            result['checks']['courteous_revision']=all(word in result['messages'][0]['body'] for word in ['您好','附件','谢谢'])
+        result['passed']=all(result['checks'].values())
+    save(folder/(label+'.json'),result)
+    return result
+
+
 def freeze():
     assert not (OUT/'frozen.json').exists()
     assert SELECTOR_CONFIG and SELECTOR_CONFIG.is_file(), 'Specify the validated selector config'
@@ -190,7 +255,7 @@ def run(case):
     try:
         sid=host.create_session(spec['title'])['id']
         host.store.data['messages'][sid].append({'id':'frozen-proposal','role':'assistant','text':'固定实验业务输入',
-             'proposal':{'id':'frozen','status':'pending',**{k:spec[k] for k in ['type','title','goal','completion_target']}}})
+             'proposal':{'id':'frozen','status':'pending',**{k:spec[k] for k in ['type','title','goal','completion_target','references'] if k in spec}}})
         business=host.confirm_business(sid,'frozen',True);rid=host.start_run(sid,business['id'])['id']
         previous=None
         while True:
@@ -203,7 +268,11 @@ def run(case):
                     choices=read(folder/'operator-decisions.json') if (folder/'operator-decisions.json').exists() else {}
                     for approval in approvals:
                         aid=approval.get('action_id') or approval['id'];choice=choices.get(aid)
-                        if approval.get('status')=='pending_approval' and choice in {'approve','reject'}:
+                        if approval.get('status')=='pending_approval' and isinstance(choice,dict) and choice.get('decision')=='revise':
+                            host.request_approval_revision(sid,business['id'],rid,aid,choice['text'])
+                            save(folder/'revision-applied.json',{'action_id':aid,'text':choice['text'],'run_id':rid,'business_id':business['id']})
+                            break
+                        if approval.get('status')=='pending_approval' and isinstance(choice,str) and choice in {'approve','reject'}:
                             decision=host.decide_approval(sid,business['id'],rid,aid,choice)
                             with (folder/'fixture-approvals.jsonl').open('a',encoding='utf8') as log:
                                 log.write(json.dumps({'action_id':aid,'review':'Reviewed against frozen business scope','decision':decision},ensure_ascii=False)+'\n')
@@ -223,16 +292,16 @@ def run(case):
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('command',choices=['setup','finish-setup','freeze','SALE','E01','E02','E03','E06'])
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('command',choices=['setup','finish-setup','freeze','SALE','E01','E02','E03','E06','MAIL'])
     parser.add_argument('--trial',help='New isolated trial name; never reuse a paid attempt')
     parser.add_argument('--port',type=int,default=PORT)
     parser.add_argument('--selector-config',type=Path)
-    parser.add_argument('--cases',nargs='+',choices=['SALE','E01','E02','E03','E06'],default=list(DATABASES))
+    parser.add_argument('--cases',nargs='+',choices=['SALE','E01','E02','E03','E06','MAIL'],default=list(DATABASES))
     args=parser.parse_args()
     if args.trial:
         assert re.fullmatch(r'[a-z][a-z0-9-]{0,31}',args.trial),'Invalid trial name'
         OUT=ROOT/'.runtime'/args.trial;CONTAINER='erp-'+args.trial;DATA='/tmp/'+args.trial
-        suffixes={'SALE':'sale','E01':'stock','E02':'manufacturing','E03':'collection','E06':'refund'}
+        suffixes={'SALE':'sale','E01':'stock','E02':'manufacturing','E03':'collection','E06':'refund','MAIL':'mail'}
         DATABASES={k:args.trial.replace('-','_')+'_'+suffixes[k] for k in args.cases}
         if (OUT/'environment.json').exists():
             DATABASES=read(OUT/'environment.json')['databases']

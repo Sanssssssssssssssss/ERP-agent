@@ -261,7 +261,7 @@ class BaselineFixTest(unittest.TestCase):
             ) as client:
                 stdout = io.StringIO()
                 with (
-                    patch.object(pi_odoo_runner, "McpToolSet", ToolSet),
+                    contextlib.nullcontext(),
                     patch.object(
                         pi_odoo_runner,
                         "OpenAICompatibleProvider",
@@ -294,7 +294,7 @@ class BaselineFixTest(unittest.TestCase):
                     ),
                     contextlib.redirect_stdout(stdout),
                 ):
-                    await pi_odoo_runner.run(args)
+                    await pi_odoo_runner.run(args, source_toolset=lambda _: ToolSet("unused"))
                     # Keep pre-prompt compaction available without calling a
                     # summarizer after the final business response.
                     compact.assert_awaited_once()

@@ -48,8 +48,8 @@ from erp_harness.erp.task_evidence import TaskEvidence
 from erp_harness.context.world import WorldStore
 from erp_harness.context.world_tools import build_world_tools
 
-MCP_ONLY_POLICY = (
-    "Use mcp_odoo tools for every Odoo operation. Do not access Odoo through "
+ODOO_TOOL_POLICY = (
+    "Use the published Odoo tools for every Odoo operation. Do not access Odoo through "
     "shell commands, direct HTTP, XML-RPC, JSON-2, PostgreSQL, or Python libraries."
 )
 SOP_POLICY = (
@@ -82,7 +82,6 @@ BUSINESS_EXECUTION_POLICY = (
     "more data. Reuse facts already read and their observation receipts when there is no "
     "new evidence; refresh Odoo only when current state is needed."
 )
-McpToolSet = None
 
 
 def build_business_system_prompt(*, sop_mode: str, tool_mode: str,
@@ -93,7 +92,7 @@ def build_business_system_prompt(*, sop_mode: str, tool_mode: str,
         "preserve exact tool names and structured fields.\n"
         f"Runtime local date: {runtime_date}; host timezone: {runtime_timezone}. "
         "Use get_current_time when a precise current time is needed.\n"
-        + MCP_ONLY_POLICY
+        + ODOO_TOOL_POLICY
         + BUSINESS_EXECUTION_POLICY
         + (SOP_POLICY if sop_mode == "controlled" else "")
         + ((HOST_ROUTING_POLICY if host_routing else DYNAMIC_TOOL_POLICY) if tool_mode == "dynamic" else "")
@@ -219,19 +218,17 @@ CURRENT_TIME_TOOL = AgentTool(
 
 
 @asynccontextmanager
-async def _source_tools(args):
-    if getattr(args, "runtime_mode", "mcp") == "native":
+async def _source_tools(args, source_toolset=None):
+    if source_toolset is None:
         yield native_tool_catalog()
-        return
-    toolset_class = McpToolSet
-    if toolset_class is None:
-        raise RuntimeError("MCP mode requires the isolated benchmark reference runner")
-    async with toolset_class(args.mcp_url) as toolset:
-        yield toolset.tools
+    else:
+        # An isolated benchmark adapter may supply a reference toolset explicitly.
+        async with source_toolset(args) as toolset:
+            yield toolset.tools
 
 
-def arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
+def argument_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(conflict_handler="resolve")
     parser.add_argument("--instruction-file", type=Path, required=True)
     parser.add_argument("--usage-file", type=Path, required=True)
     parser.add_argument(
@@ -240,20 +237,23 @@ def arguments() -> argparse.Namespace:
         default=Path("/logs/agent/pi-agent-session.jsonl"),
     )
     parser.add_argument("--receipt-dir", type=Path, default=None)
-    parser.add_argument("--mcp-url", default="http://127.0.0.1:8000/mcp")
-    parser.add_argument("--runtime-mode", choices=("mcp", "native"), default="mcp")
+    parser.add_argument("--runtime-mode", choices=("native",), default="native", help=argparse.SUPPRESS)
     parser.add_argument("--max-turns", type=int, default=None)
     parser.add_argument("--max-model-requests", type=int, default=None)
     parser.add_argument("--max-output-tokens", type=int, default=None)
-    parser.add_argument("--read-backend", choices=("mcp", "native"), default="mcp")
-    parser.add_argument("--action-backend", choices=("mcp", "native"), default="mcp")
-    parser.add_argument("--capability-backend", choices=("mcp", "native"), default="mcp")
+    parser.add_argument("--read-backend", choices=("native",), default="native", help=argparse.SUPPRESS)
+    parser.add_argument("--action-backend", choices=("native",), default="native", help=argparse.SUPPRESS)
+    parser.add_argument("--capability-backend", choices=("native",), default="native", help=argparse.SUPPRESS)
     parser.add_argument("--sop-mode", choices=("off", "controlled"), default="off")
     parser.add_argument("--tool-mode", choices=("static", "dynamic"), default="static")
     parser.add_argument("--world-mode", choices=("off", "record", "project"), default="off")
     parser.add_argument("--continue-run", action="store_true")
     parser.add_argument("--pause-on-approval", action="store_true")
-    return parser.parse_args()
+    return parser
+
+
+def arguments() -> argparse.Namespace:
+    return argument_parser().parse_args()
 
 
 def _tool_payload(result: object) -> dict:
@@ -356,7 +356,11 @@ def _next_receipt_sequence(directory: Path):
 
 # 学习入口：这里组装 ERP 后端、工具和会话；模型与工具的循环由 HarnessSession 驱动。
 # 可沿 route_tools 看读写分流，再看 actions 的审批执行和 world_context 的历史投影。
-async def run(args: argparse.Namespace) -> None:
+async def run(args: argparse.Namespace, *, source_toolset=None) -> None:
+    backend_default = "native" if source_toolset is None else "reference"
+    if source_toolset is None and any(getattr(args, name, "native") != "native"
+            for name in ("runtime_mode", "read_backend", "action_backend", "capability_backend")):
+        raise ValueError("The product runner requires native backends; use the isolated benchmark entrant")
     api_key = os.environ.get("LLM_API_KEY")
     base_url = os.environ.get("LLM_BASE_URL", "").rstrip("/")
     model = os.environ.get("LLM_MODEL")
@@ -388,9 +392,9 @@ async def run(args: argparse.Namespace) -> None:
         raise ValueError("tool-mode must be static or dynamic")
     if tool_mode == "dynamic" and sop_mode != "controlled":
         raise ValueError("dynamic tool mode requires controlled SOP mode")
-    runtime_mode = getattr(args, "runtime_mode", "mcp")
+    runtime_mode = getattr(args, "runtime_mode", backend_default)
     if runtime_mode == "native" and any(
-        getattr(args, name, "mcp") != "native"
+        getattr(args, name, backend_default) != "native"
         for name in ("read_backend", "action_backend", "capability_backend")
     ):
         raise ValueError("native runtime mode requires every Odoo backend to be native")
@@ -420,16 +424,16 @@ async def run(args: argparse.Namespace) -> None:
     capabilities = None
     dynamic_tools = None
     try:
-        async with _source_tools(args) as source_tools:
+        async with _source_tools(args, source_toolset) as source_tools:
             next_tool_sequence = _next_receipt_sequence(receipt_dir)
             native_runtime = None
-            if (getattr(args, "read_backend", "mcp") == "native"
-                    or getattr(args, "action_backend", "mcp") == "native"
-                    or getattr(args, "capability_backend", "mcp") == "native"):
+            if (getattr(args, "read_backend", backend_default) == "native"
+                    or getattr(args, "action_backend", backend_default) == "native"
+                    or getattr(args, "capability_backend", backend_default) == "native"):
                 os.environ["ODOO_REQUEST_LOG"] = str(receipt_dir / "odoo-native-requests.jsonl")
                 os.environ["ODOO_REQUEST_BACKEND"] = "native"
                 native_runtime = NativeReads.from_environment()
-            native = native_runtime if getattr(args, "read_backend", "mcp") == "native" else None
+            native = native_runtime if getattr(args, "read_backend", backend_default) == "native" else None
             actions = (
                 NativeActions(
                     native_runtime,
@@ -438,7 +442,7 @@ async def run(args: argparse.Namespace) -> None:
                     # validation and execution; prestate is still rechecked before send.
                     approval_ttl_seconds=60 * 60,
                 )
-                if getattr(args, "action_backend", "mcp") == "native"
+                if getattr(args, "action_backend", backend_default) == "native"
                 else None
             )
             if actions is not None:
@@ -455,7 +459,7 @@ async def run(args: argparse.Namespace) -> None:
                     native_runtime,
                     task_path=receipt_dir / "capability-tasks.sqlite3",
                 )
-                if getattr(args, "capability_backend", "mcp") == "native"
+                if getattr(args, "capability_backend", backend_default) == "native"
                 else None
             )
             if world_mode != "off":
@@ -593,21 +597,19 @@ async def run(args: argparse.Namespace) -> None:
                         {
                             "type": "run_metadata",
                             "entrant": (
-                                "pi-agent-odoo-native"
+                                "erp-harness-native"
                                 if runtime_mode == "native"
-                                else "pi-agent-odoo-mcp"
+                                else "benchmark-reference"
                             ),
                             "commit_sha": os.environ.get("PI_ODOO_SOURCE_COMMIT"),
                             "model": model,
                             "reasoning": thinking,
-                            "mcpToolCount": (
-                                0 if runtime_mode == "native" else len(source_tools)
-                            ),
+                            "referenceToolCount": 0 if source_toolset is None else len(source_tools),
                             "odooToolCount": len(source_tools),
                             "runtimeMode": runtime_mode,
-                            "readBackend": getattr(args, "read_backend", "mcp"),
-                            "actionBackend": getattr(args, "action_backend", "mcp"),
-                            "capabilityBackend": getattr(args, "capability_backend", "mcp"),
+                            "readBackend": getattr(args, "read_backend", backend_default),
+                            "actionBackend": getattr(args, "action_backend", backend_default),
+                            "capabilityBackend": getattr(args, "capability_backend", backend_default),
                             "sopMode": sop_mode,
                             "toolMode": tool_mode,
                             "worldMode": world_mode,
@@ -692,8 +694,8 @@ async def run(args: argparse.Namespace) -> None:
                         - sum(entry.usage is not None for entry in compactions)
                     ),
                     "worldMode": world_mode,
-                    "actionBackend": getattr(args, "action_backend", "mcp"),
-                    "capabilityBackend": getattr(args, "capability_backend", "mcp"),
+                    "actionBackend": getattr(args, "action_backend", backend_default),
+                    "capabilityBackend": getattr(args, "capability_backend", backend_default),
                     "sopMode": sop_mode,
                     "toolMode": tool_mode,
                     "runtimeMode": runtime_mode,

@@ -163,3 +163,17 @@ class CleanHarnessTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_product_runner_defaults_to_native_and_rejects_reference_transports():
+    import asyncio
+    import pytest
+    from erp_harness.app.runner import argument_parser, run
+    parser = argument_parser()
+    args = parser.parse_args(['--instruction-file', 'task.txt', '--usage-file', 'usage.json'])
+    assert all(getattr(args, key) == 'native' for key in
+               ('runtime_mode', 'read_backend', 'action_backend', 'capability_backend'))
+    assert 'mcp' not in parser.format_help().lower()
+    args.runtime_mode = 'mcp'
+    with pytest.raises(ValueError, match='isolated benchmark'):
+        asyncio.run(run(args))

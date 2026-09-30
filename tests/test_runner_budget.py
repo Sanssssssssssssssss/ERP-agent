@@ -34,7 +34,7 @@ class RunnerBudgetTest(unittest.TestCase):
                     self.assertIn("2026-09-23; host timezone: SGT (+0800)", prompt)
                     self.assertIn("get_current_time", prompt)
                     self.assertIn("Be concise and respond in Simplified Chinese", prompt)
-                    for policy in (pi_odoo_runner.MCP_ONLY_POLICY, pi_odoo_runner.BUSINESS_EXECUTION_POLICY):
+                    for policy in (pi_odoo_runner.ODOO_TOOL_POLICY, pi_odoo_runner.BUSINESS_EXECUTION_POLICY):
                         self.assertIn(policy, prompt)
                     self.assertEqual(pi_odoo_runner.SOP_POLICY in prompt, sop_mode == "controlled")
                     self.assertEqual(pi_odoo_runner.DYNAMIC_TOOL_POLICY in prompt, tool_mode == "dynamic")
@@ -150,7 +150,7 @@ class RunnerBudgetTest(unittest.TestCase):
             )
             async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
                 with (
-                    patch.object(pi_odoo_runner, "McpToolSet", ToolSet),
+                    contextlib.nullcontext(),
                     patch.object(
                         pi_odoo_runner, "OpenAICompatibleProvider",
                         side_effect=lambda config: OpenAICompatibleProvider(config, client=client),
@@ -161,7 +161,7 @@ class RunnerBudgetTest(unittest.TestCase):
                         "LLM_THINKING_TYPE": "high",
                     }),
                 ):
-                    await pi_odoo_runner.run(args)
+                    await pi_odoo_runner.run(args, source_toolset=lambda _: ToolSet("unused"))
                     self.assertEqual(len(requests), 1)
                     initial_usage = json.loads(args.usage_file.read_text())
                     self.assertEqual(initial_usage["modelCalls"], 1)
@@ -169,13 +169,13 @@ class RunnerBudgetTest(unittest.TestCase):
                     self.assertEqual(initial_usage["output"], 2)
                     args.continue_run = True
                     args.usage_file = root / "resumed-usage.json"
-                    await pi_odoo_runner.run(args)
+                    await pi_odoo_runner.run(args, source_toolset=lambda _: ToolSet("unused"))
 
             self.assertEqual(len(requests), 2)
             for payload in requests:
                 system = next(row["content"] for row in payload["messages"] if row["role"] == "system")
                 self.assertTrue(system.startswith("You are an ERP business execution assistant."))
-                self.assertIn(pi_odoo_runner.MCP_ONLY_POLICY, system)
+                self.assertIn(pi_odoo_runner.ODOO_TOOL_POLICY, system)
                 self.assertNotIn("Pi Agent", system)
                 self.assertNotIn("Available tools:", system)
                 self.assertIn("execute_method", {row["function"]["name"] for row in payload["tools"]})
@@ -252,12 +252,12 @@ class RunnerBudgetTest(unittest.TestCase):
                                    max_turns=3, max_model_requests=3, max_output_tokens=None, pause_on_approval=True)
             stdout = io.StringIO()
             async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-                with (patch.object(pi_odoo_runner, "McpToolSet", ToolSet),
+                with (contextlib.nullcontext(),
                       patch.object(pi_odoo_runner, "OpenAICompatibleProvider", side_effect=lambda config: OpenAICompatibleProvider(config, client=client)),
                       patch.dict(os.environ, {"LLM_API_KEY": "test-only", "LLM_BASE_URL": "https://unused.invalid/v1",
                                              "LLM_MODEL": "deepseek/test", "LLM_PROVIDER": "openai-compatible", "LLM_THINKING_TYPE": "high"}),
                       contextlib.redirect_stdout(stdout)):
-                    await pi_odoo_runner.run(args)
+                    await pi_odoo_runner.run(args, source_toolset=lambda _: ToolSet("unused"))
             self.assertEqual(len(requests), 2)
             self.assertEqual(json.loads(args.usage_file.read_text())["modelCalls"], 2)
             rows = [json.loads(line) for line in args.session_file.read_text(encoding="utf-8").splitlines()]
@@ -407,7 +407,7 @@ class RunnerBudgetTest(unittest.TestCase):
             async def check():
                 async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
                     with (
-                        patch.object(pi_odoo_runner, "McpToolSet", ToolSet),
+                        contextlib.nullcontext(),
                         patch.object(
                             pi_odoo_runner,
                             "OpenAICompatibleProvider",
@@ -424,13 +424,13 @@ class RunnerBudgetTest(unittest.TestCase):
                             },
                         ),
                     ):
-                        await pi_odoo_runner.run(args)
+                        await pi_odoo_runner.run(args, source_toolset=lambda _: ToolSet("unused"))
                         args.usage_file = root / "run2" / "usage.json"
                         args.receipt_dir = root / "run2"
                         resumed_requests = args.receipt_dir / "requests"
                         resumed_requests.mkdir(parents=True)
                         (resumed_requests / "0001.request.json").write_text("{}", encoding="utf-8")
-                        await pi_odoo_runner.run(args)
+                        await pi_odoo_runner.run(args, source_toolset=lambda _: ToolSet("unused"))
                         self.assertEqual(json.loads(args.usage_file.read_text())["modelCalls"], 1)
                         self.assertEqual((resumed_requests / "0001.request.json").read_text(), "{}")
                         self.assertTrue((resumed_requests / "0002.request.json").is_file())
@@ -446,7 +446,7 @@ class RunnerBudgetTest(unittest.TestCase):
                             }) + "\n",
                             encoding="utf-8",
                         )
-                        await pi_odoo_runner.run(args)
+                        await pi_odoo_runner.run(args, source_toolset=lambda _: ToolSet("unused"))
 
             asyncio.run(check())
 
@@ -465,7 +465,7 @@ class RunnerBudgetTest(unittest.TestCase):
             self.assertEqual(prompts[0], prompts[1])  # Tool publication does not restore the coding prompt.
             for system in prompts:
                 self.assertTrue(system.startswith("You are an ERP business execution assistant."))
-                for policy in (pi_odoo_runner.MCP_ONLY_POLICY, pi_odoo_runner.BUSINESS_EXECUTION_POLICY,
+                for policy in (pi_odoo_runner.ODOO_TOOL_POLICY, pi_odoo_runner.BUSINESS_EXECUTION_POLICY,
                                pi_odoo_runner.SOP_POLICY, pi_odoo_runner.DYNAMIC_TOOL_POLICY):
                     self.assertIn(policy, system)
                 self.assertIn("host timezone:", system)
@@ -650,7 +650,7 @@ class RunnerBudgetTest(unittest.TestCase):
 
                 stdout = io.StringIO()
                 with (
-                    patch.object(pi_odoo_runner, "McpToolSet", ToolSet),
+                    contextlib.nullcontext(),
                     patch.object(pi_odoo_runner, "OpenAICompatibleProvider", side_effect=make_provider),
                     patch.object(HarnessSession, "load", classmethod(capture_load)),
                     patch.dict(
@@ -666,7 +666,7 @@ class RunnerBudgetTest(unittest.TestCase):
                     contextlib.redirect_stdout(stdout),
                 ):
                     try:
-                        await pi_odoo_runner.run(args)
+                        await pi_odoo_runner.run(args, source_toolset=lambda _: ToolSet("unused"))
                     except RuntimeError as exc:
                         self.assertIn("max_model_requests", str(exc))
 

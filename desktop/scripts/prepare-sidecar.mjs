@@ -149,7 +149,7 @@ await cp(join(repoRoot, "LICENSE"), join(destination, "licenses", "workbench-MIT
 await cp(join(repoRoot, "THIRD_PARTY_NOTICES.md"), join(destination, "licenses", "workbench-NOTICES.md"));
 await cp(join(repoRoot, "docs", "licenses", "pi-agent-MIT.txt"), join(destination, "licenses", "pi-agent-MIT.txt"));
 await cp(join(repoRoot, "docs", "licenses", "pi-agent-NOTICES.md"), join(destination, "licenses", "pi-agent-NOTICES.md"));
-await cp(join(repoRoot, "bench", "reference", "mcp", "LICENSE"), join(destination, "licenses", "odoo-core-MIT.txt"));
+await cp(join(repoRoot, "docs", "licenses", "odoo-core-MIT.txt"), join(destination, "licenses", "odoo-core-MIT.txt"));
 const packageEntries = await readdir(join(destination, "app", "site-packages"), { withFileTypes: true });
 for (const entry of packageEntries) {
   if (!rejectJunk("", entry.name)) {

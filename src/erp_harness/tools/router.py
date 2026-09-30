@@ -155,7 +155,7 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
             direct = direct_read or direct_action or direct_capability
             event = {
                 "tool_call_id": call_id, "tool": tool.name,
-                "backend": "native" if direct else "mcp", "event": "start",
+                "backend": "native" if native_health or direct else "reference", "event": "start",
                 "sequence": next_sequence() if next_sequence else None,
             }
             log_path.parent.mkdir(parents=True, exist_ok=True)
