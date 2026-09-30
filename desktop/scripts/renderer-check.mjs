@@ -182,9 +182,8 @@ const bridgeScript = String.raw`
         if (method === 'request_approval_revision') {
           await wait(80)
           if (params.text === '测试预检失败') throw new Error('修改预检失败，原审批仍保留。')
-          window.__revisionAccepted = true; window.__businessBusy = false; b2.status = 'cancelled'
-          sessionDetails['session-b'].conversation_runs = [{ id: 'revision-conversation', session_id: 'session-b', kind: 'conversation', business_id: null, context_business_id: 'business-b2', status: 'running' }]
-          return { ok: true, run_id: 'revision-conversation' }
+          window.__revisionAccepted = true; window.__businessBusy = true; b2.status = 'running'
+          return { ok: true, run_id: 'business-b2-run' }
         }
         if (method === 'decide_approval') {
           if (params.action_id === 'action-b2-purchase' && params.decision === 'approve') {
@@ -1166,7 +1165,7 @@ for (const { rowBox, buttonBox, disabled } of approvalLayout) {
   assert.equal(disabled, false)
 }
 await page.setViewportSize({ width: 1600, height: 1000 })
-// A revision retires the old approval and starts a read-only proposal turn only.
+// Revision resumes the existing business; no proposal worker or automatic approval.
 await page.evaluate(() => { window.__enterpriseCase = null; window.__showAcceptedProjection(false); window.__setRunState(true); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b2' } }) })
 await page.getByRole('tab', { name: /^变更与审批/ }).click()
 const revisionApproval = page.locator('.approval-row').filter({ hasText: '创建发票与贷项' }).first()
@@ -1180,7 +1179,7 @@ assert.equal(await revisionInput.inputValue(), '测试预检失败')
 assert.equal(await revisionApproval.getByRole('button', { name: '批准这项业务动作' }).isDisabled(), true)
 await revisionInput.fill('数量改为 5 件，先保留草稿。')
 await revisionApproval.getByRole('button', { name: '提交修改要求', exact: true }).evaluate((button) => { for (let index = 0; index < 5; index += 1) button.click() })
-await page.locator('.thinking-message').waitFor()
+await page.getByRole('button', { name: '取消运行', exact: true }).waitFor()
 await page.getByRole('tab', { name: /^变更与审批/ }).click()
 await page.waitForFunction(() => !document.querySelector('.business-content .loading-line'))
 assert.equal(await page.locator('.approval-row.pending').count(), 0)

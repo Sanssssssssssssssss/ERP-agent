@@ -1985,6 +1985,15 @@ class NativeActions:
                     if (model, method) == invoice_mail.METHOD:
                         return self._reconcile(previous)  # Never replace unavailable live mail evidence with cached green.
                     return self._execute_row(previous, lambda: None)
+            if (model, method) == invoice_mail.METHOD and (missing_draft := invoice_mail.draft_requirement(kwargs)):
+                # Resume already approved legacy copy exactly; new drafts must contain actual text.
+                approved_legacy = any(
+                    r.get("status") == "approved" and r.get("payload") == payload and r.get("identity") == identity
+                    and r.get("session_id") == os.environ.get("PI_AGENT_SESSION_ID", "local")
+                    and r.get("run_id") == os.environ.get("HARBOR_TRIAL_ID", os.environ.get("PI_AGENT_SESSION_ID", "local"))
+                    for r in self.store.read_receipts(self.store.path))
+                if not approved_legacy:
+                    return missing_draft
             action = self._register(
                 "method",
                 payload,

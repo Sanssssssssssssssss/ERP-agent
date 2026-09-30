@@ -14,6 +14,14 @@ INVOICE_FIELDS = ("name", "state", "move_type", "company_id", "partner_id", "com
 CONTACT_FIELDS = ("name", "email", "active", "company_id", "parent_id", "commercial_partner_id", "type", "function")
 
 
+def draft_requirement(kwargs):
+    missing = [key for key in ("subject", "body") if key not in kwargs]
+    if missing:
+        return {"success": False, "error_code": "mail_draft_required", "missing": missing, "retry_safe": True,
+                "error": "New mail requires your actual plain-text subject and body, reflecting the user's latest feedback; no default copy will be sent.",
+                "next_action": "Read safe_write_review for account.move.message_post, draft greeting, purpose, verified invoice facts, attachment explanation and courteous closing. Submit subject/body with the same confirmed ids and partner_ids for NEW human approval. Do not create a new business or repeat PDF generation."}
+
+
 def parties(g, invoice_id, recipient_id):
     invoice = g.read("account.move", invoice_id, INVOICE_FIELDS)
     recipient = g.read("res.partner", recipient_id, CONTACT_FIELDS)
@@ -53,11 +61,16 @@ def requested(references):
 
 def prestate(runtime, payload):
     kwargs = payload.get("kwargs", {})
-    if set(kwargs) != {"ids", "partner_ids"} or any(
-        not isinstance(kwargs[k], list) or len(kwargs[k]) != 1 or _id(kwargs[k][0]) is None
+    if set(kwargs) - {"ids", "partner_ids", "subject", "body"} or any(
+        not isinstance(kwargs.get(k), list) or len(kwargs[k]) != 1 or _id(kwargs[k][0]) is None
         for k in ("ids", "partner_ids")
     ):
-        raise ValueError("invoice mail accepts only kwargs.ids=[invoice_id] and partner_ids=[billing_contact_id]; runtime supplies email, content and PDF")
+        raise ValueError("invoice mail accepts kwargs.ids=[invoice_id], partner_ids=[billing_contact_id] and optional plain-text subject/body; runtime supplies email and PDF")
+    for key, limit in (("subject", 300), ("body", 20000)):
+        if key in kwargs and (not isinstance(kwargs[key], str) or not kwargs[key].strip()
+                              or len(kwargs[key]) > limit or "\x00" in kwargs[key]
+                              or (key == "subject" and any(c in kwargs[key] for c in "\r\n"))):
+            raise ValueError(f"{key} must be nonempty plain text, at most {limit} characters; subject must be one line")
     g = _Evidence(runtime, payload)
     invoice, recipient = parties(g, kwargs["ids"][0], kwargs["partner_ids"][0])
     pdf_id = _id(invoice["invoice_pdf_report_id"])
@@ -74,6 +87,8 @@ def prestate(runtime, payload):
     messages = g.find("mail.message", [["model", "=", "account.move"], ["res_id", "=", invoice["id"]]], ("message_type",))
     subject = f"{company['name']} · {invoice['name']}"
     body = f"您好，附件为 {invoice['name']}，金额 {invoice['amount_total']:,.2f} {currency['name']}。请查收。"
+    # Legacy approvals keep their default copy. New drafts carry reviewed plain text.
+    subject, body = kwargs.get("subject", subject), kwargs.get("body", body)
     return {"invoice": invoice, "recipient": recipient, "attachment": pdf, "company": company,
             "subject": subject, "body": body, "email_to": recipient["email"], "email_from": formataddr((company["name"], sender)),
             "last_message_id": max((r["id"] for r in messages), default=0)}

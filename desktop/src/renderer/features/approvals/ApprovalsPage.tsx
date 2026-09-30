@@ -79,7 +79,7 @@ export function ApprovalRow({ approval, documents, disabled, onDecision, onRecon
       {pending && !expired && editing && onRequestRevision && <form className="approval-revision" onSubmit={(event) => { event.preventDefault(); void submitRevision() }}>
         <label htmlFor={`revision-${approval.action_id}`}>希望怎样修改这项动作？</label>
         <textarea id={`revision-${approval.action_id}`} value={revision} onChange={(event) => setRevision(event.target.value)} disabled={disabled || submittingRevision} rows={3} placeholder="例如：数量改为 5 件，先保留草稿。" />
-        <p>提交后当前审批作废，已完成动作不撤销。修改后的方案需重新确认。</p>
+        <p>提交后旧审批作废，Agent 从当前断点修改。已完成动作保留，修改后的动作需重新审批。</p>
         {revisionError && <p className="error-text" role="alert">{revisionError}</p>}
         <RadixButton type="submit" className="primary-button" disabled={disabled || submittingRevision || !revision.trim()}>{submittingRevision ? '提交修改中…' : '提交修改要求'}</RadixButton>
       </form>}
@@ -94,7 +94,7 @@ function InvoiceMailPreview({ approval }: { approval: Approval }) {
   const state = approval.prestate as { invoice_mail?: { invoice: { name: string; amount_total: number }; company: { name: string; email: string }; recipient: { name: string }; email_from: string; email_to: string; attachment: { name: string; checksum: string }; subject: string; body: string } } | null
   const mail = state?.invoice_mail
   if (!mail) return null
-  return <section className="field-diff" aria-label="待发送邮件"><div className="field-diff-note"><p><strong>{mail.company.name} · {mail.invoice.name}</strong></p><p>发件人：{mail.company.name} · {mail.company.email}</p><p>收件人：{mail.recipient.name} · {mail.email_to}</p><p>附件：{mail.attachment.name}</p><p>主题：{mail.subject}</p><p>{mail.body}</p><small>仅发送给此登记邮箱，不抄送关注者。附件指纹：{mail.attachment.checksum.slice(0, 12)}（完整值见执行前状态）。</small></div></section>
+  return <section className="field-diff" aria-label="待发送邮件"><div className="field-diff-note"><p><strong>{mail.company.name} · {mail.invoice.name}</strong></p><p>发件人：{mail.company.name} · {mail.company.email}</p><p>收件人：{mail.recipient.name} · {mail.email_to}</p><p>附件：{mail.attachment.name}</p><p>主题：{mail.subject}</p><p className="approval-message-body">{mail.body}</p><small>仅发送给此登记邮箱，不抄送关注者。附件指纹：{mail.attachment.checksum.slice(0, 12)}（完整值见执行前状态）。</small></div></section>
 }
 
 function ChatterPreview({ approval, documents }: { approval: Approval; documents: Document[] }) {

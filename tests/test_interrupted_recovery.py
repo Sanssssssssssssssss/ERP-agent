@@ -7,7 +7,7 @@ import sys
 from unittest.mock import patch
 
 import pytest
-from erp_harness.app.runner import build_recovery_resume_message
+from erp_harness.app.runner import build_recovery_resume_message, build_revision_resume_message
 from erp_harness.erp.store import ActionStore
 from tests import test_workbench_host as fixtures
 
@@ -116,3 +116,29 @@ def test_recovery_prompt_grants_no_approval_and_rejects_pending_actions():
     assert "not approval" in message and "fresh preflight and human approval" in message
     with pytest.raises(ValueError):
         build_recovery_resume_message({"reason": "recovery", "actions": {"a": "sending"}})
+
+
+def test_confirmed_goal_change_cannot_resume_the_old_instruction(host_case):
+    c = host_case
+    b, r, fresh = stopped(c)
+    b.update(goal="改为另一项已经确认的业务目标", goal_submitted=False, status="ready")
+    with patch.object(c.host, "refresh_business", side_effect=fresh) as readback:
+        with pytest.raises(ValueError, match="unchanged"):
+            c.host.resume_run(c.sid, b["id"], r["id"])
+        assert not readback.called
+    new = c.host.start_run(c.sid, b["id"])
+    assert new["id"] != r["id"]
+    assert b["goal"] in c.host._instruction(b, new["id"]).read_text(encoding="utf8")
+
+
+def test_revision_feedback_survives_failed_worker_restart(host_case):
+    c = host_case
+    b, r, fresh = stopped(c)
+    revision = {"text": "帮我生成更加详细的正文内容，目前太短且不够礼貌", "draft": {"body": "请查收。"}}
+    r.update(resume_reason="revision", recovery_evidence={"revision": revision})
+    with patch.object(c.host, "refresh_business", side_effect=fresh):
+        c.host.resume_run(c.sid, b["id"], r["id"])
+    message = build_revision_resume_message({"reason": r["resume_reason"], **r["recovery_evidence"], "actions": {"a": "verified"}})
+    assert revision["text"] in message and "请查收。" in message and "不是写入批准" in message
+    with pytest.raises(ValueError):
+        build_revision_resume_message({"reason": "revision", "revision": revision, "actions": {"a": "sending"}})

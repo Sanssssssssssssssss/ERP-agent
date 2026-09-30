@@ -951,7 +951,8 @@ class Workbench:
             raise ValueError("run cannot be resumed")
         latest = max((r for r in self.store.data["runs"].values() if r.get("business_id") == business_id),
                      key=lambda r: (r.get("started_at", ""), r["id"]))
-        if latest["id"] != run_id or business.get("requires_goal_confirmation") or business.get("status") == "awaiting_input":
+        if (latest["id"] != run_id or business.get("requires_goal_confirmation")
+                or business.get("goal_submitted") is False or business.get("status") == "awaiting_input"):
             raise ValueError("only the latest unchanged business can be resumed")
         if any(m.get("business_id") == business_id and m.get("role") == "user" and not m.get("submitted_run_id")
                for m in self.store.data["messages"].get(session_id, [])):
@@ -970,7 +971,11 @@ class Workbench:
         evidence = {"observed_at": readback["observed_at"], "outcome": readback.get("outcome"), "actions": statuses}
         self._trace(run, "resume", {"previous_status": run["status"], "previous_ended_at": run.get("ended_at"),
                                     "reason": "recovery", "verified_actions": evidence})
-        run.update(status="running", ended_at=None, error=None, resume_reason="recovery", recovery_evidence=evidence)
+        reason = "recovery"
+        if run.get("resume_reason") == "revision":
+            reason = "revision"
+            evidence["revision"] = run["recovery_evidence"]["revision"]
+        run.update(status="running", ended_at=None, error=None, resume_reason=reason, recovery_evidence=evidence)
         run.pop("summary", None)
         self.store.data["sessions"][session_id].update(active_run_id=run_id, status="running")
         business.update(active_run_id=run_id, status="running")
@@ -2030,7 +2035,7 @@ class Workbench:
 
     def request_approval_revision(self, session_id: str, business_id: str, run_id: str,
                                   action_id: str, text: str) -> dict[str, Any]:
-        """Retire unsent approvals before discussing a replacement, never replay writes."""
+        """Revise at the original breakpoint; retire old approvals, preserve completed writes."""
         if not isinstance(text, str) or not 1 <= len(text.strip()) <= 20_000:
             raise ValueError("text must be 1..20000 characters")
         business = self._business(session_id, business_id)
@@ -2052,19 +2057,31 @@ class Workbench:
             raise ValueError("action scope or state is invalid")
         if float(row.get("expires_at", 0)) < time.time():
             raise ValueError("审批已过期，请先结束旧运行，再重新提出需求。")
+        session_file = self.store.root / "sessions" / business_id / "pi-agent-session.jsonl"
+        if not session_file.is_file():
+            raise ValueError("original business session is missing; revision refused")
+        draft = {key: approval.get(key) for key in ("model", "operation", "record_ids", "values")}
+        mail = (row.get("prestate") or {}).get("invoice_mail")
+        if mail:
+            draft["mail"] = {key: mail[key] for key in ("subject", "body", "email_to")}
         self._finalize_run(run, "cancelled", "revision_requested_by_user")
         if run["status"] != "cancelled":
             raise RuntimeError("business is blocked by an unresolved write; refresh and reconcile first")
-        self.store.data["messages"].setdefault(session_id, []).append({
-            "id": uid("m"), "role": "system", "created_at": now(), "business_id": business_id,
-            "text": "用户要求调整待审批业务。本轮未执行的授权已撤销，已成功写入的事实保留。"
-                    "根据最新用户修改重新提出这项业务的方案，不得重做已完成动作。原待审批动作：" +
-                    json.dumps({key: approval.get(key) for key in ("model", "operation", "record_ids", "values")}, ensure_ascii=False),
-        })
+        message = {"id": uid("m"), "role": "user", "created_at": now(), "business_id": business_id,
+                   "run_id": run_id, "submitted_run_id": run_id, "text": text.strip()}
+        self.store.data["messages"].setdefault(session_id, []).append(message)
+        revision = {"message_id": message["id"], "text": message["text"], "action_id": action_id, "draft": draft}
+        self._trace(run, "approval_revision", revision)
+        run.update(status="running", ended_at=None, error=None, resume_reason="revision",
+                   recovery_evidence={"revision": revision})
+        run.pop("summary", None)
+        business.update(active_run_id=run_id, status="running")
+        self._session(session_id).update(active_run_id=run_id, status="running", updated_at=now())
+        self._event("message_added", {"session_id": session_id, "business_id": business_id})
         self._event("run_changed", {"session_id": session_id, "business_id": business_id,
-                                    "run_id": run_id, "status": "cancelled"})
-        return self.send_message(session_id, text, context_business_id=business_id,
-                                 _revision_business_id=business_id)
+                                    "run_id": run_id, "status": "running"})
+        self._launch(run, continue_run=True)
+        return {"ok": True, "run_id": run_id}
 
     def cancel_run(self, session_id: str, business_id: str, run_id: str) -> dict[str, Any]:
         # 取消停止本地进程，不能撤销已到达 Odoo 的请求。收尾仍以账本为准。

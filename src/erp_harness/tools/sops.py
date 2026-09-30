@@ -327,6 +327,13 @@ def get_sop(sop_id: str, inputs: dict[str, Any] | None = None) -> dict[str, Any]
              "Only reviewed methods are supported. A business method is not a create/write/unlink operation."),
             "Wait for trusted host approval, then repeat that exact execute_method call. Read the resulting state.",
         ]}
+        if (supplied["model"], operation) == ("account.move", "message_post"):
+            spec = {**spec, "steps": [
+                "Read the confirmed invoice, company and billing contact; check current delivery evidence and reuse an existing official PDF. Never repeat a sent or uncertain delivery.",
+                "Draft a plain-text subject and body from verified facts and the user's latest feedback. Suggested format: greeting, purpose, invoice number/amount/currency, PDF attachment explanation, courteous closing. Do not invent payment deadlines, bank details or commitments.",
+                "Submit execute_method(model='account.move', method='message_post', kwargs={'ids': [invoice_id], 'partner_ids': [recipient_id], 'subject': draft_subject, 'body': draft_body}). Runtime binds the registered sender/recipient and official PDF; do not pass address or attachment overrides.",
+                "Present the exact draft for trusted host approval. A modification cancels the old approval; revise at the same breakpoint and seek a new approval. Then repeat the exact approved call and verify SMTP acceptance; acceptance is not proof of reading.",
+            ]}
     return {
         "success": True,
         "tool": "get_odoo_sop",

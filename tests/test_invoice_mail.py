@@ -35,7 +35,61 @@ def setup(tmp_path, monkeypatch):
 
 
 def send(a, **extra):
-    return a.execute_method('account.move','message_post',kwargs={'ids':[10],'partner_ids':[8],**extra})
+    return a.execute_method('account.move','message_post',kwargs={'ids':[10],'partner_ids':[8],
+        'subject':'公司 · INV/001', 'body':'李明您好，附件为 INV/001，金额 3,322.20 CNY。请查收，谢谢。', **extra})
+
+
+def test_missing_new_draft_cannot_silently_send_default_copy(tmp_path, monkeypatch):
+    a,w,_ = setup(tmp_path, monkeypatch)
+    result = a.execute_method('account.move','message_post',kwargs={'ids':[10],'partner_ids':[8]})
+    assert result['error_code'] == 'mail_draft_required' and result['retry_safe']
+    assert w.calls == [] and a.store.summary()['actions'] == 0
+
+
+def test_approved_legacy_mail_keeps_the_exact_reviewed_copy(tmp_path, monkeypatch):
+    a,w,_ = setup(tmp_path, monkeypatch)
+    kwargs = {'ids':[10], 'partner_ids':[8]}
+    with monkeypatch.context() as old_version:
+        old_version.setattr(invoice_mail, 'draft_requirement', lambda _: None)
+        old = a.execute_method('account.move','message_post',kwargs=kwargs)
+    frozen = a.store.get(old['action_id'])['prestate']['invoice_mail']
+    a.store.approve(old['action_id'],'test_user')
+    w.execute_method = lambda *args, **kw: w.calls.append(kw) or 201
+    result = a.execute_method('account.move','message_post',kwargs=kwargs)
+    assert len(w.calls) == 1 and w.calls[0]['body'] == frozen['body']
+    assert result['action_status'] == 'needs_reconciliation'  # Fixture has no SMTP receipt; never infer success.
+
+
+def test_revised_copy_is_frozen_approved_and_sent_exactly_once(tmp_path, monkeypatch):
+    import html
+    a,w,records = setup(tmp_path, monkeypatch)
+    old = send(a)
+    a.store.finish(old['action_id'], 'known_failed', error='user requested revision')
+    draft = {'subject': '发票 INV/001，请查收', 'body': '李明您好：\n感谢您的支持。附件为正式发票 INV/001，金额 3,322.20 CNY。\n如有疑问请联系我方。祝工作顺利！'}
+    new = send(a, **draft)
+    assert new['approval_required'] and new['action_id'] != old['action_id'] and w.calls == []
+    frozen = a.store.get(new['action_id'])['prestate']['invoice_mail']
+    assert frozen['subject'] == draft['subject'] and frozen['body'] == draft['body']
+    a.store.approve(new['action_id'], 'test_user')
+    def smtp(model, method, **kwargs):
+        w.calls.append(kwargs)
+        records['mail.message'][201] = dict(id=201, model=model, res_id=10, message_type='comment', subject=kwargs['subject'], body='<p>'+html.escape(kwargs['body'])+'</p>',
+            outgoing_email_to=kwargs['outgoing_email_to'], partner_ids=[], attachment_ids=[30], notification_ids=[301])
+        records['mail.notification'][301] = dict(id=301,notification_type='email',notification_status='sent',mail_email_address='li@example.test',res_partner_id=False)
+        return 201
+    w.execute_method = smtp
+    changed = send(a, **{**draft, 'body':'未经审批的另一稿'})
+    assert changed['approval_required'] and w.calls == []
+    assert send(a, **draft)['action_status'] == 'verified'
+    assert w.calls[0]['body'] == draft['body'] and w.calls[0]['outgoing_email_to'] == 'li@example.test'
+    assert send(a, **{**draft, 'body':'改措辞也不能重发'})['already_satisfied']
+    assert len(w.calls) == 1
+
+
+@pytest.mark.parametrize('extra', [{'subject':'主题\r\nBcc: other@example.test'}, {'body':''}, {'body':{}}, {'body':'x'*20001}, {'attachment_ids':[99]}, {'email_from':'other@example.test'}])
+def test_mail_draft_cannot_override_delivery_bindings_or_inject_headers(tmp_path, monkeypatch, extra):
+    a,w,_ = setup(tmp_path,monkeypatch)
+    assert not send(a, **extra)['success'] and w.calls == []
 
 
 @pytest.mark.parametrize('model,id,field,value', [
@@ -165,7 +219,8 @@ def test_prior_delivery_in_another_run_does_not_request_approval_or_send(tmp_pat
     assert result['verification']['evidence']['messages'][0]['message_id'] == 201
     assert writer.calls == [] and b.store.summary()['actions'] == 0
     assert not result.get('approval_required')
-    assert not send(b, body='This is a new authorization')['success']
+    changed = send(b, body='This is a new authorization')
+    assert changed['already_satisfied'] and writer.calls == []  # Wording never authorizes resend.
 
 
 @pytest.mark.parametrize('status', ['ready', 'exception', 'bounce', 'canceled', 'unknown', None])

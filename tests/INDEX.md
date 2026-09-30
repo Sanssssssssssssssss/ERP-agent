@@ -37,6 +37,8 @@
 | 实验入口（含准备/评估；并非全部付费） | [q4_thinking_schema.py](../experiments/tool_routing/q4_thinking_schema.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [q4_thinking_surface.py](../experiments/tool_routing/q4_thinking_surface.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [target_verifier.py](../experiments/token_efficiency_20260910/target_verifier.py) | 见入口中的断言 |
+| 真实模型节点 | [HITL01](../experiments/agent_regression/hitl_revision.json) | Approval revision routed to proposal worker; desktop resumed original unchanged instruction; runtime fixed mail copy. |
+| 真实模型节点 | [HITL02](../experiments/agent_regression/hitl_revision.json) | Approval revision routed to proposal worker; desktop resumed original unchanged instruction; runtime fixed mail copy. |
 | 离线测试套件 | [test_context_window.py](../tests/runtime/test_context_window.py) | 见入口中的断言 |
 | 离线测试套件 | [test_cross_provider_history.py](../tests/runtime/test_cross_provider_history.py) | 见入口中的断言 |
 | 离线测试套件 | [test_laya_context_replay.py](../tests/test_laya_context_replay.py) | 见入口中的断言 |
@@ -54,13 +56,18 @@
 |---|---|---|
 | 实验入口（含准备/评估；并非全部付费） | [consumption_recovery.py](../experiments/agent_regression/consumption_recovery.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [contract_recovery.py](../experiments/agent_regression/contract_recovery.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [hitl_revision.py](../experiments/agent_regression/hitl_revision.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [interrupted_recovery.py](../experiments/agent_regression/interrupted_recovery.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [recovery_check.py](../experiments/tool_routing/recovery_check.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [recovery_live.py](../experiments/agent_regression/recovery_live.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [routing_recovery.py](../experiments/agent_regression/routing_recovery.py) | 见入口中的断言 |
+| 真实模型节点 | [B02](../experiments/agent_regression/hitl_revision.json) | 见冻结清单 |
+| 真实模型节点 | [B03](../experiments/agent_regression/hitl_revision.json) | 见冻结清单 |
 | 真实模型节点 | [C01 · first_alternate_mail_method_after_pdf_guard](../experiments/agent_regression/cases.py) | failure_recovery |
 | 真实模型节点 | [C02 · first_missing_binding_receipt](../experiments/agent_regression/cases.py) | failure_recovery |
 | 真实模型节点 | [C03 · blocked_eligibility_before_user_choice](../experiments/agent_regression/cases.py) | failure_recovery |
+| 真实模型节点 | [HITL01](../experiments/agent_regression/hitl_revision.json) | Approval revision routed to proposal worker; desktop resumed original unchanged instruction; runtime fixed mail copy. |
+| 真实模型节点 | [HITL02](../experiments/agent_regression/hitl_revision.json) | Approval revision routed to proposal worker; desktop resumed original unchanged instruction; runtime fixed mail copy. |
 | 真实模型节点 | [IR01](../experiments/agent_regression/interrupted_recovery.json) | host_worker_context |
 | 真实模型节点 | [IR02](../experiments/agent_regression/interrupted_recovery.json) | business_readback |
 | 离线测试套件 | [test_approval_resume_scope.py](../tests/test_approval_resume_scope.py) | 见入口中的断言 |
@@ -498,6 +505,10 @@
 | ERPBench 完整业务 | [2249 · Landing Door Assembly Single-Speed](../bench/tasks/2249_hard_24_single_subassembly_shared_overflow_capacity_screened_invoicing/task.toml) | 24_single_subassembly_shared_overflow_capacity_screened_invoicing |
 | ERPBench 完整业务 | [2250 · Elevator Cab Interior Module](../bench/tasks/2250_hard_24_single_subassembly_shared_overflow_capacity_screened_invoicing/task.toml) | 24_single_subassembly_shared_overflow_capacity_screened_invoicing |
 | 桌面检查 | [document-presentation-check.mjs](../desktop/scripts/document-presentation-check.mjs) | 见入口中的断言 |
+| 真实模型节点 | [B02](../experiments/agent_regression/hitl_revision.json) | 见冻结清单 |
+| 真实模型节点 | [B03](../experiments/agent_regression/hitl_revision.json) | 见冻结清单 |
+| 真实模型节点 | [HITL01](../experiments/agent_regression/hitl_revision.json) | Approval revision routed to proposal worker; desktop resumed original unchanged instruction; runtime fixed mail copy. |
+| 真实模型节点 | [HITL02](../experiments/agent_regression/hitl_revision.json) | Approval revision routed to proposal worker; desktop resumed original unchanged instruction; runtime fixed mail copy. |
 | 离线测试套件 | [test_chatter_verification.py](../tests/test_chatter_verification.py) | 见入口中的断言 |
 | 离线测试套件 | [test_document_export.py](../tests/test_document_export.py) | 见入口中的断言 |
 | 离线测试套件 | [test_invoice_eligibility.py](../tests/test_invoice_eligibility.py) | 见入口中的断言 |
@@ -511,14 +522,19 @@
 
 | 类型 | 案例 / 文件 | 故障位置 / 检查范围 |
 |---|---|---|
+| 实验入口（含准备/评估；并非全部付费） | [hitl_revision.py](../experiments/agent_regression/hitl_revision.py) | 见入口中的断言 |
 | 桌面检查 | [approval-presentation-check.mjs](../desktop/scripts/approval-presentation-check.mjs) | 见入口中的断言 |
 | 真实模型节点 | [B01 · first_mail_detour_after_posted_and_pdf](../experiments/agent_regression/cases.py) | phase_boundary |
+| 真实模型节点 | [B02](../experiments/agent_regression/hitl_revision.json) | 见冻结清单 |
 | 真实模型节点 | [B02 · authorized_delivery_proposal](../experiments/agent_regression/cases.py) | phase_boundary |
+| 真实模型节点 | [B03](../experiments/agent_regression/hitl_revision.json) | 见冻结清单 |
 | 真实模型节点 | [B03 · correct_final_status_after_smtp_receipt](../experiments/agent_regression/cases.py) | phase_boundary |
 | 真实模型节点 | [D01 · repaired_internal_company_contact_semantics](../experiments/agent_regression/cases.py) | evidence_semantics |
 | 真实模型节点 | [D02 · repaired_ambiguous_company_customer_scope](../experiments/agent_regression/cases.py) | evidence_semantics |
 | 真实模型节点 | [D03 · amount_conflict_before_confirmation](../experiments/agent_regression/cases.py) | evidence_semantics |
 | 真实模型节点 | [D04 · first model request consuming the unavailable status result, before the false only-proposal answer](../experiments/agent_regression/cases.py) | evidence_semantics |
+| 真实模型节点 | [HITL01](../experiments/agent_regression/hitl_revision.json) | Approval revision routed to proposal worker; desktop resumed original unchanged instruction; runtime fixed mail copy. |
+| 真实模型节点 | [HITL02](../experiments/agent_regression/hitl_revision.json) | Approval revision routed to proposal worker; desktop resumed original unchanged instruction; runtime fixed mail copy. |
 | 离线测试套件 | [test_actions.py](../tests/test_actions.py) | 见入口中的断言 |
 | 离线测试套件 | [test_approval_resume_scope.py](../tests/test_approval_resume_scope.py) | 见入口中的断言 |
 | 离线测试套件 | [test_business_facts.py](../tests/test_business_facts.py) | 见入口中的断言 |

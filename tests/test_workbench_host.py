@@ -1161,6 +1161,10 @@ class WorkbenchHostTests(unittest.TestCase):
 
     def test_approval_revision_retires_unsent_actions_and_keeps_verified_facts(self):
         business, run = self._run("revision target")
+        self.host._instruction(business, run["id"])
+        session_file = self.host.store.root / "sessions" / business["id"] / "pi-agent-session.jsonl"
+        session_file.parent.mkdir(parents=True, exist_ok=True)
+        session_file.write_text("{}\n")
         pending = self._action(run, key="pending")
         approved = self._action(run, key="approved")
         verified = self._action(run, key="verified")
@@ -1176,23 +1180,17 @@ class WorkbenchHostTests(unittest.TestCase):
         self.host._launch_conversation = lambda value: captured.append(value)
         result = self.host.call("request_approval_revision", {"session_id": self.sid, "business_id": business["id"],
                                 "run_id": run["id"], "action_id": pending["action_id"], "text": "只保留草稿，先不要确认"})
-        self.assertEqual(run["status"], "cancelled")
+        self.assertEqual(run["status"], "running")
         self.assertEqual(self.host._ledger_statuses(run), {
             pending["action_id"]: "known_failed", approved["action_id"]: "known_failed", verified["action_id"]: "verified"})
-        self.assertEqual(captured[0]["id"], result["run_id"])
-        self.assertEqual(captured[0]["revision_business_id"], business["id"])
-        self.assertIn("只保留草稿", captured[0]["instruction"])
-        self.assertIn("已成功写入的事实保留", captured[0]["instruction"])
-        self.assertEqual(len(self.launches), 1)  # No business execution is restarted.
+        self.assertEqual(captured, [])  # No proposal worker or new business.
+        self.assertEqual(result["run_id"], run["id"])
+        self.assertEqual(self.launches[-1], (run["id"], True))
+        self.assertEqual(run["recovery_evidence"]["revision"]["text"], "只保留草稿，先不要确认")
+        self.assertEqual(self.host.store.data["messages"][self.sid][-1]["submitted_run_id"], run["id"])
+        self.assertEqual(run["resume_reason"], "revision")
         with self.assertRaises(ValueError):
             self.host.decide_approval(self.sid, business["id"], run["id"], pending["action_id"], "approve")
-        self.host._conversation_tool_end(captured[0], {
-            "tool_call_id": "revision-proposal", "tool_name": "propose_business",
-            "result": {"success": True, "proposal": {"type": "sale_invoice", "title": "调整方案", "goal": "只读核对",
-                                                     "completion_target": "read_only"}},
-        })
-        proposal = self.host.store.data["messages"][self.sid][-1]["proposal"]
-        self.assertEqual(proposal["existing_business_id"], business["id"])
         self.assertEqual(len(self.host.store.data["businesses"]), 1)
 
     def test_approval_revision_refuses_uncertain_write_or_live_worker_without_mutation(self):

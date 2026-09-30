@@ -82,6 +82,7 @@ export interface Business {
   type: BusinessType;
   title: string;
   goal: string;
+  goal_submitted?: boolean;
   status: string;
   created_at: string;
   updated_at: string;

@@ -271,6 +271,26 @@ def _handoff_required(result: object) -> bool:
     return isinstance(failure, dict) and failure.get("requires_user_input") is True
 
 
+def build_revision_resume_message(recovery: dict) -> str:
+    revision = recovery.get("revision", {})
+    if (recovery.get("reason") != "revision" or not isinstance(revision.get("text"), str)
+            or not revision["text"].strip()
+            or any(s not in {"verified", "known_failed"} for s in recovery.get("actions", {}).values())):
+        raise ValueError("unresolved revision state")
+    mail_guidance = (
+        "邮件主题和正文由你按用户要求拟写，通过 account.move.message_post 的 kwargs.subject/body 提交纯文本，"
+        "收件人和官方 PDF 仍由 runtime 核验。不要只在回复里描述已改稿，工具参数必须包含实际新稿。"
+    ) if revision.get("draft", {}).get("mail") else ""
+    return (
+        "用户在当前待审批动作处提出修改。旧的未执行审批已撤销，已完成动作保留。"
+        "继续当前业务和会话，从这个断点修订待审批动作；不要重新创建业务或要求用户重新点击开始。"
+        "这不是写入批准。先回读必要事实，不重复已完成的动作或 PDF 生成；修改后重新提交逐项审批。"
+        + mail_guidance +
+        "保持原任务契约的业务阶段和身份范围；若修改需要扩大范围，说明具体缺口并交接，不得自行扩大授权。\n"
+        "修改要求、原草稿和动作状态：\n" + json.dumps(recovery, ensure_ascii=False, sort_keys=True)
+    )
+
+
 def build_recovery_resume_message(recovery: dict) -> str:
     if recovery.get("reason") != "recovery" or any(s not in {"verified", "known_failed"} for s in recovery.get("actions", {}).values()):
         raise ValueError("unresolved recovery state")
@@ -620,9 +640,11 @@ async def run(args: argparse.Namespace) -> None:
                     # Persist the host notification in the same Pi session. The
                     # native action ledger remains the execution authority.
                     recovery = json.loads(os.environ["ERP_RUN_RESUME"]) if os.environ.get("ERP_RUN_RESUME") else None
+                    revision = recovery and recovery.get("reason") == "revision"
                     source = session.prompt(
+                        build_revision_resume_message(recovery) if revision else
                         build_recovery_resume_message(recovery) if recovery else build_approval_resume_message(getattr(getattr(actions, "task_evidence", None), "stage", None)),
-                        source="extension", custom_type="odoo_recovery_resume" if recovery else "odoo_approval_resume",
+                        source="extension", custom_type="odoo_revision_resume" if revision else "odoo_recovery_resume" if recovery else "odoo_approval_resume",
                     )
                 elif getattr(args, "continue_run", False):
                     source = session.continue_()

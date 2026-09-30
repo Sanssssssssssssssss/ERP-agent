@@ -10,8 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / 'tests/INDEX.md'
 # Multiple labels are intentional: one suite can protect several business capabilities.
 GROUPS = {
-    '中断恢复与宿主交接': ('interrupted', 'recovery', 'resume', 'workbench_host', 'business_status', 'conversation'),
-    '授权、证据与写入安全': ('actions', 'approval', 'evidence', 'guards', 'relation', 'integrity', 'stage_contract', 'business_facts'),
+    '中断恢复与宿主交接': ('interrupted', 'recovery', 'resume', 'hitl', 'workbench_host', 'business_status', 'conversation'),
+    '授权、证据与写入安全': ('actions', 'approval', 'hitl', 'evidence', 'guards', 'relation', 'integrity', 'stage_contract', 'business_facts'),
     '开票、邮件与文件': ('invoice', 'mail', 'chatter', 'document', 'material', 'csv'),
     '制造、库存与业务日期': ('manufactur', 'supply', 'stock', 'bom', 'subassembl', 'workcenter'),
     '采购与业务状态': ('purchase', 'buy_only', 'repair_plan', 'business_mvp', 'sale_view', 'enterprise'),
@@ -66,7 +66,8 @@ def build():
     import json
     for path in sorted((ROOT / 'experiments/agent_regression').glob('*.json')):
         for row in json.loads(path.read_text(encoding='utf8')):
-            add(path, '真实模型节点', row['id'], layer=row.get('failure_layer', row.get('root_cause', row.get('root', row.get('original_failure', '见冻结清单')))))
+            add(path, '真实模型节点', row['id'], group=labels(str(path) + ' ' + ' '.join(row.get('categories', []))),
+                layer=row.get('failure_layer', row.get('root_cause', row.get('root', row.get('original_failure', '见冻结清单')))))
     # The R series retains its full frozen requests locally; the tracked README is the provenance index.
     names = ['调用未发布工具', '启用状态冲突', '关系删除参数', '历史 active 状态残留', '能力撤下后多一轮选择',
              '漏预加载', '确认操作名错误', '退货明细缺产品', '旧库存字段', '重复 preview', '制造旧字段',

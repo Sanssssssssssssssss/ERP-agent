@@ -721,7 +721,7 @@ export function useWorkbench() {
     setLoading(true)
     try {
       const latest = businessDetail?.runs.find((run) => run.id === businessDetail.business.active_run_id) ?? businessDetail?.runs?.[0]
-      const recovering = latest && ['interrupted', 'failed', 'cancelled'].includes(latest.status)
+      const recovering = businessDetail?.business.goal_submitted !== false && latest && ['interrupted', 'failed', 'cancelled'].includes(latest.status)
       const run = await call<Run>(recovering ? 'resume_run' : 'start_run', {
         session_id: requestSessionId, business_id: requestBusinessId, ...(recovering ? { run_id: latest.id } : {})
       })
@@ -814,7 +814,7 @@ export function useWorkbench() {
       if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) {
         setApprovalProgress(null)
         setMessageBusinessId(requestBusinessId)
-        setThinkingRun({ sessionId: requestSessionId, runId: result.run_id || '' })
+        setSelectedRunId(result.run_id || approval.run_id)
         setConversationOpen(true)
         setTab('execution')
         await reloadCurrent().catch((reason) => setError(messageForError(reason)))
