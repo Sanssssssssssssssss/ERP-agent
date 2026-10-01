@@ -6,6 +6,9 @@ import type {
 } from "../shared/protocol";
 
 const bridge: WorkbenchBridge = {
+  showMenu(name, x, y) {
+    return ipcRenderer.invoke("workbench:menu", name, x, y);
+  },
   call(method: WorkbenchMethod, params = {}) {
     return ipcRenderer.invoke("workbench:call", { method, params });
   },

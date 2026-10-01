@@ -46,7 +46,7 @@ def test_partial_stream_timeout_recovery(tmp_path: Path, recover: bool, error_ty
 
         @asynccontextmanager
         async def no_odoo(_args):
-            yield []
+            yield SimpleNamespace(tools=[])
 
         original_load = runner.HarnessSession.load
 
@@ -71,7 +71,6 @@ def test_partial_stream_timeout_recovery(tmp_path: Path, recover: bool, error_ty
                                usage_file=tmp_path / "usage.json", max_turns=None)
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             with (
-                patch.object(runner, "_source_tools", no_odoo),
                 patch.object(runner.HarnessSession, "load", side_effect=load_with_pruned_view),
                 patch.object(runner, "OpenAICompatibleProvider", side_effect=lambda config:
                              OpenAICompatibleProvider(config, client=client)),
@@ -82,10 +81,10 @@ def test_partial_stream_timeout_recovery(tmp_path: Path, recover: bool, error_ty
                 redirect_stdout(io.StringIO()),
             ):
                 if recover:
-                    await runner.run(args)
+                    await runner.run(args, source_toolset=no_odoo)
                 else:
                     with pytest.raises(RuntimeError, match="Provider run did not complete: Provider network error"):
-                        await runner.run(args)
+                        await runner.run(args, source_toolset=no_odoo)
         assert len(calls) == 3
         rows = [json.loads(line) for line in args.session_file.read_text(encoding="utf-8").splitlines()]
         errors = [row["message"] for row in rows if row.get("message", {}).get("stopReason") == "error"]

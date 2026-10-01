@@ -86,7 +86,7 @@ jobs:
 
       - name: Check business evidence, handoff and model replay boundaries offline
         shell: pwsh
-        run: python -m pytest -q tests/test_daily_business_integrity.py tests/test_stage_contract.py tests/test_agent_regression.py tests/test_enterprise_actions.py
+        run: python -m pytest -q tests/test_daily_business_integrity.py tests/test_stage_contract.py tests/test_agent_regression.py tests/test_enterprise_actions.py tests/test_connection_awareness.py tests/test_evidence_display.py
 
       - name: Check capability routing and context offline
         shell: pwsh
@@ -158,6 +158,12 @@ jobs:
         run: node scripts/renderer-check.mjs
         working-directory: desktop
 
+      - name: Execution and trace checks
+        run: |
+          npm run check:execution
+          npm run check:trace
+        working-directory: desktop
+
   package:
     name: Sidecar and packaged desktop checks
     runs-on: windows-latest
@@ -180,7 +186,7 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install uv==0.8.22
-          uv sync --directory .. --locked --no-dev
+          uv sync --directory .. --locked --no-dev --extra memory
           uv build --directory .. --wheel
           npm ci
           npm run prepare:sidecar

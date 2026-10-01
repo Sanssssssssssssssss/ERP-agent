@@ -21,7 +21,7 @@ def save(p,v): Path(p).write_text(json.dumps(v,ensure_ascii=False,indent=2),enco
 
 
 def candidates(request, state):
-    from erp_harness.app.routing_context import assemble_context
+    from experiments.tool_routing.routing_context import assemble_context
     from erp_harness.context.projection import _encode_tables
     current = assemble_context(request, state=state)
     shaped = copy.deepcopy(state)
@@ -91,7 +91,7 @@ def prepare(output, pilot, selected):
                      'original_state':case['packet']['state'],'variants':variants})
     save(output/'cases.json',rows)
     sources += [Path(__file__), output/'cases.json',ROOT/'src/erp_harness/providers/laya_worker.py',
-        ROOT/'src/erp_harness/app/routing_context.py',ROOT/'src/erp_harness/context/projection.py']
+        ROOT/'experiments/tool_routing/routing_context.py',ROOT/'src/erp_harness/context/projection.py']
     save(output/'frozen.json',{'config':str(config),'files':{str(p.resolve()):sha(p) for p in sources},
         'cases':len(rows),'variants':selected,'label_policy':'Reuse frozen expectations; new live menus unlabelled, no invented gold set.',
         'policy':'Same v7 weights/questions, GPU microbatch2; baseline reused by source hashes. No truncation, no ERP, no paid calls.'})

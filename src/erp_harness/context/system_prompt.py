@@ -1,4 +1,4 @@
-"""System prompt assembly for Pi coding sessions."""
+"""System prompt assembly for Harness sessions."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 from erp_harness.runtime.tools import AgentTool
-from erp_harness.context.self_docs import pi_docs_path, pi_examples_path, pi_readme_path
 from erp_harness.context.skills import Skill
 
 
@@ -30,7 +29,7 @@ class PromptSection:
 
 @dataclass(frozen=True, slots=True)
 class BuildSystemPromptOptions:
-    """Options used to build Pi's system prompt."""
+    """Options used to build the session system prompt."""
 
     cwd: Path
     tools: Sequence[AgentTool] = ()
@@ -43,7 +42,7 @@ class BuildSystemPromptOptions:
 
 
 def build_system_prompt(options: BuildSystemPromptOptions) -> str:
-    """Build a deterministic Pi-style system prompt for Pi."""
+    """Build a deterministic system prompt."""
     cwd = _format_path(options.cwd)
     append_parts = [options.append_system_prompt] if options.append_system_prompt else []
     append_parts.extend(format_prompt_section(section) for section in options.extra_sections)
@@ -59,14 +58,12 @@ def build_system_prompt(options: BuildSystemPromptOptions) -> str:
         return prompt
 
     prompt = (
-        "You are an expert coding assistant operating inside Pi Agent for Python, "
-        "an unofficial coding-agent harness. "
-        "You help users by reading files, executing commands, editing code, and writing new files."
+        "You are an ERP business assistant operating inside ERP Harness. "
+        "Use the available tools, respect approval boundaries, and verify business outcomes."
         f"\n\nAvailable tools:\n{format_available_tools(options.tools)}"
         "\n\nIn addition to the tools above, you may have access to other custom tools "
         "depending on the project."
         f"\n\nGuidelines:\n{format_guidelines(options.tools, options.extra_guidelines)}"
-        f"\n\n{format_pi_documentation()}"
     )
 
     prompt += append_section
@@ -82,30 +79,6 @@ def format_prompt_section(section: PromptSection) -> str:
     if section.title is None:
         return section.body
     return f"## {section.title}\n\n{section.body}"
-
-
-def format_pi_documentation() -> str:
-    """Format Pi-style routing hints to Pi's installed reference material."""
-    readme_path = _format_path(pi_readme_path())
-    docs_path = _format_path(pi_docs_path())
-    examples_path = _format_path(pi_examples_path())
-    return (
-        "Pi Agent documentation (read only when the user asks about Pi Agent itself, its SDK, "
-        "extensions, skills, providers, models, commands, or TUI):\n"
-        f"- Main documentation: {readme_path}\n"
-        f"- Additional docs: {docs_path}\n"
-        f"- Examples: {examples_path} (extensions and custom tools)\n"
-        "- When reading Pi docs or examples, resolve docs/... under Additional docs and "
-        "examples/... under Examples, not the current working directory\n"
-        "- When asked about: creating or modifying extensions (docs/extensions.md, "
-        "examples/extensions/), skills and prompt templates (docs/skills.md), custom "
-        "providers or adding built-in providers/models (docs/models.md), CLI and slash "
-        "commands (docs/cli.md), TUI usage "
-        "(docs/tui.md), Pi Agent architecture and packages (docs/architecture.md)\n"
-        "- When working on Pi Agent topics, read the docs and examples, and follow .md "
-        "cross-references before implementing\n"
-        "- Always read relevant Pi Agent .md files completely and follow links to related docs"
-    )
 
 
 def format_available_tools(tools: Sequence[AgentTool]) -> str:

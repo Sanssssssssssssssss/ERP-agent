@@ -11,7 +11,41 @@ from .routing_state import routing_state
 from .decision_dataset import bounded
 
 
-from erp_harness.providers.laya_worker import CapabilityRouter
+from erp_harness.providers.laya_worker import CapabilityRouter as ProductRouter
+
+
+class CapabilityRouter(ProductRouter):
+    """Historical model projections are confined to experiment replay."""
+    project = staticmethod(routing_state)
+
+    def _configure_projection(self, manifest):
+        self.projection = manifest.get('projection', 'legacy')
+        if self.projection == 'evidence_v2':
+            from .evidence_state import evidence_state
+            self.project = evidence_state
+        elif self.projection == 'host_facts_v1':
+            self.project = ProductRouter.project
+        elif self.projection != 'legacy':
+            raise ValueError('Unknown historical projection')
+
+    def _verify_sources(self, manifest):
+        if 'runtime_files' in manifest:
+            return super()._verify_sources(manifest)
+        for name, digest in manifest['projection_sources'].items():
+            path = (ROOT / name).resolve()
+            if not path.is_relative_to(ROOT.resolve()) or sha(path) != digest:
+                raise ValueError('Historical source changed; use its frozen checkout')
+
+    def _validate_request(self, request):
+        if self.projection == 'host_facts_v1':
+            return super()._validate_request(request)
+        if (not isinstance(request, dict) or not isinstance(request.get('messages'), list)
+                or not isinstance(request.get('tools'), list)):
+            raise ValueError('Provide a complete model request with messages and tools')
+        if (not all(isinstance(m, dict) and m.get('role') in {'system','developer','user','assistant','tool'}
+                    for m in request['messages']) or not any(m.get('role') == 'user' for m in request['messages'])):
+            raise ValueError('Request requires provider message roles and user context')
+
 
 
 async def publish_next_turn(controller, decision, call_id, *, host_owns_selection=False, unresolved_write=False):
@@ -55,7 +89,7 @@ def export(run, destination):
     sources=[Path(routing_state.__code__.co_filename),Path(bounded.__code__.co_filename),
              Path(catalog.__code__.co_filename),*catalog()[3]]
     if frozen.get('projection') == 'host_facts_v1':
-        sources=[ROOT/'src/erp_harness/app/routing_state.py',ROOT/'src/erp_harness/context/world.py',Path(catalog.__code__.co_filename),*catalog()[3]]
+        sources=[ROOT/'experiments/tool_routing/host_state_v1.py',ROOT/'src/erp_harness/context/world.py',Path(catalog.__code__.co_filename),*catalog()[3]]
     manifest={'files':{p.relative_to(destination).as_posix():sha(p) for p in destination.rglob('*') if p.is_file()},
               'projection':frozen.get('projection','legacy'),
               'projection_sources':{p.relative_to(ROOT).as_posix():sha(p) for p in sources},'source_run':str(run.resolve()),

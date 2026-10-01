@@ -11,6 +11,7 @@ from erp_harness.erp.store import ActionStore
 from erp_harness.erp.write_guards import _Guard, _id
 
 ENTERPRISE_METHODS = (
+    "purchase.order.button_cancel",
     "stock.picking.action_confirm", "stock.picking.action_assign", "stock.picking.button_validate",
     "stock.backorder.confirmation.process", "stock.return.picking.action_create_returns",
     "mrp.production.action_confirm", "mrp.production.action_assign",
@@ -77,6 +78,21 @@ class _Evidence(_Guard):
 
 def handles(payload: dict) -> bool:
     return f"{payload.get('model')}.{payload.get('method')}" in _METHODS
+
+
+def order_approval_lines(runtime, payload, records):
+    """Bind the displayed commercial lines to the same approval as the header."""
+    model = payload["model"]
+    fields = ("order_id", "product_id", "product_uom_id", "price_unit", "tax_ids")
+    fields += ("product_qty", "date_planned") if model == "purchase.order" else ("product_uom_qty", "discount")
+    if any(not isinstance(r.get("order_line"), list) for r in records):
+        raise ValueError("order lines unavailable; read the full order before approval")
+    ids = sorted({i for r in records for i in r["order_line"]})
+    lines = _Evidence(runtime, payload).many(model + ".line", ids, fields)
+    parents = {r["id"]: set(r["order_line"]) for r in records}
+    if any(r["id"] not in parents.get(_id(r["order_id"]), set()) for r in lines):
+        raise ValueError("approval line does not belong to its order")
+    return lines
 
 
 def execution_kwargs(payload: dict, prestate: dict) -> dict:
@@ -327,7 +343,22 @@ def method_prestate(runtime: Any, payload: dict) -> dict | None:
         raise ValueError("reviewed enterprise methods accept kwargs.ids only; business choices belong in the approved records")
     g = _Evidence(runtime, payload)
     ids, model, method = payload["kwargs"]["ids"], payload["model"], payload["method"]
-    if model == "stock.picking":
+    if model == "purchase.order":
+        rows = g.many(model, ids, ("name", "state", "locked", "company_id", "partner_id", "currency_id", "amount_total", "picking_ids", "invoice_ids", "order_line"))
+        company = _same(rows, "company_id")
+        pickings = g.many("stock.picking", [i for r in rows for i in r["picking_ids"]], ("state", "company_id", "move_ids"))
+        bills = g.many("account.move", [i for r in rows for i in r["invoice_ids"]], ("state", "company_id"))
+        lines = g.many("purchase.order.line", [i for r in rows for i in r["order_line"]], ("qty_received", "qty_invoiced", "move_dest_ids"))
+        display = {r["id"]: r for r in order_approval_lines(runtime, payload, rows)}
+        lines = [{**r, **display[r["id"]]} for r in lines]
+        if (any(r["locked"] for r in rows) or any(r["move_dest_ids"] for r in lines)
+                or any(r["state"] == "done" or _id(r["company_id"]) != company for r in pickings)
+                or any(r["state"] != "cancel" or _id(r["company_id"]) != company for r in bills)
+                or any(_number(r["qty_received"]) or _number(r["qty_invoiced"]) for r in lines)):
+            from .task_evidence import TaskHandoff
+            raise TaskHandoff("采购单存在锁定、关联后续库存动作、收货或账单，取消可能影响其他业务。请先核对关联动作、退货及账单处理，再确认后续业务。", code="business_choice_required", next_action="review_receipts_and_bills")
+        value = {"kind": "purchase_cancel", "records": rows, "pickings": pickings, "bills": bills, "lines": lines}
+    elif model == "stock.picking":
         value = _picking(g, ids, method)
     elif model == "mrp.production":
         value = _production(g, ids, method)
@@ -412,7 +443,13 @@ def method_verify(runtime: Any, payload: dict, prestate: dict, result: Any) -> d
     kind = before["kind"]
     evidence: dict = {}
     satisfied = False
-    if kind == "picking":
+    if kind == "purchase_cancel":
+        rows = g.many("purchase.order", [r["id"] for r in before["records"]], ("state", "company_id", "partner_id", "picking_ids", "invoice_ids"))
+        pickings = g.many("stock.picking", [r["id"] for r in before["pickings"]], ("state",))
+        prior = {r["id"]: r for r in before["records"]}
+        satisfied = bool(rows) and all(r["state"] == "cancel" and all(r[f] == prior[r["id"]][f] for f in ("company_id", "partner_id", "picking_ids", "invoice_ids")) for r in rows) and all(r["state"] == "cancel" for r in pickings)
+        evidence = {"record_model": "purchase.order", "records": rows, "picking_records": pickings}
+    elif kind == "picking":
         rows = g.many("stock.picking", [r["id"] for r in before["records"]], _PICKING)
         states = ({"confirmed", "waiting", "assigned"} if before["method"] == "action_confirm" else {"assigned"}) if before["method"] in {"action_confirm", "action_assign"} else {"done"}
         satisfied = bool(rows) and all(r["state"] in states for r in rows)
@@ -452,9 +489,13 @@ def method_verify(runtime: Any, payload: dict, prestate: dict, result: Any) -> d
             raw = g.many("stock.move", [m["id"] for m in before["moves"]], _MOVE)
             satisfied = bool(raw) and all(m["picked"] is True and _number(m["quantity"]) > 0 for m in raw)
         else:
-            raw = g.many("stock.move", [m["id"] for m in before["moves"]], ("state",))
-            satisfied = bool(raw) and all(m["state"] in {"assigned", "done"} for m in raw)
+            raw = g.many("stock.move", [m["id"] for m in before["moves"]], ("state", "quantity", "product_uom_qty", "product_id"))
+            # An acknowledged allocation can leave shortages. Missing acknowledgement
+            # remains uncertain: an unchanged state cannot prove a timed-out call ran.
+            satisfied = result is True and bool(raw) and all(r["state"] in {"confirmed", "progress", "to_close"} for r in rows)
         evidence = {"record_model": "mrp.production", "records": rows, "workorder_records": workorders, "consumption_contracts": before.get("consumption_contracts", [])}
+        if before["method"] == "action_assign":
+            evidence.update(material_records=raw, allocation_status="ready" if raw and all(m["state"] in {"assigned", "done"} for m in raw) else "partial" if any(_number(m["quantity"]) > 0 for m in raw) else "waiting_materials", production_completed=False)
     elif kind == "return":
         original = before["picking"]
         current = g.read("stock.picking", original["id"], _PICKING)

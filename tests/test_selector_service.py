@@ -50,7 +50,25 @@ def test_selector_config_alias_and_precedence(monkeypatch):
     assert capability_router_config() is None
     monkeypatch.setenv('ERP_OPENJEV_CONFIG', 'legacy.json')
     assert capability_router_config() == 'legacy.json'
+
     monkeypatch.setenv('ERP_CAPABILITY_ROUTER_CONFIG', 'laya.json')
     assert capability_router_config() == 'laya.json'
     monkeypatch.setenv('ERP_CAPABILITY_ROUTER_CONFIG', '')
     assert capability_router_config() == 'legacy.json'
+
+
+def test_product_bundle_checks_installed_files_without_experiment_sources(tmp_path, monkeypatch):
+    from erp_harness.providers import laya_worker as worker
+    monkeypatch.setattr(worker, 'PACKAGE_ROOT', tmp_path)
+    for name in worker.RUNTIME_FILES:
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('frozen product source')
+    manifest = {'runtime_files': {name: worker.sha(tmp_path / name) for name in worker.RUNTIME_FILES}}
+    router = object.__new__(worker.CapabilityRouter)
+    router._verify_sources(manifest)
+    with pytest.raises(ValueError, match='runtime_files'):
+        router._verify_sources({'projection_sources': {}})
+    (tmp_path / worker.RUNTIME_FILES[0]).write_text('changed')
+    with pytest.raises(ValueError, match='revalidate'):
+        router._verify_sources(manifest)

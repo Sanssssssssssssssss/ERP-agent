@@ -19,8 +19,7 @@ from erp_harness.app.request_receipts import routing_decision_id
 from erp_harness.runtime.messages import AssistantMessage, TextContent, ToolCall, ToolResultMessage
 from erp_harness.tools.dynamic_tools import CAPABILITY_GROUPS, tool_contract_sha256
 from erp_harness.tools.sops import SOPS
-from erp_harness.app.routing_state import sop_requirements
-from erp_harness.app.routing_context import VERSION, assemble_context, host_ledger, selection_batch
+from erp_harness.app.laya_state import sop_requirements, build_routing_state, ledger_state
 
 ROUTING_CONTROLS = frozenset({"configure_odoo_tools", "list_odoo_capabilities"})
 
@@ -59,10 +58,10 @@ class CapabilityRoutingProvider(OpenAICompatibleProvider):
     def bind_router(self, controller, store, directory: Path, *, goal=None, stage=None, identity=None, world=None) -> None:
         self.selector_config = capability_router_config()
         self.selector = json.loads(Path(self.selector_config).read_text(encoding='utf8')) if self.selector_config else {}
-        self.backend = self.selector.get('backend', 'openjev')
-        if self.backend not in {'openjev', 'laya'}:
+        self.backend = self.selector.get('backend', 'laya')
+        if self.backend != 'laya':
             raise ValueError('Unknown capability selector')
-        if self.selector and self.selector.get('contract') != ('host_facts_v1' if self.backend == 'laya' else VERSION):
+        if self.selector and self.selector.get('contract') != 'host_facts_v1':
             raise ValueError('Selector context contract mismatch')
         self.candidate_groups = self.selector.get('candidate_groups', list(CAPABILITY_GROUPS))
         if (not isinstance(self.candidate_groups, list) or not self.candidate_groups
@@ -176,7 +175,7 @@ class CapabilityRoutingProvider(OpenAICompatibleProvider):
         return groups, evidence, recovery
 
     async def _decide(self, payload):
-        endpoint = os.environ.get('ERP_SELECTOR_ENDPOINT') if self.backend == 'laya' else None
+        endpoint = os.environ.get('ERP_SELECTOR_ENDPOINT')
         if endpoint:
             from erp_harness.providers.selector_service import decide
             endpoint = json.loads(endpoint)
@@ -191,7 +190,7 @@ class CapabilityRoutingProvider(OpenAICompatibleProvider):
             env = {k: v for k, v in os.environ.items() if not k.startswith(("LLM_", "ODOO_", "COMMAND_CODE_"))}
             self.process = await asyncio.create_subprocess_exec(
                 self.selector['python'], '-P', '-u', '-X', 'utf8',
-                str(Path(__file__).parents[1] / ('providers/laya_worker.py' if self.backend == 'laya' else 'providers/openjev_worker.py')),
+                str(Path(__file__).parents[1] / 'providers/laya_worker.py'),
                 self.selector_config, str(self.directory),
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=self.stderr, env=env,
             )
@@ -216,8 +215,7 @@ class CapabilityRoutingProvider(OpenAICompatibleProvider):
         call_id = call_id or "selector:" + uuid.uuid4().hex
         row = {"call_id": call_id, "request_number": getattr(self._config.provider_hooks, "number", 0) + 1}
         before = self.controller._active
-        additive = self.backend == 'laya'
-        row.update(publication_policy='add_until_run_end' if additive else 'replace', retained_before=list(before))
+        row.update(publication_policy='add_until_run_end', retained_before=list(before))
         published = False
         status, reason, proposed = "fallback", None, None
         required, evidence, recovery = set(), [], []
@@ -237,15 +235,9 @@ class CapabilityRoutingProvider(OpenAICompatibleProvider):
                 supports_images=self._config.supports_images, provider=self._config.provider_name, api=self._config.api,
             )
             # A live ledger and World state replace the selector's former transcript truncation.
-            if self.backend == 'laya':
-                from erp_harness.app.laya_state import build_routing_state, ledger_state
-                context = build_routing_state(payload, goal=self.task_goal, stage=self.task_stage,
-                    ledger=ledger_state(ledger_rows, identity=self.identity),
-                    identity=self.identity, world=self.world, required=required | set(before))
-            else:
-                context = assemble_context(payload, goal=self.task_goal, stage=self.task_stage,
-                    ledger=host_ledger(ledger_rows, self.identity),
-                    identity=self.identity, world=self.world, required=required)
+            context = build_routing_state(payload, goal=self.task_goal, stage=self.task_stage,
+                ledger=ledger_state(ledger_rows, identity=self.identity),
+                identity=self.identity, world=self.world, required=required | set(before))
             row['context_build_ms'] = round((time.perf_counter() - context_started) * 1000, 2)
             decision = {"status": "fallback", "reason": "host_takeover"}
             if reason != "host_takeover":
@@ -253,11 +245,10 @@ class CapabilityRoutingProvider(OpenAICompatibleProvider):
                     await self.controller._list(call_id)
                 groups = [g for g in self.candidate_groups
                           if self.controller._availability[g]['status'] != 'module_missing'
-                          and (not additive or g not in required | set(before))]
+                          and g not in required | set(before)]
                 payload = {'id': call_id.replace(':', '-'), 'groups': groups,
                            'context_version': context['version']}
-                payload.update({'state': context} if self.backend == 'laya' else
-                               {'messages': selection_batch(context, groups)})
+                payload['state'] = context
                 (self.directory / (call_id.replace(":", "-") + ".request.json")).write_text(
                     json.dumps(payload, ensure_ascii=False), encoding="utf8")
                 try:
@@ -283,10 +274,8 @@ class CapabilityRoutingProvider(OpenAICompatibleProvider):
                     selected = {g for g in CAPABILITY_GROUPS
                                 if self.controller._availability[g]["status"] != "module_missing"}
             selected = sorted(selected | required)
-            if additive:
-                # A negative decision means no addition, never revoke tools mid-action.
-                # Durable run receipts preserve this order across approval resumes.
-                selected = [*before, *(g for g in selected if g not in before)]
+            # Negative means no addition. Preserve prefix order across approval resumes.
+            selected = [*before, *(g for g in selected if g not in before)]
             if set(selected) == set(self.controller._active):
                 status = "unchanged" if decision.get("status") == "ok" else "fallback"
                 self._record({**row, "status": status, "dependencies": evidence, "recovery": recovery})
@@ -382,4 +371,4 @@ class CapabilityRoutingProvider(OpenAICompatibleProvider):
 
 
 # Compatibility for existing experiment imports.
-OpenJevProvider = CapabilityRoutingProvider
+

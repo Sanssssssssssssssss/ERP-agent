@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from erp_harness.providers.openjev_worker import generate, sample
+from experiments.tool_routing.openjev_worker import generate, sample
 from experiments.tool_routing.q4_thinking import sample as replay_sample
 
 

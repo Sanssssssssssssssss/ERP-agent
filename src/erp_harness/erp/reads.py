@@ -256,15 +256,18 @@ class NativeReads:
                 if name in {"search_records", "find_records", "read_record", "aggregate_records"}:
                     refusal = check_rate(runtime.instance, name)
                     if refusal is not None:
-                        return refusal
+                        from .read_failures import read_failure
+                        return {**refusal, **read_failure(refusal)}
                 result = getattr(runtime, name)(**args)
                 if name in {"search_employee", "search_holidays"}:
                     result = READ_RESPONSES[name].model_validate(result).model_dump()
         except Exception as exc:
+            from .read_failures import read_failure
+            failure = read_failure(exc)
             if name in {"get_odoo_profile", "schema_catalog", "list_instances", "read_attachment"}:
-                result = {"success": False, "tool": name, "error": str(exc)}
+                result = {"success": False, "tool": name, **failure, "detail": failure["error"], "error": str(exc)}
             else:
-                result = {"success": False, "error": str(exc)}
+                result = {"success": False, **failure, "detail": failure["error"], "error": str(exc)}
         if name in {"search_employee", "search_holidays"}:
             return READ_RESPONSES[name].model_validate(result).model_dump()
         return result

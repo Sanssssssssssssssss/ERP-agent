@@ -1,4 +1,4 @@
-"""JSON-defined TUI themes for Pi.
+"""JSON-defined transcript themes.
 
 Themes are data, not code. The built-in themes ship as JSON files next to this
 module and load through the same parser as user themes, which live in
@@ -18,9 +18,6 @@ from typing import Literal, get_args
 from rich.color import Color, ColorParseError
 from rich.errors import StyleSyntaxError
 from rich.style import Style
-from textual.color import Color as TextualColor
-from textual.color import ColorParseError as TextualColorParseError
-from textual.theme import Theme
 
 from erp_harness.context.resources import ResourceDiagnostic
 
@@ -39,7 +36,7 @@ class TuiRoleStyle:
 
 @dataclass(frozen=True, slots=True)
 class TuiTheme:
-    """Resolved visual theme for Pi's built-in Textual frontend."""
+    """Resolved transcript style; legacy theme names remain readable."""
 
     name: str
     dark: bool
@@ -108,17 +105,6 @@ _RICH_STYLE_FIELDS = {
     "completion_selected",
     "completion_selected_description",
     "completion_description",
-}
-
-# Single-color fields only ever rendered through Rich. Every other color field
-# reaches Textual too (CSS variables, Theme slots, or widget styles), and Rich
-# accepts colors Textual rejects (bright_red, grey50, color(1), default), so
-# those fields must parse under both libraries. New fields default to the
-# strict dual check: a field missing from this set rejects a theme with a
-# diagnostic instead of crashing the TUI when the theme is applied.
-_RICH_ONLY_COLOR_FIELDS = {
-    "tool_success_text",
-    "tool_error_text",
 }
 
 # Var names that would corrupt Rich style strings during token substitution.
@@ -244,10 +230,8 @@ def _parse_colors(
         resolved = _substitute_vars(raw.strip(), variables)
         if field_name in _RICH_STYLE_FIELDS:
             error = _style_problem(resolved)
-        elif field_name in _RICH_ONLY_COLOR_FIELDS:
-            error = _color_problem(resolved)
         else:
-            error = _color_problem(resolved) or _textual_color_problem(resolved)
+            error = _color_problem(resolved)
         if error is not None:
             problems.append(f"colors.{field_name} {error}")
             continue
@@ -283,13 +267,10 @@ def _parse_roles(
             continue
         resolved_border = _substitute_vars(border.strip(), variables)
         resolved_body = _substitute_vars(body.strip(), variables)
-        # Borders feed Textual's styles.border_left as well as Rich tables.
-        border_error = _color_problem(resolved_border) or _textual_color_problem(resolved_border)
+        border_error = _color_problem(resolved_border)
         if border_error is not None:
             problems.append(f"roles.{role}.border {border_error}")
-        # Body colors also feed Textual's styles.color/background in the
-        # transcript, so both style components must satisfy Textual too.
-        body_error = _style_problem(resolved_body) or _textual_style_colors_problem(resolved_body)
+        body_error = _style_problem(resolved_body)
         if body_error is not None:
             problems.append(f"roles.{role}.body {body_error}")
         if border_error is None and body_error is None:
@@ -302,24 +283,6 @@ def _color_problem(value: str) -> str | None:
         Color.parse(value)
     except ColorParseError:
         return f"is not a valid color: {value!r}"
-    return None
-
-
-def _textual_color_problem(value: str) -> str | None:
-    try:
-        TextualColor.parse(value)
-    except TextualColorParseError:
-        return f"is not a color Textual accepts: {value!r}"
-    return None
-
-
-def _textual_style_colors_problem(value: str) -> str | None:
-    style = Style.parse(value)
-    for color in (style.color, style.bgcolor):
-        if color is not None and color.name is not None:
-            error = _textual_color_problem(color.name)
-            if error is not None:
-                return error
     return None
 
 
@@ -401,62 +364,6 @@ def get_tui_theme(name: TuiThemeName = "pi-dark") -> TuiTheme:
     if name in _BUILTIN_THEMES:
         return _BUILTIN_THEMES[name]
     return _custom_themes[name]
-
-
-def textual_theme_for_tui_theme(theme_name: TuiThemeName) -> Theme:
-    """Map a Pi theme to Textual's native theme type."""
-    theme = get_tui_theme(theme_name)
-    return Theme(
-        name=theme.name,
-        primary=theme.accent,
-        secondary=theme.prompt_border,
-        warning=theme.markdown_bullet,
-        error=theme.error,
-        success=theme.success,
-        accent=theme.accent,
-        foreground=theme.screen_text,
-        background=theme.screen_background,
-        surface=theme.chrome_background,
-        panel=theme.sidebar_background,
-        dark=theme.dark,
-        variables=theme_css_variables(theme),
-    )
-
-
-def theme_css_variables(theme: TuiTheme) -> dict[str, str]:
-    """Return Textual CSS variables for a resolved Pi theme."""
-    return {
-        "pi-screen-background": theme.screen_background,
-        "pi-screen-text": theme.screen_text,
-        "pi-chrome-background": theme.chrome_background,
-        "pi-chrome-text": theme.chrome_text,
-        "pi-muted-text": theme.muted_text,
-        "pi-sidebar-background": theme.sidebar_background,
-        "pi-border": theme.border,
-        "pi-transcript-background": theme.transcript_background,
-        "pi-prompt-background": theme.prompt_background,
-        "pi-prompt-text": theme.prompt_text,
-        "pi-prompt-border": theme.prompt_border,
-        "pi-autocomplete-background": theme.autocomplete_background,
-        "pi-accent": theme.accent,
-        "pi-tool-running": theme.role_styles["tool"].border,
-        "pi-highlight-background": theme.highlight_background,
-        "pi-highlight-text": theme.highlight_text,
-        "pi-markdown-highlight": theme.markdown_heading,
-        "pi-markdown-table-header": theme.markdown_table_header,
-        "pi-markdown-table-border": theme.markdown_table_border,
-        "pi-markdown-inline-code": theme.markdown_inline_code,
-        "pi-markdown-code-block-background": theme.markdown_code_block_background,
-        "pi-markdown-link": theme.markdown_link,
-        "pi-markdown-bullet": theme.markdown_bullet,
-        "footer-background": theme.chrome_background,
-        "footer-foreground": theme.chrome_text,
-        "footer-description-background": theme.chrome_background,
-        "footer-description-foreground": theme.chrome_text,
-        "footer-key-background": theme.chrome_background,
-        "footer-key-foreground": theme.accent,
-        "footer-item-background": theme.chrome_background,
-    }
 
 
 def load_custom_tui_themes(

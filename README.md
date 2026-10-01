@@ -1,77 +1,46 @@
-# ERP-agent
+<p align="center"><img src="desktop/assets/workbench.png" width="72" alt="ERP-agent" /></p>
+<h1 align="center">ERP-agent</h1>
+<h3 align="center">An AI Agent that can actually operate your ERP.</h3>
+<p align="center">Give it a business goal. Review the changes. See what actually happened in Odoo.</p>
+<p align="center"><a href="#demo">Demo</a> · <a href="#try-it">Try it</a> · <a href="docs/development.zh-CN.md">Docs</a> · <a href="TESTING.md">Tests</a> · <a href="README.zh-CN.md">简体中文</a></p>
+<p align="center"><a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT" /></a> <a href="https://github.com/Sanssssssssssssssss/ERP-agent/actions/workflows/checks.yml"><img src="https://github.com/Sanssssssssssssssss/ERP-agent/actions/workflows/checks.yml/badge.svg?branch=main" alt="Checks" /></a> <img src="https://img.shields.io/badge/Odoo-19-714B67" alt="Odoo 19" /> <img src="https://img.shields.io/badge/Desktop-Windows-467C7A" alt="Windows desktop" /></p>
 
-[Long-term memory](docs/long-term-memory.md) · [Persistent Odoo demo](experiments/demo_odoo/README.md) · [Tests by capability](TESTING.md)
+## Demo
 
-Native ERP Agent Harness
+![ERP-agent: review a sales confirmation and verify its result](docs/media/demo.gif)
 
-English · [简体中文](README.zh-CN.md)
+> “Confirm S00012 if its untaxed amount is under 5,000 CNY. Leave S00009 alone. No shipment or invoice.”
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) [![Checks](https://github.com/Sanssssssssssssssss/ERP-agent/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/Sanssssssssssssssss/ERP-agent/actions/workflows/checks.yml)
+The agent reads the order, requests approval for the exact change, executes the approved action, and reads the result back. The execution desk keeps the goal, current action, approvals and evidence together; chat stays alongside it.
 
-ERP-agent drafts proposed Odoo business actions, requests approval before writes, and checks the resulting records. The repository contains the Windows desktop workbench, its native Odoo 19 runtime, and the ERP-Bench research harness behind it.
+The condensed demo shows recorded states from a real model/API run against an isolated Odoo test company. [Validation results](docs/ui-integration-20261002.md) distinguish this desktop workflow from the three ERP-Bench tasks used to check the integrated backend.
 
-**Windows preview · v0.6.0 · Odoo 19**
+**Sales · Purchasing · Inventory · Manufacturing · Invoicing · Payments · Refunds · Reconciliation**
 
-![ERP-agent](docs/media/hero.svg)
+## From a request to an ERP result
 
-## Windows preview (0.6.0)
+- **Describe the work.** Ask questions in chat, then confirm the business goal and scope.
+- **Follow execution.** See the current action and progress, live model messages and observed documents.
+- **Review before changes.** Approval shows affected records, proposed values and current state. Approve, reject or request a revision from the execution desk.
+- **Inspect the result.** Read verification first; open Trace for readable tool names, parameters, risk, results and original receipts.
 
-[Download the unsigned Windows preview](https://github.com/Sanssssssssssssssss/ERP-agent/releases/download/v0.6.0/Odoo-Workbench-0.6.0-windows-x64.zip) · [Release notes](https://github.com/Sanssssssssssssssss/ERP-agent/releases/tag/v0.6.0)
+Business state, approvals and action receipts persist across interruptions. An uncertain write requires reconciliation before further execution. Tool availability follows the current task; field access and action approval remain explicit.
 
-1. Download and unzip the archive, then run `Odoo-Workbench-0.6.0-portable.exe`.
-2. Open connection settings and provide your Odoo 19 and model configuration.
-3. Create a session, describe the business, and optionally attach a CSV/TXT file.
+![Trace: readable tools, risk and result details](docs/media/workbench-trace.png)
 
-This is an unsigned preview. It needs your own Odoo 19 instance and model endpoint. The sample [`orders.csv`](experiments/desktop_workbench/fixtures/bench_2262_orders/orders.csv) matches the ERP-Bench 2262 seed data only; it is not a generic Odoo success sample.
+## Try it
 
-![Execution desk](docs/media/workbench-overview.png)
+Bring your own **Odoo 19 JSON-2 connection** and **model endpoint**.
 
-Actual UI with synthetic data; the workflow graphic below is schematic.
+The redesigned desktop shown above is available from source. The published [Windows v0.6.0 preview](https://github.com/Sanssssssssssssssss/ERP-agent/releases/download/v0.6.0/Odoo-Workbench-0.6.0-windows-x64.zip) contains the earlier UI; [release notes](https://github.com/Sanssssssssssssssss/ERP-agent/releases/tag/v0.6.0) describe that build.
 
-<details>
-<summary>Approval, document and trace views</summary>
+### Run from source on Windows
 
-![Approval view](docs/media/workbench-approvals.png)
-
-Approval cards show the proposed action, pre-state, and per-action decision controls.
-
-![Documents view](docs/media/workbench-documents.png)
-
-The documents view shows observed Odoo records and export actions.
-
-![Trace view](docs/media/workbench-trace.png)
-
-Trace shows the recorded run, tools, and usage; screenshots use synthetic demo data.
-</details>
-
-![Workflow schematic](docs/media/workflow.svg)
-
-The workflow graphic is schematic; the screenshots show the actual renderer UI.
-
-[Quick start](#quick-start-windows-development) · [Boundaries](#boundaries) · [Repository map](#repository-map) · [Sources and contribution](#provenance-and-contribution)
-
-## What it does
-
-- Runs the integrated session loop, providers and native Odoo helpers in `src/erp_harness`.
-- Provides a Windows Electron workbench for sales, purchasing, invoicing, approvals, readback, and run traces.
-- Accepts UTF-8 CSV/TXT materials within the workbench limits, exports observed document lines as UTF-8 BOM CSV, and downloads an already-generated customer-invoice PDF when its Odoo attachment is available.
-- Keeps ERP write actions behind per-action approval and records the pre-state, result, and independent readback.
-- Carries the pinned ERP-Bench dataset and Harbor integration used by the research stages.
-
-The current workbench business projections cover `sale_invoice`, `sale_purchase_invoice`, `purchase`, `inventory`, `manufacturing`, `payment`, `refund`, and `reconciliation`. The native runtime includes controlled SOP tools and persistent, identity-scoped BM25 knowledge search. The separate `experiments/company_records_rag` vector experiment is not connected to the Agent or workbench. ERP-Bench remains the independent scorer; a workbench readback is not an ERP-Bench score.
-
-The [standard validation enterprise](experiments/enterprise_validation/README.md) provides an isolated Chinese/CNY Odoo company pair, role accounts, and 10,000 source documents. See its [acceptance ledger](docs/enterprise-validation.md) for actual results and remaining gates. Long-term memory defaults to off.
-
-The desktop worker uses `native` execution with `dynamic` tools, `controlled` SOPs, and `record` world state. The v0.6.0 package includes the integrated backend and interrupted-business recovery. The desktop host supplies the confirmed task evidence; writes remain subject to approval and readback. See [release notes](docs/release-0.6.0.md) and [backend validation boundaries](docs/backend-release.md).
-
-## Quick start: Windows development
-
-Requirements: Windows, Node.js 22 or newer, Python 3.13, and uv.
+Requirements: Node.js 22+, Python 3.13 and [uv](https://docs.astral.sh/uv/).
 
 ```powershell
 git clone https://github.com/Sanssssssssssssssss/ERP-agent.git
 cd ERP-agent
-
 uv sync --locked
 
 cd desktop
@@ -81,45 +50,44 @@ $env:WORKBENCH_PYTHON = (Resolve-Path ..\.venv\Scripts\python.exe).Path
 npm run dev
 ```
 
-Open connection settings and provide the model endpoint and Odoo 19 JSON-2 details. Use HTTPS for network connections; localhost HTTP is intended for local development. The application does not start a model request just to check configuration.
+Open **Connection settings**, enter Odoo and model credentials, and start a new chat. Attach CSV, TXT, XLSX, PDF or images as reference material. Settings include dark appearance, reduced motion and chat storage location. Printed-document extraction runs locally; spreadsheet formulas are not evaluated.
 
-Useful checks from `desktop/`:
+For a reproducible local company, see the [persistent demo](experiments/demo_odoo/README.md) and [10,000-document validation fixture](experiments/enterprise_validation/README.md). The sample [orders.csv](experiments/desktop_workbench/fixtures/bench_2262_orders/orders.csv) specifically matches the ERP-Bench 2262 seed.
+
+### Development checks
 
 ```powershell
 npm run typecheck
 npm run self-check
 npx playwright install chromium
 node scripts/renderer-check.mjs
+npm run check:execution
+npm run check:trace
 ```
 
-The Windows portable and installer commands are available in `desktop/package.json`. Packaging also requires the pinned sidecar inputs described by `desktop/scripts/prepare-sidecar.mjs` and `desktop/requirements-host.txt`.
-Build the backend wheel first and prepare an environment without development dependencies. The exact build, verification and rollback commands are in the [development guide](docs/development.zh-CN.md).
+Backend checks and coverage are indexed in [TESTING.md](TESTING.md). Packaging instructions, pinned sidecar inputs and rollback commands are in the [development guide](docs/development.zh-CN.md).
 
-## Boundaries
+## Runtime and validation
 
-- The native runtime does not start or import MCP in its accepted Stage 7 path. The pinned MCP tree is retained for provenance and historical control experiments.
-- The native catalog keeps some `mcp_odoo_*` compatibility names; `src/erp_harness/tools/router.py` strips that label before calling the native adapter, with no MCP transport.
-- Odoo writes require explicit approval. An uncertain write moves to readback/reconciliation; it is not silently replayed or marked complete.
-- PDF export is for an observed Odoo document. A down payment invoice or a posted invoice is not evidence that a bank payment occurred.
-- Manufacturing, stock transfers, payments, refunds and reconciliation are validated against the local synthetic enterprise described above. Real bank/tax integrations, payroll, HR and OCR are outside this validation.
-- The workbench accepts CSV/TXT materials. It does not claim a complete enterprise document index or production deployment.
+The desktop runs the native Python Harness with dynamic tools, controlled business procedures and recorded world state. It connects directly to Odoo; historical MCP comparison code remains in the research tree. Identity-scoped BM25 knowledge search is integrated. [Long-term memory](docs/long-term-memory.md) is optional and defaults to off; the separate vector RAG experiment is not connected to the desktop.
 
-## Repository map
+The workflow families above have local test coverage; specific acceptance and remaining limitations are documented in the [enterprise ledger](docs/enterprise-validation.md), [manual business results](docs/manual-business-results.md) and [backend validation](docs/backend-release.md). These fixtures do not establish production bank, tax or HR integration. A posted invoice is not proof of payment, and a verified Odoo state is not a benchmark score.
 
-| Path | Role |
+[ERP-Bench and Harbor](bench/) provide a separate evaluation path with pinned tasks, snapshots and scoring. Mock and renderer checks verify UI mechanisms; real API runs and Odoo readbacks verify the recorded test workflows.
+
+## Repository
+
+| Path | Purpose |
 | --- | --- |
-| [`desktop/`](desktop/) | Windows Electron workbench, UI contract, and packaging scripts |
-| [`src/erp_harness/app/`](src/erp_harness/app/) | Host session, approval, storage, materials, and business projection |
-| [`src/erp_harness/erp/`](src/erp_harness/erp/) | Native Odoo helpers and runtime capabilities |
-| [`src/erp_harness/`](src/erp_harness/) | Integrated session runtime, providers, context and tools |
-| [`bench/adapters/`](bench/adapters/) | Harbor, scoring, snapshot and report adapters |
-| [`bench/`](bench/) | ERP-Bench tasks, schemas, and Harbor integration |
-| [`bench/configs/`](bench/configs/) | Stage and baseline experiment configurations |
-| [`experiments/`](experiments/) | Stage evidence, limits, and historical research notes |
-| [`sources.lock.json`](sources.lock.json) | Pinned source commits, licenses, trees, and bundle hashes |
+| [desktop/](desktop/) | Electron application, React UI, IPC and packaging |
+| [src/erp_harness/app/](src/erp_harness/app/) | Sessions, execution, approvals, materials and business views |
+| [src/erp_harness/erp/](src/erp_harness/erp/) | Native Odoo reads, writes, policy and verification |
+| [src/erp_harness/](src/erp_harness/) | Agent runtime, providers, context and tools |
+| [bench/](bench/) | ERP-Bench, Harbor adapters and frozen configurations |
+| [experiments/](experiments/) | Reproducible controls, evidence and research notes |
 
-The previous lab entry point remains in [`docs/history/README-lab.md`](docs/history/README-lab.md), with repository-relative links adjusted for the archive location.
+## Sources and contribution
 
-## Provenance and contribution
+Original integration code is MIT. Adapted components retain their own licenses and pinned provenance in [sources.lock.json](sources.lock.json), [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [UI source notices](docs/licenses/execution-ui-NOTICES.md).
 
-The repository combines locally written harness code with pinned source material listed in [`sources.lock.json`](sources.lock.json). Check the relevant [`LICENSE`](LICENSE), [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md), and [`docs/licenses/pi-agent-NOTICES.md`](docs/licenses/pi-agent-NOTICES.md) before redistributing a component. See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`SECURITY.md`](SECURITY.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and the [historical lab entry](docs/history/README-lab.md).

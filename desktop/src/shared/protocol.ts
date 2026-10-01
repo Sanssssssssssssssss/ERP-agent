@@ -1,5 +1,5 @@
 export type BusinessType = "sale_invoice" | "sale_purchase_invoice" | "purchase" | "inventory" | "manufacturing" | "payment" | "refund" | "reconciliation" | "invoice_delivery";
-export type CompletionTarget = "read_only" | "draft" | "confirmed" | "posted" | "done" | "reconciled" | "sent";
+export type CompletionTarget = "read_only" | "draft" | "confirmed" | "posted" | "done" | "reconciled" | "sent" | "cancelled";
 export type Role = "user" | "assistant" | "system";
 export type ApprovalDecision = "approve" | "reject";
 
@@ -17,7 +17,7 @@ export interface Message {
   id: string;
   role: Role;
   text: string;
-  created_at: string;
+  created_at?: string;
   business_id?: string;
   context_business_id?: string | null;
   run_id?: string;
@@ -36,6 +36,9 @@ export interface Material {
   row_count?: number;
   preview: string;
   media_type: string;
+  status?: "parsing" | "ready" | "failed";
+  error?: string;
+  warnings?: string[];
 }
 
 export interface ConversationRun {
@@ -70,10 +73,11 @@ export interface BusinessProposal {
   title: string;
   goal: string;
   source_messages?: { id: string; text: string }[];
-  resolved_references?: { resource: string; id: number; quote: string; model: string }[];
+  resolved_references?: { resource: string; id: number; quote: string; model: string; expected_state?: "cancel" }[];
   status: "pending" | "confirmed" | "rejected";
   completion_target?: CompletionTarget;
   material_ids?: string[];
+  existing_business_id?: string;
 }
 
 export interface Business {
@@ -82,6 +86,7 @@ export interface Business {
   type: BusinessType;
   title: string;
   goal: string;
+  goal_submitted?: boolean;
   status: string;
   created_at: string;
   updated_at: string;
@@ -123,6 +128,8 @@ export interface Approval {
   source?: string;
   result?: unknown;
   verification?: unknown;
+  display_references?: { model: string; id: number | string; name?: string | null; status: string; observed_at?: string }[];
+  approval_display?: { ready: boolean; missing: string[]; effect?: string | null };
 }
 
 export interface Document {
@@ -172,6 +179,10 @@ export interface BusinessEvidence {
   action_id?: string;
   observed_at?: string;
   label: string;
+  model?: string;
+  operation?: string;
+  record_ids?: Array<number | string>;
+  record_names?: string[];
 }
 
 export interface BusinessStage {
@@ -232,6 +243,7 @@ export interface Tool {
   started_at?: string;
   ended_at?: string;
   search_text?: string;
+  display?: { model?: string; operation?: string; record_ids?: Array<number | string>; record_names?: string[]; record_count?: number; classification?: { safety?: string; destructive_method?: boolean; confidence?: string } };
 }
 
 export interface TraceRequest {
@@ -331,6 +343,7 @@ export interface Health {
 }
 
 export interface Settings {
+  data_dir?: string;
   model: string;
   base_url: string;
   odoo_url: string;
@@ -375,6 +388,7 @@ export type WorkbenchMethod =
   | "open_business_artifact"
   | "reveal_business_artifact"
   | "get_settings"
+  | "choose_data_directory"
   | "save_settings"
   | "import_material"
   | "download_document"
@@ -399,6 +413,7 @@ export interface WorkbenchEvent {
 }
 
 export interface WorkbenchBridge {
+  showMenu(name: "文件" | "编辑" | "视图" | "帮助", x: number, y: number): Promise<void>;
   call(method: WorkbenchMethod, params?: Record<string, unknown>): Promise<unknown>;
   subscribe(listener: (event: WorkbenchEvent) => void): () => void;
   windowControl(action: "minimize" | "maximize" | "close"): Promise<void>;

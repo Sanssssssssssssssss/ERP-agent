@@ -5,7 +5,7 @@ from itertools import count
 from pathlib import Path
 from unittest.mock import AsyncMock
 
-from erp_harness.app.capability_routing import OpenJevProvider
+from erp_harness.app.capability_routing import CapabilityRoutingProvider
 from erp_harness.app.model_config import provider_config
 from erp_harness.erp.store import ActionStore
 from erp_harness.providers.env import OpenAICompatibleConfig
@@ -24,7 +24,7 @@ def setup(tmp_path):
     controller=DynamicToolController(fake_tools(set(),calls),tmp_path/'dynamic-tools.jsonl',count().__next__,host_owned=True)
     controller.bind(lambda tools: None)
     store=ActionStore(tmp_path/'actions.sqlite3')
-    provider=OpenJevProvider(OpenAICompatibleConfig(api_key='test',base_url='http://unused.invalid'))
+    provider=CapabilityRoutingProvider(OpenAICompatibleConfig(api_key='test',base_url='http://unused.invalid'))
     provider.bind_router(controller,store,tmp_path)
     return provider,controller,store,calls
 
@@ -41,7 +41,7 @@ def test_explicit_missing_tool_recovery_persists_without_business_execution(tmp_
         assert _receipt_dynamic_selection(tmp_path / 'dynamic-tools.jsonl') == (True, ('attachments',))
         assert set(calls) <= {'find_records'}
         # A new provider sees the receipt even if the selector again omits the group.
-        resumed = OpenJevProvider(provider._config)
+        resumed = CapabilityRoutingProvider(provider._config)
         resumed.bind_router(controller, store, tmp_path)
         resumed._decide = AsyncMock(return_value={'status': 'ok', 'capabilities': []})
         kwargs = {'model': 'test', 'system': 'ERP', 'messages': [UserMessage(content='Read attachment')],
@@ -160,7 +160,7 @@ def test_published_tools_are_dispatchable_in_the_same_turn(tmp_path,monkeypatch)
         await session.aclose()
         await provider.aclose()
     asyncio.run(check())
-    assert 'mcp_odoo_execute_approved_write' in seen[0] and 'mcp_odoo_execute_approved_write' not in seen[1]
+    assert 'mcp_odoo_execute_approved_write' in seen[0] and 'mcp_odoo_execute_approved_write' in seen[1]
     assert calls.count('execute_approved_write')==1
     assert all(not {'configure_odoo_tools','list_odoo_capabilities'} & names for names in seen)
     store.close()
@@ -177,7 +177,7 @@ def test_sop_dependencies_survive_restart_without_model_routing(tmp_path):
         provider._decide=AsyncMock(return_value={'status':'ok','capabilities':[]})
         await provider._publish(kwargs)
         assert controller._active==('actions',)
-        resumed=OpenJevProvider(provider._config);resumed.bind_router(controller,store,tmp_path)
+        resumed=CapabilityRoutingProvider(provider._config);resumed.bind_router(controller,store,tmp_path)
         resumed._decide=AsyncMock(return_value={'status':'ok','capabilities':['diagnostics']})
         await resumed._publish(kwargs)
         assert set(controller._active)=={'actions','diagnostics'}
@@ -206,7 +206,7 @@ def test_dispatch_recovery_requires_exact_failed_call_and_never_executes_it(tmp_
         assert provider.routing_diagnostic()['recovery'][0]['tool_call_id']=='missing'
         kwargs['messages'].append(AssistantMessage(content='Read completed'))
         await provider._publish(kwargs)
-        assert not controller._active
+        assert controller._active == ('cross_instance',)  # Published groups persist for this run.
         await provider.aclose()
     asyncio.run(check());store.close()
 
@@ -223,12 +223,12 @@ def test_pending_ledger_retains_actions_and_worker_failure_uses_host_fallback(tm
             monkeypatch.setattr(ActionStore,'read_receipts',staticmethod(lambda _p:[{'status':status}]))
             provider._decide=AsyncMock(return_value={'status':'ok','capabilities':[]})
             await provider._publish(kwargs)
-            assert controller._active==('actions',)
+            assert controller._active==('actions', 'migration', 'diagnostics')
             provider._decide.assert_awaited_once()
             packet=provider._decide.await_args.args[0]
-            state=json.loads(packet['messages'][1]['content'])['context']
-            assert state['version']=='capability_context_v12'
-            assert state['action_ledger']['actions'][0]['status']==status
+            state=packet['state']
+            assert state['version']=='host_facts_v1'
+            assert state['action_ledger']['unresolved'][0]['status']==status
             assert 'actions' in state['runtime_retained_capabilities']
         monkeypatch.setattr(ActionStore,'read_receipts',staticmethod(lambda _p:[]))
         provider._decide=AsyncMock(side_effect=RuntimeError('Worker failed'))

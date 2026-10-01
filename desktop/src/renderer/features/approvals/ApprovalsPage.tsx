@@ -1,6 +1,6 @@
 import { Button as RadixButton } from '@radix-ui/themes'
 import { Check as CheckIcon,Clock3,RefreshCw,X } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect,useState,type ReactNode } from 'react'
 import { EmptyState,StatusBadge } from '../../components/common'
 import { approvalResultLabel,approvalStatusLabel,isPendingApproval,modelLabel,operationLabel,messageForError,readableValue } from '../../presentation'
 import {
@@ -12,17 +12,37 @@ isExpired,
 jsonText
 } from '../../protocol'
 import { ApprovalProgress } from '../../view-types'
-import { approvalActionTitle, approvalActionEffect, approvalBusinessTargets, approvalBusinessFacts, approvalMethodOptions, approvalRelationIds, approvalWrittenValues } from './approval-presentation'
+import { approvalActionTitle, approvalActionEffect, approvalBusinessTargets, approvalBusinessFacts, approvalDisplayDocuments, approvalMethodOptions, approvalRelationIds, approvalWrittenValues } from './approval-presentation'
 
-export function ApprovalInboxCard({ approvals, businessName, progress, activity, onOpenApprovals, onOpenExecution }: { approvals: Approval[]; businessName: string; progress: ApprovalProgress | null; activity?: NonNullable<BusinessDetail['activity']>; onOpenApprovals: () => void; onOpenExecution: () => void }) {
+export function ApprovalInboxCard({ approvals, businessName, progress, activity, onOpenApprovals, onOpenExecution }: { approvals: Approval[]; businessName: string; progress: ApprovalProgress | null; activity?: NonNullable<BusinessDetail['activity']>; onOpenApprovals: (actionId?: string) => void; onOpenExecution: () => void }) {
   const activeProgress = Boolean(progress && (approvals.length === 0 || approvals.some((approval) => approval.business_id === progress.businessId)))
-  const summary = approvals.length ? `${approvals.slice(0, 2).map((approval) => approvalActionTitle(approval)).join('、')}${approvals.length > 2 ? ` 等 ${approvals.length} 项` : ''}` : activity ? `${activity.label || '当前执行状态'}：${activity.detail || '正在读取最新状态。'}` : '正在读取最新执行状态。'
-  return <section className="approval-inbox-card" role="status"><div className="approval-inbox-icon"><Clock3 size={18} /></div><div className="approval-inbox-copy"><div className="approval-inbox-kicker">{approvals.length ? `需要人工审批 · ${businessName}` : `业务执行状态 · ${businessName}`}</div><strong>{approvals.length ? `${approvals.length} 项业务动作等待确认` : (activity?.label || '业务执行状态')}</strong><span>{summary}</span>{activeProgress && <small>{progress?.status === 'submitting' ? '正在提交审批决定…' : (progress?.detail || '审批状态未生效，请查看执行详情。')}</small>}</div><RadixButton className="primary-button approval-inbox-button" onClick={approvals.length ? onOpenApprovals : onOpenExecution}>{approvals.length ? <><CheckIcon size={15} />查看并审批</> : '查看执行状态'}</RadixButton></section>
+  const summary = approvals.length ? '核对业务对象、数量和金额；需要调整时可提出修改。' : activity ? `${activity.label || '当前执行状态'}：${activity.detail || '正在读取最新状态。'}` : '正在读取最新执行状态。'
+  return <section className="approval-inbox-card" role="status"><div className="approval-inbox-icon"><Clock3 size={18} /></div><div className="approval-inbox-copy"><div className="approval-inbox-kicker">{approvals.length ? `需要人工审批 · ${businessName}` : `业务执行状态 · ${businessName}`}</div><strong>{approvals.length ? `${approvals.length} 项业务动作等待确认` : (activity?.label || '业务执行状态')}</strong><span>{summary}</span>{approvals.map((approval) => <button key={approval.action_id} type="button" className="receipt-button approval-inbox-item" data-action-id={approval.action_id} onClick={() => onOpenApprovals(approval.action_id)}>{approvalActionTitle(approval)}{approval.approval_display?.ready === false ? ' · 待补齐审批信息' : ' · 查看详情'}</button>)}{activeProgress && <small>{progress?.status === 'submitting' ? '正在提交审批决定…' : (progress?.detail || '审批状态未生效，请查看执行详情。')}</small>}</div><RadixButton className="primary-button approval-inbox-button" onClick={() => approvals.length ? onOpenApprovals(approvals[0]?.action_id) : onOpenExecution()}>{approvals.length ? <><CheckIcon size={15} />查看并审批</> : '查看执行状态'}</RadixButton></section>
 }
 
-export function ApprovalsPage({ approvals, documents, disabled, onDecision, onReconcile, onRequestRevision, onTraceTarget }: { approvals: Approval[]; documents: Document[]; disabled: boolean; onDecision: (approval: Approval, decision: 'approve' | 'reject') => void; onReconcile: (approval: Approval) => void; onRequestRevision?: (approval: Approval, text: string) => Promise<void>; onTraceTarget: (target: { run_id?: string; tool_id?: string; action_id?: string; kind?: string }) => void }) {
+export function ApprovalsPage({ approvals, documents, disabled, onDecision, onReconcile, onRequestRevision, onTraceTarget, onRefresh, focusActionId, focusRequest, onOpenExecution }: { onOpenExecution?: (actionId: string) => void; onRefresh?: () => void; focusActionId?: string; focusRequest?: number; approvals: Approval[]; documents: Document[]; disabled: boolean; onDecision: (approval: Approval, decision: 'approve' | 'reject') => void; onReconcile: (approval: Approval) => void; onRequestRevision?: (approval: Approval, text: string) => Promise<void>; onTraceTarget: (target: { run_id?: string; tool_id?: string; action_id?: string; kind?: string }) => void }) {
   const orderedApprovals = [...approvals].sort(compareApprovals)
-  return <div className="page-stack"><div className="page-intro"><h3>变更与审批</h3><span>{approvals.filter(isPendingApproval).length} 项待处理</span></div>{approvals.length === 0 ? <EmptyState title="没有审批记录" detail="主机产生需要人工确认的业务动作后，审批卡会保留在这里。" /> : <div className="approval-list">{orderedApprovals.map((approval) => <ApprovalRow key={approval.action_id} approval={approval} documents={documents} disabled={disabled} onDecision={onDecision} onReconcile={onReconcile} onRequestRevision={onRequestRevision} onTraceTarget={onTraceTarget} />)}</div>}</div>
+  const [selectedId, setSelectedId] = useState(focusActionId || '')
+  const selected = orderedApprovals.find(approval => approval.action_id === selectedId) ?? orderedApprovals[0]
+  useEffect(() => {
+    if (!focusActionId) return
+    setSelectedId(focusActionId)
+  }, [focusActionId, focusRequest])
+  useEffect(() => {
+    if (!focusActionId || selected?.action_id !== focusActionId) return
+    const row = document.getElementById(`approval-${focusActionId}`)
+    row?.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+    row?.focus({ preventScroll: true })
+  }, [focusActionId, focusRequest, selected?.action_id])
+  return <div className="page-stack approval-archive"><div className="page-intro"><h3>审批记录</h3><span>{approvals.filter(isPendingApproval).length} 项待处理</span></div>{!selected ? <EmptyState title="没有审批记录" detail="" /> : <div className="approval-archive-layout"><nav className="approval-history" aria-label="审批记录">{orderedApprovals.map(approval => <button key={approval.action_id} type="button" aria-current={selected.action_id === approval.action_id ? 'true' : undefined} onClick={() => setSelectedId(approval.action_id)}><strong>{approvalActionTitle(approval)}</strong><span>{approvalStatusLabel(approval.status)}</span></button>)}</nav><section className="approval-archive-detail"><ApprovalRow key={selected.action_id} approval={selected} documents={documents} disabled={disabled} readOnly={Boolean(onOpenExecution)} onDecision={onDecision} onReconcile={onReconcile} onRequestRevision={onRequestRevision} onTraceTarget={onTraceTarget} onRefresh={onRefresh} />{onOpenExecution && (isPendingApproval(selected) || selected.status === 'needs_reconciliation') && <RadixButton variant="soft" onClick={() => onOpenExecution(selected.action_id)}>在执行台处理</RadixButton>}</section></div>}</div>
+}
+
+// Conditional request rendering adapted from Vercel AI Elements ConfirmationRequest.
+// Apache-2.0, Copyright 2023 Vercel, Inc. Source pinned at 6a9d5b1822ffb10bba4bd97175f01edd7d8651cd.
+// Native approval states and callbacks remain authoritative; see experiments/execution_ui_v2/THIRD_PARTY_NOTICES.md.
+function ConfirmationRequest({ requested, children }: { requested: boolean; children: ReactNode }) {
+  if (!requested) return null
+  return children
 }
 
 export function compareApprovals(left: Approval, right: Approval) {
@@ -39,12 +59,20 @@ export function compareApprovals(left: Approval, right: Approval) {
   return createdDifference || right.action_id.localeCompare(left.action_id)
 }
 
-export function ApprovalRow({ approval, documents, disabled, onDecision, onReconcile, onRequestRevision, onTraceTarget }: { approval: Approval; documents: Document[]; disabled: boolean; onDecision: (approval: Approval, decision: 'approve' | 'reject') => void; onReconcile: (approval: Approval) => void; onRequestRevision?: (approval: Approval, text: string) => Promise<void>; onTraceTarget: (target: { run_id?: string; tool_id?: string; action_id?: string; kind?: string }) => void }) {
+export function ApprovalRow({ approval, documents, disabled, onDecision, onReconcile, onRequestRevision, onTraceTarget, onRefresh, readOnly = false }: { readOnly?: boolean; onRefresh?: () => void; approval: Approval; documents: Document[]; disabled: boolean; onDecision: (approval: Approval, decision: 'approve' | 'reject') => void; onReconcile: (approval: Approval) => void; onRequestRevision?: (approval: Approval, text: string) => Promise<void>; onTraceTarget: (target: { run_id?: string; tool_id?: string; action_id?: string; kind?: string }) => void }) {
+  documents = approvalDisplayDocuments(approval, documents)
+  const displayIncomplete = approval.approval_display?.ready === false
   const [editing, setEditing] = useState(false)
   const [revision, setRevision] = useState('')
   const [revisionError, setRevisionError] = useState('')
   const [submittingRevision, setSubmittingRevision] = useState(false)
   const pending = isPendingApproval(approval)
+  const [, setExpiryTick] = useState(0)
+  useEffect(() => {
+    if (!pending) return
+    const timer = window.setInterval(() => setExpiryTick(value => value + 1), 1000)
+    return () => window.clearInterval(timer)
+  }, [pending])
   const expired = pending && isExpired(approval.expires_at)
   const title = approvalActionTitle(approval)
   const targets = approvalBusinessTargets(approval, documents)
@@ -57,15 +85,16 @@ export function ApprovalRow({ approval, documents, disabled, onDecision, onRecon
     finally { setSubmittingRevision(false) }
   }
   return (
-    <article className={`approval-row ${pending ? 'pending' : ''}`}>
+    <article id={`approval-${approval.action_id}`} tabIndex={-1} className={`approval-row ${pending ? 'pending' : ''}`}>
       <div className="approval-row-head">
-        <div><strong>{title}</strong><span>{pending ? formatExpiry(approval.expires_at) : '审批已结束'}</span></div>
+        <div className="approval-request-heading">{pending && <span className="approval-request-icon" aria-hidden="true"><Clock3 size={20} /></span>}<div>{pending && <small className="approval-request-kicker">需要你的批准</small>}<strong>{title}</strong><span>{pending ? formatExpiry(approval.expires_at) : '审批已结束'}</span></div></div>
         <StatusBadge status={expired ? 'expired' : approval.status} label={expired ? '已过期' : approvalStatusLabel(approval.status)} />
       </div>
-      <p className="approval-effect">{approvalActionEffect(approval)}</p>
+      {pending && displayIncomplete && <section className="approval-display-missing" role="status"><strong>审批信息尚不完整</strong><p>{approval.approval_display?.missing.join('、') || '关键业务对象尚未读取。'}</p>{onRefresh && <RadixButton variant="soft" disabled={disabled} onClick={onRefresh}><RefreshCw size={15} />刷新审批信息</RadixButton>}</section>}
+      <section className="approval-effect"><strong>批准后会发生什么</strong><p>{approvalActionEffect(approval)}</p></section>
       <section className="approval-business-context" aria-label="本次业务对象">
         <small className="approval-context-label">关联单据 · 最近读取</small>
-        {targets.length ? targets.map(({ model, fields }, index) => <dl className="approval-business-facts" key={`${model}:${String(fields.id ?? index)}`}>{approvalBusinessFacts(model, fields, documents).map(({ label, value }) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>) : <p className="muted">关联业务单据未读取，请核对原始数据后再批准。</p>}
+        {targets.length ? targets.map(({ model, fields }, index) => <dl className="approval-business-facts" key={`${model}:${String(fields.id ?? index)}`}>{approvalBusinessFacts(model, fields, documents, approval.operation).map(({ label, value }) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>) : <p className="muted">关联业务单据未读取，请核对原始数据后再批准。</p>}
         {methodOptions.length > 0 && <dl className="approval-business-facts">{methodOptions.map(({ label, value }, index) => <div key={`${label}:${index}`}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>}
       </section>
       <InvoiceMailPreview approval={approval} />
@@ -75,15 +104,15 @@ export function ApprovalRow({ approval, documents, disabled, onDecision, onRecon
         <summary>查看拟提交值与执行前状态</summary>
         <p className="approval-internal-ids">{modelLabel(approval.model)} · {operationLabel(approval.operation)} · {approval.model} · {approval.action_id}<br />{approvalRecordText(approval, documents)}</p><div className="json-columns"><div><small>拟提交值</small><pre>{jsonText(approval.values)}</pre></div><div><small>执行前状态</small><pre>{approvalPrestateText(approval)}</pre></div></div>
       </details>
-      {pending && !expired && <div className="approval-actions"><RadixButton className="danger-button" variant="soft" disabled={disabled || submittingRevision} onClick={() => onDecision(approval, 'reject')}><X size={15} />拒绝</RadixButton>{onRequestRevision && <RadixButton className="secondary-button" variant="soft" disabled={disabled || submittingRevision} onClick={() => { setEditing(!editing); setRevisionError('') }}>{editing ? '取消修改' : '提出修改'}</RadixButton>}<RadixButton className="primary-button" disabled={disabled || submittingRevision || editing} onClick={() => onDecision(approval, 'approve')}><CheckIcon size={15} />批准这项业务动作</RadixButton></div>}
-      {pending && !expired && editing && onRequestRevision && <form className="approval-revision" onSubmit={(event) => { event.preventDefault(); void submitRevision() }}>
+      <ConfirmationRequest requested={pending && !expired && !readOnly}><div className="approval-actions"><RadixButton className="danger-button" variant="soft" disabled={disabled || submittingRevision} onClick={() => onDecision(approval, 'reject')}><X size={15} />拒绝</RadixButton>{onRequestRevision && <RadixButton className="secondary-button" variant="soft" disabled={disabled || submittingRevision} onClick={() => { setEditing(!editing); setRevisionError('') }}>{editing ? '取消修改' : '提出修改'}</RadixButton>}<RadixButton className="primary-button" disabled={disabled || submittingRevision || editing || displayIncomplete} onClick={() => onDecision(approval, 'approve')}><CheckIcon size={15} />批准这项业务动作</RadixButton></div></ConfirmationRequest>
+      {pending && !expired && !readOnly && editing && onRequestRevision && <form className="approval-revision" onSubmit={(event) => { event.preventDefault(); void submitRevision() }}>
         <label htmlFor={`revision-${approval.action_id}`}>希望怎样修改这项动作？</label>
         <textarea id={`revision-${approval.action_id}`} value={revision} onChange={(event) => setRevision(event.target.value)} disabled={disabled || submittingRevision} rows={3} placeholder="例如：数量改为 5 件，先保留草稿。" />
-        <p>提交后当前审批作废，已完成动作不撤销。修改后的方案需重新确认。</p>
+        <p>提交后旧审批作废，Agent 从当前断点修改。已完成动作保留，修改后的动作需重新审批。</p>
         {revisionError && <p className="error-text" role="alert">{revisionError}</p>}
         <RadixButton type="submit" className="primary-button" disabled={disabled || submittingRevision || !revision.trim()}>{submittingRevision ? '提交修改中…' : '提交修改要求'}</RadixButton>
       </form>}
-      {approval.status === 'needs_reconciliation'  && <div className="approval-actions"><small>写入结果不确定；核对现有 Odoo 状态后才能继续。</small><RadixButton className="secondary-button" variant="soft" disabled={disabled} onClick={() => onReconcile(approval)}><RefreshCw size={15} />核对不确定写入</RadixButton></div>}
+      {approval.status === 'needs_reconciliation' && !readOnly && <div className="approval-actions"><small>写入结果不确定；核对现有 Odoo 状态后才能继续。</small><RadixButton className="secondary-button" variant="soft" disabled={disabled} onClick={() => onReconcile(approval)}><RefreshCw size={15} />核对不确定写入</RadixButton></div>}
       <button className="receipt-link receipt-button" type="button" onClick={() => onTraceTarget({ run_id: approval.run_id, action_id: approval.action_id })}>查看关联运行回执</button>
       {approval.result != null && <details className={`receipt receipt-details ${pending ? 'receipt-preflight' : ''}`}><summary>{approvalResultLabel(approval.status)}</summary><pre>{jsonText(approval.result)}</pre></details>}
     </article>
@@ -94,7 +123,7 @@ function InvoiceMailPreview({ approval }: { approval: Approval }) {
   const state = approval.prestate as { invoice_mail?: { invoice: { name: string; amount_total: number }; company: { name: string; email: string }; recipient: { name: string }; email_from: string; email_to: string; attachment: { name: string; checksum: string }; subject: string; body: string } } | null
   const mail = state?.invoice_mail
   if (!mail) return null
-  return <section className="field-diff" aria-label="待发送邮件"><div className="field-diff-note"><p><strong>{mail.company.name} · {mail.invoice.name}</strong></p><p>发件人：{mail.company.name} · {mail.company.email}</p><p>收件人：{mail.recipient.name} · {mail.email_to}</p><p>附件：{mail.attachment.name}</p><p>主题：{mail.subject}</p><p>{mail.body}</p><small>仅发送给此登记邮箱，不抄送关注者。附件指纹：{mail.attachment.checksum.slice(0, 12)}（完整值见执行前状态）。</small></div></section>
+  return <section className="field-diff" aria-label="待发送邮件"><div className="field-diff-note"><p><strong>{mail.company.name} · {mail.invoice.name}</strong></p><p>发件人：{mail.company.name} · {mail.company.email}</p><p>收件人：{mail.recipient.name} · {mail.email_to}</p><p>附件：{mail.attachment.name}</p><p>主题：{mail.subject}</p><p className="approval-message-body">{mail.body}</p><small>仅发送给此登记邮箱，不抄送关注者。附件指纹：{mail.attachment.checksum.slice(0, 12)}（完整值见执行前状态）。</small></div></section>
 }
 
 function ChatterPreview({ approval, documents }: { approval: Approval; documents: Document[] }) {
@@ -116,9 +145,7 @@ export function ApprovalFieldDiff({ approval, documents }: { approval: Approval;
   if (!keys.length) return null
   const beforeText = (key: string) => prestate.kind === 'new' ? '新建 / 无前态' : prestate.kind === 'multiple' ? '多条记录（见下方原始状态）' : prestate.kind === 'unknown' ? '未知' : approvalValueText(approval.model, key, before[key], documents)
   const row = (key: string) => <div className="field-diff-row" key={key}><span>{approvalFieldLabel(key, approval.model)}</span><span className="diff-value">{beforeText(key)}</span><span className="diff-value after">{approvalValueText(approval.model, key, values[key], documents)}</span></div>
-  const visible = keys.slice(0, 8)
-  const remaining = keys.slice(8)
-  return <div className="field-diff"><div className="field-diff-row field-diff-head"><span>字段</span><span>执行前</span><span>拟提交</span></div>{visible.map(row)}{remaining.length > 0 && <details className="field-diff-more"><summary>查看其余字段（共 {keys.length} 项）</summary>{remaining.map(row)}</details>}</div>
+  return <div className="field-diff"><div className="field-diff-row field-diff-head"><span>字段</span><span>执行前</span><span>拟提交</span></div>{keys.map(row)}</div>
 }
 
 export function approvalPrestateView(approval: Approval): { kind: 'new' | 'unknown' | 'fields' | 'multiple'; fields: Record<string, unknown> } {
@@ -153,7 +180,7 @@ export function approvalRecordText(approval: Approval, documents: Document[]) {
 }
 
 export function approvalFieldLabel(key: string, model?: string) {
-  const labels: Record<string, string> = { partner_id: model === 'purchase.order' ? '供应商' : '客户', payment_term_id: '付款条件', partner_shipping_id: '收货地址', partner_invoice_id: '开票地址', date_order: '下单日期', invoice_status: '开票状态', invoice_line_ids: '发票明细', order_line: '订单明细', commitment_date: '承诺日期', client_order_ref: '客户参考', advance_payment_method: '开票方式', sale_order_ids: '来源销售订单', move_id: '关联发票 / 凭证', move_ids: '原发票 / 凭证', sending_methods: '发送方式', extra_edis: '附加电子文件', invoice_edi_format: '电子发票格式', company_id: '公司', currency_id: '币种', amount: '金额', amount_total: '含税金额', journal_id: '日记账', product_id: '产品', product_uom_qty: '数量', product_qty: '数量', quantity: '数量', product_uom_id: '计量单位', price_unit: '单价', date: '业务日期', reason: '原因', state: '状态', name: '名称', line_ids: '会计分录', payment_type: '收付款方向', partner_type: '往来类型', group_payment: '合并收付款', payment_difference_handling: '付款差额处理' }
+  const labels: Record<string, string> = { effective_date: '实际交付日期', id: '记录编号', display_name: '显示名称', amount_untaxed: '未税金额', amount_tax: '税额', picking_ids: '收发货单', invoice_ids: '关联发票', description: '说明', read_only: '只读', local_date: '本地日期', local_datetime: '本地时间', timezone: '时区', utc_datetime: 'UTC 时间', note: '备注', notes: '备注', origin: '来源单号', date_planned: '计划日期', partner_ref: '供应商参考', partner_id: model === 'purchase.order' ? '供应商' : '客户', payment_term_id: '付款条件', partner_shipping_id: '收货地址', partner_invoice_id: '开票地址', date_order: '下单日期', invoice_status: '开票状态', invoice_line_ids: '发票明细', order_line: '订单明细', commitment_date: '承诺日期', client_order_ref: '客户参考', advance_payment_method: '开票方式', sale_order_ids: '来源销售订单', move_id: '关联发票 / 凭证', move_ids: '原发票 / 凭证', sending_methods: '发送方式', extra_edis: '附加电子文件', invoice_edi_format: '电子发票格式', company_id: '公司', currency_id: '币种', amount: '金额', amount_total: '含税金额', journal_id: '日记账', product_id: '产品', product_uom_qty: '数量', product_qty: '数量', quantity: '数量', product_uom_id: '计量单位', price_unit: '单价', date: '业务日期', reason: '原因', state: '状态', name: '名称', line_ids: '会计分录', payment_type: '收付款方向', partner_type: '往来类型', group_payment: '合并收付款', payment_difference_handling: '付款差额处理' }
   return labels[key] || key
 }
 
@@ -162,7 +189,7 @@ export function approvalReferenceText(models: string[], value: unknown, document
   if (id == null || id === '') return '未读取'
   const inlineName = Array.isArray(value) && typeof value[1] === 'string' ? value[1] : ''
   const document = documents.find((item) => models.includes(item.model) && String(item.id) === String(id))
-  const name = document?.name || inlineName
+  const name = inlineName || document?.name
   return name || `${fallback}名称未读取（记录 ${String(id)}）`
 }
 
@@ -175,7 +202,7 @@ export function approvalLineText(value: unknown, documents: Document[]) {
     const product = approvalReferenceText(['product.product'], row.product_id, documents, '商品')
     const quantity = row.product_uom_qty ?? row.product_qty ?? row.quantity ?? row.qty
     const price = row.price_unit ?? row.price
-    return [product, quantity == null ? '' : `数量 ${readableValue(quantity)}`, price == null ? '' : `单价 ${readableValue(price)}`].filter(Boolean).join(' · ')
+    return [product, row.name ? `明细描述：${String(row.name)}` : '', quantity == null ? '' : `数量 ${readableValue(quantity)}`, price == null ? '' : `单价 ${readableValue(price)}`].filter(Boolean).join(' · ')
   }).filter(Boolean)
   return rows.length ? rows.join('；') : readableValue(value)
 }
@@ -191,6 +218,12 @@ export function approvalValueText(model: string, key: string, value: unknown, do
     return approvalRelationIds(value).map((id) => approvalReferenceText([targetModel], id, documents, modelLabel(targetModel))).join('、') || '未指定'
   }
   if (value === null || value === false || Array.isArray(value) && value.length === 0) return '清空 / 未设置'
+  if (key === 'note' || key === 'notes') {
+    const template = document.createElement('template')
+    template.innerHTML = String(value ?? '')
+    template.content.querySelectorAll('script,style').forEach((node) => node.remove())
+    return template.content.textContent || '未填写'
+  }
   if (key === 'company_id') return approvalReferenceText(['res.company'], value, documents, '公司')
   if (key === 'currency_id') return approvalReferenceText(['res.currency'], value, documents, '币种')
   if (key === 'move_id') return approvalReferenceText(['account.move'], value, documents, '发票 / 凭证')

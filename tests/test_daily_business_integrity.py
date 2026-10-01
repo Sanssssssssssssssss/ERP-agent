@@ -177,7 +177,7 @@ def test_target_evidence_prevents_sending_wrong_business(tmp_path, monkeypatch, 
     monkeypatch.setenv("ODOO_MCP_ENABLE_WRITES", "1")
     monkeypatch.setenv("ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS", "sale.order.action_confirm")
     partner = {"id": 7, "name": "Customer249"}
-    order = {"id": 7, "name": "S7", "partner_id": [7, "Customer249"], "state": "draft"}
+    order = {"id": 7, "name": "S7", "partner_id": [7, "Customer249"], "state": "draft", "order_line": []}
     runtime.client.records["res.partner"][7] = partner
     runtime.client.records["sale.order"][7] = copy.deepcopy(order)
     runtime.client.records["sale.order"][8] = {**order, "id": 8}

@@ -3,12 +3,12 @@ import json
 
 import pytest
 
-from erp_harness.app.routing_context import assemble_context, selection_messages
-from erp_harness.app.routing_state import build_routing_state, ledger_state
+from experiments.tool_routing.routing_context import assemble_context, selection_messages
+from experiments.tool_routing.host_state_v1 import build_routing_state, ledger_state
 
 
 def test_batch_preserves_context_and_exact_candidate_schemas():
-    from erp_harness.app.routing_context import selection_batch
+    from experiments.tool_routing.routing_context import selection_batch
     context = assemble_context(prefix())
     before = copy.deepcopy(context)
     packet = json.loads(selection_batch(context, ['actions', 'attachments'])[1]['content'])
@@ -22,7 +22,7 @@ def test_batch_preserves_context_and_exact_candidate_schemas():
 
 
 def test_live_ledger_preserves_verified_evidence_without_claiming_task_completion():
-    from erp_harness.app.routing_context import host_ledger
+    from experiments.tool_routing.routing_context import host_ledger
     rows = [{'action_id': 'a', 'status': 'verified', 'finished_at': 123,
              'payload': {'model': 'sale.order'}, 'verification': {'status': 'satisfied', 'evidence': {'records': [{'id': 1}]}}}]
     result = host_ledger(rows, None)

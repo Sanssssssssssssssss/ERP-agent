@@ -261,7 +261,7 @@ class BaselineFixTest(unittest.TestCase):
             ) as client:
                 stdout = io.StringIO()
                 with (
-                    patch.object(pi_odoo_runner, "McpToolSet", ToolSet),
+                    contextlib.nullcontext(),
                     patch.object(
                         pi_odoo_runner,
                         "OpenAICompatibleProvider",
@@ -294,7 +294,7 @@ class BaselineFixTest(unittest.TestCase):
                     ),
                     contextlib.redirect_stdout(stdout),
                 ):
-                    await pi_odoo_runner.run(args)
+                    await pi_odoo_runner.run(args, source_toolset=lambda _: ToolSet("unused"))
                     # Keep pre-prompt compaction available without calling a
                     # summarizer after the final business response.
                     compact.assert_awaited_once()
@@ -305,13 +305,13 @@ class BaselineFixTest(unittest.TestCase):
             )
             self.assertEqual(metadata["commit_sha"], "fixture-commit")
             self.assertEqual(len(requests), 2)
-            self.assertEqual(json.loads(args.usage_file.read_text())["modelCalls"], 2)
+            self.assertEqual(json.loads(args.usage_file.read_text(encoding="utf-8"))["modelCalls"], 2)
             for number, payload in enumerate(requests, 1):
                 self.assertNotIn("max_tokens", payload)
                 self.assertNotIn("max_completion_tokens", payload)
                 self.assertEqual(
                     json.loads(
-                        (root / "requests" / f"{number:04d}.request.json").read_text()
+                        (root / "requests" / f"{number:04d}.request.json").read_text(encoding="utf-8")
                     ),
                     payload,
                 )
@@ -329,10 +329,10 @@ class BaselineFixTest(unittest.TestCase):
             self.assertEqual(len(tool_results), 2)
             self.assertIn("world_projection", tool_results[0]["content"])
             self.assertIn('"name": "' + "x" * 20, tool_results[1]["content"])
-            self.assertEqual(json.loads((root / "world-summary.json").read_text())["projected_messages"], 1)
+            self.assertEqual(json.loads((root / "world-summary.json").read_text(encoding="utf-8"))["projected_messages"], 1)
             self.assertNotIn(
                 "must-not-be-recorded",
-                (root / "requests/0001.response.json").read_text(),
+                (root / "requests/0001.response.json").read_text(encoding="utf-8"),
             )
 
         with tempfile.TemporaryDirectory() as directory:

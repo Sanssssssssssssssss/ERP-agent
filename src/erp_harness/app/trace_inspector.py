@@ -203,6 +203,32 @@ class TraceInspector:
         search = _json(safe_args)
         row.update(search_text=search[:600], search_truncated=len(search) > 600)
         result = tool.get("result") if isinstance(tool.get("result"), dict) else {}
+        # Small display facts travel with the tree; full request/result bodies stay lazy.
+        payload = result.get("result", result.get("data", result))
+        records = payload if isinstance(payload, list) else payload.get("records", payload.get("rows")) if isinstance(payload, dict) else None
+        if isinstance(payload, dict) and ("id" in payload or "name" in payload):
+            records = [payload]
+        candidates = [args, args.get("approval"), result.get("approval")]
+        candidates = [item for item in candidates if isinstance(item, dict)]
+        display = {key: next((item[source] for item in candidates if item.get(source) is not None), None)
+                   for key, source in (("model", "model"), ("operation", "method"))}
+        display["operation"] = display["operation"] or next((item.get("operation") for item in candidates if item.get("operation")), None)
+        display = {key: value[:160] for key, value in display.items() if isinstance(value, str)}
+        identifiers = args.get("record_ids", args.get("ids", args.get("record_id")))
+        if identifiers is None and isinstance(args.get("kwargs"), dict):
+            identifiers = args["kwargs"].get("ids")
+        display["record_ids"] = [identifier for identifier in (identifiers if isinstance(identifiers, list) else [identifiers])
+                                 if type(identifier) in (str, int)][:16]
+        names = [item.get("name") or item.get("display_name") for item in records or [] if isinstance(item, dict)
+                 and (not display["record_ids"] or item.get("id") in display["record_ids"])] if isinstance(records, list) else []
+        display["record_names"] = [name[:120] for name in names if isinstance(name, str) and name][:4]
+        if not display["record_names"] and isinstance(args.get("name"), str):
+            display["record_names"] = [args["name"][:120]]
+        if isinstance(records, list):
+            display["record_count"] = len(records)
+        classification = result.get("classification") if isinstance(result.get("classification"), dict) else {}
+        display["classification"] = {key: classification[key] for key in ("safety", "destructive_method", "confidence") if key in classification}
+        row["display"] = _sanitize({key: value for key, value in display.items() if value is not None})[0]
         if result.get("error"):
             row["error"] = str(result["error"])[:400]
         return row
@@ -229,11 +255,18 @@ class TraceInspector:
                     "error", "error_detail", "usage", "model_rounds", "tool_count", "metadata", "retry", "phase", "ttft_ms"}
         events = [{"id": str(i), **{k: event[k] for k in ("type", "at", "tool_call_id", "tool_name", "round", "action_id", "status", "is_error", "request_id", "request_file", "round_id", "file", "error_type", "attempt", "max_attempts", "delay_ms", "success", "reason", "aborted", "will_retry") if k in event}}
                   for i, event in enumerate(self.run.get("events", []))]
+        tool_rows = [self._tool_summary(t) for t in self.run.get("tools", [])]
+        for tool in tool_rows:
+            display = tool["display"]
+            if not display["record_names"]:
+                display["record_names"] = [doc["name"][:120] for doc in self.run.get("documents", [])
+                                           if isinstance(doc, dict) and doc.get("model") == display.get("model")
+                                           and doc.get("id") in display["record_ids"] and isinstance(doc.get("name"), str)][:4]
         response = {"summary_only": True, "business": self.business, "run": {k: v for k, v in public_run.items() if k in run_keys},
                     "rounds": [{**{k: v for k, v in r.items() if k != "text"},
                                 "stop_reason": self.run.get("rounds", [])[i].get("stop_reason")}
                                for i, r in enumerate(rounds)],
-                    "tools": [self._tool_summary(t) for t in self.run.get("tools", [])],
+                    "tools": tool_rows,
                     "events": events, "requests": self._requests(), "actions": action_rows,
                     "diagnostics": self._diagnostics(), "warnings": warnings}
         return _sanitize(response)[0]

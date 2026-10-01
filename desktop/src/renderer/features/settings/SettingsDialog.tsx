@@ -1,7 +1,7 @@
 import { Button as RadixButton,Dialog as RadixDialog } from '@radix-ui/themes'
-import { LoaderCircle,RefreshCw } from 'lucide-react'
-import { useEffect,useRef } from 'react'
-import { connectionLabel,environmentLabel,healthLabel,odooHealthStatus } from '../../presentation'
+import { ExternalLink,FolderOpen,LoaderCircle,RefreshCw,X } from 'lucide-react'
+import { useRef,useState } from 'react'
+import { connectionLabel,healthLabel,odooHealthStatus } from '../../presentation'
 import {
 Health,
 Settings,
@@ -33,46 +33,23 @@ export function ConnectionDetailsDialog({ health, connection, busy, open, onOpen
   </RadixDialog.Root>
 }
 
-export function SettingsDialog({ settings, draft, saving, onChange, onClose, onSave }: { settings: Settings | null; draft: Record<string, string>; saving: boolean; onChange: (key: string, value: string) => void; onClose: () => void; onSave: () => void }) {
+export function SettingsDialog({ settings, draft, saving, error, onDismissError, onChooseDirectory, onChange, onClose, onSave, onOpenOdoo, openingOdoo = false, appearance = 'light', onAppearanceChange }: { error?: string; onDismissError?: () => void; onChooseDirectory: () => Promise<void>; appearance?: 'light' | 'dark'; onAppearanceChange?: (appearance: 'light' | 'dark') => void; onOpenOdoo?: () => void; openingOdoo?: boolean; settings: Settings | null; draft: Record<string, string>; saving: boolean; onChange: (key: string, value: string) => void; onClose: () => void; onSave: () => void }) {
   const closeButtonRef = useRef<HTMLButtonElement>(null)
-  const dialogRef = useRef<HTMLElement>(null)
-  useEffect(() => {
-    closeButtonRef.current?.focus()
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        onClose()
-        return
-      }
-      if (event.key !== 'Tab' || !dialogRef.current) return
-      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button, input, select, textarea, [tabindex]:not([tabindex="-1"])')).filter((element) => !element.hasAttribute('disabled') && element.getAttribute('aria-hidden') !== 'true')
-      if (!focusable.length) return
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-      if (event.shiftKey && (document.activeElement === first || !dialogRef.current.contains(document.activeElement))) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && (document.activeElement === last || !dialogRef.current.contains(document.activeElement))) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
-  const field = (key: string, label: string, type = 'text', placeholder = '') => <label className="settings-field"><span>{label}</span><input type={type} value={draft[key] || ''} placeholder={placeholder} onChange={(event) => onChange(key, event.target.value)} /></label>
-  return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <section ref={dialogRef} className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-        <header><div><span className="eyebrow">Connection settings</span><h2 id="settings-title">连接设置</h2></div><button ref={closeButtonRef} className="modal-close" onClick={onClose} aria-label="关闭设置">×</button></header>
-        <p className="settings-note">配置模型与 Odoo 连接。密钥留空表示保留已有密钥。</p>
-        <div className="settings-grid">{field('model', '模型')}{field('base_url', '模型地址')}{field('odoo_url', 'Odoo 地址')}{field('odoo_db', 'Odoo 数据库')}{field('odoo_username', 'Odoo 用户名')}{field('model_key', settings?.has_model_key ? '模型密钥（留空保留）' : '模型密钥', 'password')}{field('odoo_key', settings?.has_odoo_key ? 'Odoo 密钥（留空保留）' : 'Odoo 密钥', 'password')}</div>
-        <div className="settings-note">
-          <label><input type="checkbox" checked={draft.long_term_memory === 'on'} disabled={saving} onChange={(event) => onChange('long_term_memory', event.target.checked ? 'on' : 'off')} aria-describedby="memory-setting-help" /> 启用长期记忆（Mem0）</label>
-          <div id="memory-setting-help">任务开始或遇到已识别错误时召回，结束后自动学习。学习会额外调用模型。关闭后，后续执行跳过召回与学习，已有记忆保留。</div>
-        </div>
-        <div className="settings-footer"><span>环境：{environmentLabel(settings?.environment)}</span><div><button className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" disabled={saving} onClick={onSave}>{saving ? '保存中…' : '保存连接设置'}</button></div></div>
-      </section>
-    </div>
-  )
+  const [choosing, setChoosing] = useState(false)
+  const busy = saving || choosing
+  const field = (key: string, label: string, type = 'text') => <label className="settings-field"><span>{label}</span><input type={type} value={draft[key] || ''} disabled={busy} onChange={(event) => onChange(key, event.target.value)} /></label>
+  return <RadixDialog.Root open onOpenChange={(open) => { if (!open && !busy) onClose() }}>
+    <RadixDialog.Content className="settings-dialog" maxWidth="780px" onOpenAutoFocus={(event) => { event.preventDefault(); closeButtonRef.current?.focus() }} onEscapeKeyDown={(event) => { if (busy) event.preventDefault() }} onPointerDownOutside={(event) => { if (busy) event.preventDefault() }}>
+      <header><RadixDialog.Title>连接设置</RadixDialog.Title><button ref={closeButtonRef} className="modal-close" disabled={busy} onClick={onClose} aria-label="关闭设置"><X size={19} /></button></header>
+      <div className="settings-body">
+        <RadixDialog.Description className="settings-description">连接、聊天存储与外观。密钥留空保留。</RadixDialog.Description>
+        {error && <div className="settings-error" role="alert"><span>{error}</span><button aria-label="关闭错误提示" onClick={onDismissError}><X size={16} /></button></div>}
+        <section className="settings-section"><h3>模型</h3><div className="settings-grid">{field('model', '模型')}{field('base_url', '模型地址')}{field('model_key', settings?.has_model_key ? '模型密钥（留空保留）' : '模型密钥', 'password')}</div></section>
+        <section className="settings-section"><div className="settings-section-heading"><h3>Odoo</h3>{onOpenOdoo && <RadixButton variant="ghost" size="1" disabled={busy || openingOdoo} onClick={onOpenOdoo}><ExternalLink size={14} />在浏览器登录 Odoo</RadixButton>}</div><div className="settings-grid">{field('odoo_url', 'Odoo 地址')}{field('odoo_db', 'Odoo 数据库')}{field('odoo_username', 'Odoo 用户名')}{field('odoo_key', settings?.has_odoo_key ? 'Odoo 密钥（留空保留）' : 'Odoo 密钥', 'password')}</div></section>
+        <section className="settings-section"><h3>聊天数据</h3><div className="settings-storage"><label className="settings-field"><span>存储目录</span><input aria-label="聊天数据存储目录" readOnly value={draft.data_dir || ''} title={draft.data_dir} /></label><RadixButton variant="soft" disabled={busy} onClick={async () => { setChoosing(true); try { await onChooseDirectory() } finally { setChoosing(false) } }}><FolderOpen size={15} />选择目录</RadixButton></div><p className="settings-help">使用所选位置下的 ERP-agent-data 文件夹。保存时复制聊天、材料和运行记录，原目录保留；目标文件夹需尚未存在。</p>{draft.data_dir && draft.data_dir !== settings?.data_dir && <p className="settings-storage-pending">保存后切换到此目录</p>}</section>
+        <section className="settings-section settings-preferences"><h3>偏好</h3>{onAppearanceChange && <label><input type="checkbox" checked={appearance === 'dark'} disabled={busy} onChange={(event) => onAppearanceChange(event.target.checked ? 'dark' : 'light')} />深色外观</label>}<label><input type="checkbox" checked={draft.long_term_memory === 'on'} disabled={busy} onChange={(event) => onChange('long_term_memory', event.target.checked ? 'on' : 'off')} aria-describedby="memory-setting-help" />启用长期记忆（Mem0）</label><p className="settings-help" id="memory-setting-help">结束后自动学习，会额外调用模型。关闭后保留已有记忆。</p></section>
+      </div>
+      <footer className="settings-footer"><span>{saving ? '正在保存，请稍候…' : ''}</span><div><button className="secondary-button" disabled={busy} onClick={onClose}>取消</button><button className="primary-button" disabled={busy} onClick={onSave}>{saving ? '保存中…' : '保存连接设置'}</button></div></footer>
+    </RadixDialog.Content>
+  </RadixDialog.Root>
 }

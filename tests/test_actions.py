@@ -40,9 +40,10 @@ class _Reader:
                                "partner_id": [7, "Customer"], "company_id": [1, "Company"], "currency_id": [1, "CNY"]}},
             "sale.order.line": {71: {"id": 71, "order_id": [7, "S00007"], "name": "Item", "display_type": False,
                                      "is_downpayment": False, "product_id": [5, "Item"], "product_uom_qty": 3,
+                                     "product_uom_id": [1, "Units"], "price_unit": 10, "tax_ids": [], "discount": 0,
                                      "qty_delivered": 2, "qty_invoiced": 0, "qty_to_invoice": 2}},
             "product.product": {5: {"id": 5, "invoice_policy": "delivery"}},
-            "purchase.order": {8: {"id": 8, "state": "draft"}},
+            "purchase.order": {8: {"id": 8, "state": "draft", "order_line": []}},
             "account.move": {10: {"id": 10, "state": "draft", "move_type": "out_invoice"}},
             "sale.advance.payment.inv": {9: {"id": 9, "sale_order_ids": [7], "advance_payment_method": "delivered",
                                             "deduct_down_payments": True, "amount": 0.0, "fixed_amount": 0.0}},
@@ -342,6 +343,10 @@ class NativeActionCheckpointTests(unittest.TestCase):
             with self.subTest(model=model, method=method):
                 actions, writer, runtime = _actions()
                 runtime.client.records[model] = {7: {"id": 7, "state": before}}
+                if model == "sale.order":
+                    runtime.client.records[model][7]["order_line"] = []
+                if model == "purchase.order":
+                    runtime.client.records[model][7].update(name="P7", locked=False, company_id=1, partner_id=2, currency_id=6, amount_total=10, picking_ids=[], invoice_ids=[], order_line=[])
                 if model == "mrp.production":
                     runtime.client.records["mrp.bom"] = {1: {"id": 1, "produce_delay": 2}}
                     runtime.client.records[model][7].update(

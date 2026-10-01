@@ -140,7 +140,7 @@ const bridgeScript = String.raw`
             if (window.__resultScenario === 'stale') result.business.readback.latest_run_id = 'business-b4-old-run'
             if (window.__resultScenario === 'missing') { delete result.runs[1].summary; result.summary = '旧轮次总结，不能显示' }
           }
-          if (id === 'business-b2' && window.__revisionAccepted) { result.runs[1].status = 'cancelled'; result.business.status = 'cancelled'; result.approvals = result.approvals.map(row => ({ ...row, status: 'rejected' })); result.activity = { phase: 'idle', label: '等待更新后的业务方案', detail: '旧审批已撤销。' } }
+          if (id === 'business-b2' && window.__revisionAccepted) { result.runs[1].status = 'running'; result.business.status = 'running'; result.approvals = result.approvals.map(row => ({ ...row, status: 'rejected' })); result.activity = { phase: 'model', label: '正在处理修改意见', detail: '原业务断点续跑。' } }
           if (id === 'business-b2' && showAcceptedProjection) { result.approvals = []; result.business.status = 'running'; result.runs[1].status = 'running'; result.activity = { phase: 'model', label: '等待模型响应', detail: '审批已完成，模型正在继续处理。' } }
           if (id === 'business-b4' && window.__activityScenario) { result.runs[1].status = 'running'; result.business.status = 'running'; result.activity = window.__activityScenario; result.outcome = { status: 'unknown', label: '执行中', detail: '完成后核验。' } }
           // The host returns newest first when no active_run_id selects a row.
@@ -182,9 +182,8 @@ const bridgeScript = String.raw`
         if (method === 'request_approval_revision') {
           await wait(80)
           if (params.text === '测试预检失败') throw new Error('修改预检失败，原审批仍保留。')
-          window.__revisionAccepted = true; window.__businessBusy = false; b2.status = 'cancelled'
-          sessionDetails['session-b'].conversation_runs = [{ id: 'revision-conversation', session_id: 'session-b', kind: 'conversation', business_id: null, context_business_id: 'business-b2', status: 'running' }]
-          return { ok: true, run_id: 'revision-conversation' }
+          window.__revisionAccepted = true; window.__businessBusy = true; b2.status = 'running'
+          return { ok: true, run_id: 'business-b2-run' }
         }
         if (method === 'decide_approval') {
           if (params.action_id === 'action-b2-purchase' && params.decision === 'approve') {
@@ -226,7 +225,7 @@ const bridgeScript = String.raw`
           }
           return { ok: true, run_id: 'conversation-run-b' }
         }
-        if (method === 'start_run') return { id: params.business_id + '-started-run', business_id: params.business_id, session_id: params.session_id, status: 'running', tool_count: 0, model_rounds: 0, elapsed_seconds: 0 }
+        if (method === 'start_run') { await wait(150); return { id: params.business_id + '-started-run', business_id: params.business_id, session_id: params.session_id, status: 'running', tool_count: 0, model_rounds: 0, elapsed_seconds: 0 } }
         if (method === 'resume_run') return { id: params.run_id, business_id: params.business_id, session_id: params.session_id, status: 'running', tool_count: 0, model_rounds: 0, elapsed_seconds: 0 }
         if (method === 'cancel_conversation') {
           sessionDetails['session-b'].conversation_runs[0].status = 'cancel_requested'
@@ -262,6 +261,11 @@ page.on('console', (message) => { if (message.type() === 'error') console.error(
 await page.goto(`http://127.0.0.1:${serverAddress.port}/`)
 await page.getByRole('button', { name: /Session A/ }).waitFor()
 await page.getByText('主机已连接').waitFor()
+const selectScope = async (value) => {
+  await page.getByLabel('讨论范围').click()
+  const name = value === '__conversation__' ? '整个会话 · 新业务讨论' : value === '' ? /^当前业务：/ : new RegExp(`^Business ${value.replace('business-', '').toUpperCase()} ·`)
+  await page.getByRole('option', { name }).click()
+}
 await page.getByRole('button', { name: '打开 Odoo', exact: true }).click()
 await page.getByText('已请求在浏览器打开已配置的 Odoo。', { exact: true }).waitFor()
 assert.deepEqual(await page.evaluate(() => window.__bridgeCalls.find(({ method }) => method === 'open_odoo')?.params), {})
@@ -271,8 +275,8 @@ assert.deepEqual(await page.evaluate(() => window.__bridgeCalls.find(({ method }
 await page.getByRole('button', { name: /Session A/ }).click()
 await page.getByRole('heading', { name: 'Session A' }).waitFor()
 await page.getByText('处理业务', { exact: true }).waitFor()
-assert.equal(await page.getByLabel('讨论范围').inputValue(), '')
-assert.equal(await page.getByLabel('讨论范围').locator('option:checked').textContent(), '跟随当前业务：Business A1')
+assert.equal(await page.getByLabel('讨论范围').getAttribute('data-scope'), '')
+assert.equal(await page.getByLabel('讨论范围').textContent(), '当前业务：Business A1')
 // A conversation trace without a business must never issue get_business('', ...).
 const emptyBusinessCallsBefore = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'get_business' && !params.business_id).length)
 await page.evaluate(() => window.__emitWorkbench({ event: 'trace', data: { session_id: 'session-a', business_id: null, run_id: 'conversation-only' } }))
@@ -292,11 +296,11 @@ const materialSend = await page.evaluate(() => window.__bridgeCalls.find(({ meth
 assert.deepEqual(materialSend?.params.material_ids, ['material-1'])
 await page.getByRole('button', { name: /Session B/ }).click()
 await page.getByRole('heading', { name: 'Session B' }).waitFor()
-assert.equal(await page.getByLabel('讨论范围').inputValue(), '')
-await page.getByLabel('讨论范围').selectOption('__conversation__')
+assert.equal(await page.getByLabel('讨论范围').getAttribute('data-scope'), '')
+await selectScope('__conversation__')
 await page.getByRole('button', { name: /Session A/ }).click()
 await page.getByRole('heading', { name: 'Session A' }).waitFor()
-assert.equal(await page.getByLabel('讨论范围').inputValue(), '')
+assert.equal(await page.getByLabel('讨论范围').getAttribute('data-scope'), '')
 await page.locator('input[type="file"]').first().setInputFiles({ name: 'cross.csv', mimeType: 'text/csv', buffer: Buffer.from('客户,产品\nA,B') })
 await page.getByRole('button', { name: /Session B/ }).click()
 await page.getByRole('heading', { name: 'Session B' }).waitFor()
@@ -312,6 +316,7 @@ assert.equal(await userMessage.locator('.message-meta strong').count(), 0)
 assert.equal(await userMessage.locator('.avatar').textContent(), '你')
 await page.locator('.conversation-pane').waitFor()
 await page.getByRole('button', { name: '收起会话', exact: true }).click()
+await page.locator('.conversation-pane').waitFor({ state: 'detached' })
 assert.equal(await page.locator('.conversation-pane').count(), 0)
 assert.equal(await page.evaluate(() => window.localStorage.getItem('odoo-workbench.conversation-open')), 'false')
 await page.getByRole('button', { name: '打开会话', exact: true }).click()
@@ -321,8 +326,8 @@ await proposalButton.waitFor()
 assert.equal(await page.locator('.proposal-card').count(), 1)
 assert.equal(await page.locator('.proposal-card h3').textContent(), '新业务意图')
 await page.evaluate(() => { window.__setRunState(false, 'running'); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
-await page.getByText('正在完善提案，回复结束后可确认。', { exact: true }).waitFor()
-assert.equal(await proposalButton.isDisabled(), true)
+await page.getByText('正在整理业务方案，回复完成后可确认。', { exact: true }).waitFor()
+assert.equal(await proposalButton.count(), 0)
 await page.evaluate(() => { window.__setRunState(false); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
 await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent === '创建业务工作区' && !button.disabled))
 for (const status of ['failed', 'interrupted']) {
@@ -377,6 +382,30 @@ await page.getByRole('heading', { name: 'Session A' }).waitFor()
 await page.getByText('处理业务', { exact: true }).waitFor()
 assert.equal(await page.locator('.welcome-card').count(), 3)
 assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'send_message').length), sendCallsBeforeProposalOnly)
+// Packaged SALE history starts with a confirmed frozen proposal without created_at.
+// Missing timestamps remain unknown; cards and messages retain the host's stored order.
+await page.evaluate(() => {
+  window.__setSessionMessages('session-a', [
+    { id: 'frozen-proposal', role: 'assistant', text: '固定实验业务输入', business_id: 'business-a1', proposal: { id: 'frozen', title: '历史确认卡片', goal: '保留已确认目标', type: 'sale_invoice', status: 'confirmed' } },
+    { id: 'history-read', role: 'assistant', text: '已读取历史订单。', created_at: '2026-09-30T14:30:18.607332Z' },
+    { id: 'history-user', role: 'user', text: '时间缺失的历史要求。' },
+    { id: 'history-second-proposal', role: 'assistant', text: '', created_at: null, business_id: 'business-a1', proposal: { id: 'frozen-second', title: '后续确认卡片', goal: '保留后续目标', type: 'sale_invoice', status: 'confirmed' } },
+    { id: 'history-ended', role: 'assistant', text: '历史业务已结束。', created_at: '2026-09-30T14:33:12.535853Z' }
+  ])
+  window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-a', status: 'completed' } })
+})
+await page.getByText('历史业务已结束。', { exact: true }).waitFor()
+const historyOrder = () => page.locator('.conversation-scroll > article').evaluateAll((articles) => articles.map((article) => article.querySelector('.message-markdown')?.textContent || article.querySelector('strong')?.textContent))
+assert.deepEqual(await historyOrder(), ['历史确认卡片', '已读取历史订单。', '时间缺失的历史要求。', '后续确认卡片', '历史业务已结束。'])
+assert.equal(await page.locator('.message.user').filter({ hasText: '时间缺失的历史要求。' }).locator('.message-meta span').textContent(), '未知时间')
+assert.equal(pageErrors.length, 0, pageErrors.join('\n'))
+await page.getByRole('button', { name: /Session B/ }).click()
+await page.getByRole('heading', { name: 'Session B' }).waitFor()
+await page.getByRole('button', { name: /Session A/ }).click()
+await page.getByText('历史业务已结束。', { exact: true }).waitFor()
+assert.deepEqual(await historyOrder(), ['历史确认卡片', '已读取历史订单。', '时间缺失的历史要求。', '后续确认卡片', '历史业务已结束。'])
+await page.locator('.proposal-receipt').filter({ hasText: '历史确认卡片' }).getByRole('button', { name: '打开业务' }).click()
+await page.getByRole('heading', { name: 'Business A1' }).waitFor()
 await page.evaluate(() => { window.__setSessionMessages('session-a', []); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-a', status: 'idle' } }) })
 await page.getByRole('button', { name: /Session B/ }).click()
 await page.getByRole('heading', { name: 'Session B' }).waitFor()
@@ -430,7 +459,7 @@ const sendsBeforeBusy = await page.evaluate(() => window.__bridgeCalls.filter(({
 for (const scope of ['approval', 'execution', 'conversation']) {
   await page.evaluate((value) => { window.__showAcceptedProjection(value === 'execution'); window.__setRunState(value !== 'conversation', value === 'conversation' ? 'running' : 'completed'); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) }, scope)
   await page.waitForTimeout(60)
-  await messageTarget.selectOption('__conversation__')
+  await selectScope('__conversation__')
   await composer.fill('执行中暂存的修改要求')
   await composer.press('Enter')
   assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'send_message').length), sendsBeforeBusy)
@@ -443,18 +472,18 @@ for (const scope of ['approval', 'execution', 'conversation']) {
 }
 await page.evaluate(() => window.__showAcceptedProjection(false))
 await page.getByRole('tab', { name: /Business B2/ }).click()
-assert.equal(await messageTarget.inputValue(), 'business-b2')
-await messageTarget.selectOption('')
+assert.equal(await messageTarget.getAttribute('data-scope'), 'business-b2')
+await selectScope('')
 await readyComposer()
-assert.equal(await messageTarget.inputValue(), '')
-assert.equal(await messageTarget.locator('option:checked').textContent(), '跟随当前业务：Business B2')
+assert.equal(await messageTarget.getAttribute('data-scope'), '')
+assert.equal(await messageTarget.textContent(), '当前业务：Business B2')
 assert.ok((await page.locator('.material-reuse-tray').textContent()).includes('订单材料.csv'))
 await composer.fill('继续处理当前业务')
 await page.getByRole('button', { name: '发送' }).click()
 await page.waitForTimeout(25)
-await messageTarget.selectOption('__conversation__')
+await selectScope('__conversation__')
 await readyComposer()
-assert.equal(await messageTarget.inputValue(), '__conversation__')
+assert.equal(await messageTarget.getAttribute('data-scope'), '__conversation__')
 await composer.fill('开始一个新的业务意图')
 await page.getByRole('button', { name: '发送' }).click()
 await page.waitForTimeout(25)
@@ -463,7 +492,7 @@ assert.deepEqual(sentMessages.map(({ params }) => params), [
   { session_id: 'session-b', text: '继续处理当前业务', context_business_id: 'business-b2' },
   { session_id: 'session-b', text: '开始一个新的业务意图' }
 ])
-await messageTarget.selectOption('__conversation__')
+await selectScope('__conversation__')
 await readyComposer()
 await composer.fill('thinking hold')
 await page.getByRole('button', { name: '发送' }).click()
@@ -477,7 +506,7 @@ await page.getByRole('heading', { name: 'Session B' }).waitFor()
 await page.waitForTimeout(220)
 await page.getByRole('tab', { name: /Business B2/ }).click()
 await page.getByRole('heading', { name: 'Business B2' }).waitFor()
-await messageTarget.selectOption('business-b2')
+await selectScope('business-b2')
 await readyComposer()
 await composer.fill('dedupe send')
 await page.evaluate(() => {
@@ -519,7 +548,13 @@ await page.evaluate(() => {
 await page.waitForTimeout(40)
 assert.equal(await page.getByText('最终回答：当前能力与业务范围已确认。', { exact: true }).count(), 1)
 assert.equal(await page.locator('.conversation-pane .message-markdown table').count(), 1)
-assert.equal(await page.locator('.conversation-pane .message-full h2').count(), 1)
+const longMessage = page.locator('.message.assistant').filter({ hasText: '长摘要' })
+assert.equal(await longMessage.locator('h2').count(), 1)
+assert.equal(await longMessage.getByRole('button', { name: /查看完整消息/ }).count(), 0)
+assert.equal(await longMessage.locator('h2').count(), 1)
+assert.equal(await longMessage.locator('.message-markdown').count(), 1)
+assert.equal((await longMessage.locator('.message-markdown').textContent()).match(/公开业务内容/g).length, 200)
+assert.equal(await longMessage.getByRole('button', { name: '收起消息' }).count(), 0)
 assert.equal(await page.getByText('## 长摘要', { exact: true }).count(), 0)
 const tableOverflow = await page.locator('.conversation-pane .message-table-wrap').evaluate((element) => ({ scrollWidth: element.scrollWidth, clientWidth: element.clientWidth, pageWidth: document.documentElement.scrollWidth, viewport: window.innerWidth }))
 assert.ok(tableOverflow.pageWidth <= tableOverflow.viewport + 1, JSON.stringify(tableOverflow))
@@ -561,7 +596,7 @@ assert.equal(await page.locator('.thinking-message').count(), 0)
 await page.evaluate(() => window.__removeConversationMessage('snapshot-public'))
 
 // A delayed send response from the old session must not reload that session over a newer selection.
-await messageTarget.selectOption('business-b2')
+await selectScope('business-b2')
 await readyComposer()
 await composer.fill('delayed mutation')
 await page.getByRole('button', { name: '发送' }).click()
@@ -598,6 +633,7 @@ await page.evaluate(() => {
 await page.waitForTimeout(30)
 const startCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'start_run'))
 assert.equal(startCalls.length, 1)
+assert.equal(await page.getByRole('button', { name: '正在启动…', exact: true }).isDisabled(), true)
 assert.equal(await page.getByRole('button', { name: '取消运行' }).count(), 0)
 assert.equal(await page.locator('.tool-row').count(), 0)
 await page.getByRole('tab', { name: /Business B2/ }).click()
@@ -605,8 +641,9 @@ await page.getByRole('heading', { name: 'Business B2' }).waitFor()
 assert.equal(await page.locator('.business-header h2').textContent(), 'Business B2')
 assert.ok((await page.locator('.business-facts').textContent()).includes('已确认'))
 assert.ok((await page.locator('.business-facts').textContent()).includes('已过账'))
-assert.ok((await page.locator('.business-facts').textContent()).includes('2 张'))
+assert.equal(await page.locator('.execution-documents > li').filter({ hasText: '销售订单' }).count(), 2)
 assert.ok((await page.locator('.business-facts').textContent()).includes('SO-B2-SECOND'))
+await page.getByText('最近核验结果', { exact: true }).click()
 await page.getByText('核验范围：销售、采购与开票基础核验', { exact: true }).waitFor()
 await page.getByRole('tab', { name: /^单据/ }).click()
 const businessReadsBeforeExport = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'get_business' && params.business_id === 'business-b2').length)
@@ -715,8 +752,8 @@ await page.waitForTimeout(30)
 assert.equal(await page.locator('.business-header h2').textContent(), 'Business B2')
 
 // Verify both approval decisions carry the currently selected business and its run.
-await page.getByRole('tab', { name: /^变更与审批/ }).click()
-await page.getByText('创建发票与贷项', { exact: true }).waitFor()
+await page.getByRole('tab', { name: /^执行台/ }).click()
+await page.locator('#approval-action-b2').waitFor()
 const invoiceApproval = page.locator('.approval-row').filter({ hasText: '创建发票与贷项' })
 await invoiceApproval.getByText('查看拟提交值与执行前状态', { exact: true }).click()
 await invoiceApproval.getByText('拟提交值', { exact: true }).waitFor()
@@ -761,27 +798,27 @@ assert.ok((await sendFileApproval.textContent())?.includes('is_move_sent'))
 await invoiceApproval.getByRole('button', { name: '查看关联运行回执' }).click()
 await page.locator('.trace-page .loading-line').waitFor({ state: 'hidden' })
 assert.equal(await page.locator('.trace-toolbar select').inputValue(), 'business-b2-run')
-await page.getByRole('heading', { name: 'execute_approved_write', exact: true }).waitFor()
+await page.getByRole('heading', { name: /执行已批准动作/ }).waitFor()
 const executedReceipt = await page.locator('.trace-detail-panel').textContent()
 assert.ok(executedReceipt?.includes('已执行'))
 assert.ok(executedReceipt?.includes('"write_id": 42'))
 assert.equal(executedReceipt?.includes('回执尚未到达'), false)
 // Selecting the Run node, then changing runs, clears the old action target
 // and restores the selected run summary.
-await page.locator('.trace-tree > .trace-node').first().click()
+await page.locator('.trace-node[data-trace-key="run"]').click()
 await page.getByRole('heading', { name: '运行总览', exact: true }).waitFor()
 assert.ok((await page.locator('.trace-detail-panel').textContent())?.includes('等待审批'))
 await page.locator('.trace-toolbar select').selectOption('business-b2-old-run')
 await page.waitForFunction(() => window.__bridgeCalls.some(({ method, params }) => method === 'get_trace' && params.run_id === 'business-b2-old-run'))
 await page.waitForTimeout(260)
-await page.locator('.trace-detail-panel').getByText('本轮结束', { exact: true }).waitFor()
+await page.locator('.trace-detail-panel').getByText('本轮结束', { exact: true }).first().waitFor()
 assert.equal(await page.locator('.trace-toolbar select').inputValue(), 'business-b2-old-run')
 await page.getByRole('heading', { name: '运行总览', exact: true }).waitFor()
 const historicalRunSummary = await page.locator('.trace-detail-panel').textContent()
 assert.ok(historicalRunSummary?.includes('本轮结束'), historicalRunSummary)
 assert.equal(historicalRunSummary?.includes('动作回执不可用'), false)
-await page.getByRole('tab', { name: /^变更与审批/ }).click()
-await page.getByText('创建发票与贷项', { exact: true }).waitFor()
+await page.getByRole('tab', { name: /^执行台/ }).click()
+await page.locator('#approval-action-b2').waitFor()
 await invoiceApproval.getByRole('button', { name: '批准这项业务动作' }).waitFor()
 await page.waitForFunction(() => {
   const row = [...document.querySelectorAll('.approval-row')].find((item) => item.textContent?.includes('创建发票与贷项'))
@@ -838,12 +875,12 @@ await page.locator('.trace-toolbar select').selectOption('business-b2-run')
 await page.getByText('未缓存输入 未知').first().waitFor()
 const traceText = await page.locator('.trace-page').textContent()
 assert.ok(traceText.includes('未缓存输入 未知'))
-assert.ok(traceText.includes('mcp_odoo_validate_write'))
-assert.equal(await page.locator('.trace-tool-node').filter({ hasText: 'mcp_odoo_validate_write' }).count(), 1)
+assert.ok(traceText.includes('预检业务动作'))
+assert.equal(await page.locator('.trace-tool-node').filter({ hasText: '预检业务动作' }).count(), 1)
 await page.locator('.trace-node').filter({ hasText: /第 1 轮/ }).click()
 await page.locator('.trace-detail-panel .loading-line').waitFor({ state: 'hidden' })
 assert.ok((await page.locator('.trace-detail-panel').textContent()).length > 1500)
-await page.getByRole('button', { name: /mcp_odoo_validate_write/ }).click()
+await page.locator('.trace-tool-node').filter({ hasText: '预检业务动作' }).click()
 const activeToolDetail = await page.locator('.trace-detail-panel').textContent()
 assert.ok(activeToolDetail.includes('进行中'))
 assert.ok(activeToolDetail.includes('未知'))
@@ -857,7 +894,7 @@ await page.waitForFunction((before) => window.__traceVersion > before, traceVers
 const traceCallsAfter = await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'get_trace' && params.business_id === 'business-b2').length)
 assert.ok(traceCallsAfter > traceCallsBefore)
 const currentTraceVersion = await page.evaluate(() => window.__traceVersion)
-await page.getByRole('button', { name: /read_business_records/ }).click()
+await page.locator('[data-trace-key="tool:tool-b2"]').click()
 await page.locator('.trace-detail-panel .loading-line').waitFor({ state: 'hidden' })
 assert.ok((await page.locator('.trace-detail-panel').textContent()).includes(`"version": ${currentTraceVersion}`))
 
@@ -886,8 +923,8 @@ await b3Goal.waitFor()
 const fullB3Goal = '核对中断写入是否已经落库，并保留当前运行与历史单据证据。'
 assert.ok((await b3Goal.textContent()).includes('Business B3'))
 assert.equal(await page.getByText('查看已确认的业务说明', { exact: true }).count(), 0)
-await page.getByText('查看原始指令', { exact: true }).click()
-await page.locator('.goal-details').getByText(fullB3Goal, { exact: true }).waitFor()
+await page.locator('.business-header .goal-details > summary').first().click()
+await page.locator('.goal-details p').filter({ hasText: fullB3Goal }).waitFor()
 const currentActivity = await page.locator('.activity-card').textContent()
 assert.ok(currentActivity?.includes('写入结果待核对'))
 assert.equal(await page.getByRole('button', { name: /开始执行|继续执行|重新执行/ }).count(), 0)
@@ -898,11 +935,12 @@ await page.getByRole('tab', { name: /^运行详情/ }).click()
 await page.locator('.trace-toolbar select').selectOption('business-b3-old-run')
 await page.locator('.trace-page .loading-line').waitFor({ state: 'hidden' })
 assert.equal(await page.locator('.trace-toolbar select').inputValue(), 'business-b3-old-run')
-assert.ok((await page.locator('.trace-page').textContent()).includes('read_business_records'))
+assert.ok(await page.locator('[data-trace-key="tool:tool-b3-old"]').isVisible())
+assert.equal((await page.locator('.trace-tree').innerText()).includes('read_business_records'), false)
 await page.getByRole('tab', { name: /^执行台/ }).click()
 assert.equal(await page.locator('.activity-card').textContent(), currentActivity)
 assert.ok((await page.locator('.business-content').textContent()).includes('系统不会自动重试'))
-await page.getByRole('tab', { name: /^变更与审批/ }).click()
+await page.getByRole('tab', { name: /^执行台/ }).click()
 const reconcileButton = page.getByRole('button', { name: '核对不确定写入' })
 await reconcileButton.waitFor()
 await reconcileButton.click()
@@ -923,15 +961,14 @@ const finishedResult = page.getByLabel('执行结果', { exact: true })
 await finishedResult.getByText('销售订单已确认', { exact: true }).waitFor()
 assert.equal(await page.locator('.business-header h2').textContent(), 'Business B4')
 assert.equal(await page.locator('.business-header > div > p').count(), 0)
-await page.getByText('查看已确认的业务说明', { exact: true }).click()
-assert.equal(await page.locator('.business-header .goal-details').first().locator('p').textContent(), '确认订单，暂不发货。')
-await finishedResult.getByText('查看 Agent 完整回复', { exact: true }).click()
-await finishedResult.getByText('本轮已确认订单，尚未发货。', { exact: true }).waitFor()
+await page.locator('.business-header .goal-details > summary').first().click()
+assert.equal(await page.locator('.business-header .goal-details').first().locator('p').first().textContent(), '确认订单，暂不发货。')
+await page.getByLabel('Agent 完整回复').getByText('本轮已确认订单，尚未发货。', { exact: true }).waitFor()
 const modelCallsBeforeResult = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => ['send_message', 'start_run'].includes(method)).length)
 for (const scenario of ['failed', 'stale', 'missing']) {
   await page.evaluate((value) => { window.__resultScenario = value; window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b4' } }) }, scenario)
   if (scenario === 'missing') {
-    await finishedResult.getByText('本轮未返回总结，可查看核验结果和运行详情。', { exact: true }).waitFor()
+    await page.getByLabel('Agent 完整回复').getByText('本轮未返回总结，可查看核验结果和运行详情。', { exact: true }).waitFor()
     assert.ok(!(await finishedResult.textContent()).includes('旧轮次总结'))
   } else {
     await finishedResult.getByText('本轮结果待核对', { exact: true }).waitFor()
@@ -951,30 +988,33 @@ await page.evaluate(() => { window.__resultScenario = null; window.__emitWorkben
 await finishedResult.getByText('销售订单已确认', { exact: true }).waitFor()
 await page.waitForFunction(() => { const result = document.querySelector('.outcome-summary')?.getBoundingClientRect(); const panel = document.querySelector('.business-content')?.getBoundingClientRect(); return result && panel && result.top >= panel.top - 2 && result.top < panel.bottom })
 assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => ['send_message', 'start_run'].includes(method)).length), modelCallsBeforeResult)
+await page.getByRole('tab', { name: /^执行台/ }).click()
 await page.getByRole('tab', { name: /^变更与审批/ }).click()
-const terminalApprovals = page.locator('.approval-row')
-await terminalApprovals.nth(1).waitFor()
-assert.equal(await terminalApprovals.nth(0).locator('.state-badge').textContent(), '已核验')
-assert.equal(await terminalApprovals.nth(1).locator('.state-badge').textContent(), '已拒绝')
-assert.equal(await terminalApprovals.locator('.state-expired').count(), 0)
+for (const status of ['已核验', '已拒绝']) {
+  await page.locator('.approval-history button').filter({ hasText: status }).click()
+  assert.equal(await page.locator('.approval-archive-detail .state-badge').textContent(), status)
+  assert.equal(await page.locator('.approval-archive-detail .state-expired').count(), 0)
+}
 
 // Evidence navigation carries both identifiers: run selection and tool receipt.
 await page.getByRole('tab', { name: /Business B2/ }).click()
 await page.getByRole('heading', { name: 'Business B2' }).waitFor()
 await page.getByRole('tab', { name: /^执行台/ }).click()
-await page.getByText('当前业务进度').waitFor()
-await page.getByRole('button', { name: /读取订单/ }).click()
+await page.getByRole('heading', { name: '执行过程', exact: true }).waitFor()
+await page.locator('.execution-timeline').getByText('已读取 Odoo 销售订单。', { exact: true }).waitFor()
+assert.ok(await page.locator('.execution-timeline').getByText('已读取 Odoo 销售订单。', { exact: true }).isVisible())
 const exactReceipt = page.getByRole('button', { name: /查看订单读取回执/ })
 await exactReceipt.waitFor()
 await exactReceipt.click()
 await page.locator('.trace-page .loading-line').waitFor({ state: 'hidden' })
 assert.equal(await page.locator('.trace-toolbar select').inputValue(), 'business-b2-run')
-await page.locator('.trace-tool-node.active').filter({ hasText: 'read_business_records' }).waitFor()
+await page.locator('.trace-tool-node.active[data-trace-key="tool:tool-b2"]').waitFor()
 
 // A readback link sourced from the historical run resolves to the current
 // independent snapshot and never reports the snapshot as unavailable.
 await page.getByRole('tab', { name: /^执行台/ }).click()
-await page.getByRole('button', { name: /读取订单/ }).click()
+await page.locator('.execution-timeline').getByText('已读取 Odoo 销售订单。', { exact: true }).waitFor()
+assert.ok(await page.locator('.execution-timeline').getByText('已读取 Odoo 销售订单。', { exact: true }).isVisible())
 await page.getByRole('button', { name: /查看独立回读快照/ }).click()
 await page.locator('.trace-page .loading-line').waitFor({ state: 'hidden' })
 assert.equal(await page.locator('.trace-toolbar select').inputValue(), 'business-b2-run')
@@ -1101,7 +1141,7 @@ assert.equal(actionSpacing.documentMargin, '0px')
 assert.equal(actionSpacing.documentGap, '14px')
 assert.equal(actionSpacing.artifactGap, '12px')
 await page.setViewportSize({ width: 1600, height: 1000 })
-await page.getByText('查看原始指令', {exact: true}).click()
+await page.locator('.business-header .goal-details').first().evaluate(fold => { fold.open = true })
 const originalInstructions = page.locator('.business-header .goal-details p').last()
 await originalInstructions.evaluate(e => { e.textContent = '完整原始指令 '.repeat(1000) })
 assert.ok(await originalInstructions.evaluate(e => e.clientHeight < 200 && e.scrollHeight > e.clientHeight))
@@ -1152,7 +1192,7 @@ await businessB2Tab.evaluate((element) => {
   if (list) list.scrollLeft = Math.max(0, element.offsetLeft + element.offsetWidth - list.clientWidth + 12)
 })
 await businessB2Tab.click()
-await page.getByRole('tab', { name: /^变更与审批/ }).click()
+await page.getByRole('tab', { name: /^执行台/ }).click()
 const approvalLayout = await page.locator('.approval-actions:visible').evaluateAll((rows) => rows.flatMap((row) => Array.from(row.querySelectorAll('button')).map((button) => {
   const rowBox = row.getBoundingClientRect()
   const buttonBox = button.getBoundingClientRect()
@@ -1166,9 +1206,9 @@ for (const { rowBox, buttonBox, disabled } of approvalLayout) {
   assert.equal(disabled, false)
 }
 await page.setViewportSize({ width: 1600, height: 1000 })
-// A revision retires the old approval and starts a read-only proposal turn only.
+// Revision resumes the existing business; no proposal worker or automatic approval.
 await page.evaluate(() => { window.__enterpriseCase = null; window.__showAcceptedProjection(false); window.__setRunState(true); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b2' } }) })
-await page.getByRole('tab', { name: /^变更与审批/ }).click()
+await page.getByRole('tab', { name: /^执行台/ }).click()
 const revisionApproval = page.locator('.approval-row').filter({ hasText: '创建发票与贷项' }).first()
 await revisionApproval.getByRole('button', { name: '提出修改', exact: true }).click()
 const revisionInput = revisionApproval.getByRole('textbox', { name: '希望怎样修改这项动作？' })
@@ -1180,11 +1220,12 @@ assert.equal(await revisionInput.inputValue(), '测试预检失败')
 assert.equal(await revisionApproval.getByRole('button', { name: '批准这项业务动作' }).isDisabled(), true)
 await revisionInput.fill('数量改为 5 件，先保留草稿。')
 await revisionApproval.getByRole('button', { name: '提交修改要求', exact: true }).evaluate((button) => { for (let index = 0; index < 5; index += 1) button.click() })
-await page.locator('.thinking-message').waitFor()
-await page.getByRole('tab', { name: /^变更与审批/ }).click()
+await page.getByRole('button', { name: '取消运行', exact: true }).waitFor()
+await page.getByRole('tab', { name: /^执行台/ }).click()
 await page.waitForFunction(() => !document.querySelector('.business-content .loading-line'))
+await page.locator('.approval-row.pending').first().waitFor({ state: 'hidden' })
 assert.equal(await page.locator('.approval-row.pending').count(), 0)
-assert.equal(await page.getByLabel('讨论范围').inputValue(), 'business-b2')
+assert.equal(await page.getByLabel('讨论范围').getAttribute('data-scope'), 'business-b2')
 const revisionCalls = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'request_approval_revision'))
 assert.equal(revisionCalls.length, 2)
 assert.deepEqual(revisionCalls[1].params, { session_id: 'session-b', business_id: 'business-b2', run_id: 'business-b2-run', action_id: 'action-b2', text: '数量改为 5 件，先保留草稿。' })
@@ -1254,8 +1295,8 @@ assert.equal((await page.locator('.activity-card').textContent()).includes('其�
 assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'get_business').length), deltaBusinessCalls)
 await page.evaluate(() => window.__emitWorkbench({ event: 'message_delta', data: { session_id: 'session-b', business_id: 'business-b4', run_id: 'business-b4-run', message_id: 'execution-live', sequence: 1, text: '\n\n' + '正在核对单据来源与付款关系。\n\n'.repeat(70) } }))
 const publicReply = page.locator('.activity-public-text')
-await page.waitForFunction(() => { const element = document.querySelector('.activity-public-text'); return element && element.scrollHeight > element.clientHeight && element.scrollHeight - element.clientHeight - element.scrollTop < 3 })
-await publicReply.evaluate((element) => { element.scrollTop = 0; element.dispatchEvent(new Event('scroll', { bubbles: true })) })
+await page.waitForFunction(() => { const element = document.querySelector('.activity-public-text'); return element && element.clientHeight > 1000 && Math.abs(element.scrollHeight - element.clientHeight) < 3 })
+await page.locator('.business-content').evaluate(element => { element.scrollTop = 0; element.dispatchEvent(new Event('scroll')) })
 await page.evaluate(() => window.__emitWorkbench({ event: 'message_delta', data: { session_id: 'session-b', business_id: 'business-b4', run_id: 'business-b4-run', message_id: 'execution-live', sequence: 2, text: '\n最新公开片段。' } }))
 await publicReply.getByText('最新公开片段。', { exact: true }).waitFor({ state: 'attached' })
 assert.equal(await publicReply.evaluate((element) => element.scrollTop), 0)
@@ -1272,6 +1313,7 @@ await page.getByLabel('执行回执与留档').getByText('邮件：无发送记�
 assert.equal(await page.locator('.business-content .spin').count(), 0)
 await page.getByRole('tab', { name: /^运行详情/ }).click()
 await page.locator('.trace-toolbar select').selectOption('business-b4-old-run')
+await page.locator('.trace-more-menu > summary').click()
 await page.getByRole('button', { name: '业务会话快照', exact: true }).click()
 await page.getByRole('button', { name: '业务会话快照', exact: true }).waitFor()
 assert.deepEqual(await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'open_session_snapshot').at(-1)?.params), { session_id: 'session-b', business_id: 'business-b4' })
@@ -1292,6 +1334,78 @@ await page.getByRole('button', { name: '打开 Odoo', exact: true }).click()
 await page.getByRole('dialog', { name: '连接设置' }).waitFor()
 await page.getByText('请先填写 Odoo 地址与数据库，再打开 Odoo。', { exact: true }).waitFor()
 await page.keyboard.press('Escape')
+assert.equal(pageErrors.length, 0, pageErrors.join('\n'))
+// Reproduce the observed UI boundaries against the same bridge, without Odoo or model calls.
+await page.evaluate(() => {
+  window.__originalUiCall = window.workbench.call
+  window.__uiScenario = ''
+  window.workbench.call = async (method, params = {}) => {
+    const hold = method === 'get_business' && window.__holdNextRead
+    if (hold) window.__holdNextRead = false
+    const result = await window.__originalUiCall(method, params)
+    if (method === 'get_session' && window.__uiScenario === 'empty') return { ...result, businesses: [], messages: [], conversation_runs: [], live_messages: [] }
+    if (method === 'import_material' && params.name === 'async.pdf') {
+      window.__asyncMaterial = { ...result, status: 'parsing', preview: '' }
+      return window.__asyncMaterial
+    }
+    if (method === 'get_session' && window.__asyncMaterial?.session_id === params.session_id) return { ...result, materials: [...(result.materials || []), window.__asyncMaterial] }
+    if (method === 'get_business' || method === 'refresh_business') {
+      if (window.__uiScenario === 'display') {
+        if (method === 'refresh_business') window.__displayReady = true
+        result.approvals[0].approval_display = { ready: Boolean(window.__displayReady), missing: window.__displayReady ? [] : ['公司名称尚未读取'], effect: '核对后处理本次变更。' }
+        result.approvals[0].values.note = '<p>换供应商承接单</p><script>bad()</script>'
+      }
+      if (hold) {
+        result.business = { ...result.business, title: '旧快照不得覆盖' }
+        window.__heldReadReady = true
+        await new Promise((resolve) => { window.__releaseOldRead = resolve })
+      }
+    }
+    return result
+  }
+  window.__uiScenario = 'empty'
+})
+await page.getByRole('button', { name: /Session A/ }).click()
+await page.getByRole('heading', { name: 'Session A', exact: true }).waitFor()
+await page.getByLabel('讨论范围').waitFor({ state: 'detached' })
+await page.locator('.conversation-pane').getByRole('textbox', { name: '会话消息' }).waitFor()
+assert.equal(await page.getByLabel('讨论范围').count(), 0)
+await page.evaluate(() => { window.__uiScenario = '' })
+await page.locator('input[type="file"]').first().setInputFiles({ name: 'async.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-fixture') })
+await page.locator('.material-parsing').waitFor()
+assert.equal(await page.getByRole('button', { name: '发送', exact: true }).isDisabled(), true)
+await page.evaluate(() => { window.__asyncMaterial.status = 'failed'; window.__asyncMaterial.error = '文件内容无法解析'; window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-a' } }) })
+await page.locator('.material-failed').getByText(/文件内容无法解析/).waitFor()
+assert.equal(await page.getByRole('button', { name: '发送', exact: true }).isDisabled(), true)
+await page.evaluate(() => { window.__asyncMaterial.status = 'ready'; window.__asyncMaterial.error = ''; window.__asyncMaterial.warnings = ['图片页需要人工核对']; window.__asyncMaterial.preview = '可读取的业务材料'; window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-a' } }) })
+await page.locator('.material-ready').getByText(/图片页需要人工核对/).waitFor()
+await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent === '发送' && !button.disabled))
+await page.getByRole('button', { name: '移除 async.pdf' }).click()
+await page.getByRole('button', { name: /Session B/ }).click()
+await page.getByRole('tab', { name: /Business B2/ }).click()
+await page.evaluate(() => { window.__enterpriseCase = null; window.__showAcceptedProjection(false); window.__uiScenario = 'display'; window.__revisionAccepted = false; window.__setRunState(true); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b2' } }) })
+await page.locator('.approval-inbox-item').filter({ hasText: '创建发票与贷项' }).click()
+const displayApproval = page.locator('#approval-action-b2')
+await displayApproval.getByText('审批信息尚不完整', { exact: true }).waitFor()
+assert.equal(await displayApproval.getByRole('button', { name: '批准这项业务动作' }).isDisabled(), true)
+assert.equal(await displayApproval.evaluate((element) => document.activeElement === element), true)
+assert.ok((await displayApproval.locator('.field-diff').textContent()).includes('换供应商承接单'))
+assert.ok(!(await displayApproval.locator('.field-diff').textContent()).includes('<p>'))
+assert.ok(!(await displayApproval.locator('.field-diff').textContent()).includes('bad()'))
+await displayApproval.getByRole('button', { name: '刷新审批信息' }).click()
+await displayApproval.getByText('审批信息尚不完整', { exact: true }).waitFor({ state: 'hidden' })
+await page.waitForFunction(() => ![...document.querySelectorAll('#approval-action-b2 button')].find(button => button.textContent.includes('批准这项业务动作'))?.disabled)
+assert.equal(await displayApproval.getByRole('button', { name: '批准这项业务动作' }).isDisabled(), false)
+await page.evaluate(() => { window.__uiScenario = ''; window.__holdNextRead = true; window.__emitWorkbench({ event: 'run_trace', data: { session_id: 'session-b', business_id: 'business-b2', run_id: 'business-b2-run' } }) })
+await page.waitForFunction(() => window.__heldReadReady)
+const readsBeforeFresh = await page.evaluate(() => window.__bridgeCalls.filter(({ method }) => method === 'get_business').length)
+await page.evaluate(() => window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b2' } }))
+await page.waitForFunction((count) => window.__bridgeCalls.filter(({ method }) => method === 'get_business').length > count, readsBeforeFresh)
+await page.waitForTimeout(60)
+await page.evaluate(() => window.__releaseOldRead())
+await page.waitForTimeout(60)
+assert.equal(await page.locator('.business-header h2').textContent(), 'Business B2')
+assert.equal(await page.getByRole('heading', { name: '旧快照不得覆盖' }).count(), 0)
 assert.equal(pageErrors.length, 0, pageErrors.join('\n'))
 console.log('renderer-check: PASS')
 console.log('checked: session/business/trace stale guards, same-run trace refresh, changed routing, host crash/retry, message scope, session search, approval scope+preflight labels, purchase/file approval labels, invoice PDF availability, business-chain scope labels, document selection across refresh, CONFIG_BUSY mapping, settings save+Escape, splitter overflow, evidence navigation, unknown-write no-retry, historical activity preservation, latest proposal guards, busy-send draft preservation, approval revision failure/success without automatic execution')

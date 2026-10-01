@@ -8,10 +8,8 @@ version = "0.6.0"
 description = "Native ERP agent runtime and desktop backend"
 requires-python = ">=3.12"
 license = "MIT"
-license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "docs/licenses/*", "bench/reference/mcp/LICENSE"]
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "docs/licenses/*"]
 dependencies = [
-    "mem0ai==2.1.0",
-    "fastembed==0.8.0",
     "anyio>=4.0",
     "httpx[socks]>=0.27",
     "jsonschema>=4.23",
@@ -22,12 +20,17 @@ dependencies = [
     "pygments>=2.18",
     "pyyaml>=6.0",
     "rich>=13.0",
-    "textual>=8.2.8",
-    "typer>=0.12",
+    "openpyxl==3.1.5",
+    "pypdfium2==5.13.0",
+    "rapidocr==3.9.2",
+    "onnxruntime==1.30.0",
 ]
 
+[project.optional-dependencies]
+memory = ["mem0ai==2.1.0", "fastembed==0.8.0"]
+
 [dependency-groups]
-dev = ["pytest==9.1.0", "ruff>=0.5", "mypy>=1.10"]
+dev = ["pytest==9.1.0", "ruff>=0.5", "mypy>=1.10", "psutil==7.2.2"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/erp_harness"]
@@ -71,8 +74,6 @@ constraint-dependencies = [
     "rpds-py==2026.6.3",
     "shellingham==1.5.4",
     "socksio==1.0.0",
-    "textual==8.2.8",
-    "typer==0.27.2",
     "typing_extensions==4.16.0",
     "typing-inspection==0.4.4",
  ]

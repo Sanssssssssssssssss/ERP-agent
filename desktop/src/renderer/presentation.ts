@@ -157,6 +157,21 @@ export function amountWithCurrency(amount: string, currency: string) { return cu
 export function messageForError(reason: unknown) {
   let message = reason instanceof Error ? reason.message : String(reason)
   message = message.replace(/^Error invoking remote method ['"]workbench:call['"]:\s*Error:\s*/i, '')
+  const settingsErrors: Record<string, string> = {
+    DATA_DIRECTORY_EXISTS: '目标文件夹已存在，请选择另一位置。已有数据不会被覆盖。',
+    DATA_DIRECTORY_OVERLAP: '请选择当前数据目录之外的位置，不能放进原目录或它的上层。',
+    DATA_DIRECTORY_INVALID: '存储目录无效，请重新选择目录。',
+    DATA_DIRECTORY_NOT_SELECTED: '请使用“选择目录”指定存储位置。',
+    DATA_DIRECTORY_SYMLINK: '数据目录含链接，无法安全复制。原目录继续使用。',
+    BASE_URL_INVALID: '模型地址格式不正确。',
+    BASE_URL_PROTOCOL_INVALID: '模型地址须使用 HTTPS；本地服务可使用 HTTP。',
+    ODOO_URL_INVALID: 'Odoo 地址格式不正确。',
+    ODOO_URL_PROTOCOL_INVALID: 'Odoo 地址须使用 HTTPS；本地服务可使用 HTTP。',
+    EACCES: '没有权限访问此目录，请选择可写的位置。',
+    EPERM: '此目录无法写入，请选择其他位置。',
+    ENOSPC: '磁盘空间不足，原目录继续使用。',
+  }
+  for (const [code, text] of Object.entries(settingsErrors)) if (new RegExp(`\\b${code}\\b`).test(message)) return text
   const knownCodes = new Set(['VALUEERROR', 'CONFIG_BUSY', 'CONNECTION_CHECK_BUSY', 'EXPORT_CANCELLED', 'ARTIFACT_FILE_MISSING', 'ARTIFACT_NOT_FOUND', 'ARTIFACT_FORMAT_INVALID', 'ARTIFACT_OPEN_FAILED', 'ARTIFACT_INDEX_FAILED', 'DOCUMENT_PDF_UNAVAILABLE', 'PDF_UNAVAILABLE', 'DOCUMENT_DOWNLOAD_FAILED', 'MATERIAL_TOO_LARGE', 'MATERIAL_UNSUPPORTED', 'MATERIAL_PARSE_FAILED', 'ODOO_RECORD_NOT_FOUND', 'ODOO_OPEN_UNAVAILABLE', 'ODOO_ORIGIN_MISMATCH'])
   const codePrefix = message.match(/^\[([A-Z0-9_]+)\]\s*/)
   if (codePrefix && knownCodes.has(codePrefix[1])) message = message.slice(codePrefix[0].length)
@@ -179,7 +194,7 @@ export function activityPhaseLabel(phase?: string) { return ({ idle: '待执行'
 
 export function businessTypeMeta(type?: string) { return ({ invoice_delivery: { title: '发票发送', short: '发送发票' }, inventory: { title: '库存收发与退货', short: '库存' }, manufacturing: { title: '制造与补货', short: '制造' }, payment: { title: '客户收款与供应商付款', short: '收付款' }, refund: { title: '退货退款与贷项', short: '退款' }, reconciliation: { title: '银行与账务核销', short: '核销' }, sale_invoice: { title: '销售与开票', short: '销售发票' }, purchase: { title: '采购', short: '采购流程' }, sale_purchase_invoice: { title: '销售 → 采购 → 开票', short: '业务链' } } as Record<string, { title: string; short: string }>)[type || ''] || { title: '业务工作区', short: '业务' } }
 
-export function completionTargetLabel(target?: string, type?: string) { const effective = target || (type === 'purchase' ? 'confirmed' : ['inventory', 'manufacturing'].includes(type || '') ? 'done' : ['payment', 'refund', 'reconciliation'].includes(type || '') ? 'reconciled' : 'posted'); return ({ sent: '交付邮件服务器', read_only: '只读浏览', draft: '保留草稿', confirmed: '完成确认', posted: ['payment', 'refund'].includes(type || '') ? '单据已过账' : '发票已过账', done: '业务已完成', reconciled: '账务与银行已核销' } as Record<string, string>)[effective] || '完成目标未知' }
+export function completionTargetLabel(target?: string, type?: string) { const effective = target || (type === 'purchase' ? 'confirmed' : ['inventory', 'manufacturing'].includes(type || '') ? 'done' : ['payment', 'refund', 'reconciliation'].includes(type || '') ? 'reconciled' : 'posted'); return ({ cancelled: '单据已取消', sent: '交付邮件服务器', read_only: '只读浏览', draft: '保留草稿', confirmed: '完成确认', posted: ['payment', 'refund'].includes(type || '') ? '单据已过账' : '发票已过账', done: '业务已完成', reconciled: '账务与银行已核销' } as Record<string, string>)[effective] || '完成目标未知' }
 
 export function materialRowLabel(material: MaterialRecord) { if (material.row_count == null) return '行数未知'; return material.media_type === 'text/csv' ? `${Math.max(0, material.row_count - 1)} 条数据` : `${material.row_count} 行`; }
 
@@ -195,6 +210,7 @@ export function outcomeScopeLabel(scope?: string) { const kind = scope?.split('_
   sale_invoice_basic_checks: '销售订单与客户发票基础核验',
   purchase_read_only_checks: '采购订单只读浏览',
   purchase_draft_checks: '采购订单草稿核验',
+  purchase_cancelled_checks: '采购订单取消核验',
   purchase_confirmed_checks: '采购订单确认核验',
   sale_purchase_invoice_read_only_checks: '销售、采购与开票只读浏览',
   sale_purchase_invoice_draft_checks: '销售、采购与开票草稿核验',
@@ -204,7 +220,7 @@ export function outcomeScopeLabel(scope?: string) { const kind = scope?.split('_
 
 export function outcomeStatusLabel(status?: string) { return ({ unknown: '未知', passed: '通过', failed: '失败' } as Record<string, string>)[status || ''] || '状态未知' }
 
-export function toolLabel(tool?: string) { return ({ mcp_odoo_read_record: '读取业务记录', mcp_odoo_read: '读取业务记录', mcp_odoo_validate_write: '预检业务动作', execute_approved_write: '执行已批准动作', refresh_business: '读取最新状态' } as Record<string, string>)[tool || ''] || '业务工具' }
+export function toolLabel(tool?: string) { const labels: Record<string, string> = { mcp_odoo_find_records: '查找业务记录', mcp_odoo_read_record: '读取业务记录', mcp_odoo_get_model_fields: '读取字段定义', mcp_odoo_schema_catalog: '检索模型结构', mcp_odoo_list_models: '列出业务模型', mcp_odoo_read_supply_context: '读取库存与供应信息', mcp_odoo_read_invoice_eligibility: '核对可开票条件', mcp_odoo_preview_write: '预览业务变更', mcp_odoo_execute_approved_write: '执行已批准动作', mcp_odoo_execute_method: '执行业务动作', mcp_odoo_chatter_post: '提交单据消息', mcp_odoo_read_attachment: '读取附件', mcp_odoo_aggregate_records: '汇总业务记录', mcp_odoo_diagnose_access: '核对操作权限', mcp_odoo_diagnose_odoo_call: '诊断业务调用', mcp_odoo_health_check: '检查 Odoo 连接', mcp_odoo_read: '读取业务记录', mcp_odoo_validate_write: '预检业务动作', execute_approved_write: '执行已批准动作', refresh_business: '读取最新状态', list_odoo_sops: '浏览业务操作规程', get_odoo_sop: '读取业务操作规程', get_current_time: '读取当前时间', check_odoo_connection: '检查 Odoo 连接', mcp_odoo_data_quality_report: '检查数据质量', mcp_odoo_generate_json2_payload: '预览接口请求', mcp_odoo_inspect_model_relationships: '查看模型关联', mcp_odoo_upgrade_risk_report: '评估升级风险', mcp_odoo_analyze_upgrade_log: '分析升级日志', mcp_odoo_lookup_model_history: '查看模型变更历史', mcp_odoo_fit_gap_report: '分析业务适配差距', mcp_odoo_scan_addons_source: '检查扩展模块源码', mcp_odoo_build_domain: '生成查询条件', mcp_odoo_business_pack_report: '查看业务模块能力', mcp_odoo_get_odoo_profile: '读取 Odoo 环境信息', mcp_odoo_list_instances: '查看可用实例', mcp_odoo_search_employee: '查找员工', mcp_odoo_search_holidays: '查找休假记录', mcp_odoo_index_knowledge: '建立知识索引', mcp_odoo_search_knowledge: '搜索业务知识', mcp_odoo_knowledge_stats: '查看知识库统计', mcp_odoo_receivable_payable_aging: '分析应收应付账龄', mcp_odoo_accounting_health_summary: '检查会计数据', mcp_odoo_search_across_instances: '跨实例查找记录', mcp_odoo_aggregate_across_instances: '跨实例汇总数据', mcp_odoo_accounting_health_across_instances: '跨实例检查会计数据', mcp_odoo_submit_async_task: '提交后台任务', mcp_odoo_get_async_task: '读取后台任务结果', mcp_odoo_cancel_async_task: '取消后台任务', mcp_odoo_list_async_tasks: '查看后台任务列表' }; return labels[tool || ''] || labels[`mcp_odoo_${tool || ''}`] || '业务工具' }
 
 export function isPendingApproval(approval: Approval) { return approval.status === 'pending' || approval.status === 'pending_approval' }
 

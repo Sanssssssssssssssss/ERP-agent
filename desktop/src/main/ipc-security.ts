@@ -2,7 +2,7 @@ import { basename, extname, isAbsolute } from "node:path";
 import type { Document, WorkbenchMethod } from "../shared/protocol";
 import { validateEndpoint } from "./settings";
 
-const LOCAL_METHODS = new Set(["get_settings", "save_settings", "import_material", "download_document", "export_business_report", "open_session_snapshot", "open_odoo", "open_odoo_record", "open_business_artifact", "reveal_business_artifact"]);
+const LOCAL_METHODS = new Set(["get_settings", "save_settings", "choose_data_directory", "import_material", "download_document", "export_business_report", "open_session_snapshot", "open_odoo", "open_odoo_record", "open_business_artifact", "reveal_business_artifact"]);
 
 export const METHODS = new Set<WorkbenchMethod>([
   "list_sessions", "create_session", "rename_session", "archive_session", "get_session",
@@ -31,7 +31,7 @@ export function assertRequest(request: unknown): asserts request is ValidIpcRequ
       (!candidate.params || typeof candidate.params !== "object" || Array.isArray(candidate.params))) {
     throw new Error("INVALID_PARAMS");
   }
-  if (candidate.method === "open_odoo" && Object.keys(candidate.params ?? {}).length) throw new Error("INVALID_PARAMS");
+  if (["open_odoo", "choose_data_directory"].includes(candidate.method) && Object.keys(candidate.params ?? {}).length) throw new Error("INVALID_PARAMS");
 }
 
 export function businessScope(params: Record<string, unknown>): { session_id: string; business_id: string; run_id?: string } {

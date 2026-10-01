@@ -4,14 +4,14 @@ BusinessArtifact,
 BusinessDetailProjection,
 Message
 } from './protocol'
-import type { BusinessType, BusinessProposal } from '../shared/protocol'
+import type { BusinessType, BusinessProposal, Material } from '../shared/protocol'
 
 
 export type ConnectionState = 'checking' | 'connected' | 'disconnected' | 'crashed' | 'protocol_error'
 
 export type BusinessTypeCode = BusinessType
 
-export type MaterialRecord = { id: string; session_id: string; name: string; size: number; sha256: string; created_at: string; row_count?: number; preview?: string; media_type?: string }
+export type MaterialRecord = Omit<Material, 'preview' | 'media_type'> & Partial<Pick<Material, 'preview' | 'media_type'>>
 
 export type MessageWithMaterials = Message & { material_ids?: string[] }
 

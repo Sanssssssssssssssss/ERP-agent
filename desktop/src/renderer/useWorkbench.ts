@@ -20,6 +20,7 @@ TraceBundle
 } from './protocol'
 import type { TraceDetail, TraceDetailKind } from './protocol'
 import { ApprovalProgress,ConnectionState,DownloadReceipt,MaterialRecord,ProposalLike } from './view-types'
+import { transitionView } from './view-transition'
 
 export const liveMessageKey = (message: Pick<LiveMessage, 'session_id' | 'business_id' | 'run_id' | 'id'>) => `${message.session_id}:${message.business_id ?? '__conversation__'}:${message.run_id}:${message.id}`
 
@@ -36,6 +37,7 @@ export function useWorkbench() {
   const [tab, setTab] = useState<BusinessTab>('execution')
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(false)
+  const [startingBusinessId, setStartingBusinessId] = useState('')
   const [businessLoading, setBusinessLoading] = useState(false)
   const [traceLoading, setTraceLoading] = useState(false)
   const [connection, setConnection] = useState<ConnectionState>('checking')
@@ -86,7 +88,6 @@ export function useWorkbench() {
   selectedRunIdRef.current = selectedRunId
   const traceRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const businessRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const quietBusinessRequestRef = useRef(0)
   const messageInFlightRef = useRef(new Set<string>())
   const proposalInFlightRef = useRef(new Set<string>())
   const runStartInFlightRef = useRef(new Set<string>())
@@ -216,6 +217,7 @@ export function useWorkbench() {
     const result = await call<SessionDetail>('get_session', { session_id: sessionId })
     if (requestId !== sessionRequestRef.current || sessionIdRef.current !== sessionId) return
     setSession(result)
+    setPendingMaterials((current) => current.map((material) => result.materials?.find((item) => item.id === material.id) ?? material))
     setSessions((current) => current.map((item) => item.id === sessionId ? result.session : item))
     conversationRunsRef.current = result.conversation_runs ?? []
     const latestConversation = [...conversationRunsRef.current].filter((run) => run.business_id == null).sort((left, right) => String(right.started_at || '').localeCompare(String(left.started_at || '')))[0]
@@ -287,17 +289,19 @@ export function useWorkbench() {
 
   const refreshBusinessQuiet = useCallback(async (sessionId: string, businessId: string) => {
     if (!sessionId || !businessId || sessionIdRef.current !== sessionId || businessIdRef.current !== businessId) return
-    const requestId = ++quietBusinessRequestRef.current
+    const requestId = ++businessRequestRef.current
     try {
       const result = await call<BusinessDetailProjection>('get_business', { session_id: sessionId, business_id: businessId })
-      if (requestId !== quietBusinessRequestRef.current || sessionIdRef.current !== sessionId || businessIdRef.current !== businessId) return
+      if (requestId !== businessRequestRef.current || sessionIdRef.current !== sessionId || businessIdRef.current !== businessId) return
       setBusinessDetail(result)
       businessRunsRef.current = result.runs
       drainPendingStreamEvents()
       publishLiveMessages()
       setSelectedRunId((current) => result.runs.some((run) => run.id === current) ? current : result.runs[0]?.id || '')
     } catch (reason) {
-      if (requestId === quietBusinessRequestRef.current && sessionIdRef.current === sessionId && businessIdRef.current === businessId) setError(messageForError(reason))
+      if (requestId === businessRequestRef.current && sessionIdRef.current === sessionId && businessIdRef.current === businessId) setError(messageForError(reason))
+    } finally {
+      if (requestId === businessRequestRef.current && sessionIdRef.current === sessionId && businessIdRef.current === businessId) setBusinessLoading(false)
     }
   }, [call])
 
@@ -466,7 +470,7 @@ export function useWorkbench() {
   }, [approvalProgress?.businessId, checkConnection, loadSessions, refreshBusinessQuiet, reloadCurrent, selectedBusinessId, selectedRunId, selectedSessionId, tab])
 
   const activeBusiness = useMemo(
-    () => session?.businesses.find((item) => item.id === selectedBusinessId) ?? businessDetail?.business ?? null,
+    () => businessDetail?.business.id === selectedBusinessId ? businessDetail.business : session?.businesses.find((item) => item.id === selectedBusinessId) ?? null,
     [businessDetail?.business, selectedBusinessId, session?.businesses]
   )
   // Empty follows the visible business; an explicit conversation scope stays unbound.
@@ -485,7 +489,6 @@ export function useWorkbench() {
     businessIdRef.current = ''
     sessionRequestRef.current += 1
     businessRequestRef.current += 1
-    quietBusinessRequestRef.current += 1
     traceRequestRef.current += 1
     setSelectedSessionId(id)
     setBlockedSend('')
@@ -525,8 +528,8 @@ export function useWorkbench() {
     setMaterialsBusy(true)
     try {
       for (const file of files) {
-        if (file.size > 2 * 1024 * 1024) throw new Error(`文件“${file.name}”超过 2 MiB 限制。`)
-        if (!/\.(csv|txt)$/i.test(file.name) && !['text/csv', 'text/plain'].includes(file.type)) throw new Error(`文件“${file.name}”仅支持 CSV 或 TXT。`)
+        if (file.size > 10 * 1024 * 1024) throw new Error(`文件“${file.name}”超过 10 MiB 限制。`)
+        if (!/\.(csv|txt|xlsx|pdf|png|jpe?g)$/i.test(file.name)) throw new Error(`文件“${file.name}”仅支持 CSV、TXT、XLSX、PDF、PNG 或 JPG。`)
         const bytes = new Uint8Array(await file.arrayBuffer())
         let binary = ''
         const chunkSize = 0x8000
@@ -536,6 +539,7 @@ export function useWorkbench() {
         if (!material?.id) throw new Error(`文件“${file.name}”解析失败，请检查内容。`)
         if (sessionIdRef.current === requestSessionId && materialRequestRef.current === requestId) setPendingMaterials((current) => current.some((item) => item.id === material.id) ? current : current.length >= 3 ? current : [...current, material])
       }
+      if (sessionIdRef.current === requestSessionId) await loadSession(requestSessionId)
     } catch (reason) {
       if (sessionIdRef.current === requestSessionId && materialRequestRef.current === requestId) setError(messageForError(reason))
     } finally {
@@ -563,7 +567,6 @@ export function useWorkbench() {
       }
       setDocumentDownloads((current) => ({ ...current, [key]: { status: 'completed', path: result.path, artifact: result.artifact } }))
       setNotice(`${format.toUpperCase()} 已下载：${result.artifact?.name || result.path || document.name}`)
-      window.setTimeout(() => setNotice(''), 2600)
     } catch (reason) {
       if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) {
         const message = messageForError(reason)
@@ -578,7 +581,6 @@ export function useWorkbench() {
     if (businessIdRef.current === id && selectedBusinessId === id) return
     businessIdRef.current = id
     businessRequestRef.current += 1
-    quietBusinessRequestRef.current += 1
     traceRequestRef.current += 1
     setSelectedBusinessId(id)
     setBusinessDetail(null)
@@ -604,9 +606,8 @@ export function useWorkbench() {
     try {
       const created = await call<SessionSummary>('create_session')
       await loadSessions(false)
-      setConversationOpen(true)
       try { window.localStorage.setItem('odoo-workbench.conversation-open', 'true') } catch { /* storage is optional */ }
-      chooseSession(created.id)
+      transitionView(() => { setConversationOpen(true); chooseSession(created.id) })
     } catch (reason) {
       setError(messageForError(reason))
     } finally {
@@ -642,6 +643,10 @@ export function useWorkbench() {
     const attachedMaterials = pendingMaterials
     const text = draft.trim() || (attachedMaterials.length ? '请先整理这些业务材料，说明需要补充的信息' : '')
     if (!text || !selectedSessionId || loading || materialsBusy) return
+    if (attachedMaterials.some((material) => material.status === 'parsing' || material.status === 'failed')) {
+      setError('请等待材料解析完成，或移除解析失败的材料后再发送。')
+      return
+    }
     const requestSessionId = selectedSessionId
     const messageKey = `${requestSessionId}:${text}:${attachedMaterials.map((material) => material.id).join(',')}`
     if (messageInFlightRef.current.has(messageKey)) return
@@ -681,7 +686,7 @@ export function useWorkbench() {
     if (!selectedSessionId) return
     const message = session?.messages.find((item) => item.proposal?.id === proposal.id)
     if (message?.proposal?.status === 'confirmed' && message.business_id) {
-      chooseBusiness(message.business_id)
+      transitionView(() => chooseBusiness(message.business_id!))
       return
     }
     if (message?.proposal?.status !== 'pending' || proposal.id !== pendingProposal?.id || proposalUnavailable) return
@@ -701,7 +706,7 @@ export function useWorkbench() {
       if (sessionIdRef.current !== requestSessionId) return
       await loadSession(requestSessionId)
       if (business && sessionIdRef.current === requestSessionId) {
-        chooseBusiness(business.id)
+        transitionView(() => { if (sessionIdRef.current === requestSessionId) chooseBusiness(business.id) })
       }
     } catch (reason) {
       if (sessionIdRef.current === requestSessionId) setError(messageForError(reason))
@@ -718,20 +723,25 @@ export function useWorkbench() {
     const runKey = `${requestSessionId}:${requestBusinessId}`
     if (runStartInFlightRef.current.has(runKey)) return
     runStartInFlightRef.current.add(runKey)
+    setStartingBusinessId(requestBusinessId)
     setLoading(true)
     try {
       const latest = businessDetail?.runs.find((run) => run.id === businessDetail.business.active_run_id) ?? businessDetail?.runs?.[0]
-      const recovering = latest && ['interrupted', 'failed', 'cancelled'].includes(latest.status)
+      const recovering = businessDetail?.business.goal_submitted !== false && latest && ['interrupted', 'failed', 'cancelled'].includes(latest.status)
       const run = await call<Run>(recovering ? 'resume_run' : 'start_run', {
         session_id: requestSessionId, business_id: requestBusinessId, ...(recovering ? { run_id: latest.id } : {})
       })
       if (sessionIdRef.current !== requestSessionId || businessIdRef.current !== requestBusinessId) return
+      // The accepted run is authoritative for execution status, not business success.
+      businessRequestRef.current += 1
+      setBusinessDetail((current) => current?.business.id === requestBusinessId ? { ...current, business: { ...current.business, status: run.status, active_run_id: run.id }, runs: [run, ...current.runs.filter((item) => item.id !== run.id)] } : current)
       setSelectedRunId(run.id)
       await reloadCurrent()
     } catch (reason) {
       if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) setError(messageForError(reason))
     } finally {
       runStartInFlightRef.current.delete(runKey)
+      setStartingBusinessId((current) => current === requestBusinessId ? '' : current)
       if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) setLoading(false)
     }
   }
@@ -770,6 +780,10 @@ export function useWorkbench() {
   }
 
   const decideApproval = async (approval: Approval, decision: 'approve' | 'reject') => {
+    if (decision === 'approve' && approval.approval_display?.ready === false) {
+      setError('审批信息尚不完整，请先刷新审批信息。')
+      return
+    }
     const requestSessionId = selectedSessionId
     const requestBusinessId = approval.business_id
     const approvalKey = `${requestSessionId}:${requestBusinessId}:${approval.run_id}:${approval.action_id}`
@@ -814,7 +828,7 @@ export function useWorkbench() {
       if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) {
         setApprovalProgress(null)
         setMessageBusinessId(requestBusinessId)
-        setThinkingRun({ sessionId: requestSessionId, runId: result.run_id || '' })
+        setSelectedRunId(result.run_id || approval.run_id)
         setConversationOpen(true)
         setTab('execution')
         await reloadCurrent().catch((reason) => setError(messageForError(reason)))
@@ -881,6 +895,7 @@ export function useWorkbench() {
       const current = await call<Settings>('get_settings')
       setSettings(current)
       setSettingsDraft({
+        data_dir: current.data_dir || '',
         model: current.model,
         base_url: current.base_url,
         odoo_url: current.odoo_url,
@@ -900,7 +915,18 @@ export function useWorkbench() {
     requestAnimationFrame(() => settingsButtonRef.current?.focus())
   }, [])
 
+  const chooseDataDirectory = async () => {
+    try {
+      const result = await call<{ cancelled: boolean; path?: string }>('choose_data_directory')
+      if (!result.cancelled && result.path) {
+        setSettingsDraft(current => ({ ...current, data_dir: result.path! }))
+        setError('')
+      }
+    } catch (reason) { setError(messageForError(reason)) }
+  }
+
   const saveSettings = async () => {
+    setError('')
     setSettingsSaving(true)
     try {
       const updated = await call<Settings>('save_settings', {
@@ -908,7 +934,7 @@ export function useWorkbench() {
         long_term_memory: settingsDraft.long_term_memory === 'on'
       })
       setSettings(updated)
-      setSettingsDraft((current) => ({ ...current, model_key: '', odoo_key: '' }))
+      setSettingsDraft((current) => ({ ...current, data_dir: updated.data_dir || '', model_key: '', odoo_key: '' }))
       const currentHealth = await checkConnection(true)
       if (!currentHealth) throw new Error('连接检查失败')
       setNotice('设置已保存，连接状态已刷新。')
@@ -935,7 +961,6 @@ export function useWorkbench() {
       setExportPath(result.path || '导出已完成，但主机没有返回文件路径。')
       setNotice(result.path ? '业务回执已导出。' : '业务回执已导出。')
       await loadBusiness(requestSessionId, requestBusinessId).catch(() => undefined)
-      window.setTimeout(() => setNotice(''), 2600)
     } catch (reason) {
       setError(messageForError(reason))
     } finally {
@@ -987,7 +1012,6 @@ export function useWorkbench() {
       await call('open_odoo_record', { session_id: requestSessionId, business_id: requestBusinessId, model: document.model, record_id: recordId })
       if (sessionIdRef.current !== requestSessionId || businessIdRef.current !== requestBusinessId) return
       setNotice(`已请求打开 ${document.name || document.id}。`)
-      window.setTimeout(() => setNotice(''), 2600)
     } catch (reason) {
       setError(messageForError(reason))
     }
@@ -1005,7 +1029,6 @@ export function useWorkbench() {
       })
       if (sessionIdRef.current !== requestSessionId || businessIdRef.current !== requestBusinessId) return
       setNotice(reveal ? `已打开文件所在位置：${artifact.name}` : `已请求打开文件：${artifact.name}`)
-      window.setTimeout(() => setNotice(''), 2600)
     } catch (reason) {
       if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) setError(messageForError(reason))
     }
@@ -1013,7 +1036,7 @@ export function useWorkbench() {
 
   const openTraceTarget = (target: { run_id?: string; tool_id?: string; action_id?: string; kind?: string }) => {
     const runId = target.kind === 'readback' ? businessDetail?.business.readback?.latest_run_id : target.run_id
-    setTraceTarget({ runId, toolId: target.tool_id, actionId: target.action_id, kind: target.kind })
+    setTraceTarget({ runId, toolId: target.kind === 'action' && target.action_id ? undefined : target.tool_id, actionId: target.action_id, kind: target.kind })
     if (runId) setSelectedRunId(runId)
     setTab('trace')
   }
@@ -1041,7 +1064,9 @@ export function useWorkbench() {
   const latestUser = [...visibleMessages].reverse().find((message) => message.role === 'user')
   const newerProposal = proposalRun?.proposal_ids?.length ? proposalRun.proposal_ids.at(-1) !== pendingProposal?.id
     : Boolean(pendingProposalMessage?.run_id && visibleMessages.slice(visibleMessages.indexOf(pendingProposalMessage) + 1).some((message) => message.run_id === pendingProposalMessage.run_id && message.proposal))
-  const proposalUnavailable = newerProposal ? '该提案已被更新，请使用最新业务说明。'
+  const proposalTarget = pendingProposal?.existing_business_id ? (businessDetail?.business.id === pendingProposal.existing_business_id ? businessDetail.business : session?.businesses.find((business) => business.id === pendingProposal.existing_business_id)) : undefined
+  const proposalUnavailable = proposalTarget && ['needs_reconciliation', 'blocked'].includes(proposalTarget.status) ? '现有业务仍有待核对动作。请先打开该业务核对写入结果，再确认新的目标。'
+    : newerProposal ? '该提案已被更新，请使用最新业务说明。'
     : proposalRun && !['completed', 'running', 'cancel_requested'].includes(proposalRun.status) ? '本轮回复未完成，请重新说明业务要求。'
     : pendingProposal?.source_messages?.length && latestUser && !pendingProposal.source_messages.some((message) => message.id === latestUser.id)
       ? '已有新的业务要求，请等待更新后的提案。' : ''
@@ -1061,6 +1086,7 @@ export function useWorkbench() {
     draft,
     setDraft,
     loading,
+    startingBusinessId,
     businessLoading,
     traceLoading,
     loadTraceDetail,
@@ -1130,6 +1156,7 @@ export function useWorkbench() {
     openSettings,
     closeSettings,
     saveSettings,
+    chooseDataDirectory,
     retryHealth,
     exportBusiness,
     openSessionSnapshot,

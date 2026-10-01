@@ -29,8 +29,10 @@ from erp_harness.runtime.session import HarnessSession, SessionConfig
 from erp_harness.app.request_receipts import (
     RequestReceipts as _RequestReceipts, _message_usage, _sum_usage_bucket,
 )
-from erp_harness.app.business import BUSINESS_TARGETS, COMPLETION_TARGETS, default_target, valid_target
+from erp_harness.app.business import BUSINESS_TARGETS, BUSINESS_COMMUNICATION, COMPLETION_TARGETS, default_target, valid_target
 from erp_harness.app.model_config import CONTEXT_WINDOW, MODEL_COMPAT, provider_config as _provider_config, transport_config
+
+from erp_harness.erp.read_failures import read_failure
 
 READ_MAX_ROWS = 5
 READ_PAGE_MAX = 20
@@ -69,7 +71,7 @@ CONVERSATION_POLICY = (
     "is missing or ambiguous. "
     "Keep the reply concise: a short summary and usually no more than two necessary "
     "questions. Do not promise "
-    "external attachment upload or OCR, and do not claim "
+    "external attachment delivery, and do not claim "
     "a business is complete before the workspace has verified it. Payment and refund "
     "goals require the original document, amount, currency and company; bank reconciliation "
     "requires matching journal entries, not merely an invoice marked paid. "
@@ -81,16 +83,23 @@ CONVERSATION_POLICY = (
     "Before proposing sales-order invoicing, resolve the order and use read_invoice_eligibility. "
     "A blocked prerequisite requires the user's commercial choice, not another API or changed invoice policy. "
     "Ordinary discussion must not create a proposal. After a successful proposal "
-    "tool call, tell the user briefly to click the card button '创建业务工作区', "
-    "then click '开始执行'. Do not ask the user to reply with confirmation and do "
+    "tool call, describe the proposal card: '创建业务工作区' for new work, or confirm the goal update for an existing workspace. "
+    "New proposals do not require choosing an existing business. A company is not a workspace. "
+    "本轮实际工具定义优先于历史回复中的能力描述。read_odoo_reference 已提供 bom、bom_line、stock_quant、stock_move、supplier_offer、calendar。需要时直接只读查询，不能沿用旧回复声称工具不存在。"
+    "The host supplies a current Odoo connection check. It proves connectivity only, never business completion. "
+    "If it is not connected, explain the reported reason and next action; do not repeat business reads or ask for a narrower company/customer scope to fix a connection failure. "
+    "Use check_odoo_connection when the user asks for diagnostics or to recheck connectivity. It is read-only and cannot restart servers or change settings. "
+    "For read failures, distinguish authentication, ACL/field-policy denial, transport, invalid query and unknown causes using reason_code. Never invent a cause or replay writes. "
+    "If an existing business has unresolved writes, explain that read-only reconciliation must finish before confirming the saved amendment. "
+    "Then click '开始执行'. Do not ask the user to reply with confirmation and do "
     "not imply that execution starts automatically. Never use shell, filesystem, "
     "network, MCP, or hidden reasoning as user-facing progress."
-)
+) + " " + BUSINESS_COMMUNICATION
 
 
 _REFERENCE_SPECS = {
     "contact": ("res.partner", ["id", "name", "display_name", "email", "city", "company_id", "parent_id", "commercial_partner_id", "type", "function", "active", "property_payment_term_id"]),
-    "product": ("product.product", ["id", "name", "display_name", "default_code", "list_price"]),
+    "product": ("product.product", ["id", "name", "display_name", "default_code", "list_price", "product_tmpl_id", "qty_available", "free_qty", "incoming_qty", "outgoing_qty", "uom_id", "bom_ids", "seller_ids"]),
     "payment_term": ("account.payment.term", ["id", "name"]),
     "sale_order": ("sale.order", ["id", "name", "state", "partner_id", "company_id", "date_order", "client_order_ref", "amount_total", "currency_id", "invoice_status"]),
     "purchase_order": ("purchase.order", ["id", "name", "state", "partner_id", "company_id", "date_order", "partner_ref", "amount_total", "currency_id"]),
@@ -100,7 +109,13 @@ _REFERENCE_SPECS = {
     "purchase_line": ("purchase.order.line", ["id", "order_id", "product_id", "product_qty", "price_unit", "tax_ids"]),
     "invoice": ("account.move", ["id", "name", "state", "move_type", "company_id", "partner_id", "commercial_partner_id", "amount_total", "currency_id", "payment_state", "invoice_origin", "invoice_line_ids", "invoice_pdf_report_id"]),
     "transfer": ("stock.picking", ["id", "name", "state", "partner_id", "origin", "scheduled_date"]),
-    "production": ("mrp.production", ["id", "name", "state", "product_id", "product_qty"]),
+    "production": ("mrp.production", ["id", "name", "state", "company_id", "product_id", "product_qty", "qty_produced", "bom_id", "date_start", "date_finished", "move_raw_ids", "workorder_ids"]),
+    "bom": ("mrp.bom", ["id", "display_name", "product_id", "product_tmpl_id", "product_qty", "product_uom_id", "bom_line_ids", "operation_ids", "company_id", "type"]),
+    "bom_line": ("mrp.bom.line", ["id", "bom_id", "product_id", "product_qty", "product_uom_id"]),
+    "supplier_offer": ("product.supplierinfo", ["id", "partner_id", "product_id", "product_tmpl_id", "price", "min_qty", "delay", "date_start", "date_end", "currency_id", "company_id"]),
+    "stock_move": ("stock.move", ["id", "product_id", "state", "quantity", "product_uom_qty", "location_id", "location_dest_id", "company_id", "picked"]),
+    "stock_quant": ("stock.quant", ["id", "product_id", "company_id", "location_id", "quantity", "reserved_quantity"]),
+    "calendar": ("resource.calendar", ["id", "name", "tz", "hours_per_day", "attendance_ids", "global_leave_ids", "company_id"]),
     "payment": ("account.payment", ["id", "name", "state", "partner_id", "amount", "currency_id", "is_matched"]),
 }
 _ODOO_READS = None
@@ -141,11 +156,13 @@ def resolve_references(reads, references, source_text):
         raise ValueError("references must contain at most 20 records")
     resolved = []
     for reference in sorted(references, key=lambda r: 2 if isinstance(r, dict) and r.get("purpose") == "recipient" else 0 if isinstance(r, dict) and r.get("resource") == "company" else 1):
-        if (not isinstance(reference, dict) or set(reference) - {"resource", "id", "quote", "purpose"}
+        if (not isinstance(reference, dict) or set(reference) - {"resource", "id", "quote", "purpose", "expected_state"}
                 or not {"resource", "id", "quote"}.issubset(reference)
                 or reference.get("purpose", "target") not in {"target", "source", "recipient"}):
             raise ValueError("reference requires resource, id and an exact quote from the user")
         resource, record_id, quote = (reference[k] for k in ("resource", "id", "quote"))
+        if "expected_state" in reference and (resource != "purchase_order" or reference["expected_state"] != "cancel"):
+            raise ValueError("expected_state currently supports only purchase_order cancellation")
         resource = "contact" if resource == "customer" else resource  # 旧提案只在入口兼容。
         if resource not in _REFERENCE_SPECS or type(record_id) is not int or record_id < 1 or not isinstance(quote, str) or not quote or quote not in source_text:
             raise ValueError("reference must cite the user's exact name or document reference")
@@ -205,10 +222,10 @@ def _reference_query(resource, values):
     return model, list(dict.fromkeys(["id", *fields])), domain, order
 
 
-def _odoo_reads():
+def _odoo_reads(*, fresh=False, timeout=10):
     """Build the explicit, read-only Odoo facade for this worker."""
     global _ODOO_READS
-    if _ODOO_READS is not None:
+    if _ODOO_READS is not None and not fresh:
         return _ODOO_READS
     required = ("ODOO_URL", "ODOO_DB", "ODOO_USERNAME", "ODOO_API_KEY")
     if any(not os.environ.get(key) for key in required):
@@ -218,7 +235,7 @@ def _odoo_reads():
     client = Json2ReadClient(
         url=os.environ["ODOO_URL"], db=os.environ["ODOO_DB"],
         username=os.environ["ODOO_USERNAME"], password=os.environ["ODOO_API_KEY"],
-        api_key=os.environ["ODOO_API_KEY"], transport="json2", timeout=10,
+        api_key=os.environ["ODOO_API_KEY"], transport="json2", timeout=timeout,
     )
     _ODOO_READS = NativeReads(client)
     return _ODOO_READS
@@ -311,7 +328,9 @@ async def _read_odoo_reference(_call_id, arguments, _signal=None, _on_update=Non
             "limit": limit + 1, "offset": offset, "order": order,
         })
         if not isinstance(result, dict) or result.get("success") is not True:
-            raise RuntimeError(str(result.get("error", "native read was unavailable")))
+            payload = {"success": False, **read_failure(result), "source": "native_odoo_read",
+                       "observed_at": observed_at, "resource": resource, "model": model, "verified": False}
+            return AgentToolResult(content=json.dumps(payload, ensure_ascii=False), details=payload)
         raw_records = result.get("result")
         if not isinstance(raw_records, list) or any(not isinstance(row, dict) for row in raw_records):
             raise RuntimeError("native read returned malformed records")
@@ -384,10 +403,8 @@ async def _read_odoo_reference(_call_id, arguments, _signal=None, _on_update=Non
                     if "page_counts_by_state" in page:
                         page["page_counts_by_state"] = dict(Counter(r["state"] for r in page["records"]))
     except Exception as exc:
-        denied = any(word in str(exc).lower() for word in ("accesserror", "access denied", "permission", "policy denies", "restricted"))
-        payload = {"success": False, "status": "permission_denied" if denied else "unavailable", "source": "native_odoo_read",
-                   "observed_at": observed_at, "resource": resource, "model": model,
-                   "verified": False, "error": "Odoo read could not be verified"}
+        payload = {"success": False, **read_failure(exc), "source": "native_odoo_read",
+                   "observed_at": observed_at, "resource": resource, "model": model, "verified": False}
     return AgentToolResult(content=json.dumps(payload, ensure_ascii=False), details=payload)
 
 
@@ -409,8 +426,8 @@ async def _read_business_status(_call_id, arguments, _signal=None, _on_update=No
                 read_business_status, _BUSINESS_CONTEXT, _odoo_reads(),
                 session_id=os.environ.get("PI_AGENT_SESSION_ID"), connection=_connection_identity(),
             )
-        except Exception:  # noqa: BLE001 - read failures never expose credentials or cached success.
-            payload = {"success": False, "status": "unavailable", "error": "Current business evidence could not be read; no completion or delivery is verified."}
+        except Exception as exc:  # No cached success or credential text.
+            payload = {"success": False, **read_failure(exc), "verification_status": "unknown"}
     return AgentToolResult(content=json.dumps(payload, ensure_ascii=False), details=payload)
 
 
@@ -421,9 +438,35 @@ async def _read_invoice_eligibility(_call_id, arguments, _signal=None, _on_updat
     else:
         try:
             payload = await asyncio.to_thread(_odoo_reads().call, "read_invoice_eligibility", values)
-        except Exception:  # noqa: BLE001 - read failures never authorize a business action.
-            payload = {"success": False, "status": "unavailable", "error": "Current invoice prerequisites could not be read."}
+            if payload.get("success") is False and payload.get("error"):
+                payload.update(read_failure(payload))
+        except Exception as exc:  # Read failures never authorize a business action.
+            payload = {"success": False, **read_failure(exc)}
     return AgentToolResult(content=json.dumps(payload, ensure_ascii=False), details=payload)
+
+
+async def _check_odoo_connection(_call_id, arguments, _signal=None, _on_update=None):
+    from .host import _public_endpoint
+    payload = {"source": "native_odoo_connection", "observed_at": _observed_at(),
+               "endpoint": _public_endpoint(os.environ.get("ODOO_URL")), "database": os.environ.get("ODOO_DB"),
+               "business_verified": False}
+    if arguments:
+        payload.update(success=False, status="invalid", reason_code="invalid_arguments", error="Connection diagnosis takes no arguments.")
+    else:
+        try:
+            await asyncio.to_thread(_odoo_reads, fresh=True, timeout=3)
+            payload.update(success=True, status="connected", detail="只读认证和用户上下文读取成功；各模型权限仍需分别核验。")
+        except Exception as exc:
+            payload.update(success=False, **read_failure(exc))
+    return AgentToolResult(content=json.dumps(payload, ensure_ascii=False), details=payload)
+
+
+CHECK_ODOO_CONNECTION = AgentTool(
+    name="check_odoo_connection", label="Check Odoo connection",
+    description="Read-only current Odoo authentication/connectivity diagnosis. Returns classified reason and next action; no business reads, writes, restarts or setting changes. Connectivity is not transaction or model ACL proof.",
+    parameters={"type": "object", "properties": {}, "additionalProperties": False},
+    execute_fn=_check_odoo_connection,
+)
 
 
 READ_BUSINESS_STATUS = AgentTool(
@@ -549,10 +592,15 @@ async def _propose_business(_call_id, arguments, _signal=None, _on_update=None):
             proposal["existing_business_id"] = existing.strip()
         if material_ids is not None:
             proposal["material_ids"] = [item.strip() for item in material_ids]
-        return AgentToolResult(
-            content=json.dumps({"success": True, "proposal": proposal}, ensure_ascii=False),
-            details={"success": True, "proposal": proposal},
-        )
+        selected = ((_BUSINESS_CONTEXT or {}).get("state") or {}).get("businesses", {}).get(existing, {})
+        blocked = selected.get("status") in {"needs_reconciliation", "blocked"}
+        payload = {"success": True, "proposal": proposal, "confirmation": {
+            "kind": "amend_existing" if existing else "create_business",
+            "label": "确认目标更新" if existing else "创建业务工作区",
+            "available": not blocked,
+            "next_action": "先在原业务核对待定写入，之后确认已保存的目标更新" if blocked else "确认此提案后开始执行",
+        }}
+        return AgentToolResult(content=json.dumps(payload, ensure_ascii=False), details=payload)
     return AgentToolResult(
         content=json.dumps({"success": False, "error": error}, ensure_ascii=False),
         details={"success": False, "error": error},
@@ -572,6 +620,7 @@ PROPOSE_BUSINESS = AgentTool(
         " Write proposals require references for the user-named existing document or customer/supplier; include the named company too. "
         "Use only IDs observed in Odoo and quote the exact user-supplied name/reference; digits inside names are not IDs. "
         "purpose=target binds the intended write subject; purpose=source is a reference document used for copying/derivation, not the write target. "
+        "For purchase cancellation, completion_target=cancelled. For replacement drafts plus cancellation, keep target=draft and add expected_state=cancel on the explicitly requested old purchase_order reference (purpose=source). Both outcomes must be checked. "
         "For invoice_delivery use purpose=recipient for the billing contact; identical names are resolved within the target invoice's commercial customer. "
         "Preserve constraints exactly: no receiving means do not complete a receipt; confirmation may create pending transfers."
     ),
@@ -586,7 +635,7 @@ PROPOSE_BUSINESS = AgentTool(
             "completion_target": {"type": "string", "enum": list(COMPLETION_TARGETS)},
             "references": {"type": "array", "maxItems": 20, "items": {"type": "object", "properties": {
                 "resource": {"type": "string", "enum": list(_REFERENCE_SPECS)}, "id": {"type": "integer", "minimum": 1},
-                "quote": {"type": "string"}, "purpose": {"type": "string", "enum": ["target", "source", "recipient"]}}, "required": ["resource", "id", "quote"], "additionalProperties": False}},
+                "quote": {"type": "string"}, "purpose": {"type": "string", "enum": ["target", "source", "recipient"]}, "expected_state": {"type": "string", "enum": ["cancel"]}}, "required": ["resource", "id", "quote"], "additionalProperties": False}},
         },
         "required": ["type", "title", "goal"],
         "additionalProperties": False,
@@ -652,7 +701,7 @@ async def run(args: argparse.Namespace) -> None:
             model=model,
             storage=JsonlSessionStorage(args.session_file),
             cwd=Path.cwd(),
-            tools=[READ_ODOO_REFERENCE, READ_BUSINESS_STATUS, READ_INVOICE_ELIGIBILITY, PROPOSE_BUSINESS],
+            tools=[READ_ODOO_REFERENCE, READ_BUSINESS_STATUS, READ_INVOICE_ELIGIBILITY, CHECK_ODOO_CONNECTION, PROPOSE_BUSINESS],
             max_turns=None,
             resource_paths=ResourcePaths(
                 root=args.receipt_dir / ".pi-agent",
@@ -672,8 +721,8 @@ async def run(args: argparse.Namespace) -> None:
     try:
         print(json.dumps({
             "type": "run_metadata", "kind": "conversation", "model": model,
-            "runtime": "HarnessSession", "toolNames": [READ_ODOO_REFERENCE.name, READ_BUSINESS_STATUS.name, READ_INVOICE_ELIGIBILITY.name, PROPOSE_BUSINESS.name],
-            "toolMode": "proposal_plus_readonly", "odooToolCount": 3,
+            "runtime": "HarnessSession", "toolNames": [READ_ODOO_REFERENCE.name, READ_BUSINESS_STATUS.name, READ_INVOICE_ELIGIBILITY.name, CHECK_ODOO_CONNECTION.name, PROPOSE_BUSINESS.name],
+            "toolMode": "proposal_plus_readonly", "odooToolCount": 4,
         }, ensure_ascii=False), flush=True)
         # Use append-only journal entries rather than session.messages.  A
         # compaction replaces old context in the latter and would make a

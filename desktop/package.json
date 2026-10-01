@@ -13,7 +13,9 @@
     "package-check": "node scripts/package-check.mjs",
     "prepare:sidecar": "node scripts/prepare-sidecar.mjs",
     "dist:portable": "npm run build && electron-builder --win portable",
-    "dist:installer": "npm run build && electron-builder --win nsis"
+    "dist:installer": "npm run build && electron-builder --win nsis",
+    "check:execution": "node scripts/execution-v2-check.mjs",
+    "check:trace": "node scripts/trace-v2-check.mjs"
   },
   "dependencies": {
     "@radix-ui/themes": "3.3.0",
@@ -55,6 +57,17 @@
       {
         "from": "assets/workbench.png",
         "to": "workbench.png"
+      },
+      {
+        "from": "../THIRD_PARTY_NOTICES.md",
+        "to": "THIRD_PARTY_NOTICES.md"
+      },
+      {
+        "from": "../docs/licenses",
+        "to": "licenses",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {

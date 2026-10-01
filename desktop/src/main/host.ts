@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 import type { WorkbenchEvent, WorkbenchMethod, WorkbenchResponse } from "../shared/protocol";
-import { secretEnvironment } from "./settings";
+import { dataDirectory, secretEnvironment } from "./settings";
 
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout };
 type EventSink = (event: WorkbenchEvent) => void;
@@ -115,10 +115,11 @@ export class HostClient {
       TEMP: process.env.TEMP ?? "",
       TMP: process.env.TMP ?? "",
       PYTHONUTF8: "1",
+      ...(process.env.ERP_CAPABILITY_ROUTER_CONFIG ? { ERP_CAPABILITY_ROUTER_CONFIG: process.env.ERP_CAPABILITY_ROUTER_CONFIG } : {}),
       ...(await secretEnvironment()),
     };
     if (generation !== this.lifecycleGeneration) throw error("HOST_START_CANCELLED", "Workbench host start was cancelled.");
-    const dataDir = join(app.getPath("userData"), "data");
+    const dataDir = await dataDirectory();
     const packagedHost = join(process.resourcesPath, "host");
     const python = app.isPackaged
       ? join(packagedHost, "python", process.platform === "win32" ? "python.exe" : "python")

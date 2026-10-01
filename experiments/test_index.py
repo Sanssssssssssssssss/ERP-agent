@@ -4,14 +4,15 @@ import ast
 from collections import defaultdict
 from pathlib import Path
 import re
+import subprocess
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / 'tests/INDEX.md'
 # Multiple labels are intentional: one suite can protect several business capabilities.
 GROUPS = {
-    '中断恢复与宿主交接': ('interrupted', 'recovery', 'resume', 'workbench_host', 'business_status', 'conversation'),
-    '授权、证据与写入安全': ('actions', 'approval', 'evidence', 'guards', 'relation', 'integrity', 'stage_contract', 'business_facts'),
+    '中断恢复与宿主交接': ('interrupted', 'recovery', 'resume', 'hitl', 'workbench_host', 'business_status', 'conversation'),
+    '授权、证据与写入安全': ('actions', 'approval', 'hitl', 'evidence', 'guards', 'relation', 'integrity', 'stage_contract', 'business_facts', 'access', 'staff'),
     '开票、邮件与文件': ('invoice', 'mail', 'chatter', 'document', 'material', 'csv'),
     '制造、库存与业务日期': ('manufactur', 'supply', 'stock', 'bom', 'subassembl', 'workcenter'),
     '采购与业务状态': ('purchase', 'buy_only', 'repair_plan', 'business_mvp', 'sale_view', 'enterprise'),
@@ -32,8 +33,11 @@ def labels(path):
 
 def build():
     entries = []
+    tracked = set(subprocess.check_output(['git', 'ls-files', '-z'], cwd=ROOT).decode('utf8').split('\0'))
     def add(path, kind, title='', group=None, layer='见入口中的断言'):
         path = path.relative_to(ROOT).as_posix()
+        if path not in tracked:
+            return
         for category in group or labels(path):
             entries.append((category, kind, title or Path(path).name, layer, path))
 
@@ -44,7 +48,7 @@ def build():
     for path in sorted((ROOT / 'bench/reference').rglob('test*.py')):
         add(path, '历史参考测试' if '/mcp/' in path.as_posix() else '基准适配测试', group=['历史参考与基准适配'])
     for path in sorted((ROOT / 'experiments').rglob('*.py')):
-        if '__pycache__' in path.parts or path == Path(__file__) or path.name == '__init__.py':
+        if path.relative_to(ROOT).as_posix() not in tracked or '__pycache__' in path.parts or path == Path(__file__) or path.name == '__init__.py':
             continue
         tree = ast.parse(path.read_text(encoding='utf-8-sig'))
         executable = any(isinstance(n, ast.If) and '__name__' in ast.unparse(n.test) for n in tree.body)
@@ -66,7 +70,9 @@ def build():
     import json
     for path in sorted((ROOT / 'experiments/agent_regression').glob('*.json')):
         for row in json.loads(path.read_text(encoding='utf8')):
-            add(path, '真实模型节点', row['id'], layer=row.get('failure_layer', row.get('root_cause', row.get('root', row.get('original_failure', '见冻结清单')))))
+            declared = row.get('categories', [])
+            add(path, '真实模型节点', row['id'], group=[c for c in declared if c in GROUPS] or labels(str(path) + ' ' + ' '.join(declared)),
+                layer=row.get('failure_layer', row.get('root_cause', row.get('root', row.get('original_failure', '见冻结清单')))))
     # The R series retains its full frozen requests locally; the tracked README is the provenance index.
     names = ['调用未发布工具', '启用状态冲突', '关系删除参数', '历史 active 状态残留', '能力撤下后多一轮选择',
              '漏预加载', '确认操作名错误', '退货明细缺产品', '旧库存字段', '重复 preview', '制造旧字段',

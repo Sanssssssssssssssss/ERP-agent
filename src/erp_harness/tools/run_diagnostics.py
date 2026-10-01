@@ -120,6 +120,10 @@ def summarize_run(directory: Path, session_file: Path, identity: dict, *, run_id
     for call in reversed(calls):
         message = by_call.get(call, {})
         payload = _payload(message)
+        failure = payload.get("failure") if isinstance(payload.get("failure"), dict) else {}
+        if not failure and str(payload.get("error", "")).startswith("Unreviewed side-effect methods are blocked by default."):
+            # Legacy policy receipt proves the refusal reason, not missing RPC evidence.
+            failure = {"code": "method_not_supported", "layer": "action_policy", "next_action": "request_supported_alternative"}
         code = _error(message, payload)
         starts = [e for e in events if e.get("tool_call_id") == call and e.get("event") == "start"]
         ends = [e for e in events if e.get("tool_call_id") == call and e.get("event") == "end"]
@@ -134,9 +138,12 @@ def summarize_run(directory: Path, session_file: Path, identity: dict, *, run_id
         before_dispatch = bool(message.get("isError") and re.fullmatch(r"Tool [\w.-]+ not found(?:\..*)?", text, re.S))
         observed_dispatch = any(r.get("dispatch_started") is True for r in matching)
         explicit_no_dispatch = bool(matching) and all(r.get("dispatch_started") is False for r in matching)
+        policy_no_dispatch = failure.get("stage") == "before_send" and failure.get("odoo_request_seen") is False
+        if policy_no_dispatch and observed_dispatch:
+            conflict = True
         if before_dispatch and (starts or observed_dispatch):
             conflict = True
-        seen = (True if observed_dispatch else False if explicit_no_dispatch
+        seen = (True if observed_dispatch else False if explicit_no_dispatch or policy_no_dispatch
                 or before_dispatch and not matching else None) if not conflict else None
         if conflict:
             result["evidence_complete"] = False
@@ -165,7 +172,7 @@ def summarize_run(directory: Path, session_file: Path, identity: dict, *, run_id
             "action_id": _identifier(action_id), "action_status": _action_status(action),
             "world_observation": _identifier(observation.get("receipt_id")), "world_stale": stale,
             "error_code": "correlation_conflict" if conflict else code or "tool_incomplete",
-            "stage": "before_dispatch" if seen is False else "unknown",
+            "stage": failure.get("stage") if not conflict and failure.get("stage") in {"before_send", "before_dispatch"} else "before_dispatch" if seen is False else "unknown",
             "likely_failure_layer": "unknown" if conflict else "tool_dispatch" if before_dispatch else "handoff" if code in {
                 "scope_handoff_required", "business_choice_required", "scope_reconfirmation_required"}
                 else "odoo_transport" if incomplete_rpc else "unknown",
@@ -174,6 +181,8 @@ def summarize_run(directory: Path, session_file: Path, identity: dict, *, run_id
                 else "reconcile_without_replay" if action.get("status") in {"sending", "executing", "needs_reconciliation"}
                 else "fresh_read_or_validate",
         })
+        if not conflict and failure.get("code") in {"method_not_supported", "scope_handoff_required", "business_choice_required", "scope_reconfirmation_required"}:
+            result["items"][-1].update(error_code=failure["code"], likely_failure_layer=failure.get("layer", "handoff"), next_action=failure.get("next_action", "request_user_input"))
         if len(result["items"]) == 3:
             break
     unresolved = []

@@ -420,7 +420,7 @@ def _target_order_ids_for_runs(runs: list[dict[str, Any]], business_type: str) -
 def _readback_targets(business: dict[str, Any], runs: list[dict[str, Any]]) -> set[tuple[str, int]]:
     """Shared desktop/chat scope: explicit bindings and existing verified receipts."""
     targets = {(r["model"], r["id"]) for r in business.get("references", [])
-               if r.get("purpose") != "source" and isinstance(r.get("model"), str)
+               if (r.get("purpose") != "source" or r.get("expected_state")) and isinstance(r.get("model"), str)
                and type(r.get("id")) is int and r["id"] > 0}
     kind = business.get("type", "sale_invoice")
     if kind in ENTERPRISE_TYPES:
@@ -490,6 +490,8 @@ def _evidence(document: dict[str, Any], label: str) -> dict[str, Any] | None:
         return None
     kind = "readback" if document.get("source") == "refresh_native_read" else "action" if document.get("source") == "native_action_readback" else "tool"
     item: dict[str, Any] = {"run_id": run_id, "kind": kind, "label": "独立回读快照" if kind == "readback" else "已核验动作状态回读" if kind == "action" else label}
+    item.update(model=document.get("model"), record_ids=[document["id"]] if document.get("id") is not None else [],
+                record_names=[document["name"]] if document.get("name") else [])
     if document.get("source") == "native_read_receipt" and isinstance(tool_id, str) and tool_id:
         item["tool_id"] = tool_id
     if kind == "action" and isinstance(document.get("source_action_id"), str):
@@ -698,7 +700,10 @@ def _execution_projection(
             stage_id = action_stage(model, operation)
             if not stage_id or stage_id not in verified_actions or not isinstance(run.get("id"), str):
                 continue
-            verified_actions[stage_id].append({"run_id": run["id"], "tool_id": tool.get("id"), "action_id": tool.get("action_id") or result.get("action_id"), "kind": "action", "model": model, "operation": operation, "label": "结构化 ERP 动作已核验"})
+            kwargs = arguments.get("kwargs") if isinstance(arguments.get("kwargs"), dict) else {}
+            record_ids = _relation_ids(arguments.get("record_ids") or arguments.get("ids") or kwargs.get("ids"))
+            names = [doc.get("name") or str(doc.get("id")) for doc in documents if doc.get("model") == model and doc.get("id") in record_ids]
+            verified_actions[stage_id].append({"run_id": run["id"], "tool_id": tool.get("id"), "action_id": tool.get("action_id") or result.get("action_id"), "kind": "action", "model": model, "operation": operation, "record_ids": record_ids, "record_names": names, "label": "结构化 ERP 动作已核验"})
 
     for approval in approvals or []:
         if approval.get("status") != "pending_approval" or not isinstance(approval.get("run_id"), str):
@@ -768,7 +773,7 @@ def _execution_projection(
                     status = {"passed": "verified", "failed": "failed", "unknown": "unknown"}.get(check.get("status"), "unknown")
                     detail = check.get("detail", detail)
         elif stage_id == "purchase" and evidence:
-            check = check_by_name.get("purchase_draft" if completion_target == "draft" else "purchase_confirmed", {})
+            check = check_by_name.get("purchase_draft" if completion_target == "draft" else "purchase_cancelled" if completion_target == "cancelled" else "purchase_confirmed", {})
             if current_run_id and not current_evidence:
                 status, detail = "observed", "仅有历史运行证据，当前运行尚未确认采购订单。"
             elif any(item.get("kind") == "action" for item in current_evidence):
@@ -821,6 +826,8 @@ def _execution_projection(
 
 
 def _required_check_names(business_type: str, completion_target: str) -> set[str]:
+    if business_type == "purchase" and completion_target == "cancelled":
+        return {"observed_purchase", "purchase_cancelled"}
     if business_type == "invoice_delivery":
         return {"invoice_recipient_verified", "invoice_mail_sent"}
     if business_type in ENTERPRISE_TYPES:
@@ -892,6 +899,10 @@ def _finish_readback(state: dict[str, Any], business: dict[str, Any], runs: list
                      observations: dict[tuple[str, int], dict[str, Any]], failures: dict[tuple[str, int], str],
                      checks: list[dict[str, Any]], business_type: str, target: str) -> dict[str, Any]:
     for index, reference in enumerate(business.get("references", [])):
+        if reference.get("expected_state") == "cancel":
+            doc = observations.get((reference["model"], reference["id"]))
+            current = doc.get("state") if doc else None
+            checks.append(_check(f"requested_reference_{index}_cancel", f"取消原采购单：{reference['quote']}", "passed" if current == "cancel" else "failed" if current else "unknown", "独立回读原采购单取消状态。"))
         if reference.get("purpose") == "source":
             continue
         model, record_id = reference["model"], reference["id"]
@@ -934,6 +945,9 @@ def _finish_purchase_readback(state: dict[str, Any], business: dict[str, Any], r
     orders = fresh_by_model.get("purchase.order", [])
     target_ids = _target_order_ids_for_runs(runs, "purchase")
     order = _select_target_document(orders, target_ids)
+    if business.get("completion_target") == "cancelled":
+        cancel_ids = {r["id"] for r in business.get("references", []) if r.get("model") == "purchase.order"}
+        order = _select_target_document(orders, cancel_ids)
     fields = order.get("fields", {}) if order else {}
     partner_ids = _relation_ids(fields.get("partner_id"))
     partners = fresh_by_model.get("res.partner", [])
@@ -947,6 +961,7 @@ def _finish_purchase_readback(state: dict[str, Any], business: dict[str, Any], r
     target = business.get("completion_target", "confirmed")
     checks = [
         _check("observed_purchase", "当前采购订单", "passed" if order else "unknown", "采购订单由 native read 观测。" if order else "尚未观测到唯一采购订单。"),
+        _check("purchase_cancelled", "采购单已取消", "passed" if state_value == "cancel" else "failed" if state_value else "unknown", "独立核对采购单取消状态。"),
         _check("observed_supplier", "已读取供应商", "passed" if partner_ids and any(row.get("id") in partner_ids for row in partners) else "unknown", "供应商关系与记录均已观测。" if partner_ids and partners else "供应商关系或记录未观测完整。"),
         _check("observed_document_states", "已读取采购单状态", "passed" if state_value else "unknown", "采购订单状态已观测。" if state_value else "没有足够读取结果确认采购单状态。"),
         _check("purchase_lines_valid", "采购行有效", "passed" if valid_lines else "failed" if line_ids else "unknown", "采购行包含商品和数量。" if valid_lines else "采购行缺少商品或数量。" if line_ids else "尚未观测采购行。"),

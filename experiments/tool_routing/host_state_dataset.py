@@ -9,7 +9,7 @@ import tempfile
 from functools import lru_cache
 from unittest.mock import patch
 
-from erp_harness.app.routing_state import VERSION, build_routing_state, ledger_state, sop_requirements
+from experiments.tool_routing.host_state_v1 import VERSION, build_routing_state, ledger_state, sop_requirements
 from erp_harness.erp.store import ActionStore
 from erp_harness.context.world import WorldStore
 from erp_harness.tools.dynamic_tools import CAPABILITY_GROUPS
@@ -197,7 +197,7 @@ def freeze(source, output, live_source=None):
         (output/name).write_text(json.dumps(value,ensure_ascii=False,indent=2),encoding='utf8')
     frozen={'projection':VERSION,'parent_manifest':str(source/'frozen.json'),'parent_sha256':sha(source/'frozen.json'),
         'hashes':{n:sha(output/n) for n in ['cases.json','groups.json','label-revisions.json']},
-        'sources':{str(p):sha(p) for p in [Path(__file__),ROOT/'src/erp_harness/app/routing_state.py',ROOT/'src/erp_harness/context/world.py']},
+        'sources':{str(p):sha(p) for p in [Path(__file__),ROOT/'experiments/tool_routing/host_state_v1.py',ROOT/'src/erp_harness/context/world.py']},
         'limits':['Labels are versioned; original dataset and scores preserved. No future results enter input.',
                   'Missing historical ledger/approval timestamps remain unknown. Historical observations are not fresh reads.',
                   'Previously inspected development corpus; final live business comparison is separate.']}

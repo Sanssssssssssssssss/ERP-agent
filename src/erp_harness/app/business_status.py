@@ -32,8 +32,8 @@ def build_status_context(state, business_id, session_id, connection):
         raise ValueError("business does not belong to session")
     if business.get("odoo_connection") != connection or not all(connection.get(k) for k in ("url", "database", "principal")):
         raise ValueError("business connection mismatch")
-    selected = _pick(business, ("id", "session_id", "type", "completion_target", "odoo_connection"))
-    selected["references"] = [{**_pick(r, ("model", "id", "purpose")), "quote": r.get("model", "record"),
+    selected = _pick(business, ("id", "session_id", "type", "completion_target", "odoo_connection", "status"))
+    selected["references"] = [{**_pick(r, ("model", "id", "purpose", "expected_state")), "quote": r.get("model", "record"),
         "fields": dict.fromkeys(r.get("fields", {})),
         "expected_relations": {key: sale_view._relation_ids(value) for key, value in r.get("fields", {}).items()
             if key in {"company_id", "partner_id", "commercial_partner_id", "parent_id", "currency_id"}}}
@@ -108,7 +108,8 @@ def read_business_status(context, reads, *, session_id, connection):
                 return {**result, "status": "permission_denied"}
             row, error = sale_view._read_result(payload, reference["id"])
             if error or not fields.issubset(row or {}):
-                return {**result, "status": _failure(error or "required fields unavailable")}
+                from erp_harness.erp.read_failures import read_failure
+                return {**result, **read_failure(payload if error else {"error": "required fields unavailable"})}
             changed = [key for key, ids in reference.get("expected_relations", {}).items()
                        if ids != sale_view._relation_ids(row.get(key))]
             if changed and reference.get("purpose") != "source":
@@ -116,7 +117,8 @@ def read_business_status(context, reads, *, session_id, connection):
             reference["fields"] = row
         sale_view.refresh_business(state, business_id, reads)
     except Exception as exc:  # noqa: BLE001 - the read boundary fails closed for every backend error.
-        return {**result, "status": _failure(f"{type(exc).__name__}: {exc}")}
+        from erp_harness.erp.read_failures import read_failure
+        return {**result, **read_failure(exc)}
     readback = business.get("readback") or {}
     checks = readback.get("checks", [])
     # Fresh facts and the original request binding are separate checks. Updating
@@ -151,9 +153,12 @@ def read_business_status(context, reads, *, session_id, connection):
         result["recovery"] = {"reason": "mail_delivery_failed", "retry_safe": False,
             "next_action": "inspect_mail_failure_then_reconcile_existing_message",
             "message": "消息已创建，邮件通知报错。请检查邮件队列和 SMTP 配置；在业务执行台点击‘核对当前状态’。不得重复创建消息或擅自重发。"}
-    elif any(r.get("status") in {"needs_reconciliation", "blocked", "interrupted", "failed", "cancelled"} for r in state.get("runs", {}).values()):
+    elif any(r.get("status") in {"needs_reconciliation", "blocked"} for r in state.get("runs", {}).values()):
         result["recovery"] = {"next_action": "reconcile_in_business_workspace", "retry_safe": False,
             "message": "在业务执行台点击‘核对当前状态’。核对通过后可继续剩余步骤；历史审批不能批准新写入。"}
+    elif any(r.get("status") in {"interrupted", "failed", "cancelled"} for r in state.get("runs", {}).values()):
+        result["recovery"] = {"next_action": "review_remaining_business", "retry_safe": False,
+            "message": "当前状态已回读。可在原业务执行台继续剩余工作；宿主会先检查账本，已完成的动作不会重新执行，新写入仍需审批。"}
     result["next_read"] = "read_odoo_reference for exact document fields; this status query never authorizes a write or resend"
     # Keep full source evidence in host logs. The model can request exact record fields next.
     for key in ("documents", "checks", "delivery_receipts"):

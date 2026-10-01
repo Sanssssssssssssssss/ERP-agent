@@ -14,6 +14,7 @@ const log = [];
 let writes = 0;
 let comment = "Original fixture comment";
 let calls = 0;
+let capabilityCalls = 0;
 function partnerRows(body) {
   const row = { id: 10, name: "Fixture vendor", display_name: "Fixture vendor", ref: "FIXTURE", comment,
     email: false, city: false, company_id: false, parent_id: false, commercial_partner_id: [10, "Fixture vendor"],
@@ -61,8 +62,11 @@ const server = createServer(async (request, response) => {
           args = { type: "purchase", title: "IPC fixture", goal: "Set Fixture vendor's comment to Approved fixture comment after approval.", completion_target: "draft",
             references: [{ resource: "contact", id: 10, quote: "Fixture vendor" }] };
         }
-      } else if (!used.includes("configure_odoo_tools")) {
+      } else if (catalog.includes("configure_odoo_tools") && !used.includes("configure_odoo_tools")) {
         tool = "configure_odoo_tools";
+        args = { capabilities: ["actions"] };
+      } else if (!catalog.includes("mcp_odoo_validate_write") && catalog.includes("recover_capabilities")) {
+        tool = "recover_capabilities";
         args = { capabilities: ["actions"] };
       } else if (!used.includes("mcp_odoo_validate_write")) {
         tool = "mcp_odoo_validate_write";
@@ -72,6 +76,7 @@ const server = createServer(async (request, response) => {
         args = JSON.parse(body.messages.findLast(m => m.role === "tool" && m.name === "mcp_odoo_validate_write").content).execution_request;
       }
       if (tool) assert.ok(catalog.includes(tool), `${tool} must be advertised`);
+      if (["configure_odoo_tools", "recover_capabilities"].includes(tool)) capabilityCalls++;
       const delta = tool ? { role: "assistant", tool_calls: [{ index: 0, id: `fixture-${calls}`, type: "function", function: { name: tool, arguments: JSON.stringify(args) } }] }
         : { role: "assistant", content: "Local fixture finished." };
       response.writeHead(200, { "Content-Type": "text/event-stream" });
@@ -146,6 +151,7 @@ async function until(read, accepts) {
 }
 async function prepareApproval() {
   const initialCalls = calls;
+  const initialCapabilityCalls = capabilityCalls;
   const session = await call("create_session", { title: "Migration fixture" });
   const scope = { session_id: session.id };
   const material = await call("import_material", { ...scope, name: "fixture.csv", content_base64: Buffer.from("vendor,note\nFixture vendor,review\n").toString("base64") });
@@ -159,12 +165,14 @@ async function prepareApproval() {
   scope.run_id = run.id;
   const pending = await until(() => call("get_business", scope), d => d.runs?.some(r => r.id === run.id && r.status === "awaiting_approval"));
   assert.equal(writes, 0, "No writes before human approval");
-  assert.equal(calls - initialCalls, 4, "Pause must not spend another model call");
+  assert.equal(calls - initialCalls, 3 + capabilityCalls - initialCapabilityCalls, "Pause must not spend another model call");
   return { session, scope, material, run, pending };
 }
 try {
   await launch(initialExe, profile);
-  assert.equal((await call("health")).host_ready, true);
+  const health = await call("health");
+  assert.equal(health.host_ready, true);
+  assert.equal(health.capability_routing.configured, Boolean(environment.ERP_CAPABILITY_ROUTER_CONFIG));
   await until(() => call("save_settings", { model: "fixture", base_url: `${endpoint}/v1`, model_key: "local-fixture-key", odoo_url: endpoint, odoo_db: "fixture", odoo_username: "admin", odoo_key: "local-fixture-odoo" }).catch(error => {
     if (String(error).includes("CONFIG_BUSY")) return null;
     throw error;

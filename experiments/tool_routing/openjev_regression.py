@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from erp_harness.app.routing_context import assemble_context, selection_batch
+from experiments.tool_routing.routing_context import assemble_context, selection_batch
 from erp_harness.tools.dynamic_tools import CAPABILITY_GROUPS
 from .q4_inputs import ROOT, read, save, sha
 
@@ -82,7 +82,7 @@ def run(output):
     results = []
     with (worker_dir / 'worker.stderr.log').open('wb') as stderr, (output / 'results.jsonl').open('x', encoding='utf8') as stream:
         process = subprocess.Popen([config['python'], '-P', '-u', '-X', 'utf8',
-            str(ROOT / ('src/erp_harness/providers/laya_worker.py' if config.get('backend') == 'laya' else 'src/erp_harness/providers/openjev_worker.py')), frozen['config'], str(worker_dir.resolve())],
+            str(ROOT / ('src/erp_harness/providers/laya_worker.py' if config.get('backend') == 'laya' else 'experiments/tool_routing/openjev_worker.py')), frozen['config'], str(worker_dir.resolve())],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=stderr, text=True, encoding='utf8', env=env)
         try:
             for row in rows:

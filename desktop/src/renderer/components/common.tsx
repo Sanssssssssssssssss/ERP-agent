@@ -2,13 +2,15 @@ import { Badge as RadixBadge } from '@radix-ui/themes'
 import { CircleAlert,CircleCheck,CircleDashed,Clock3,Minus } from 'lucide-react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { useState } from 'react'
 
 
 export function MessageText({ text, collapsible = true }: { text: string; collapsible?: boolean }) {
+  const [expanded, setExpanded] = useState(false)
   const value = text || '（空消息）'
-  const content = <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{ img: ({ alt }) => <span>{alt || '图片'}</span>, a: ({ children }) => <span>{children}</span>, table: ({ children }) => <div className="message-table-wrap"><table>{children}</table></div> }}>{value}</Markdown>
-  if (value.length <= 900 || !collapsible) return <div className="message-text message-markdown">{content}</div>
-  return <div><MessageText text={`${value.slice(0, 360)}…`} collapsible={false} /><details className="message-full"><summary>查看完整消息（{value.length.toLocaleString('zh-CN')} 字）</summary><div className="message-text message-markdown">{content}</div></details></div>
+  const canCollapse = collapsible && value.length > 900
+  const content = <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{ img: ({ alt }) => <span>{alt || '图片'}</span>, a: ({ children }) => <span className="markdown-link">{children}</span>, table: ({ children }) => <div className="message-table-wrap"><table>{children}</table></div> }}>{canCollapse && !expanded ? `${value.slice(0, 360)}…` : value}</Markdown>
+  return <div><div className="message-text message-markdown">{content}</div>{canCollapse && <button type="button" className="message-full receipt-button" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? '收起消息' : `查看完整消息（${value.length.toLocaleString('zh-CN')} 字）`}</button>}</div>
 }
 
 export function StatusBadge({ status, label }: { status?: string; label: string }) {
