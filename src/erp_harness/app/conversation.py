@@ -32,6 +32,8 @@ from erp_harness.app.request_receipts import (
 from erp_harness.app.business import BUSINESS_TARGETS, BUSINESS_COMMUNICATION, COMPLETION_TARGETS, default_target, valid_target
 from erp_harness.app.model_config import CONTEXT_WINDOW, MODEL_COMPAT, provider_config as _provider_config, transport_config
 
+from erp_harness.erp.read_failures import read_failure
+
 READ_MAX_ROWS = 5
 READ_PAGE_MAX = 20
 READ_MAX_BYTES = 16_384
@@ -84,6 +86,10 @@ CONVERSATION_POLICY = (
     "tool call, describe the proposal card: '创建业务工作区' for new work, or confirm the goal update for an existing workspace. "
     "New proposals do not require choosing an existing business. A company is not a workspace. "
     "本轮实际工具定义优先于历史回复中的能力描述。read_odoo_reference 已提供 bom、bom_line、stock_quant、stock_move、supplier_offer、calendar。需要时直接只读查询，不能沿用旧回复声称工具不存在。"
+    "The host supplies a current Odoo connection check. It proves connectivity only, never business completion. "
+    "If it is not connected, explain the reported reason and next action; do not repeat business reads or ask for a narrower company/customer scope to fix a connection failure. "
+    "Use check_odoo_connection when the user asks for diagnostics or to recheck connectivity. It is read-only and cannot restart servers or change settings. "
+    "For read failures, distinguish authentication, ACL/field-policy denial, transport, invalid query and unknown causes using reason_code. Never invent a cause or replay writes. "
     "If an existing business has unresolved writes, explain that read-only reconciliation must finish before confirming the saved amendment. "
     "Then click '开始执行'. Do not ask the user to reply with confirmation and do "
     "not imply that execution starts automatically. Never use shell, filesystem, "
@@ -216,10 +222,10 @@ def _reference_query(resource, values):
     return model, list(dict.fromkeys(["id", *fields])), domain, order
 
 
-def _odoo_reads():
+def _odoo_reads(*, fresh=False, timeout=10):
     """Build the explicit, read-only Odoo facade for this worker."""
     global _ODOO_READS
-    if _ODOO_READS is not None:
+    if _ODOO_READS is not None and not fresh:
         return _ODOO_READS
     required = ("ODOO_URL", "ODOO_DB", "ODOO_USERNAME", "ODOO_API_KEY")
     if any(not os.environ.get(key) for key in required):
@@ -229,7 +235,7 @@ def _odoo_reads():
     client = Json2ReadClient(
         url=os.environ["ODOO_URL"], db=os.environ["ODOO_DB"],
         username=os.environ["ODOO_USERNAME"], password=os.environ["ODOO_API_KEY"],
-        api_key=os.environ["ODOO_API_KEY"], transport="json2", timeout=10,
+        api_key=os.environ["ODOO_API_KEY"], transport="json2", timeout=timeout,
     )
     _ODOO_READS = NativeReads(client)
     return _ODOO_READS
@@ -322,7 +328,9 @@ async def _read_odoo_reference(_call_id, arguments, _signal=None, _on_update=Non
             "limit": limit + 1, "offset": offset, "order": order,
         })
         if not isinstance(result, dict) or result.get("success") is not True:
-            raise RuntimeError(str(result.get("error", "native read was unavailable")))
+            payload = {"success": False, **read_failure(result), "source": "native_odoo_read",
+                       "observed_at": observed_at, "resource": resource, "model": model, "verified": False}
+            return AgentToolResult(content=json.dumps(payload, ensure_ascii=False), details=payload)
         raw_records = result.get("result")
         if not isinstance(raw_records, list) or any(not isinstance(row, dict) for row in raw_records):
             raise RuntimeError("native read returned malformed records")
@@ -395,10 +403,8 @@ async def _read_odoo_reference(_call_id, arguments, _signal=None, _on_update=Non
                     if "page_counts_by_state" in page:
                         page["page_counts_by_state"] = dict(Counter(r["state"] for r in page["records"]))
     except Exception as exc:
-        denied = any(word in str(exc).lower() for word in ("accesserror", "access denied", "permission", "policy denies", "restricted"))
-        payload = {"success": False, "status": "permission_denied" if denied else "unavailable", "source": "native_odoo_read",
-                   "observed_at": observed_at, "resource": resource, "model": model,
-                   "verified": False, "error": "Odoo read could not be verified"}
+        payload = {"success": False, **read_failure(exc), "source": "native_odoo_read",
+                   "observed_at": observed_at, "resource": resource, "model": model, "verified": False}
     return AgentToolResult(content=json.dumps(payload, ensure_ascii=False), details=payload)
 
 
@@ -420,8 +426,8 @@ async def _read_business_status(_call_id, arguments, _signal=None, _on_update=No
                 read_business_status, _BUSINESS_CONTEXT, _odoo_reads(),
                 session_id=os.environ.get("PI_AGENT_SESSION_ID"), connection=_connection_identity(),
             )
-        except Exception:  # noqa: BLE001 - read failures never expose credentials or cached success.
-            payload = {"success": False, "status": "unavailable", "error": "Current business evidence could not be read; no completion or delivery is verified."}
+        except Exception as exc:  # No cached success or credential text.
+            payload = {"success": False, **read_failure(exc), "verification_status": "unknown"}
     return AgentToolResult(content=json.dumps(payload, ensure_ascii=False), details=payload)
 
 
@@ -432,9 +438,35 @@ async def _read_invoice_eligibility(_call_id, arguments, _signal=None, _on_updat
     else:
         try:
             payload = await asyncio.to_thread(_odoo_reads().call, "read_invoice_eligibility", values)
-        except Exception:  # noqa: BLE001 - read failures never authorize a business action.
-            payload = {"success": False, "status": "unavailable", "error": "Current invoice prerequisites could not be read."}
+            if payload.get("success") is False and payload.get("error"):
+                payload.update(read_failure(payload))
+        except Exception as exc:  # Read failures never authorize a business action.
+            payload = {"success": False, **read_failure(exc)}
     return AgentToolResult(content=json.dumps(payload, ensure_ascii=False), details=payload)
+
+
+async def _check_odoo_connection(_call_id, arguments, _signal=None, _on_update=None):
+    from .host import _public_endpoint
+    payload = {"source": "native_odoo_connection", "observed_at": _observed_at(),
+               "endpoint": _public_endpoint(os.environ.get("ODOO_URL")), "database": os.environ.get("ODOO_DB"),
+               "business_verified": False}
+    if arguments:
+        payload.update(success=False, status="invalid", reason_code="invalid_arguments", error="Connection diagnosis takes no arguments.")
+    else:
+        try:
+            await asyncio.to_thread(_odoo_reads, fresh=True, timeout=3)
+            payload.update(success=True, status="connected", detail="只读认证和用户上下文读取成功；各模型权限仍需分别核验。")
+        except Exception as exc:
+            payload.update(success=False, **read_failure(exc))
+    return AgentToolResult(content=json.dumps(payload, ensure_ascii=False), details=payload)
+
+
+CHECK_ODOO_CONNECTION = AgentTool(
+    name="check_odoo_connection", label="Check Odoo connection",
+    description="Read-only current Odoo authentication/connectivity diagnosis. Returns classified reason and next action; no business reads, writes, restarts or setting changes. Connectivity is not transaction or model ACL proof.",
+    parameters={"type": "object", "properties": {}, "additionalProperties": False},
+    execute_fn=_check_odoo_connection,
+)
 
 
 READ_BUSINESS_STATUS = AgentTool(
@@ -669,7 +701,7 @@ async def run(args: argparse.Namespace) -> None:
             model=model,
             storage=JsonlSessionStorage(args.session_file),
             cwd=Path.cwd(),
-            tools=[READ_ODOO_REFERENCE, READ_BUSINESS_STATUS, READ_INVOICE_ELIGIBILITY, PROPOSE_BUSINESS],
+            tools=[READ_ODOO_REFERENCE, READ_BUSINESS_STATUS, READ_INVOICE_ELIGIBILITY, CHECK_ODOO_CONNECTION, PROPOSE_BUSINESS],
             max_turns=None,
             resource_paths=ResourcePaths(
                 root=args.receipt_dir / ".pi-agent",
@@ -689,8 +721,8 @@ async def run(args: argparse.Namespace) -> None:
     try:
         print(json.dumps({
             "type": "run_metadata", "kind": "conversation", "model": model,
-            "runtime": "HarnessSession", "toolNames": [READ_ODOO_REFERENCE.name, READ_BUSINESS_STATUS.name, READ_INVOICE_ELIGIBILITY.name, PROPOSE_BUSINESS.name],
-            "toolMode": "proposal_plus_readonly", "odooToolCount": 3,
+            "runtime": "HarnessSession", "toolNames": [READ_ODOO_REFERENCE.name, READ_BUSINESS_STATUS.name, READ_INVOICE_ELIGIBILITY.name, CHECK_ODOO_CONNECTION.name, PROPOSE_BUSINESS.name],
+            "toolMode": "proposal_plus_readonly", "odooToolCount": 4,
         }, ensure_ascii=False), flush=True)
         # Use append-only journal entries rather than session.messages.  A
         # compaction replaces old context in the latter and would make a

@@ -262,14 +262,9 @@ class Workbench:
 
     @staticmethod
     def _connection_failure(exc: Exception) -> tuple[str, str]:
-        if isinstance(exc, PermissionError):
-            return "permission_denied", "Odoo 认证失败或当前账号没有所需的只读权限。"
-        if isinstance(exc, (TimeoutError, ConnectionError, OSError)):
-            return "unavailable", "Odoo 暂时不可达或连接超时。"
-        text = f"{type(exc).__name__} {exc}".lower()
-        if any(token in text for token in ("auth", "credential", "password", "api key", "permission", "access denied", "forbidden")):
-            return "permission_denied", "Odoo 认证失败或当前账号没有所需的只读权限。"
-        return "error", "Odoo 连接检查发生错误。"
+        from erp_harness.erp.read_failures import read_failure
+        failure = read_failure(exc)
+        return failure["status"], failure["error"]
 
     def check_connection(self) -> dict[str, Any]:
         if self._processes or any(
@@ -289,7 +284,7 @@ class Workbench:
         }
         required = ("ODOO_URL", "ODOO_DB", "ODOO_USERNAME", "ODOO_API_KEY")
         if any(not os.environ.get(key) for key in required):
-            result["detail"] = "未配置完整的 Odoo 连接信息。"
+            result.update(detail="未配置完整的 Odoo 连接信息。", reason_code="connection_unconfigured", next_action="configure_connection")
         else:
             try:
                 # Json2ReadClient construction performs the native res.users.context_get authentication call.
@@ -297,7 +292,9 @@ class Workbench:
                 result["status"] = "connected"
                 result["detail"] = "只读认证和当前用户上下文读取成功；这不代表全部模型 ACL 均可用。"
             except Exception as exc:  # classify without exposing provider/credential text
-                result["status"], result["detail"] = self._connection_failure(exc)
+                from erp_harness.erp.read_failures import read_failure
+                failure = read_failure(exc)
+                result.update(failure, detail=failure["error"])
         result["checked_at"] = now()
         result["latency_ms"] = round((time.perf_counter() - started) * 1000, 1)
         self._odoo_health = result
@@ -755,6 +752,8 @@ class Workbench:
                 raise RuntimeError("explicit model settings are required")
             instruction = self.store.root / "conversation-runs" / run["id"] / "instruction.txt"
             instruction.parent.mkdir(parents=True, exist_ok=True)
+            connection = self.check_connection()["odoo"]
+            run["instruction"] += "\n\nHost Odoo connection check (not business evidence):\n" + json.dumps(connection, ensure_ascii=False)
             instruction.write_text(run["instruction"], encoding="utf-8")
             source_file = instruction.with_name("source-messages.json")
             source_file.write_text(json.dumps(run.get("source_messages", []), ensure_ascii=False), encoding="utf-8")

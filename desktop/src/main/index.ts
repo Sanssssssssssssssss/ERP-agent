@@ -1,10 +1,10 @@
-import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell } from "electron";
 import { randomUUID } from "node:crypto";
 import { rename, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { HostClient } from "./host";
-import { publicSettings, saveSettings } from "./settings";
+import { dataDirectory, publicSettings, saveSettings } from "./settings";
 import { assertRequest, businessScope, canChangeSettings, configuredOdooUrl, METHODS, materialSessionId, observedRecordUrl, recordedArtifactPath, safeMaterialName, strictBase64 } from "./ipc-security";
 import { runSelfCheck } from "./self-check";
 import { openSessionSnapshot, snapshotPath } from "./session-snapshot";
@@ -14,6 +14,34 @@ const host = new HostClient();
 let settingsChanging = false;
 let exportInProgress = false;
 let mainWindow: BrowserWindow | undefined;
+let chosenDataDirectory: string | undefined;
+let desktopMenu: Menu;
+
+function installDesktopMenu(): void {
+  const command = (name: string) => () => mainWindow?.webContents.send("workbench:event", { event: "ui_command", data: { command: name } });
+  desktopMenu = Menu.buildFromTemplate([
+    { label: "文件", submenu: [
+      { label: "新聊天", accelerator: "CmdOrCtrl+N", click: command("new_chat") },
+      { type: "separator" },
+      { label: "设置…", accelerator: "CmdOrCtrl+,", click: command("settings") },
+      { type: "separator" }, { label: "关闭窗口", role: "close" },
+    ] },
+    { label: "编辑", submenu: [
+      { label: "撤销", role: "undo" }, { label: "重做", role: "redo" }, { type: "separator" },
+      { label: "剪切", role: "cut" }, { label: "复制", role: "copy" }, { label: "粘贴", role: "paste" },
+      { type: "separator" }, { label: "全选", role: "selectAll" },
+    ] },
+    { label: "视图", submenu: [
+      { label: "显示／隐藏会话栏", click: command("toggle_sidebar") },
+      { label: "显示／隐藏 Agent 聊天", click: command("toggle_chat") },
+      { label: "切换明暗外观", click: command("toggle_appearance") }, { type: "separator" },
+      { label: "实际大小", role: "resetZoom" }, { label: "放大", role: "zoomIn" }, { label: "缩小", role: "zoomOut" },
+      { type: "separator" }, { label: "全屏", role: "togglefullscreen" },
+    ] },
+    { label: "帮助", submenu: [{ label: "连接状态", click: command("connection_status") }] },
+  ]);
+  Menu.setApplicationMenu(desktopMenu);
+}
 function configureUserDataDir(): void {
   const inline = process.argv.find((value) => value.startsWith("--user-data-dir="));
   const index = process.argv.indexOf("--user-data-dir");
@@ -83,12 +111,30 @@ function documentPayload(value: unknown, format: "pdf" | "csv"): { bytes: Buffer
 }
 
 function registerIpc(): void {
+  ipcMain.handle("workbench:menu", (event, name: string, x: number, y: number) => {
+    assertTrustedFrame(event);
+    const window = BrowserWindow.fromWebContents(event.sender);
+    const item = desktopMenu?.items.find(item => item.label === name);
+    if (!window || !item?.submenu || !Number.isFinite(x) || !Number.isFinite(y)) throw new Error("MENU_NOT_ALLOWED");
+    const bounds = window.getContentBounds();
+    if (x < 0 || y < 0 || x > bounds.width || y > bounds.height) throw new Error("MENU_POSITION_INVALID");
+    return new Promise<void>(resolve => item.submenu!.popup({ window, x: Math.round(x), y: Math.round(y), callback: resolve }));
+  });
   ipcMain.handle("workbench:call", async (event, request: { method: WorkbenchMethod; params?: Record<string, unknown> }) => {
     assertTrustedFrame(event);
     assertRequest(request);
     if (request.method === "get_settings") return publicSettings();
+    if (request.method === "choose_data_directory") {
+      if (settingsChanging) throw new Error("CONFIG_BUSY");
+      const window = BrowserWindow.fromWebContents(event.sender);
+      if (!window) throw new Error("WINDOW_CLOSED");
+      const selected = await dialog.showOpenDialog(window, { title: "选择聊天数据的存储位置", properties: ["openDirectory", "createDirectory"] });
+      if (selected.canceled || !selected.filePaths[0]) return { cancelled: true };
+      chosenDataDirectory = join(selected.filePaths[0], "ERP-agent-data");
+      return { cancelled: false, path: chosenDataDirectory };
+    }
     if (request.method === "save_settings") {
-      if (!canChangeSettings(settingsChanging, host.isBusy())) throw new Error("CONFIG_BUSY");
+      if (!canChangeSettings(settingsChanging, host.isBusy()) || exportInProgress) throw new Error("CONFIG_BUSY");
       settingsChanging = true;
       try {
         // A run outlives its start_run RPC. Check the host while new requests
@@ -97,11 +143,17 @@ function registerIpc(): void {
           const health = await host.call("health", {}) as { active_run_id?: string | null };
           if (health.active_run_id) throw new Error("CONFIG_BUSY");
         }
-        const result = await saveSettings((request.params ?? {}) as SettingsInput);
-        if (host.isRunning()) {
-          await host.stop();
-          await host.call("health", {});
-        }
+        const input = (request.params ?? {}) as SettingsInput;
+        if (input.data_dir !== undefined && input.data_dir !== await dataDirectory() && input.data_dir !== chosenDataDirectory) throw new Error("DATA_DIRECTORY_NOT_SELECTED");
+        await host.stop();
+        const result = await saveSettings(input, async () => {
+          try { await host.call("health", {}); }
+          catch (cause) { await host.stop(); throw cause; }
+        }).catch(async (cause) => {
+          await host.call("health", {}).catch(() => undefined);
+          throw cause;
+        });
+        chosenDataDirectory = undefined;
         return result;
       } finally {
         settingsChanging = false;
@@ -132,7 +184,7 @@ function registerIpc(): void {
         exportInProgress = true;
         try {
           const receipt = await host.call("_prepare_session_snapshot" as WorkbenchMethod, { session_id: scope.session_id, business_id: scope.business_id });
-          const path = await snapshotPath(receipt, scope.business_id, join(app.getPath("userData"), "data"));
+          const path = await snapshotPath(receipt, scope.business_id, await dataDirectory());
           await openSessionSnapshot(path);
           return { opened: true, scope: "business_session" };
         } finally { exportInProgress = false; }
@@ -272,6 +324,7 @@ if (!hasSingleInstanceLock) {
     });
     registerIpc();
     mainWindow = createWindow();
+    installDesktopMenu();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow();
     });

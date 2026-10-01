@@ -210,7 +210,7 @@ class WorkbenchConversationTests(unittest.TestCase):
         self.assertEqual(len(requests), 1)
         self.assertEqual(
             [row["function"]["name"] for row in requests[0]["tools"]],
-            ["read_odoo_reference", "read_business_status", "read_invoice_eligibility", "propose_business"],
+            ["read_odoo_reference", "read_business_status", "read_invoice_eligibility", "check_odoo_connection", "propose_business"],
         )
         self.assertEqual("".join(event.get("text", "") for event in events if event.get("type") == "message_delta"), "可以先回答问题，再在你确认后建立业务。")
         self.assertNotIn("mcp_odoo_read", json.dumps(requests[0]))

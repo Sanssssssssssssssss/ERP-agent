@@ -15,6 +15,7 @@
 | 实验入口（含准备/评估；并非全部付费） | [run_module_slice.py](../experiments/dynamic-tools-budgeted/run_module_slice.py) | 见入口中的断言 |
 | 桌面检查 | [trace-check.mjs](../desktop/scripts/trace-check.mjs) | 见入口中的断言 |
 | 桌面检查 | [trace-model-check.mjs](../desktop/scripts/trace-model-check.mjs) | 见入口中的断言 |
+| 桌面检查 | [trace-v2-check.mjs](../desktop/scripts/trace-v2-check.mjs) | 见入口中的断言 |
 | 真实模型节点 | [M04](../experiments/agent_regression/manual_cases.json) | Policy refusal became unknown failure |
 | 离线测试套件 | [test_relation_receipts.py](../tests/test_relation_receipts.py) | 见入口中的断言 |
 | 离线测试套件 | [test_reporting.py](../tests/test_reporting.py) | 见入口中的断言 |
@@ -28,6 +29,7 @@
 
 | 类型 | 案例 / 文件 | 故障位置 / 检查范围 |
 |---|---|---|
+| 实验入口（含准备/评估；并非全部付费） | [__main__.py](../experiments/execution_ui_v2/host/erp_harness/memory/__main__.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [analyze_token_cost.py](../experiments/desktop_workbench/analyze_token_cost.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [context_followup.py](../experiments/agent_regression/context_followup.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [history_inventory.py](../experiments/tool_routing/history_inventory.py) | 见入口中的断言 |
@@ -57,11 +59,13 @@
 |---|---|---|
 | 实验入口（含准备/评估；并非全部付费） | [consumption_recovery.py](../experiments/agent_regression/consumption_recovery.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [contract_recovery.py](../experiments/agent_regression/contract_recovery.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [conversation.py](../experiments/execution_ui_v2/host/erp_harness/app/conversation.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [hitl_revision.py](../experiments/agent_regression/hitl_revision.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [interrupted_recovery.py](../experiments/agent_regression/interrupted_recovery.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [recovery_check.py](../experiments/tool_routing/recovery_check.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [recovery_live.py](../experiments/agent_regression/recovery_live.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [routing_recovery.py](../experiments/agent_regression/routing_recovery.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [test_candidate_conversation.py](../experiments/execution_ui_v2/.runtime/connection-check/test_candidate_conversation.py) | 见入口中的断言 |
 | 真实模型节点 | [B02](../experiments/agent_regression/hitl_revision.json) | 见冻结清单 |
 | 真实模型节点 | [B03](../experiments/agent_regression/hitl_revision.json) | 见冻结清单 |
 | 真实模型节点 | [C01 · first_alternate_mail_method_after_pdf_guard](../experiments/agent_regression/cases.py) | failure_recovery |
@@ -86,6 +90,7 @@
 
 | 类型 | 案例 / 文件 | 故障位置 / 检查范围 |
 |---|---|---|
+| 实验入口（含准备/评估；并非全部付费） | [export_snapshot.py](../experiments/execution_ui/export_snapshot.py) | 见入口中的断言 |
 | 离线测试套件 | [test_coding_session.py](../tests/runtime/test_coding_session.py) | 见入口中的断言 |
 | 离线测试套件 | [test_pi_session_retry.py](../tests/runtime/test_pi_session_retry.py) | 见入口中的断言 |
 | 离线测试套件 | [test_session.py](../tests/runtime/test_session.py) | 见入口中的断言 |
@@ -357,6 +362,7 @@
 | 实验入口（含准备/评估；并非全部付费） | [competitive_probe.py](../experiments/tool_routing/competitive_probe.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [decision_dataset.py](../experiments/tool_routing/decision_dataset.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [final_check.py](../experiments/tool_routing/final_check.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [flock_tool.py](../experiments/execution_ui_v2/desktop/node_modules/@electron/node-gyp/gyp/pylib/gyp/flock_tool.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [format_probe.py](../experiments/tool_routing/format_probe.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [history_inventory.py](../experiments/tool_routing/history_inventory.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [host_routing.py](../experiments/agent_regression/host_routing.py) | 见入口中的断言 |
@@ -367,7 +373,9 @@
 | 实验入口（含准备/评估；并非全部付费） | [laya_context_replay.py](../experiments/tool_routing/laya_context_replay.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [laya_prefix_regression.py](../experiments/tool_routing/laya_prefix_regression.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [laya_probe.py](../experiments/tool_routing/laya_probe.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [laya_worker.py](../experiments/execution_ui_v2/host/erp_harness/providers/laya_worker.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [live_trial.py](../experiments/tool_routing/live_trial.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [mac_tool.py](../experiments/execution_ui_v2/desktop/node_modules/@electron/node-gyp/gyp/pylib/gyp/mac_tool.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [model_comparison.py](../experiments/tool_routing/model_comparison.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [openjev_regression.py](../experiments/tool_routing/openjev_regression.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [openjev_worker.py](../experiments/tool_routing/openjev_worker.py) | 见入口中的断言 |
@@ -390,6 +398,7 @@
 | 实验入口（含准备/评估；并非全部付费） | [router.py](../experiments/tool_routing/router.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [routing_recovery.py](../experiments/agent_regression/routing_recovery.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [run_module_slice.py](../experiments/dynamic-tools-budgeted/run_module_slice.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [selector_service.py](../experiments/execution_ui_v2/host/erp_harness/providers/selector_service.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [semantic_probe.py](../experiments/tool_routing/semantic_probe.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [train_decider.py](../experiments/tool_routing/train_decider.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [train_head.py](../experiments/tool_routing/train_head.py) | 见入口中的断言 |
@@ -397,6 +406,7 @@
 | 实验入口（含准备/评估；并非全部付费） | [train_reviewed.py](../experiments/tool_routing/train_reviewed.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [training_probe.py](../experiments/tool_routing/training_probe.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [verify_prefix.py](../experiments/tool_routing/verify_prefix.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [win_tool.py](../experiments/execution_ui_v2/desktop/node_modules/@electron/node-gyp/gyp/pylib/gyp/win_tool.py) | 见入口中的断言 |
 | 真实模型节点 | [A01 · first_unregistered_tool_intent](../experiments/agent_regression/cases.py) | tool_contract |
 | 真实模型节点 | [A02 · first_method_as_field_write](../experiments/agent_regression/cases.py) | tool_contract |
 | 真实模型节点 | [A03 · correct_action_after_metadata_access_failure](../experiments/agent_regression/cases.py) | tool_contract |
@@ -521,6 +531,7 @@
 | 真实模型节点 | [HITL01](../experiments/agent_regression/hitl_revision.json) | Approval revision routed to proposal worker; desktop resumed original unchanged instruction; runtime fixed mail copy. |
 | 真实模型节点 | [HITL02](../experiments/agent_regression/hitl_revision.json) | Approval revision routed to proposal worker; desktop resumed original unchanged instruction; runtime fixed mail copy. |
 | 真实模型节点 | [M12](../experiments/agent_regression/manual_cases.json) | Existing successful fixed-deposit control |
+| 真实模型节点 | [M16](../experiments/agent_regression/manual_followups.json) | Final reply labels amount_total=791 as untaxed; source request had five net-priced lines totalling700 but the order readback supplied only amount_total. Why the model chose the label is unproven. |
 | 离线测试套件 | [test_chatter_verification.py](../tests/test_chatter_verification.py) | 见入口中的断言 |
 | 离线测试套件 | [test_document_export.py](../tests/test_document_export.py) | 见入口中的断言 |
 | 离线测试套件 | [test_invoice_eligibility.py](../tests/test_invoice_eligibility.py) | 见入口中的断言 |
@@ -539,6 +550,7 @@
 | 实验入口（含准备/评估；并非全部付费） | [access_check.py](../experiments/enterprise_validation/access_check.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [hitl_revision.py](../experiments/agent_regression/hitl_revision.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [staff.py](../experiments/enterprise_validation/staff.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [test_evidence_display.py](../experiments/execution_ui_v2/tests/test_evidence_display.py) | 见入口中的断言 |
 | 桌面检查 | [approval-presentation-check.mjs](../desktop/scripts/approval-presentation-check.mjs) | 见入口中的断言 |
 | 真实模型节点 | [B01 · first_mail_detour_after_posted_and_pdf](../experiments/agent_regression/cases.py) | phase_boundary |
 | 真实模型节点 | [B02](../experiments/agent_regression/hitl_revision.json) | 见冻结清单 |
@@ -559,6 +571,7 @@
 | 离线测试套件 | [test_business_facts.py](../tests/test_business_facts.py) | 见入口中的断言 |
 | 离线测试套件 | [test_daily_business_integrity.py](../tests/test_daily_business_integrity.py) | 见入口中的断言 |
 | 离线测试套件 | [test_enterprise_actions.py](../tests/test_enterprise_actions.py) | 见入口中的断言 |
+| 离线测试套件 | [test_evidence_display.py](../tests/test_evidence_display.py) | 见入口中的断言 |
 | 离线测试套件 | [test_minimal_write_guards.py](../tests/test_minimal_write_guards.py) | 见入口中的断言 |
 | 离线测试套件 | [test_relation_receipts.py](../tests/test_relation_receipts.py) | 见入口中的断言 |
 | 离线测试套件 | [test_stage_contract.py](../tests/test_stage_contract.py) | 见入口中的断言 |
@@ -576,17 +589,33 @@
 
 | 类型 | 案例 / 文件 | 故障位置 / 检查范围 |
 |---|---|---|
+| 实验入口（含准备/评估；并非全部付费） | [MSVSSettings_test.py](../experiments/execution_ui_v2/desktop/node_modules/@electron/node-gyp/gyp/pylib/gyp/MSVSSettings_test.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [_musllinux.py](../experiments/execution_ui_v2/desktop/node_modules/@electron/node-gyp/gyp/pylib/packaging/_musllinux.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [analyze_token_cost.py](../experiments/desktop_workbench/analyze_token_cost.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [common_test.py](../experiments/execution_ui_v2/desktop/node_modules/@electron/node-gyp/gyp/pylib/gyp/common_test.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [easy_xml_test.py](../experiments/execution_ui_v2/desktop/node_modules/@electron/node-gyp/gyp/pylib/gyp/easy_xml_test.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [flock_tool.py](../experiments/execution_ui_v2/desktop/node_modules/@electron/node-gyp/gyp/pylib/gyp/flock_tool.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [gyp_main.py](../experiments/execution_ui_v2/desktop/node_modules/@electron/node-gyp/gyp/gyp_main.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [input_test.py](../experiments/execution_ui_v2/desktop/node_modules/@electron/node-gyp/gyp/pylib/gyp/input_test.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [mac_tool.py](../experiments/execution_ui_v2/desktop/node_modules/@electron/node-gyp/gyp/pylib/gyp/mac_tool.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [msvs_test.py](../experiments/execution_ui_v2/desktop/node_modules/@electron/node-gyp/gyp/pylib/gyp/generator/msvs_test.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [ninja_test.py](../experiments/execution_ui_v2/desktop/node_modules/@electron/node-gyp/gyp/pylib/gyp/generator/ninja_test.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [scripted_model.py](../experiments/desktop_workbench/scripted_model.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [test_gyp.py](../experiments/execution_ui_v2/desktop/node_modules/@electron/node-gyp/gyp/test_gyp.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [win_tool.py](../experiments/execution_ui_v2/desktop/node_modules/@electron/node-gyp/gyp/pylib/gyp/win_tool.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [xcode_emulation_test.py](../experiments/execution_ui_v2/desktop/node_modules/@electron/node-gyp/gyp/pylib/gyp/xcode_emulation_test.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [xcode_test.py](../experiments/execution_ui_v2/desktop/node_modules/@electron/node-gyp/gyp/pylib/gyp/generator/xcode_test.py) | 见入口中的断言 |
 | 实验检查 | [check.cjs](../experiments/desktop_workbench/prototype/check.cjs) | 见入口中的断言 |
 | 桌面检查 | [approval-presentation-check.mjs](../desktop/scripts/approval-presentation-check.mjs) | 见入口中的断言 |
 | 桌面检查 | [document-presentation-check.mjs](../desktop/scripts/document-presentation-check.mjs) | 见入口中的断言 |
+| 桌面检查 | [execution-v2-check.mjs](../desktop/scripts/execution-v2-check.mjs) | 见入口中的断言 |
 | 桌面检查 | [ipc-check.mjs](../desktop/scripts/ipc-check.mjs) | 见入口中的断言 |
 | 桌面检查 | [package-check.mjs](../desktop/scripts/package-check.mjs) | 见入口中的断言 |
 | 桌面检查 | [renderer-check.mjs](../desktop/scripts/renderer-check.mjs) | 见入口中的断言 |
 | 桌面检查 | [self-check.mjs](../desktop/scripts/self-check.mjs) | 见入口中的断言 |
 | 桌面检查 | [trace-check.mjs](../desktop/scripts/trace-check.mjs) | 见入口中的断言 |
 | 桌面检查 | [trace-model-check.mjs](../desktop/scripts/trace-model-check.mjs) | 见入口中的断言 |
+| 桌面检查 | [trace-v2-check.mjs](../desktop/scripts/trace-v2-check.mjs) | 见入口中的断言 |
 | 真实模型节点 | [M10](../experiments/agent_regression/manual_cases.json) | Final reply exposed implementation instead of business result |
 | 真实模型节点 | [M15](../experiments/agent_regression/manual_followups.json) | Model-facing Chinese requirement did not reliably control public progress language |
 | 离线测试套件 | [test_enterprise_workbench.py](../tests/test_enterprise_workbench.py) | 见入口中的断言 |
@@ -601,6 +630,8 @@
 
 | 类型 | 案例 / 文件 | 故障位置 / 检查范围 |
 |---|---|---|
+| 实验入口（含准备/评估；并非全部付费） | [laya_worker.py](../experiments/execution_ui_v2/host/erp_harness/providers/laya_worker.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [selector_service.py](../experiments/execution_ui_v2/host/erp_harness/providers/selector_service.py) | 见入口中的断言 |
 | 离线测试套件 | [test_cross_provider_history.py](../tests/runtime/test_cross_provider_history.py) | 见入口中的断言 |
 | 离线测试套件 | [test_http.py](../tests/runtime/test_http.py) | 见入口中的断言 |
 | 离线测试套件 | [test_multimodal_provider_payloads.py](../tests/runtime/test_multimodal_provider_payloads.py) | 见入口中的断言 |
@@ -616,17 +647,21 @@
 | 类型 | 案例 / 文件 | 故障位置 / 检查范围 |
 |---|---|---|
 | 实验入口（含准备/评估；并非全部付费） | [freeze.py](../experiments/agent_regression/freeze.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [host.py](../experiments/execution_ui_v2/host/erp_harness/app/host.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [incidents.py](../experiments/agent_regression/incidents.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [manual_business.py](../experiments/agent_regression/manual_business.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [manual_business_live.py](../experiments/agent_regression/manual_business_live.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [prepare.py](../experiments/agent_regression/prepare.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [provenance.py](../experiments/agent_regression/provenance.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [runner.py](../experiments/agent_regression/runner.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [runner.py](../experiments/execution_ui_v2/host/erp_harness/app/runner.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [start.py](../experiments/demo_odoo/start.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [test_connection_awareness.py](../experiments/execution_ui_v2/tests/test_connection_awareness.py) | 见入口中的断言 |
 | 离线测试套件 | [test_agent_harness.py](../tests/runtime/test_agent_harness.py) | 见入口中的断言 |
 | 离线测试套件 | [test_agent_loop.py](../tests/runtime/test_agent_loop.py) | 见入口中的断言 |
 | 离线测试套件 | [test_agent_regression.py](../tests/test_agent_regression.py) | 见入口中的断言 |
 | 离线测试套件 | [test_agent_types.py](../tests/runtime/test_agent_types.py) | 见入口中的断言 |
+| 离线测试套件 | [test_connection_awareness.py](../tests/test_connection_awareness.py) | 见入口中的断言 |
 | 离线测试套件 | [test_message_transform.py](../tests/runtime/test_message_transform.py) | 见入口中的断言 |
 | 离线测试套件 | [test_pi_event_protocol.py](../tests/runtime/test_pi_event_protocol.py) | 见入口中的断言 |
 | 离线测试套件 | [test_pi_loop_parity.py](../tests/runtime/test_pi_loop_parity.py) | 见入口中的断言 |
@@ -760,6 +795,7 @@
 | 真实模型节点 | [M05](../experiments/agent_regression/manual_cases.json) | History used as current supplier commitment |
 | 真实模型节点 | [M11](../experiments/agent_regression/manual_cases.json) | Existing successful sales confirmation control |
 | 真实模型节点 | [M13](../experiments/agent_regression/manual_followups.json) | Reviewed purchase cancellation was not explained as including unreceived receipts; unsupported picking cancellation forced handoff |
+| 真实模型节点 | [M16](../experiments/agent_regression/manual_followups.json) | Final reply labels amount_total=791 as untaxed; source request had five net-priced lines totalling700 but the order readback supplied only amount_total. Why the model chose the label is unproven. |
 | 离线测试套件 | [test_business_mvp_verifier.py](../tests/test_business_mvp_verifier.py) | 见入口中的断言 |
 | 离线测试套件 | [test_enterprise_actions.py](../tests/test_enterprise_actions.py) | 见入口中的断言 |
 | 离线测试套件 | [test_enterprise_knowledge.py](../tests/test_enterprise_knowledge.py) | 见入口中的断言 |

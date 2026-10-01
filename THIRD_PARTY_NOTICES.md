@@ -12,5 +12,7 @@ The root MIT license applies to original integration and harness code where no m
 | pypdfium2 5.13.0 | PDF text extraction and rasterization | BSD-3-Clause / Apache-2.0 and dependency licenses | The sidecar retains distribution license files, including PDFium dependencies. |
 | openpyxl 3.1.5 | Read-only XLSX extraction | MIT | Formula evaluation is not performed. |
 | ONNX Runtime 1.30.0 | Local OCR inference | MIT | Distributed license retained in the packaged dependency. |
+| Langfuse trace tree | Adapted tree rows in `desktop/src/renderer/features/traces/TraceTreeRow.tsx` | MIT | Pinned source and retained copyright in [UI notices](docs/licenses/execution-ui-NOTICES.md). |
+| AI Elements Confirmation | Adapted conditional display in `desktop/src/renderer/features/approvals/ApprovalsPage.tsx` | Apache-2.0 | Modified for native approvals; full license and provenance in [UI notices](docs/licenses/execution-ui-NOTICES.md). |
 
 The complete pinned commits, trees, modifications, and bundle hashes are recorded in [`sources.lock.json`](sources.lock.json). Keep the corresponding notices when redistributing a component.

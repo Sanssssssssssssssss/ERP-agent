@@ -108,7 +108,8 @@ def read_business_status(context, reads, *, session_id, connection):
                 return {**result, "status": "permission_denied"}
             row, error = sale_view._read_result(payload, reference["id"])
             if error or not fields.issubset(row or {}):
-                return {**result, "status": _failure(error or "required fields unavailable")}
+                from erp_harness.erp.read_failures import read_failure
+                return {**result, **read_failure(payload if error else {"error": "required fields unavailable"})}
             changed = [key for key, ids in reference.get("expected_relations", {}).items()
                        if ids != sale_view._relation_ids(row.get(key))]
             if changed and reference.get("purpose") != "source":
@@ -116,7 +117,8 @@ def read_business_status(context, reads, *, session_id, connection):
             reference["fields"] = row
         sale_view.refresh_business(state, business_id, reads)
     except Exception as exc:  # noqa: BLE001 - the read boundary fails closed for every backend error.
-        return {**result, "status": _failure(f"{type(exc).__name__}: {exc}")}
+        from erp_harness.erp.read_failures import read_failure
+        return {**result, **read_failure(exc)}
     readback = business.get("readback") or {}
     checks = readback.get("checks", [])
     # Fresh facts and the original request binding are separate checks. Updating

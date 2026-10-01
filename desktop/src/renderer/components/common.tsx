@@ -9,7 +9,7 @@ export function MessageText({ text, collapsible = true }: { text: string; collap
   const [expanded, setExpanded] = useState(false)
   const value = text || '（空消息）'
   const canCollapse = collapsible && value.length > 900
-  const content = <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{ img: ({ alt }) => <span>{alt || '图片'}</span>, a: ({ children }) => <span>{children}</span>, table: ({ children }) => <div className="message-table-wrap"><table>{children}</table></div> }}>{canCollapse && !expanded ? `${value.slice(0, 360)}…` : value}</Markdown>
+  const content = <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{ img: ({ alt }) => <span>{alt || '图片'}</span>, a: ({ children }) => <span className="markdown-link">{children}</span>, table: ({ children }) => <div className="message-table-wrap"><table>{children}</table></div> }}>{canCollapse && !expanded ? `${value.slice(0, 360)}…` : value}</Markdown>
   return <div><div className="message-text message-markdown">{content}</div>{canCollapse && <button type="button" className="message-full receipt-button" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? '收起消息' : `查看完整消息（${value.length.toLocaleString('zh-CN')} 字）`}</button>}</div>
 }
 

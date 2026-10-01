@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { app } from "electron";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { publicSettings, saveSettings, secretEnvironment } from "./settings";
+import { copyDataDirectory, dataDirectory, publicSettings, saveSettings, secretEnvironment } from "./settings";
 import { assertRequest, businessScope, canChangeSettings, configuredOdooUrl, observedRecordUrl, recordedArtifactPath, safeMaterialName, strictBase64 } from "./ipc-security";
 import { safeErrorMessage } from "./host";
 import { openSessionSnapshot, snapshotPath } from "./session-snapshot";
@@ -61,12 +61,42 @@ export async function runSelfCheck(): Promise<void> {
   const reread = await publicSettings();
   assert.equal(JSON.stringify(reread).includes("SELF_CHECK_SENTINEL"), false);
 
+  const originalDirectory = await dataDirectory();
+  await mkdir(join(originalDirectory, "materials"), { recursive: true });
+  await writeFile(join(originalDirectory, "materials", "example.csv"), "item,quantity\nA,2\n");
+  const state = { version: 1, materials: { m_one: { path: join(originalDirectory, "materials", "example.csv") } },
+    approvals: { a_one: { status: "needs_reconciliation" } }, businesses: { b_one: { artifacts: [{ path: "C:\\external\\receipt.json" }] } } };
+  await writeFile(join(originalDirectory, "workbench-state.json"), JSON.stringify(state));
+  await writeFile(join(originalDirectory, "unknown-action.jsonl"), '{"status":"unknown","action_id":"a_one"}\n');
+  await assert.rejects(() => copyDataDirectory(originalDirectory, join(originalDirectory, "child")), /OVERLAP/);
+  await assert.rejects(() => copyDataDirectory(originalDirectory, isolated), /OVERLAP/);
+  const occupied = join(isolated, "occupied");
+  await mkdir(occupied);
+  await writeFile(join(occupied, "keep.txt"), "untouched");
+  await assert.rejects(() => copyDataDirectory(originalDirectory, occupied), /EXISTS/);
+  assert.equal(await readFile(join(occupied, "keep.txt"), "utf8"), "untouched");
+  const target = join(isolated, "new-data");
+  const migrated = await saveSettings({ data_dir: target });
+  assert.equal(migrated.data_dir, target);
+  const copied = JSON.parse(await readFile(join(target, "workbench-state.json"), "utf8"));
+  assert.equal(copied.materials.m_one.path, join(target, "materials", "example.csv"));
+  assert.equal(copied.businesses.b_one.artifacts[0].path, state.businesses.b_one.artifacts[0].path);
+  assert.equal(copied.approvals.a_one.status, "needs_reconciliation");
+  assert.equal(await readFile(join(target, "unknown-action.jsonl"), "utf8"), await readFile(join(originalDirectory, "unknown-action.jsonl"), "utf8"));
+  assert.deepEqual(JSON.parse(await readFile(join(originalDirectory, "workbench-state.json"), "utf8")), state);
+  const failedTarget = join(isolated, "activation-failed");
+  await assert.rejects(() => saveSettings({ data_dir: failedTarget }, async () => { throw new Error("HOST_START_FAILED"); }), /HOST_START_FAILED/);
+  assert.equal(await dataDirectory(), target);
+  assert.equal((await publicSettings()).has_model_key, true);
+
   assert.equal(canChangeSettings(false, false), true);
   assert.equal(canChangeSettings(true, false), false);
   assert.equal(canChangeSettings(false, true), false);
   assert.doesNotThrow(() => assertRequest({ method: "health", params: {} }));
   assert.doesNotThrow(() => assertRequest({ method: "check_connection", params: {} }));
   assert.doesNotThrow(() => assertRequest({ method: "get_settings" }));
+  assert.doesNotThrow(() => assertRequest({ method: "choose_data_directory" }));
+  assert.throws(() => assertRequest({ method: "choose_data_directory", params: { path: "C:\\Windows" } }), /INVALID_PARAMS/);
   assert.doesNotThrow(() => assertRequest({ method: "open_odoo" }));
   assert.throws(() => assertRequest({ method: "open_odoo", params: { url: "https://other.example" } }), /INVALID_PARAMS/);
   assert.throws(() => assertRequest({ method: "shell_exec" }), /METHOD_NOT_ALLOWED/);

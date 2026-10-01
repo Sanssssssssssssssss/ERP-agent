@@ -20,6 +20,7 @@ TraceBundle
 } from './protocol'
 import type { TraceDetail, TraceDetailKind } from './protocol'
 import { ApprovalProgress,ConnectionState,DownloadReceipt,MaterialRecord,ProposalLike } from './view-types'
+import { transitionView } from './view-transition'
 
 export const liveMessageKey = (message: Pick<LiveMessage, 'session_id' | 'business_id' | 'run_id' | 'id'>) => `${message.session_id}:${message.business_id ?? '__conversation__'}:${message.run_id}:${message.id}`
 
@@ -566,7 +567,6 @@ export function useWorkbench() {
       }
       setDocumentDownloads((current) => ({ ...current, [key]: { status: 'completed', path: result.path, artifact: result.artifact } }))
       setNotice(`${format.toUpperCase()} 已下载：${result.artifact?.name || result.path || document.name}`)
-      window.setTimeout(() => setNotice(''), 2600)
     } catch (reason) {
       if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) {
         const message = messageForError(reason)
@@ -606,9 +606,8 @@ export function useWorkbench() {
     try {
       const created = await call<SessionSummary>('create_session')
       await loadSessions(false)
-      setConversationOpen(true)
       try { window.localStorage.setItem('odoo-workbench.conversation-open', 'true') } catch { /* storage is optional */ }
-      chooseSession(created.id)
+      transitionView(() => { setConversationOpen(true); chooseSession(created.id) })
     } catch (reason) {
       setError(messageForError(reason))
     } finally {
@@ -687,7 +686,7 @@ export function useWorkbench() {
     if (!selectedSessionId) return
     const message = session?.messages.find((item) => item.proposal?.id === proposal.id)
     if (message?.proposal?.status === 'confirmed' && message.business_id) {
-      chooseBusiness(message.business_id)
+      transitionView(() => chooseBusiness(message.business_id!))
       return
     }
     if (message?.proposal?.status !== 'pending' || proposal.id !== pendingProposal?.id || proposalUnavailable) return
@@ -707,7 +706,7 @@ export function useWorkbench() {
       if (sessionIdRef.current !== requestSessionId) return
       await loadSession(requestSessionId)
       if (business && sessionIdRef.current === requestSessionId) {
-        chooseBusiness(business.id)
+        transitionView(() => { if (sessionIdRef.current === requestSessionId) chooseBusiness(business.id) })
       }
     } catch (reason) {
       if (sessionIdRef.current === requestSessionId) setError(messageForError(reason))
@@ -896,6 +895,7 @@ export function useWorkbench() {
       const current = await call<Settings>('get_settings')
       setSettings(current)
       setSettingsDraft({
+        data_dir: current.data_dir || '',
         model: current.model,
         base_url: current.base_url,
         odoo_url: current.odoo_url,
@@ -915,7 +915,18 @@ export function useWorkbench() {
     requestAnimationFrame(() => settingsButtonRef.current?.focus())
   }, [])
 
+  const chooseDataDirectory = async () => {
+    try {
+      const result = await call<{ cancelled: boolean; path?: string }>('choose_data_directory')
+      if (!result.cancelled && result.path) {
+        setSettingsDraft(current => ({ ...current, data_dir: result.path! }))
+        setError('')
+      }
+    } catch (reason) { setError(messageForError(reason)) }
+  }
+
   const saveSettings = async () => {
+    setError('')
     setSettingsSaving(true)
     try {
       const updated = await call<Settings>('save_settings', {
@@ -923,7 +934,7 @@ export function useWorkbench() {
         long_term_memory: settingsDraft.long_term_memory === 'on'
       })
       setSettings(updated)
-      setSettingsDraft((current) => ({ ...current, model_key: '', odoo_key: '' }))
+      setSettingsDraft((current) => ({ ...current, data_dir: updated.data_dir || '', model_key: '', odoo_key: '' }))
       const currentHealth = await checkConnection(true)
       if (!currentHealth) throw new Error('连接检查失败')
       setNotice('设置已保存，连接状态已刷新。')
@@ -950,7 +961,6 @@ export function useWorkbench() {
       setExportPath(result.path || '导出已完成，但主机没有返回文件路径。')
       setNotice(result.path ? '业务回执已导出。' : '业务回执已导出。')
       await loadBusiness(requestSessionId, requestBusinessId).catch(() => undefined)
-      window.setTimeout(() => setNotice(''), 2600)
     } catch (reason) {
       setError(messageForError(reason))
     } finally {
@@ -1002,7 +1012,6 @@ export function useWorkbench() {
       await call('open_odoo_record', { session_id: requestSessionId, business_id: requestBusinessId, model: document.model, record_id: recordId })
       if (sessionIdRef.current !== requestSessionId || businessIdRef.current !== requestBusinessId) return
       setNotice(`已请求打开 ${document.name || document.id}。`)
-      window.setTimeout(() => setNotice(''), 2600)
     } catch (reason) {
       setError(messageForError(reason))
     }
@@ -1020,7 +1029,6 @@ export function useWorkbench() {
       })
       if (sessionIdRef.current !== requestSessionId || businessIdRef.current !== requestBusinessId) return
       setNotice(reveal ? `已打开文件所在位置：${artifact.name}` : `已请求打开文件：${artifact.name}`)
-      window.setTimeout(() => setNotice(''), 2600)
     } catch (reason) {
       if (sessionIdRef.current === requestSessionId && businessIdRef.current === requestBusinessId) setError(messageForError(reason))
     }
@@ -1028,7 +1036,7 @@ export function useWorkbench() {
 
   const openTraceTarget = (target: { run_id?: string; tool_id?: string; action_id?: string; kind?: string }) => {
     const runId = target.kind === 'readback' ? businessDetail?.business.readback?.latest_run_id : target.run_id
-    setTraceTarget({ runId, toolId: target.tool_id, actionId: target.action_id, kind: target.kind })
+    setTraceTarget({ runId, toolId: target.kind === 'action' && target.action_id ? undefined : target.tool_id, actionId: target.action_id, kind: target.kind })
     if (runId) setSelectedRunId(runId)
     setTab('trace')
   }
@@ -1148,6 +1156,7 @@ export function useWorkbench() {
     openSettings,
     closeSettings,
     saveSettings,
+    chooseDataDirectory,
     retryHealth,
     exportBusiness,
     openSessionSnapshot,

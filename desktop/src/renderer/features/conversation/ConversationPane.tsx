@@ -1,5 +1,5 @@
 import { AlertDialog as RadixAlertDialog,Button as RadixButton,IconButton as RadixIconButton,Tooltip as RadixTooltip,Select as RadixSelect } from '@radix-ui/themes'
-import { Archive,FilePlus2,FileText,FolderPlus,LoaderCircle,PanelLeftClose,PanelLeftOpen,Search,Send,Settings2,Square,Trash2,Upload } from 'lucide-react'
+import { Archive,FilePlus2,FileText,FolderPlus,LoaderCircle,PanelLeftClose,PanelLeftOpen,Search,Send,Settings2,Square,Trash2 } from 'lucide-react'
 import { useEffect,useRef,useState,type FormEvent,type ReactNode } from 'react'
 import { EmptyState,MessageText } from '../../components/common'
 import { businessTypeMeta,completionTargetLabel,materialRowLabel } from '../../presentation'
@@ -53,17 +53,17 @@ export function SessionRail({
   const visibleSessions = sessions.filter((item) => `${item.title} ${item.id}`.toLowerCase().includes(query.trim().toLowerCase()))
   return (
     <aside className={`session-rail ${collapsed ? 'collapsed' : ''}`}>
-      <div className="rail-heading"><div><span className="eyebrow">工作区</span><h1>{collapsed ? '会' : '会话'}</h1></div><div className="rail-heading-actions"><RadixTooltip content={collapsed ? '展开会话栏' : '收起会话栏'}><RadixIconButton variant="ghost" aria-label={collapsed ? '展开会话栏' : '收起会话栏'} onClick={onToggle}>{collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}</RadixIconButton></RadixTooltip>{!collapsed && <RadixTooltip content="新建会话"><RadixButton className="new-button" onClick={onCreate} disabled={loading}><FolderPlus size={15} />新建</RadixButton></RadixTooltip>}</div></div>
+      <div className="rail-heading">{!collapsed && <div><h1>会话</h1></div>}<div className="rail-heading-actions"><RadixTooltip content={collapsed ? '展开会话栏' : '收起会话栏'}><RadixIconButton variant="ghost" aria-label={collapsed ? '展开会话栏' : '收起会话栏'} onClick={onToggle}>{collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}</RadixIconButton></RadixTooltip><RadixTooltip content="新建会话">{collapsed ? <RadixIconButton variant="ghost" aria-label="新聊天" onClick={onCreate} disabled={loading}><FolderPlus size={15} /></RadixIconButton> : <RadixButton className="new-button" onClick={onCreate} disabled={loading}><FolderPlus size={15} />新聊天</RadixButton>}</RadixTooltip></div></div>
       {!collapsed && <label className="session-search"><Search size={15} aria-hidden="true" /><span className="sr-only">搜索会话</span><input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索会话" aria-label="搜索会话" /></label>}
       {!collapsed && <div className="rail-summary"><span>{query ? `${visibleSessions.length} / ${sessions.length} 个会话` : `${sessions.length} 个活跃会话`}</span><span className="quiet-rule" /></div>}
       <div className="session-list">
-        {sessions.length === 0 && !collapsed && <EmptyState title="还没有会话" detail="点击新建，输入要查询或办理的业务。" />}
+        {sessions.length === 0 && !collapsed && <EmptyState title="还没有会话" detail="点击新聊天，输入要查询或办理的业务。" />}
         {sessions.length > 0 && visibleSessions.length === 0 && !collapsed && <EmptyState title="没有匹配会话" detail="换一个名称或会话 ID 试试。" />}
-        {visibleSessions.map((item) => (
+        {!collapsed && visibleSessions.map((item) => (
           <div key={item.id} className={`session-row ${item.id === selectedId ? 'active' : ''}`} title={collapsed ? item.title : undefined}>
-            <button className="session-select" aria-label={item.title || '未命名会话'} onClick={() => onSelect(item.id)}>
+            <button className="session-select" aria-current={item.id === selectedId ? true : undefined} aria-label={item.title || '未命名会话'} onClick={() => onSelect(item.id)}>
               <span className={`session-status-dot status-${item.status}`} />
-              {!collapsed && <span className="session-copy"><strong>{item.title || '未命名会话'}</strong><small>{formatInstant(item.updated_at)}</small></span>}
+              {!collapsed && <span className="session-copy"><strong title={item.title || '未命名会话'}>{item.title || '未命名会话'}</strong><small>{formatInstant(item.updated_at)}</small></span>}
             </button>
             {item.id === selectedId && !collapsed && (
               <div className="session-row-actions">
@@ -164,8 +164,8 @@ export function ConversationPane({ session, draft, liveMessages, conversationRun
   return (
     <section className={`conversation-pane ${terminalConversation ? 'has-run-status' : ''}`}>
       <header className="conversation-header">
-        <div><h2>{session?.session.title || '选择一个会话'}</h2></div>
-        <div className="conversation-header-meta"><span className="session-id" title={session?.session.id || undefined}>会话详情</span>{activeConversation && <RadixButton className="conversation-cancel" variant="soft" disabled={loading || activeConversation.status === 'cancel_requested'} onClick={() => onCancelConversation(activeConversation)}><Square size={13} />{activeConversation.status === 'cancel_requested' ? '正在停止…' : '停止对话'}</RadixButton>}</div>
+        <div><h2 title={session?.session.title}>{session?.session.title || '选择一个会话'}</h2></div>
+        <div className="conversation-header-meta">{activeConversation && <RadixButton className="conversation-cancel" variant="soft" disabled={loading || activeConversation.status === 'cancel_requested'} onClick={() => onCancelConversation(activeConversation)}><Square size={13} />{activeConversation.status === 'cancel_requested' ? '正在停止…' : '停止对话'}</RadixButton>}</div>
       </header>
       {terminalConversation && <div className={`conversation-run-status status-${terminalConversation.status}`} role="status"><strong>{terminalConversation.status === 'failed' ? '对话失败，可继续输入' : terminalConversation.status === 'cancelled' ? '对话已停止，可继续输入' : '对话已中断，可继续输入'}</strong>{(terminalConversation.error || terminalConversation.error_detail) && <details><summary>查看错误详情</summary><code>{terminalConversation.error || terminalConversation.error_detail}</code>{terminalConversation.error_detail && terminalConversation.error_detail !== terminalConversation.error && <p>{terminalConversation.error_detail}</p>}</details>}</div>}
       <div ref={scrollRef} className="conversation-scroll" onScroll={(event) => { const element = event.currentTarget; const latest = element.scrollHeight - element.scrollTop - element.clientHeight < 24; setAtLatest(latest); if (latest) setHasNew(false) }}>
@@ -181,9 +181,9 @@ export function ConversationPane({ session, draft, liveMessages, conversationRun
       <form className="composer" onSubmit={onSubmit} onDragOver={(event) => { event.preventDefault(); event.currentTarget.classList.add('drop-active') }} onDragLeave={(event) => event.currentTarget.classList.remove('drop-active')} onDrop={(event) => { event.preventDefault(); event.currentTarget.classList.remove('drop-active'); onFiles(Array.from(event.dataTransfer.files)) }}>
         <MaterialTray materials={pendingMaterials} busy={materialsBusy} onRemove={onRemoveMaterial} onFiles={onFiles} />
         {inheritedMaterials.length > 0 && <MaterialReuseTray materials={inheritedMaterials} hasNewMaterials={pendingMaterials.length > 0} />}
-        <textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={!session || loading} placeholder={session ? '输入要查询或办理的业务…' : '先选择或创建一个会话'} aria-label="会话消息" />
+        <textarea rows={2} value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={!session || loading} placeholder={session ? '输入要查询或办理的业务…' : '先选择或创建一个会话'} aria-label="会话消息" />
         <div className="composer-footer">
-          <div className="composer-context">{businesses.length > 0 ? <><label htmlFor="message-business-target">讨论范围</label><RadixSelect.Root value={messageBusinessId || '__current__'} onValueChange={(value) => onMessageBusinessChange(value === '__current__' ? '' : value)} disabled={!session || loading}><RadixSelect.Trigger id="message-business-target" data-scope={messageBusinessId} aria-label="讨论范围" /><RadixSelect.Content position="popper"><RadixSelect.Item value="__current__">{selectedBusiness ? `当前业务：${selectedBusiness.title || '未命名业务'}` : '新业务讨论'}</RadixSelect.Item><RadixSelect.Item value="__conversation__">整个会话 · 新业务讨论</RadixSelect.Item>{businesses.map((business) => <RadixSelect.Item key={business.id} value={business.id}>{business.title || '未命名业务'} · {labelFor(businessStatusLabel, business.status)}</RadixSelect.Item>)}</RadixSelect.Content></RadixSelect.Root><span>{messageBusinessId === '__conversation__' || (!messageBusinessId && !selectedBusiness) ? '可查询资料或讨论新业务；核对执行结果时选择对应业务。' : '讨论当前业务；执行中的变更请使用审批卡“提出修改”。'}</span></> : <span>新业务讨论 · 描述需求后确认业务方案</span>}</div>
+          {businesses.length > 0 && <div className="composer-context"><label htmlFor="message-business-target" className="sr-only">讨论范围</label><RadixSelect.Root value={messageBusinessId || '__current__'} onValueChange={(value) => onMessageBusinessChange(value === '__current__' ? '' : value)} disabled={!session || loading}><RadixSelect.Trigger id="message-business-target" data-scope={messageBusinessId} aria-label="讨论范围" /><RadixSelect.Content position="popper"><RadixSelect.Item value="__current__">{selectedBusiness ? `当前业务：${selectedBusiness.title || '未命名业务'}` : '新业务讨论'}</RadixSelect.Item><RadixSelect.Item value="__conversation__">整个会话 · 新业务讨论</RadixSelect.Item>{businesses.map((business) => <RadixSelect.Item key={business.id} value={business.id}>{business.title || '未命名业务'} · {labelFor(businessStatusLabel, business.status)}</RadixSelect.Item>)}</RadixSelect.Content></RadixSelect.Root></div>}
         <div className="composer-actions"><label className="material-picker"><FilePlus2 size={15} />添加材料<input type="file" accept=".csv,.txt,.xlsx,.pdf,.png,.jpg,.jpeg,text/csv,text/plain,application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple disabled={!session || loading || materialsBusy} onChange={(event) => { onFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = '' }} /></label><RadixButton type="submit" disabled={!session || loading || materialsBusy || pendingMaterials.some((material) => material.status === 'parsing' || material.status === 'failed') || (!draft.trim() && !pendingMaterials.length)}>{loading ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}{loading ? '处理中…' : '发送'}</RadixButton></div>
         </div>
       </form>
@@ -195,7 +195,7 @@ export function MessageRow({ message, inheritedMaterialIds = [] }: { message: Me
   const role = message.role === 'user' ? 'user' : message.role === 'system' ? 'system' : 'assistant'
   const materialIds = (message as MessageWithMaterials).material_ids ?? []
   const isProposalEnvelope = Boolean(message.proposal)
-  return <article className={`message ${role}`}><span className={`avatar ${role === 'user' ? 'user-avatar' : role === 'system' ? 'system-avatar' : 'agent-avatar'}`}>{role === 'user' ? '你' : role === 'system' ? '·' : 'A'}</span><div><div className="message-meta">{role !== 'user' && <strong>{role === 'system' ? '系统' : 'Agent'}</strong>}<span>{formatInstant(message.created_at)}</span></div>{!isProposalEnvelope && <MessageText text={message.text} />}{materialIds.length > 0 && <span className="message-materials"><FileText size={12} />{inheritedMaterialIds.length === materialIds.length ? `沿用 ${materialIds.length} 个业务材料` : inheritedMaterialIds.length > 0 ? `新附 ${materialIds.length - inheritedMaterialIds.length} 个，沿用 ${inheritedMaterialIds.length} 个材料` : `已附 ${materialIds.length} 个业务材料`}</span>}</div></article>
+  return <article className={`message ${role}`}><span className={`avatar ${role === 'user' ? 'user-avatar' : role === 'system' ? 'system-avatar' : 'agent-avatar'}`}>{role === 'user' ? '你' : role === 'system' ? '·' : 'A'}</span><div><div className="message-meta">{role !== 'user' && <strong>{role === 'system' ? '系统' : 'Agent'}</strong>}<span>{formatInstant(message.created_at)}</span></div>{!isProposalEnvelope && <MessageText text={message.text} collapsible={false} />}{materialIds.length > 0 && <span className="message-materials"><FileText size={12} />{inheritedMaterialIds.length === materialIds.length ? `沿用 ${materialIds.length} 个业务材料` : inheritedMaterialIds.length > 0 ? `新附 ${materialIds.length - inheritedMaterialIds.length} 个，沿用 ${inheritedMaterialIds.length} 个材料` : `已附 ${materialIds.length} 个业务材料`}</span>}</div></article>
 }
 
 export function ConversationWelcome({ onStarter }: { onStarter: (goal: string) => void }) {
@@ -208,7 +208,7 @@ export function ConversationWelcome({ onStarter }: { onStarter: (goal: string) =
 }
 
 export function MaterialTray({ materials, busy, onRemove, onFiles }: { materials: MaterialRecord[]; busy: boolean; onRemove: (id: string) => void; onFiles: (files: File[]) => void }) {
-  if (!materials.length && !busy) return <div className="material-drop-hint"><Upload size={14} />拖入 CSV、TXT、XLSX、PDF 或图片，或点击“添加材料”（每个文件 ≤ 10 MiB，最多 3 个）</div>
+  if (!materials.length && !busy) return null
   return <div className="material-tray" aria-label="本次消息材料"><div className="material-tray-head"><span><FileText size={14} />本次消息材料</span>{busy && <span className="material-uploading"><LoaderCircle className="spin" size={13} />正在上传与解析…</span>}</div>{materials.map((material) => <div className={`material-chip material-${material.status || 'ready'}`} key={material.id}><div><strong>{material.name}</strong><span>{material.status === 'parsing' ? '正在解析…' : material.status === 'failed' ? `解析失败：${material.error || '请移除后重新上传'}` : `${materialRowLabel(material)} · ${material.preview || '暂无预览'}`}{material.warnings?.length ? ` · ${material.warnings.join('；')}` : ''}</span></div><button type="button" aria-label={`移除 ${material.name}`} onClick={() => onRemove(material.id)}><Trash2 size={14} /></button></div>)}{!busy && materials.length < 3 && <label className="material-inline-drop">继续添加<input type="file" accept=".csv,.txt,.xlsx,.pdf,.png,.jpg,.jpeg,text/csv,text/plain,application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple onChange={(event) => { onFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = '' }} /></label>}</div>
 }
 

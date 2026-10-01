@@ -490,6 +490,8 @@ def _evidence(document: dict[str, Any], label: str) -> dict[str, Any] | None:
         return None
     kind = "readback" if document.get("source") == "refresh_native_read" else "action" if document.get("source") == "native_action_readback" else "tool"
     item: dict[str, Any] = {"run_id": run_id, "kind": kind, "label": "独立回读快照" if kind == "readback" else "已核验动作状态回读" if kind == "action" else label}
+    item.update(model=document.get("model"), record_ids=[document["id"]] if document.get("id") is not None else [],
+                record_names=[document["name"]] if document.get("name") else [])
     if document.get("source") == "native_read_receipt" and isinstance(tool_id, str) and tool_id:
         item["tool_id"] = tool_id
     if kind == "action" and isinstance(document.get("source_action_id"), str):
@@ -698,7 +700,10 @@ def _execution_projection(
             stage_id = action_stage(model, operation)
             if not stage_id or stage_id not in verified_actions or not isinstance(run.get("id"), str):
                 continue
-            verified_actions[stage_id].append({"run_id": run["id"], "tool_id": tool.get("id"), "action_id": tool.get("action_id") or result.get("action_id"), "kind": "action", "model": model, "operation": operation, "label": "结构化 ERP 动作已核验"})
+            kwargs = arguments.get("kwargs") if isinstance(arguments.get("kwargs"), dict) else {}
+            record_ids = _relation_ids(arguments.get("record_ids") or arguments.get("ids") or kwargs.get("ids"))
+            names = [doc.get("name") or str(doc.get("id")) for doc in documents if doc.get("model") == model and doc.get("id") in record_ids]
+            verified_actions[stage_id].append({"run_id": run["id"], "tool_id": tool.get("id"), "action_id": tool.get("action_id") or result.get("action_id"), "kind": "action", "model": model, "operation": operation, "record_ids": record_ids, "record_names": names, "label": "结构化 ERP 动作已核验"})
 
     for approval in approvals or []:
         if approval.get("status") != "pending_approval" or not isinstance(approval.get("run_id"), str):

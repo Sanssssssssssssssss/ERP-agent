@@ -179,6 +179,10 @@ export interface BusinessEvidence {
   action_id?: string;
   observed_at?: string;
   label: string;
+  model?: string;
+  operation?: string;
+  record_ids?: Array<number | string>;
+  record_names?: string[];
 }
 
 export interface BusinessStage {
@@ -239,6 +243,7 @@ export interface Tool {
   started_at?: string;
   ended_at?: string;
   search_text?: string;
+  display?: { model?: string; operation?: string; record_ids?: Array<number | string>; record_names?: string[]; record_count?: number; classification?: { safety?: string; destructive_method?: boolean; confidence?: string } };
 }
 
 export interface TraceRequest {
@@ -338,6 +343,7 @@ export interface Health {
 }
 
 export interface Settings {
+  data_dir?: string;
   model: string;
   base_url: string;
   odoo_url: string;
@@ -382,6 +388,7 @@ export type WorkbenchMethod =
   | "open_business_artifact"
   | "reveal_business_artifact"
   | "get_settings"
+  | "choose_data_directory"
   | "save_settings"
   | "import_material"
   | "download_document"
@@ -406,6 +413,7 @@ export interface WorkbenchEvent {
 }
 
 export interface WorkbenchBridge {
+  showMenu(name: "文件" | "编辑" | "视图" | "帮助", x: number, y: number): Promise<void>;
   call(method: WorkbenchMethod, params?: Record<string, unknown>): Promise<unknown>;
   subscribe(listener: (event: WorkbenchEvent) => void): () => void;
   windowControl(action: "minimize" | "maximize" | "close"): Promise<void>;
