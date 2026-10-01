@@ -4,6 +4,7 @@ import ast
 from collections import defaultdict
 from pathlib import Path
 import re
+import subprocess
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,8 +33,11 @@ def labels(path):
 
 def build():
     entries = []
+    tracked = set(subprocess.check_output(['git', 'ls-files', '-z'], cwd=ROOT).decode('utf8').split('\0'))
     def add(path, kind, title='', group=None, layer='见入口中的断言'):
         path = path.relative_to(ROOT).as_posix()
+        if path not in tracked:
+            return
         for category in group or labels(path):
             entries.append((category, kind, title or Path(path).name, layer, path))
 
@@ -44,7 +48,7 @@ def build():
     for path in sorted((ROOT / 'bench/reference').rglob('test*.py')):
         add(path, '历史参考测试' if '/mcp/' in path.as_posix() else '基准适配测试', group=['历史参考与基准适配'])
     for path in sorted((ROOT / 'experiments').rglob('*.py')):
-        if '__pycache__' in path.parts or path == Path(__file__) or path.name == '__init__.py':
+        if path.relative_to(ROOT).as_posix() not in tracked or '__pycache__' in path.parts or path == Path(__file__) or path.name == '__init__.py':
             continue
         tree = ast.parse(path.read_text(encoding='utf-8-sig'))
         executable = any(isinstance(n, ast.If) and '__name__' in ast.unparse(n.test) for n in tree.body)

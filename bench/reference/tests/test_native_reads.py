@@ -119,7 +119,14 @@ class FakeOdoo:
 
 class NativeReadsTest(unittest.TestCase):
     @staticmethod
-    def _canonical_result_dump(value, *, schema_extensions=False):
+    def _legacy_error_envelope(value):
+        # Native diagnostics extend failed reads; legacy success/error and RPCs still match.
+        if isinstance(value, dict) and value.get("success") is False and value.get("reason_code"):
+            return {k: v for k, v in value.items() if k not in {"status", "reason_code", "next_action", "http_status", "detail"}}
+        return value
+
+    @classmethod
+    def _canonical_result_dump(cls, value, *, schema_extensions=False):
         """Normalize wire formatting and opt in to native schema annotations only."""
         value = copy.deepcopy(value)
         content = value.get("content") if isinstance(value, dict) else None
@@ -128,6 +135,7 @@ class NativeReadsTest(unittest.TestCase):
                 if isinstance(item, dict) and item.get("type") == "text" and isinstance(item.get("text"), str):
                     try:
                         payload = json.loads(item["text"])
+                        payload = cls._legacy_error_envelope(payload)
                         if schema_extensions and isinstance(payload, dict):
                             for key in ("summary", "query_matched", "query", "supplemental_fields"):
                                 payload.pop(key, None)
@@ -145,6 +153,7 @@ class NativeReadsTest(unittest.TestCase):
 
         def normalize_cache_hit(item):
             if isinstance(item, dict):
+                item = cls._legacy_error_envelope(item)
                 return {
                     key: None if key == "cache_hit" and isinstance(child, bool)
                     else normalize_cache_hit(child)
@@ -470,7 +479,12 @@ print('MCP_FREE_CORE_IMPORT_OK')
                     with patch.object(tools_read, "_resolve_odoo", return_value=("default", expected_client)), patch.object(tools_read, "_app_context", return_value=app):
                         expected = getattr(tools_read, name)(None, **arguments)
                     actual = NativeReads(actual_client, policy=policy).call(name, arguments)
-                    comparable_actual = copy.deepcopy(actual)
+                    comparable_actual = copy.deepcopy(self._legacy_error_envelope(actual))
+                    if actual.get("reason_code"):
+                        self.assertFalse(actual["success"])
+                        self.assertTrue(actual["status"])
+                        self.assertTrue(actual["next_action"])
+                        self.assertTrue(actual["detail"])
                     if name == "get_model_fields" and not arguments.get("field_names") and arguments.get("relevance", "top") is not None:
                         comparable_actual.pop("summary", None)
                     self.assertEqual(comparable_actual, expected)
