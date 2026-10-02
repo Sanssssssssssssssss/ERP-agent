@@ -10,6 +10,7 @@
 
 | 类型 | 案例 / 文件 | 故障位置 / 检查范围 |
 |---|---|---|
+| 实验入口（含准备/评估；并非全部付费） | [fresh_self_debug.py](../experiments/agent_regression/fresh_self_debug.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [q4_input_report.py](../experiments/tool_routing/q4_input_report.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [report.py](../experiments/enterprise_validation/report.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [run_module_slice.py](../experiments/dynamic-tools-budgeted/run_module_slice.py) | 见入口中的断言 |
@@ -618,6 +619,7 @@
 | 离线测试套件 | [test_relation_receipts.py](../tests/test_relation_receipts.py) | 见入口中的断言 |
 | 离线测试套件 | [test_stage_contract.py](../tests/test_stage_contract.py) | 见入口中的断言 |
 | 离线测试套件 | [test_task_evidence.py](../tests/test_task_evidence.py) | 见入口中的断言 |
+| 离线测试套件 | [test_typed_action_failures.py](../tests/test_typed_action_failures.py) | 见入口中的断言 |
 
 ## 搜索与知识检索
 
