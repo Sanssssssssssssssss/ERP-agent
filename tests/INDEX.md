@@ -10,10 +10,12 @@
 
 | 类型 | 案例 / 文件 | 故障位置 / 检查范围 |
 |---|---|---|
+| 实验入口（含准备/评估；并非全部付费） | [fresh_self_debug.py](../experiments/agent_regression/fresh_self_debug.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [q4_input_report.py](../experiments/tool_routing/q4_input_report.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [report.py](../experiments/enterprise_validation/report.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [run_module_slice.py](../experiments/dynamic-tools-budgeted/run_module_slice.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [self_debug_audit.py](../experiments/agent_regression/self_debug_audit.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [self_debug_recovery.py](../experiments/agent_regression/self_debug_recovery.py) | 见入口中的断言 |
 | 桌面检查 | [trace-check.mjs](../desktop/scripts/trace-check.mjs) | 见入口中的断言 |
 | 桌面检查 | [trace-model-check.mjs](../desktop/scripts/trace-model-check.mjs) | 见入口中的断言 |
 | 桌面检查 | [trace-v2-check.mjs](../desktop/scripts/trace-v2-check.mjs) | 见入口中的断言 |
@@ -24,6 +26,7 @@
 | 离线测试套件 | [test_run_diagnostics.py](../tests/test_run_diagnostics.py) | 见入口中的断言 |
 | 离线测试套件 | [test_runner_budget.py](../tests/test_runner_budget.py) | 见入口中的断言 |
 | 离线测试套件 | [test_self_debug_audit.py](../tests/test_self_debug_audit.py) | 见入口中的断言 |
+| 离线测试套件 | [test_self_debug_recovery.py](../tests/test_self_debug_recovery.py) | 见入口中的断言 |
 | 离线测试套件 | [test_trace_inspector.py](../tests/test_trace_inspector.py) | 见入口中的断言 |
 | 离线测试套件 | [test_unbounded_execution.py](../tests/test_unbounded_execution.py) | 见入口中的断言 |
 
@@ -66,6 +69,7 @@
 | 实验入口（含准备/评估；并非全部付费） | [recovery_check.py](../experiments/tool_routing/recovery_check.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [recovery_live.py](../experiments/agent_regression/recovery_live.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [routing_recovery.py](../experiments/agent_regression/routing_recovery.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [self_debug_recovery.py](../experiments/agent_regression/self_debug_recovery.py) | 见入口中的断言 |
 | 真实模型节点 | [B02](../experiments/agent_regression/hitl_revision.json) | 见冻结清单 |
 | 真实模型节点 | [B03](../experiments/agent_regression/hitl_revision.json) | 见冻结清单 |
 | 真实模型节点 | [C01 · first_alternate_mail_method_after_pdf_guard](../experiments/agent_regression/cases.py) | failure_recovery |
@@ -82,6 +86,7 @@
 | 离线测试套件 | [test_business_status.py](../tests/test_business_status.py) | 见入口中的断言 |
 | 离线测试套件 | [test_interrupted_recovery.py](../tests/test_interrupted_recovery.py) | 见入口中的断言 |
 | 离线测试套件 | [test_manual_business_recovery.py](../tests/test_manual_business_recovery.py) | 见入口中的断言 |
+| 离线测试套件 | [test_self_debug_recovery.py](../tests/test_self_debug_recovery.py) | 见入口中的断言 |
 | 离线测试套件 | [test_transport_recovery.py](../tests/test_transport_recovery.py) | 见入口中的断言 |
 | 离线测试套件 | [test_workbench_conversation.py](../tests/test_workbench_conversation.py) | 见入口中的断言 |
 | 离线测试套件 | [test_workbench_host.py](../tests/test_workbench_host.py) | 见入口中的断言 |
@@ -614,6 +619,7 @@
 | 离线测试套件 | [test_relation_receipts.py](../tests/test_relation_receipts.py) | 见入口中的断言 |
 | 离线测试套件 | [test_stage_contract.py](../tests/test_stage_contract.py) | 见入口中的断言 |
 | 离线测试套件 | [test_task_evidence.py](../tests/test_task_evidence.py) | 见入口中的断言 |
+| 离线测试套件 | [test_typed_action_failures.py](../tests/test_typed_action_failures.py) | 见入口中的断言 |
 
 ## 搜索与知识检索
 
@@ -680,6 +686,7 @@
 | 离线测试套件 | [test_agent_loop.py](../tests/runtime/test_agent_loop.py) | 见入口中的断言 |
 | 离线测试套件 | [test_agent_regression.py](../tests/test_agent_regression.py) | 见入口中的断言 |
 | 离线测试套件 | [test_agent_types.py](../tests/runtime/test_agent_types.py) | 见入口中的断言 |
+| 离线测试套件 | [test_capability_failures.py](../tests/test_capability_failures.py) | 见入口中的断言 |
 | 离线测试套件 | [test_connection_awareness.py](../tests/test_connection_awareness.py) | 见入口中的断言 |
 | 离线测试套件 | [test_message_transform.py](../tests/runtime/test_message_transform.py) | 见入口中的断言 |
 | 离线测试套件 | [test_pi_event_protocol.py](../tests/runtime/test_pi_event_protocol.py) | 见入口中的断言 |

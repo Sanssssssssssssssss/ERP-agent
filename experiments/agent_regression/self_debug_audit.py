@@ -36,6 +36,7 @@ FAULTS = (
     ("field_acl", ValueError("Field policy denies access: offline fault"), "field_policy_denied"),
     ("rate_limit", OdooJson2Error("offline fault", status_code=429), "rate_limited"),
     ("endpoint", OdooJson2Error("offline fault", status_code=404), "endpoint_not_found"),
+    ("model_missing", OdooJson2Error("the model 'base.automation' does not exist", status_code=404), "model_unavailable"),
     ("database", ValueError("database offline does not exist"), "database_unavailable"),
     ("server", OdooJson2Error("offline fault", status_code=500), "server_error"),
     ("query", ValueError("Invalid domain: offline fault"), "query_invalid"),
@@ -164,13 +165,15 @@ def source_inventory():
 def run():
     probes = contract_probes()
     actual = historical_inventory()
+    missing = sorted({p["tool"] for p in probes if not p["direct_reason"]})
+    lost = sorted({p["tool"] for p in probes if p["direct_reason"]
+                   and p["diagnostic_reason"] != p["expected_reason"]})
     return {"date": "2026-10-03", "native_tool_count": len(native_tool_catalog()),
         "groups": dict(Counter(row["group"] for row in probes[::len(FAULTS)])),
         "fault_families": [family for family, _, _ in FAULTS], "probe_count": len(probes),
-        "status": "coverage_gaps",
-        "direct_missing_reason_tools": sorted({p["tool"] for p in probes if not p["direct_reason"]}),
-        "diagnostic_lost_reason_tools": sorted({p["tool"] for p in probes if p["direct_reason"]
-                                               and p["diagnostic_reason"] != p["expected_reason"]}),
+        "status": "coverage_gaps" if missing or lost else "passed_offline_contracts",
+        "direct_missing_reason_tools": missing,
+        "diagnostic_lost_reason_tools": lost,
         "historical_failed_tool_count": len({row["tool"] for row in actual}),
         "historical_failed_nodes": len(actual),
         "historical_by_tool": dict(Counter(row["tool"] for row in actual)),

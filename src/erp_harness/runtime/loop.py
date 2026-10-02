@@ -8,8 +8,8 @@ from __future__ import annotations
 # 只执行当前轮已公布的工具。参数先归一化、校验，再经过执行前钩子。
 # 工具失败转成结构化结果，供模型修正。Odoo 未知写入由动作账本处理。
 # steering 在轮间插入；follow-up 在当前工作结束后接入。
-
 import asyncio
+import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
@@ -56,7 +56,7 @@ from erp_harness.runtime.provider_events import (
 from erp_harness.runtime.tool_history import repair_tool_history
 from erp_harness.runtime.tools import AgentTool, AgentToolResult
 from erp_harness.runtime.types import JSONValue
-from erp_harness.runtime.validation import validate_tool_arguments
+from erp_harness.runtime.validation import ToolArgumentsError, validate_tool_arguments
 
 ToolExecutionMode = Literal["parallel", "sequential"]
 
@@ -789,8 +789,21 @@ async def _prepare_tool_call(
         if signal is not None and signal.is_cancelled():
             return _immediate(index, call, "Operation aborted")
         return _PreparedToolCall(index, call, tool, args)
-    except Exception as exc:  # noqa: BLE001 - preparation is an isolation boundary
-        return _immediate(index, call, str(exc))
+    except ToolArgumentsError as exc:
+        outcome = _immediate(index, call, str(exc))
+        outcome.result.details = {"structuredContent": {
+            "success": False, "reason_code": "tool_arguments_invalid", "tool": call.name,
+            "error": "调用参数不符合已发布的工具契约；请按参数路径和规则修正后再提交。",
+            "parameter_issues": exc.issues, "failure_layer": "tool_arguments",
+            "next_action": "correct_arguments", "stage": "before_dispatch", "odoo_request_seen": False,
+            "failure": {"code": "tool_arguments_invalid", "layer": "tool_arguments",
+                        "next_action": "correct_arguments", "stage": "before_dispatch",
+                        "odoo_request_seen": False},
+        }}
+        outcome.result.content.append(TextContent(text=json.dumps(outcome.result.details["structuredContent"], ensure_ascii=False)))
+        return outcome
+    except Exception:  # noqa: BLE001 - preparation is an isolation boundary
+        return _FinalizedToolCall(index, call, _execution_error(call.name, "prepare"), True)
 
 
 async def _execute_and_finalize(
@@ -815,8 +828,8 @@ async def _execute_and_finalize(
             raise
         result = _error_result("Operation cancelled")
         is_error = True
-    except Exception as exc:  # noqa: BLE001 - tools are an isolation boundary
-        result = _error_result(str(exc))
+    except Exception:  # noqa: BLE001 - tools are an isolation boundary
+        result = _execution_error(prepared.call.name, "execute")
         is_error = True
     finally:
         accepting = False
@@ -845,8 +858,8 @@ async def _execute_and_finalize(
                 result = result.model_copy(update=updates_by_field)
                 if override.is_error is not None:
                     is_error = override.is_error
-        except Exception as exc:  # noqa: BLE001 - Pi converts hook failures to tool errors
-            result = _error_result(str(exc))
+        except Exception:  # noqa: BLE001 - Pi converts hook failures to tool errors
+            result = _execution_error(prepared.call.name, "after_tool_call")
             is_error = True
     return _FinalizedToolCall(prepared.index, prepared.call, result, is_error)
 
@@ -896,6 +909,17 @@ def _should_terminate(finalized: Sequence[_FinalizedToolCall]) -> bool:
 
 def _error_result(message: str) -> AgentToolResult:
     return AgentToolResult(content=[TextContent(text=message)], details={})
+
+
+def _execution_error(tool: str, stage: str) -> AgentToolResult:
+    payload = {"success": False, "tool": tool, "reason_code": "tool_execution_failed",
+               "error": "工具执行或宿主回调异常；请检查运行日志。执行结果未确认，写入动作须核对后再处理。",
+               "failure_layer": "runtime", "next_action": "check_host_runtime",
+               "failure": {"code": "tool_execution_failed", "layer": "runtime",
+                           "next_action": "check_host_runtime", "stage": stage,
+                           "odoo_request_seen": None}}
+    return AgentToolResult(content=[TextContent(text=json.dumps(payload, ensure_ascii=False))],
+                           details={"structuredContent": payload})
 
 
 def _error_message(model: str, message: str) -> AssistantMessage:

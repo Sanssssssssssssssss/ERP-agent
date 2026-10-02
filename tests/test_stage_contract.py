@@ -36,8 +36,12 @@ def test_confirmed_sales_guard_is_used_before_approval_and_after_approval(action
     bind(actions, tmp_path / "confirmed.json")
     result = actions.execute_method("account.move", "action_post", kwargs={"ids": [10]})
     assert _handoff_required(result) and writer.calls == []
-    with pytest.raises(TaskHandoff):
-        actions._execute_row(actions.store.get(approved["action_id"]), lambda: writer.calls.append("forbidden"))
+    refused = actions._execute_row(actions.store.get(approved["action_id"]), lambda: writer.calls.append("forbidden"))
+    assert _handoff_required(refused) and refused["success"] is False
+    assert refused["action_id"] == approved["action_id"] and refused["action_status"] == "approved"
+    assert refused["failure"]["stage"] == "before_send"
+    assert refused["failure"]["write_dispatch_started"] is False
+    assert actions.store.get(approved["action_id"])["status"] == "approved"
     assert writer.calls == []
     assert len(actions.store.summary()["receipts"]) == 1
 

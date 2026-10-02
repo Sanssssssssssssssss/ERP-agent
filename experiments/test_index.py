@@ -12,7 +12,7 @@ INDEX = ROOT / 'tests/INDEX.md'
 # Multiple labels are intentional: one suite can protect several business capabilities.
 GROUPS = {
     '中断恢复与宿主交接': ('interrupted', 'recovery', 'resume', 'hitl', 'workbench_host', 'business_status', 'conversation'),
-    '授权、证据与写入安全': ('actions', 'approval', 'hitl', 'evidence', 'guards', 'relation', 'integrity', 'stage_contract', 'business_facts', 'access', 'staff'),
+    '授权、证据与写入安全': ('actions', 'action_', 'approval', 'hitl', 'evidence', 'guards', 'relation', 'integrity', 'stage_contract', 'business_facts', 'access', 'staff'),
     '开票、邮件与文件': ('invoice', 'mail', 'chatter', 'document', 'material', 'csv'),
     '制造、库存与业务日期': ('manufactur', 'supply', 'stock', 'bom', 'subassembl', 'workcenter'),
     '采购与业务状态': ('purchase', 'buy_only', 'repair_plan', 'business_mvp', 'sale_view', 'enterprise'),
@@ -71,7 +71,7 @@ def build():
     for path in sorted((ROOT / 'experiments/agent_regression').glob('*.json')):
         for row in json.loads(path.read_text(encoding='utf8')):
             declared = row.get('categories', [])
-            add(path, '真实模型节点', row['id'], group=[c for c in declared if c in GROUPS] or labels(str(path) + ' ' + ' '.join(declared)),
+            add(path, '真实模型节点', row['id'], group=[c for c in declared if c in GROUPS] or labels(path.relative_to(ROOT).as_posix() + ' ' + ' '.join(declared)),
                 layer=row.get('failure_layer', row.get('root_cause', row.get('root', row.get('original_failure', '见冻结清单')))))
     # The R series retains its full frozen requests locally; the tracked README is the provenance index.
     names = ['调用未发布工具', '启用状态冲突', '关系删除参数', '历史 active 状态残留', '能力撤下后多一轮选择',

@@ -8,9 +8,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from erp_harness.runtime.tools import AgentTool, AgentToolResult
-from erp_harness.erp._odoo_core.write_policy import allowed_side_effect_methods
 from erp_harness.erp._odoo_core.odoo_client import READ_CALL_ID
+from erp_harness.erp._odoo_core.write_policy import allowed_side_effect_methods
+from erp_harness.erp.read_failures import tool_failure
+from erp_harness.runtime.tools import AgentTool, AgentToolResult
 
 MAX_INPUT_LENGTH = 2_000
 STOCK_READ_FIELDS = {
@@ -279,13 +280,16 @@ def get_sop(sop_id: str, inputs: dict[str, Any] | None = None) -> dict[str, Any]
         return {
             "success": False,
             "tool": "get_odoo_sop",
-            "error": f"Unknown SOP {sop_id!r}; call list_odoo_sops first.",
+            **tool_failure({"reason_code": "sop_unknown"}),
+            "error": "The requested SOP is not in the published catalog.",
         }
     if inputs is not None and not isinstance(inputs, dict):
         return {
             "success": False,
             "tool": "get_odoo_sop",
+            **tool_failure({"reason_code": "sop_inputs_invalid"}),
             "error": "SOP inputs must be an object.",
+            "allowed_inputs": list(SOPS[sop_id]["parameters"]),
         }
     supplied = dict(inputs or {})
     spec = SOPS[sop_id]
@@ -302,26 +306,31 @@ def get_sop(sop_id: str, inputs: dict[str, Any] | None = None) -> dict[str, Any]
         return {
             "success": False,
             "tool": "get_odoo_sop",
+            **tool_failure({"reason_code": "sop_inputs_invalid"}),
             "error": "Invalid SOP inputs.",
             "unknown": unknown,
             "missing": missing,
             "invalid": invalid,
-            "reason_code": "sop_inputs_invalid",
-            "next_action": "Use the listed parameter names and nonempty strings from the actual business context; do not invent missing choices.",
+            "allowed_inputs": list(spec["parameters"]),
+            "required_inputs": [name for name, required in spec["parameters"].items() if required],
+            "input_constraints": {"type": "string", "max_length": MAX_INPUT_LENGTH,
+                                  "missing_values": "Use confirmed business context; ask for missing choices instead of inventing them."},
         }
     if sop_id == "safe_write_review" and supplied["operation"] not in {"create", "write", "unlink"}:
         operation = supplied["operation"]
         if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]*", operation):
-            return {"success": False, "tool": "get_odoo_sop", "error": "Invalid operation name.",
-                    "next_action": "Supply one create/write/unlink operation or one exact reviewed method. Separate field changes and business methods; do not join operation names."}
+            return {"success": False, "tool": "get_odoo_sop",
+                    **tool_failure({"reason_code": "sop_operation_invalid"}),
+                    "error": "Invalid operation name. Separate field changes and business methods; do not join operation names.",
+                    "allowed_operations": ["create", "write", "unlink", "exact_reviewed_method"]}
         # A model's business verb is not evidence that an Odoo method exists.
         prefix = supplied["model"] + "."
         reviewed = sorted(name[len(prefix):] for name in allowed_side_effect_methods() if name.startswith(prefix))
         if operation not in reviewed:
             return {"success": False, "tool": "get_odoo_sop",
+                    **tool_failure({"reason_code": "sop_method_unreviewed"}),
                     "error": "This exact model.method is not in the current reviewed method policy. Do not execute the guessed name.",
                     "model": supplied["model"], "operation": operation, "reviewed_methods": reviewed,
-                    "next_action": "Select a reviewed method matching the confirmed goal and check its prerequisites. If none fits, ask the host for review; do not expand policy yourself.",
                     "authorization": "Listed methods still require task-scope validation and trusted host approval."}
         spec = {**spec, "required_tools": ["read_record", "execute_method"], "steps": [
             "Read the current record and check the requested business method's prerequisites.",
@@ -400,13 +409,14 @@ def build_sop_tools(
                     try:
                         result = read_fields(model=model, field_names=fields)
                         if not result.get("success"):
-                            raise ValueError("schema unavailable")
+                            contract[model] = {**tool_failure(result), "status": "unavailable"}
+                            continue
                         contract[model] = {"source": "live_fields_get", "fields": [
                             name for name, meta in result["result"].items()
                             if name in fields and meta.get("access") != "restricted"
                         ]}
-                    except Exception as exc:
-                        contract[model] = {"status": "unavailable", "error_type": type(exc).__name__}
+                    except Exception as exc:  # noqa: BLE001 - metadata availability stays unknown on failures
+                        contract[model] = {**tool_failure(exc), "status": "unavailable", "error_type": type(exc).__name__}
                 payload["sop"]["read_contract"] = contract
         finally:
             READ_CALL_ID.reset(token)

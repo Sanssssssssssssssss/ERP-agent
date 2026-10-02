@@ -221,6 +221,92 @@ def _actions(
 
 
 class NativeActionCheckpointTests(unittest.TestCase):
+    def test_all_action_tool_boundaries_preserve_classified_errors_without_external_bodies(self):
+        actions, writer, _ = _actions()
+        for name in sorted(ACTION_TOOLS):
+            with self.subTest(tool=name), patch.object(actions, name, side_effect=ConnectionRefusedError("api-key-secret")):
+                result = actions.call(name, {})
+                self.assertFalse(result["success"])
+                self.assertEqual(result["reason_code"], "connection_refused")
+                self.assertEqual(result["failure"]["code"], "connection_refused")
+                self.assertEqual(result["failure"]["stage"], "unknown")
+                self.assertEqual(result["next_action"], "check_service")
+                self.assertNotIn("api-key-secret", json.dumps(result))
+        wrapper = ValueError("private-rpc-wrapper")
+        wrapper.__cause__ = OdooJson2Error("private-odoo-body", status_code=503)
+        with patch.object(actions, "execute_method", side_effect=wrapper):
+            result = actions.call("execute_method", {})
+        self.assertEqual(result["reason_code"], "server_error")
+        self.assertNotIn("private", json.dumps(result))
+        self.assertEqual(writer.calls, [])
+
+    def test_action_refusals_keep_issues_and_explain_required_recovery(self):
+        actions, writer, _ = _actions()
+        cases = [
+            ("preview_write", {"model": "res.partner", "operation": "invented"}, "action_validation_failed"),
+            ("validate_write", {"model": "res.partner", "operation": "write", "record_ids": [7],
+                                "values": {"not_a_field": "Ada"}}, "action_validation_failed"),
+            ("execute_approved_write", {"approval": {}, "confirm": True}, "approval_invalid"),
+            ("chatter_post", {"model": "res.partner", "record_id": 7, "body": ""}, "action_validation_failed"),
+            ("execute_method", {"model": "res.partner", "method": "unreviewed"}, "method_not_supported"),
+        ]
+        for name, arguments, code in cases:
+            with self.subTest(tool=name):
+                result = actions.call(name, arguments)
+                self.assertFalse(result["success"])
+                self.assertEqual(result["failure"]["code"], code)
+                self.assertTrue(result["failure"]["next_action"])
+                if name in {"preview_write", "validate_write"}:
+                    self.assertTrue(result["issues"])
+                if name == "execute_method":
+                    self.assertFalse(result["failure"]["odoo_request_seen"])
+        self.assertEqual(writer.calls, [])
+
+    def test_action_failure_phases_keep_unsent_preparation_and_prior_dispatch_distinct(self):
+        actions, writer, _ = _actions()
+        approval = actions.validate_write("res.partner", "write", record_ids=[7], values={"name": "Ada"})["approval"]
+        row = actions.store.get(approval["action_id"])
+        send = Mock(side_effect=AssertionError("must not dispatch"))
+        prepare = Mock(side_effect=FileNotFoundError("private-upload-path"))
+        result = actions._execute_row(row, send, prepare)
+        self.assertEqual(result["action_status"], "known_failed")
+        self.assertEqual(result["reason_code"], "local_resource_missing")
+        self.assertEqual(result["failure"]["code"], "action_preparation_failed")
+        self.assertEqual(result["failure"]["stage"], "before_send")
+        self.assertFalse(result["failure"]["write_dispatch_started"])
+        self.assertTrue(result["retry_safe"])
+        self.assertNotIn("private-upload-path", json.dumps(result))
+        send.assert_not_called()
+
+        renewed = actions.validate_write("res.partner", "write", record_ids=[7], values={"name": "Ada"})["approval"]
+        action_id = renewed["action_id"]
+        self.assertTrue(actions.store.claim(action_id)["claimed"])
+        self.assertTrue(actions.store.mark_sending(action_id))
+        with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1"}), \
+             patch.object(actions, "_verify", side_effect=TimeoutError("private-service-error")):
+            result = actions.execute_approved_write(renewed, confirm=True)
+        self.assertEqual(result["action_id"], action_id)
+        self.assertEqual(result["action_status"], "needs_reconciliation")
+        self.assertEqual(result["reason_code"], "connection_timeout")
+        self.assertEqual(result["failure"]["stage"], "verification")
+        self.assertTrue(result["failure"]["write_dispatch_started"])
+        self.assertEqual(result["next_action"], "reconcile_without_replay")
+        self.assertFalse(result["retry_safe"])
+        self.assertNotIn("private-service-error", json.dumps(result))
+        self.assertEqual(writer.calls, [])
+
+    def test_send_marker_failure_does_not_claim_a_write_was_dispatched(self):
+        actions, writer, _ = _actions()
+        approval = actions.validate_write("res.partner", "write", record_ids=[7], values={"name": "Ada"})["approval"]
+        with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1"}), \
+             patch.object(actions.store, "mark_sending", return_value=False):
+            result = actions.execute_approved_write(approval, confirm=True)
+        self.assertEqual(result["failure"]["code"], "action_send_marker_failed")
+        self.assertEqual(result["failure"]["stage"], "before_send")
+        self.assertFalse(result["failure"]["write_dispatch_started"])
+        self.assertFalse(result["retry_safe"])
+        self.assertEqual(writer.calls, [])
+
     def test_relation_shorthand_is_canonical_before_approval_only(self):
         actions, writer, runtime = _actions()
         runtime.client.metadata["links"] = {"type": "many2many", "relation": "res.partner"}
@@ -1021,6 +1107,12 @@ class NativeActionCheckpointTests(unittest.TestCase):
         with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "0"}):
             reconciled = actions.reconcile(approval["action_id"])
         self.assertEqual(first["action_status"], "needs_reconciliation")
+        self.assertEqual(first["reason_code"], "connection_unavailable")
+        self.assertEqual(first["failure"]["code"], "action_outcome_unknown")
+        self.assertEqual(first["failure"]["stage"], "send")
+        self.assertTrue(first["failure"]["write_dispatch_started"])
+        self.assertEqual(first["next_action"], "reconcile_without_replay")
+        self.assertFalse(first["retry_safe"])
         self.assertTrue(reconciled["success"])
         self.assertTrue(reconciled["reconciled"])
         self.assertEqual(len(writer.calls), 1)
@@ -1042,6 +1134,12 @@ class NativeActionCheckpointTests(unittest.TestCase):
         with patch.object(actions, "_verify", side_effect=ConnectionError("offline")):
             result = actions.reconcile(action_id)
         self.assertFalse(result["success"])
+        self.assertEqual(result["action_id"], action_id)
+        self.assertEqual(result["reason_code"], "connection_unavailable")
+        self.assertEqual(result["failure"]["code"], "action_verification_failed")
+        self.assertEqual(result["failure"]["stage"], "verification")
+        self.assertEqual(result["next_action"], "reconcile_without_replay")
+        self.assertFalse(result["retry_safe"])
         self.assertEqual(actions.store.get(action_id)["status"], "needs_reconciliation")
         self.assertEqual(writer.calls, [])
 
@@ -1077,6 +1175,10 @@ class NativeActionCheckpointTests(unittest.TestCase):
             )
         self.assertEqual(first["action_status"], "needs_reconciliation")
         self.assertEqual(blocked["action_status"], "resource_busy")
+        self.assertEqual(first["failure"]["code"], "action_outcome_unknown")
+        self.assertEqual(blocked["failure"]["code"], "action_resource_busy")
+        self.assertEqual(blocked["next_action"], "reconcile_without_replay")
+        self.assertFalse(blocked["retry_safe"])
         self.assertEqual(len(writer.calls), 1)
 
     def test_structured_odoo_rejection_is_the_only_retry_safe_send_failure(self):
@@ -1104,6 +1206,10 @@ class NativeActionCheckpointTests(unittest.TestCase):
                 "sale.order", "action_confirm", kwargs={"ids": [7]}
             )
         self.assertEqual(result["action_status"], "known_failed")
+        self.assertEqual(result["reason_code"], "permission_denied")
+        self.assertEqual(result["failure"]["code"], "action_known_rejected")
+        self.assertEqual(result["failure"]["stage"], "send")
+        self.assertEqual(result["next_action"], "correct_then_validate")
         self.assertTrue(result["retry_safe"])
 
     def test_verification_failure_duplicate_and_concurrent_submission_do_not_resend(self):
@@ -1123,6 +1229,10 @@ class NativeActionCheckpointTests(unittest.TestCase):
             second = actions.execute_approved_write(approval, confirm=True)
         self.assertEqual(first["action_status"], "needs_reconciliation")
         self.assertEqual(second["action_status"], "needs_reconciliation")
+        self.assertEqual(first["failure"]["code"], "action_verification_failed")
+        self.assertEqual(second["failure"]["code"], "action_verification_failed")
+        self.assertEqual(second["next_action"], "reconcile_without_replay")
+        self.assertFalse(second["retry_safe"])
         self.assertEqual(len(writer.calls), 1)
 
         concurrent, concurrent_writer, _ = _actions()

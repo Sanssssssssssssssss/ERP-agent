@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -20,10 +21,53 @@ from bench.adapters.report import (
     write_index,
 )
 from bench.adapters.trial_summary import _failure, _redact
+from erp_harness.context.world import WorldStore
 from erp_harness.tools.dynamic_tools import tool_contract_sha256
 
 
 class ReportingTest(unittest.TestCase):
+    def test_invoice_eligibility_receipt_links_dispatch_and_remains_searchable(self):
+        call_id = "call_01_hajqtuws37apwics59pdg26k"
+        tool = "read_invoice_eligibility"
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "ODOO_URL": "http://odoo.test", "ODOO_DB": "bench",
+            "ODOO_USERNAME": "reader", "ODOO_PASSWORD": "not-recorded",
+            "ODOO_TRANSPORT": "json2",
+        }):
+            trial = Path(directory) / "trial"
+            agent = trial / "agent"
+            agent.mkdir(parents=True)
+            (trial / "config.json").write_text(json.dumps({"agent": {"kwargs": {
+                "read_backend": "native", "world_mode": "record",
+            }}}), encoding="utf-8")
+            (trial / "result.json").write_text("{}", encoding="utf-8")
+            (agent / "pi-agent-session.jsonl").write_text(json.dumps({
+                "type": "message", "id": "response", "timestamp": 1.0,
+                "message": {"role": "assistant", "model": "test", "content": [],
+                            "stopReason": "stop", "usage": {"input": 10, "output": 2, "totalTokens": 12}},
+            }) + "\n", encoding="utf-8")
+            (agent / "tool-backends.jsonl").write_text("\n".join(json.dumps({
+                "event": event, "backend": "native", "tool_call_id": call_id,
+                "tool": "mcp_odoo_" + tool,
+            }) for event in ("start", "end")) + "\n", encoding="utf-8")
+            world = WorldStore(agent / "world-observations.jsonl")
+            receipt = world.finish(world.begin(call_id, tool, {
+                "order_ids": [1, 2, 3, 4], "final": True,
+            }, "native"), json.dumps({
+                "success": True, "tool": tool, "status": "eligible", "complete": True,
+                "orders": [{"order_id": 1, "order_name": "S00004"}],
+            }))
+            world.write_summary(agent / "world-summary.json")
+            self.assertEqual(world.search_observations(
+                receipt["identity"], tool=tool,
+            )["items"][0]["observation_ref"], receipt["receipt_id"])
+            summary = report_trial(trial, Path(directory) / "report")
+            integrity = summary["receipts"]["world_integrity"]
+            self.assertTrue(integrity["valid"], integrity)
+            self.assertEqual(integrity["orphan_observation_call_ids"], [])
+            self.assertEqual(integrity["missing_dispatch_call_ids"], [])
+            self.assertEqual(summary["actions"]["native_read_calls"], 1)
+
     def test_recovered_intermediate_error_is_not_a_terminal_failure(self) -> None:
         failure = _failure(
             [

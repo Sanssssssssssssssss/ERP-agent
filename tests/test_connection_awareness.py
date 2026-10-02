@@ -4,16 +4,40 @@ import json
 import os
 import socket
 import ssl
+import threading
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from erp_harness.app import conversation
 from erp_harness.erp._odoo_core.odoo_client import OdooJson2Error
-from erp_harness.erp.read_failures import read_failure
+from erp_harness.erp.read_failures import read_failure, tool_failure
 from erp_harness.erp.reads import NativeReads
 
 
 class ConnectionAwarenessTests(unittest.TestCase):
+    def test_missing_model_survives_metadata_wrapper_without_becoming_connection_error(self):
+        message = "JSON-2 request base.automation.fields_get failed with HTTP 404: the model 'base.automation' does not exist secret"
+        for error in (OdooJson2Error(message, status_code=404), ValueError(message)):
+            with self.subTest(error=type(error).__name__):
+                direct = read_failure(error)
+                tool = tool_failure(error)
+                self.assertEqual(direct["reason_code"], "model_unavailable")
+                self.assertEqual(tool["failure_layer"], "environment")
+                self.assertEqual(tool["next_action"], "list_models")
+                self.assertNotIn("secret", json.dumps(tool))
+        self.assertEqual(read_failure(OdooJson2Error("no endpoint", status_code=404))["reason_code"], "endpoint_not_found")
+        reads = NativeReads.__new__(NativeReads)
+        reads.instance, reads.cache = "default", {}
+        reads.instances, reads._lock = {"default": reads}, threading.RLock()
+        reads.cache_hits = reads.cache_misses = 0
+        reads._refresh_scope = lambda: None
+        reads.client = SimpleNamespace(get_model_fields=lambda _model: {"error": message})
+        result = reads.call("find_records", {"model": "base.automation", "domain": [["id", ">", 0]], "limit": 20})
+        self.assertFalse(result["success"])
+        self.assertEqual(result["reason_code"], "model_unavailable")
+        self.assertEqual(result["next_action"], "list_models")
+
     def test_classification_and_redaction(self):
         cases = [
             (ConnectionRefusedError(10061, "secret"), "connection_refused"),

@@ -1,0 +1,332 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-10-02T20:19:27.097543+00:00",
+  "cases": [
+    {
+      "case_id": "TF2010-FIXED-01",
+      "case_kind": "observed_business_run_tool_failure",
+      "task": "2010",
+      "source_commit": "b38bd51d562de488e2dd8306220ba1cf9ee6d1d6",
+      "source_tree_sha256": "18c9bf064f77950f99e2db11a9858c50f3ed4bb6759bb11a1fad6bed7a817a61",
+      "wheel_sha256": "c9c369632c0ee8982577b53d1eea6d7ce2778b923b75e2e1e528c6f4e6711bac",
+      "task_scope_sha256": "aea6c56c3b6f05938092a1e8fa85f1db7dc40f67cbe50aa8f53813c9662bec69",
+      "expected_business_constraints": {
+        "purchase_sources": [
+          {
+            "check_demand_capacity": true,
+            "minimum_per_origin": 1,
+            "product": {
+              "domain": [
+                [
+                  "name",
+                  "=",
+                  "48U High-Density Cabinet"
+                ]
+              ],
+              "model": "product.product"
+            },
+            "purchases": {
+              "domain": [
+                [
+                  "order_line.product_id.name",
+                  "=",
+                  "48U High-Density Cabinet"
+                ],
+                [
+                  "state",
+                  "!=",
+                  "cancel"
+                ]
+              ],
+              "model": "purchase.order"
+            },
+            "source": {
+              "domain": [
+                [
+                  "partner_id.name",
+                  "in",
+                  [
+                    "Riverdale Engineering",
+                    "Matrix Bazaar",
+                    "Bridgeway Workshop",
+                    "Aegis Enterprises"
+                  ]
+                ],
+                [
+                  "order_line.product_id.name",
+                  "=",
+                  "48U High-Density Cabinet"
+                ]
+              ],
+              "field": "name",
+              "model": "sale.order"
+            }
+          }
+        ],
+        "version": 1
+      },
+      "failed_arguments": {
+        "fields": [
+          "name",
+          "note",
+          "description",
+          "description_purchase",
+          "description_sale",
+          "list_price",
+          "standard_price",
+          "type",
+          "uom_id",
+          "categ_id"
+        ],
+        "model": "product.template",
+        "record_id": 2
+      },
+      "causal_request_id": "req_4a6c04ae3d3d4efd95a49dc331037b59",
+      "causal_call_id": "call_1376f6b2f5e14f0ab7763821035b5d7b",
+      "tool_call_id": "call_03_rtg1hxd7beut6ws5c2lfr1b5",
+      "tool": "mcp_odoo_read_record",
+      "causal_request_file": "0006",
+      "first_followup_request_file": "0007",
+      "first_corrective_request_file": null,
+      "first_followup_request_id": "req_da3891c65f864be787112572ff8bf1a3",
+      "full_request_context_and_tool_schemas": ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests",
+      "causal_tool_schema_sha256": "3cecd8eb561109fd1236db33d058ceb32eeb18a5e4194d53a1b3ec44786a3f79",
+      "public_failure": {
+        "reason_code": "query_invalid",
+        "failure_layer": null,
+        "next_action": "correct_query",
+        "public_error": "Unknown field(s) ['note'] on product.template; use live get_model_fields. Valid candidates: description_sale.",
+        "issues": null,
+        "recovery_request": {
+          "tool": "mcp_odoo_get_model_fields",
+          "arguments": {
+            "model": "product.template",
+            "query": "note",
+            "instance": "default"
+          },
+          "unknown_fields": [
+            "note"
+          ],
+          "candidate_fields": [
+            "description_sale"
+          ],
+          "notice": "Candidates are suggestions, not semantic replacements. Discover exact live metadata before retrying."
+        },
+        "public_error_source": {
+          "path": ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests/0007.request.json",
+          "sha256": "72005a466937e53349cfa4441ac5ed85d0c0b29b153a12510e7e1918045ceb6f",
+          "tool_call_id": "call_03_rtg1hxd7beut6ws5c2lfr1b5",
+          "field": "messages[role=tool].content.error"
+        }
+      },
+      "observed_recovery": "No metadata correction of this optional note read was observed; next request read existing supply evidence.",
+      "observed_recovery_verified": false,
+      "offline_guard_entry": "src/erp_harness/erp/reads.py:UnknownFieldsError; tests/test_bench_tool_regression.py:test_all_observed_unknown_fields_refuse_before_data_rpc_and_offer_discovery",
+      "business_acceptance": {
+        "original_score": 100,
+        "original_passed": true,
+        "report": ".runtime/tool-self-debug-20261003/fresh-fixed/business-review.json"
+      },
+      "captured_request_usage": {
+        "fresh_input_tokens": 35535,
+        "cache_read_tokens": 23040,
+        "cache_write_tokens": 0,
+        "output_including_reasoning_tokens": 732,
+        "reasoning_subset_tokens": 362,
+        "total_tokens": 59307,
+        "request_count": 2,
+        "compaction_request_count": 0,
+        "compaction_total_tokens": 0,
+        "unknown_usage_requests": 0,
+        "usage_complete": true,
+        "cost": null,
+        "currency": null
+      },
+      "new_cut_api_calls": 0,
+      "hashes": {
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests/0006.meta.json": "5ccfdd9be20477b2ea1d3924d27ea01fdb829fa3fe845adf548ee6240fd22a51",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests/0006.output.json": "98496d1d548c7276add0a60a26c1eb75643e93deacbdc46eba98e298089a0d12",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests/0006.request.json": "e0b772f6ec33817ee5a9d382aa1fb73440aa0aeddb6088aeea5cf164ae91557e",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests/0006.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests/0007.meta.json": "787191bbe92ab9007ff704168e1ddf0bddb40b4e8ed15c915b8247026161e8a6",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests/0007.output.json": "84a081c6cfe138bd5d1456eaf7bd6157f1cc24897e9a7d4ae4c92e9b36e5f795",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests/0007.request.json": "72005a466937e53349cfa4441ac5ed85d0c0b29b153a12510e7e1918045ceb6f",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests/0007.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/source/frozen.json": "ad0ce9a21be58af1906a8db7c25d503f3e0cdd738fe2c70251a7bc0d84635d06",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/source/erp_harness-0.6.0-py3-none-any.whl": "c9c369632c0ee8982577b53d1eea6d7ce2778b923b75e2e1e528c6f4e6711bac",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/constraints/task-evidence.json": "050d27b44adb70241cdc6ae7597b1e35baca903018a3e9355722e304fd07cb80",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/constraints/system-prompt.txt": "c43d67957911b04cf7b05d2263c5be9471848c8d0696b2774b73d59c501f3973",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/constraints/run-config.json": "047ffe965bea289a61b1822a0139182b7602a85141c293e41f7d4c4b8d9b8c0b",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/constraints/instruction.md": "a5ffd9ab22a28a2edb370312471d276fa107d93b6e7a95142fe62170f35ecaf4",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/constraints/task.toml": "d2fa8f01c84ebdff5d16d25dcf8ae668134400448a1eedd123fcfb603b341148"
+      },
+      "local_manifest_sha256": "b3323104281ff5c85b2bb4271217bd27735e04b14a379bdcfb3e085882ded2d8"
+    },
+    {
+      "case_id": "TF2010-FIXED-02",
+      "case_kind": "observed_business_run_tool_failure",
+      "task": "2010",
+      "source_commit": "b38bd51d562de488e2dd8306220ba1cf9ee6d1d6",
+      "source_tree_sha256": "18c9bf064f77950f99e2db11a9858c50f3ed4bb6759bb11a1fad6bed7a817a61",
+      "wheel_sha256": "c9c369632c0ee8982577b53d1eea6d7ce2778b923b75e2e1e528c6f4e6711bac",
+      "task_scope_sha256": "aea6c56c3b6f05938092a1e8fa85f1db7dc40f67cbe50aa8f53813c9662bec69",
+      "expected_business_constraints": {
+        "purchase_sources": [
+          {
+            "check_demand_capacity": true,
+            "minimum_per_origin": 1,
+            "product": {
+              "domain": [
+                [
+                  "name",
+                  "=",
+                  "48U High-Density Cabinet"
+                ]
+              ],
+              "model": "product.product"
+            },
+            "purchases": {
+              "domain": [
+                [
+                  "order_line.product_id.name",
+                  "=",
+                  "48U High-Density Cabinet"
+                ],
+                [
+                  "state",
+                  "!=",
+                  "cancel"
+                ]
+              ],
+              "model": "purchase.order"
+            },
+            "source": {
+              "domain": [
+                [
+                  "partner_id.name",
+                  "in",
+                  [
+                    "Riverdale Engineering",
+                    "Matrix Bazaar",
+                    "Bridgeway Workshop",
+                    "Aegis Enterprises"
+                  ]
+                ],
+                [
+                  "order_line.product_id.name",
+                  "=",
+                  "48U High-Density Cabinet"
+                ]
+              ],
+              "field": "name",
+              "model": "sale.order"
+            }
+          }
+        ],
+        "version": 1
+      },
+      "failed_arguments": {
+        "model": "purchase.order",
+        "operation": "create",
+        "values": {
+          "partner_id": 6,
+          "date_planned": "2026-10-08 00:00:00",
+          "origin": "S00003, S00004",
+          "order_line": [
+            [
+              0,
+              0,
+              {
+                "product_id": 2,
+                "product_uom_qty": 10,
+                "price_unit": 1070.66,
+                "date_planned": "2026-10-08 00:00:00"
+              }
+            ]
+          ]
+        }
+      },
+      "causal_request_id": "req_3173d4d785a344638fbb2a7eaca84656",
+      "causal_call_id": "call_88c5533bab554edf91bca7083c31572b",
+      "tool_call_id": "call_01_qjw9n5aqc8va1dx24co8ft4p",
+      "tool": "mcp_odoo_validate_write",
+      "causal_request_file": "0015",
+      "first_followup_request_file": "0016",
+      "first_corrective_request_file": "0016",
+      "first_followup_request_id": "req_8840dd50ece241749c40e76aef5bc74c",
+      "full_request_context_and_tool_schemas": ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests",
+      "causal_tool_schema_sha256": "6738824ac4714c0ad17289777d49aa1b5bb7b3882403d7d045f3a1f943147b2d",
+      "public_failure": {
+        "reason_code": "action_validation_failed",
+        "failure_layer": "tool_arguments",
+        "next_action": "correct_arguments",
+        "public_error": "工具调用失败；请按错误分类检查对应条件。",
+        "issues": [
+          {
+            "code": "readonly_field",
+            "severity": "error",
+            "message": "order_line[0][2]: 'product_uom_qty' is readonly in fields_get metadata."
+          }
+        ],
+        "recovery_request": null,
+        "public_error_source": {
+          "path": ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests/0016.request.json",
+          "sha256": "88d5fe707a302884639321cbd946b842bfa07ad140fa3505fe739ecb9b8ef60e",
+          "tool_call_id": "call_01_qjw9n5aqc8va1dx24co8ft4p",
+          "field": "messages[role=tool].content.error"
+        }
+      },
+      "observed_recovery": "0016 queried purchase.order.line fields; 0017 replaced readonly product_uom_qty with product_qty, validation succeeded.",
+      "observed_recovery_verified": true,
+      "offline_guard_entry": "src/erp_harness/erp/_odoo_core/agent_tools.py:_metadata_issues_for_values; readonly_field severity=error blocks approval before send",
+      "business_acceptance": {
+        "original_score": 100,
+        "original_passed": true,
+        "report": ".runtime/tool-self-debug-20261003/fresh-fixed/business-review.json"
+      },
+      "captured_request_usage": {
+        "fresh_input_tokens": 3483,
+        "cache_read_tokens": 151552,
+        "cache_write_tokens": 0,
+        "output_including_reasoning_tokens": 2008,
+        "reasoning_subset_tokens": 1454,
+        "total_tokens": 157043,
+        "request_count": 3,
+        "compaction_request_count": 0,
+        "compaction_total_tokens": 0,
+        "unknown_usage_requests": 0,
+        "usage_complete": true,
+        "cost": null,
+        "currency": null
+      },
+      "new_cut_api_calls": 0,
+      "hashes": {
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests/0015.meta.json": "5d7a363c6a93c86e806d9f2603bf69ce9003a3b2022a61babbacff9ade6e84ae",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests/0015.output.json": "965c039319425c5018a88629d861a001dd123c63a5257997b75b31b92d704fc8",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests/0015.request.json": "a4eb291ada49f59778b230aa58ec3639610bcc91c24ea9348ff2dae3e7e1e8ef",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests/0015.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests/0016.meta.json": "060918839e4786f2ed75474347712bc692ba37d9755df7ff878aa3f511eb7db1",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests/0016.output.json": "f41393658d95942fc4741587d82c4875c9a0596ce5bc99cbabb4274c4ad78911",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests/0016.request.json": "88d5fe707a302884639321cbd946b842bfa07ad140fa3505fe739ecb9b8ef60e",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests/0016.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests/0017.meta.json": "ace96fe0e89bc04d99c68e7cdb47d458446d3e7cd65cf9662e6324c76c6e5dd3",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests/0017.output.json": "a08aca9f830c8b732880f726169a000e51cb5a865fafa17283fcdd84518bac7b",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests/0017.request.json": "199418d8d2707acb6b3e79fa72978a82cf96b0954be591d595dacc5e27027677",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/requests/0017.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/source/frozen.json": "ad0ce9a21be58af1906a8db7c25d503f3e0cdd738fe2c70251a7bc0d84635d06",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/source/erp_harness-0.6.0-py3-none-any.whl": "c9c369632c0ee8982577b53d1eea6d7ce2778b923b75e2e1e528c6f4e6711bac",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/constraints/task-evidence.json": "050d27b44adb70241cdc6ae7597b1e35baca903018a3e9355722e304fd07cb80",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/constraints/system-prompt.txt": "c43d67957911b04cf7b05d2263c5be9471848c8d0696b2774b73d59c501f3973",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/constraints/run-config.json": "047ffe965bea289a61b1822a0139182b7602a85141c293e41f7d4c4b8d9b8c0b",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/constraints/instruction.md": "a5ffd9ab22a28a2edb370312471d276fa107d93b6e7a95142fe62170f35ecaf4",
+        ".runtime/tool-self-debug-20261003/fresh-fixed/regression-frozen/2010/constraints/task.toml": "d2fa8f01c84ebdff5d16d25dcf8ae668134400448a1eedd123fcfb603b341148"
+      },
+      "local_manifest_sha256": "b3323104281ff5c85b2bb4271217bd27735e04b14a379bdcfb3e085882ded2d8"
+    }
+  ],
+  "notes": [
+    "Actual complete business run supplies model/API acceptance; no new paid cut requests were added.",
+    "The optional note read was not corrected; its immediate followup is recorded without claiming recovery.",
+    "Public error text is taken from the UTF-8 tool reply in the first followup request; historical stdout may have encoding artifacts. Original receipts and frozen hashes are unchanged."
+  ]
+}

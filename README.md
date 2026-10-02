@@ -75,6 +75,8 @@ The workflow families above have local test coverage; specific acceptance and re
 
 [ERP-Bench and Harbor](bench/) provide a separate evaluation path with pinned tasks, snapshots and scoring. Mock and renderer checks verify UI mechanisms; real API runs and Odoo readbacks verify the recorded test workflows.
 
+[Tool recovery validation](docs/tool-self-debug-20261003.md) records the failure causes, local API decisions, fresh business runs and token usage for each case.
+
 ## Repository
 
 | Path | Purpose |

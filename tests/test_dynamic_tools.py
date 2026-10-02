@@ -4,11 +4,11 @@ import asyncio
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from itertools import count
 from pathlib import Path
 
 from erp_harness.runtime.tools import AgentTool, AgentToolResult
-
 from erp_harness.tools.dynamic_tools import (
     BASE_TOOLS,
     CAPABILITY_GROUPS,
@@ -212,6 +212,9 @@ class DynamicToolsTest(unittest.TestCase):
             ).details
             self.assertFalse(rejected["success"])
             self.assertEqual(rejected["module_missing"], ["accounting"])
+            self.assertEqual(rejected["reason_code"], "capability_module_missing")
+            self.assertEqual(rejected["next_action"], "check_installed_modules")
+            self.assertEqual(rejected["missing_models"], ["account.move"])
             self.assertEqual(published, [])
 
     def test_first_configure_rejects_missing_module(self) -> None:
@@ -259,9 +262,64 @@ class DynamicToolsTest(unittest.TestCase):
                         )
                     ).details
                     self.assertFalse(rejected["success"])
+                    self.assertEqual(rejected["reason_code"], "capability_unknown" if capabilities == ["unknown"] else "capability_selection_invalid")
+                    self.assertEqual(rejected["failure_layer"], "tool_contract")
+                    self.assertEqual(set(rejected["allowed_capabilities"]), set(CAPABILITY_GROUPS))
 
             self.assertEqual(calls, [])
             self.assertEqual(published, [])
+
+    def test_probe_failures_remain_unknown_and_explain_transport_failure(self):
+        secret = "credential-value-must-not-be-published"
+        tools = fake_tools(set())
+        async def failed_probe(*_args, **_kwargs):
+            return AgentToolResult(content="{}", details={"structuredContent": {
+                "success": False, "reason_code": "authentication_failed", "error": secret,
+            }})
+        tools = [replace(tool, execute_fn=failed_probe) if tool.name == "mcp_odoo_find_records" else tool for tool in tools]
+        with tempfile.TemporaryDirectory() as directory:
+            controller = DynamicToolController(tools, Path(directory) / "dynamic-tools.jsonl", count(1).__next__)
+            controller.bind(lambda _tools: None)
+            listed = asyncio.run(controller.tools[-2].execute("failed-probe", {})).details
+            for row in listed["capabilities"]:
+                if row["required_models"]:
+                    self.assertEqual(row["status"], "unknown")
+                    self.assertEqual(row["availability_failure"]["reason_code"], "authentication_failed")
+                    self.assertEqual(row["availability_failure"]["next_action"], "check_credentials")
+                self.assertEqual(row["missing_models"], [])
+            self.assertNotIn(secret, json.dumps(listed))
+            configured = asyncio.run(controller.tools[-1].execute("unknown-permitted", {"capabilities": ["accounting"]})).details
+            self.assertTrue(configured["success"])
+
+    def test_recovery_invalid_groups_and_unbound_session_are_classified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            controller = DynamicToolController(fake_tools(set()), Path(directory) / "dynamic-tools.jsonl", count(1).__next__, host_owned=True)
+            recover = next(tool for tool in controller.tools if tool.name == "recover_capabilities")
+            invalid = asyncio.run(recover.execute("invalid", {"capabilities": []})).details
+            self.assertEqual(invalid["reason_code"], "capability_selection_invalid")
+            unbound = asyncio.run(recover.execute("unbound", {"capabilities": ["attachments"]})).details
+            self.assertEqual(unbound["reason_code"], "capability_publication_failed")
+            self.assertEqual(unbound["failure_layer"], "runtime")
+            self.assertEqual(unbound["next_action"], "check_host_runtime")
+            self.assertEqual(controller._active, ())
+
+    def test_configure_publisher_exception_and_cancellation_restore_selection(self):
+        for error in (OSError("publisher unavailable"), asyncio.CancelledError("cancelled")):
+            with self.subTest(error=type(error).__name__), tempfile.TemporaryDirectory() as directory:
+                controller = DynamicToolController(fake_tools(set()), Path(directory) / "dynamic-tools.jsonl", count(1).__next__)
+                controller._active = ("attachments",)
+                original_tools = {tool.name for tool in controller.tools}
+                published = []
+                def failed_publish(tools, published=published, error=error):
+                    published.append({tool.name for tool in tools})
+                    raise error
+                controller.bind(failed_publish)
+                with self.assertRaises(type(error)) as caught:
+                    asyncio.run(controller.publish("publisher-failure", ["actions"]))
+                self.assertIs(caught.exception, error)
+                self.assertEqual(controller._active, ("attachments",))
+                self.assertEqual({tool.name for tool in controller.tools}, original_tools)
+                self.assertEqual(len(published), 1)
 
 
 if __name__ == "__main__":

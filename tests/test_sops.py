@@ -4,14 +4,14 @@ import asyncio
 import json
 import tempfile
 import unittest
-from unittest.mock import patch
 from itertools import count
 from pathlib import Path
+from unittest.mock import patch
 
 from erp_harness.erp.actions import ACTION_TOOLS
 from erp_harness.erp.capabilities import CAPABILITY_TOOLS
-from erp_harness.erp.reads import READ_RESPONSES, NATIVE_READ_RESPONSES
-from erp_harness.tools.sops import SOPS, SOP_TOOLS, build_sop_payload, build_sop_tools, get_sop
+from erp_harness.erp.reads import NATIVE_READ_RESPONSES, READ_RESPONSES
+from erp_harness.tools.sops import SOP_TOOLS, SOPS, build_sop_payload, build_sop_tools, get_sop
 
 
 class ControlledSopTest(unittest.TestCase):
@@ -89,7 +89,8 @@ class ControlledSopTest(unittest.TestCase):
             self.assertEqual(contract["fields"], ["state"])
         bad = get_sop("safe_write_review", {"model": "sale.order", "operation": "write+confirm"})
         self.assertFalse(bad["success"])
-        self.assertIn("Separate", bad["next_action"])
+        self.assertEqual(bad["next_action"], "separate_operations")
+        self.assertEqual(bad["reason_code"], "sop_operation_invalid")
 
     def test_guessed_method_is_not_endorsed_and_policy_is_rechecked(self):
         with patch("erp_harness.tools.sops.allowed_side_effect_methods", return_value=[
@@ -97,10 +98,47 @@ class ControlledSopTest(unittest.TestCase):
             for operation in ("confirm", "button_confirm"):
                 result = build_sop_payload("safe_write_review", {"model": "sale.order", "operation": operation})
                 self.assertFalse(result["success"])
+                self.assertEqual(result["reason_code"], "sop_method_unreviewed")
+                self.assertEqual(result["failure_layer"], "authorization")
                 self.assertEqual(result["reviewed_methods"], ["action_confirm"])
                 self.assertNotIn("sop", result)
         with patch("erp_harness.tools.sops.allowed_side_effect_methods", return_value=[]):
             self.assertFalse(get_sop("safe_write_review", {"model": "sale.order", "operation": "action_confirm"})["success"])
+
+    def test_all_required_sop_inputs_report_exact_missing_choices(self):
+        for name, spec in SOPS.items():
+            required = sorted(key for key, needed in spec["parameters"].items() if needed)
+            if required:
+                with self.subTest(sop=name):
+                    result = get_sop(name)
+                    self.assertFalse(result["success"])
+                    self.assertEqual(result["reason_code"], "sop_inputs_invalid")
+                    self.assertEqual(result["failure_layer"], "tool_contract")
+                    self.assertEqual(result["next_action"], "correct_sop_inputs")
+                    self.assertEqual(result["missing"], required)
+                    self.assertEqual(sorted(result["required_inputs"]), required)
+                    self.assertEqual(set(result["allowed_inputs"]), set(spec["parameters"]))
+
+    def test_sop_failure_discards_values_and_preserves_metadata_failure(self):
+        secret = "credential-value-must-not-be-published"
+        unknown = get_sop(secret)
+        self.assertEqual(unknown["reason_code"], "sop_unknown")
+        self.assertEqual(unknown["next_action"], "list_odoo_sops")
+        invalid = get_sop("safe_write_review", [secret])
+        self.assertEqual(invalid["reason_code"], "sop_inputs_invalid")
+        self.assertNotIn(secret, json.dumps([unknown, invalid]))
+        tool = build_sop_tools(read_fields=lambda **kw: {
+            "success": False, "reason_code": "authentication_failed", "error": secret,
+        })[1]
+        result = asyncio.run(tool.execute("metadata-failure", {
+            "sop_id": "stock_delivery_and_return", "inputs": {"source": "picking"},
+        })).details
+        self.assertTrue(result["success"])
+        for contract in result["sop"]["read_contract"].values():
+            self.assertEqual(contract["status"], "unavailable")
+            self.assertEqual(contract["reason_code"], "authentication_failed")
+            self.assertEqual(contract["next_action"], "check_credentials")
+        self.assertNotIn(secret, json.dumps(result))
 
 
 if __name__ == "__main__":
