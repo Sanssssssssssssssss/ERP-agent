@@ -443,6 +443,7 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
                 "" if native_only else "/tmp/pi-odoo-mcp-source"
             ),
             "PI_AGENT_SESSION_ID": str(self.context_id or self.session_id or "trial"),
+            "PI_AGENT_RUN_ID": str(self.context_id or self.session_id or "trial"),
             "PI_ODOO_SOURCE_COMMIT": os.environ.get("PI_ODOO_SOURCE_COMMIT", ""),
             **bench_action_env(),
         }

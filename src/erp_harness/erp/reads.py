@@ -109,12 +109,22 @@ NATIVE_READ_RESPONSES = {
     "find_records": FindRecordsResponse,
     "read_supply_context": ReadSupplyContextResponse,
     "read_invoice_eligibility": ToolResponse,
+    "read_purchase_allocation": ToolResponse,
 }
 
 _FIELD_SUMMARY_KEYS = (
     "type", "string", "help", "required", "readonly", "store", "searchable",
     "relation", "relation_field", "ondelete", "index",
 )
+
+
+class UnknownFieldsError(ValueError):
+    def __init__(self, model, fields, candidates):
+        hint = f" Valid candidates: {', '.join(candidates)}." if candidates else ""
+        super().__init__(f"Unknown field(s) {fields} on {model}; use live get_model_fields.{hint}")
+        self.recovery = {"tool": "mcp_odoo_get_model_fields", "arguments": {"model": model, "query": " ".join(fields)},
+                         "unknown_fields": fields, "candidate_fields": candidates,
+                         "notice": "Candidates are suggestions, not semantic replacements. Discover exact live metadata before retrying."}
 
 
 def _implicit_always_include(model: str, metadata: dict[str, Any]) -> list[str]:
@@ -268,6 +278,9 @@ class NativeReads:
                 result = {"success": False, "tool": name, **failure, "detail": failure["error"], "error": str(exc)}
             else:
                 result = {"success": False, **failure, "detail": failure["error"], "error": str(exc)}
+            if isinstance(exc, UnknownFieldsError):
+                exc.recovery['arguments']['instance'] = instance
+                result["recovery_request"] = exc.recovery
         if name in {"search_employee", "search_holidays"}:
             return READ_RESPONSES[name].model_validate(result).model_dump()
         return result
@@ -291,6 +304,12 @@ class NativeReads:
         return {"success": True, "tool": "read_invoice_eligibility",
                 "observed_at": datetime.now(UTC).isoformat(), **result}
 
+    def read_purchase_allocation(self, purchase_ids: list[int], order_ids: list[int]) -> dict[str, Any]:
+        from .purchase_allocation import inspect_purchase_allocation
+        return {"success": True, "tool": "read_purchase_allocation",
+                "observed_at": datetime.now().astimezone().isoformat(),
+                **inspect_purchase_allocation(self, purchase_ids, order_ids)}
+
     def health_check(self) -> dict[str, Any]:
         """Report the native runtime boundary without opening Odoo."""
         policy = load_side_effect_policy()
@@ -307,7 +326,7 @@ class NativeReads:
             "server": {
                 "name": "Odoo native Harness",
                 "instructions": "Direct Odoo capabilities without MCP transport",
-                "tool_count": 42,
+                "tool_count": 44,
                 "resource_count": 4,
                 "prompt_count": 11,
             },
@@ -489,10 +508,7 @@ class NativeReads:
         if unknown:
             allowed, _ = self.policy.filter_fields(self.instance, model, metadata)
             candidates = _field_candidates(unknown[0], metadata, allowed)
-            hint = f" Valid candidates: {', '.join(candidates)}." if candidates else ""
-            raise ValueError(
-                f"Unknown field(s) {unknown} on {model}; use live get_model_fields.{hint}"
-            )
+            raise UnknownFieldsError(model, unknown, candidates)
         return fields
 
     def _require_fields(self, model: str, fields: list[str]) -> None:

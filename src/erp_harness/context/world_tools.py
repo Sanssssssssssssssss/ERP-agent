@@ -51,7 +51,8 @@ def build_world_tools(
             return _result({"success": False, "tool": "read_observation", "error": str(exc), "error_class": "access"})
         except (TypeError, ValueError) as exc:
             kind = "invalid_path" if "path" in str(exc).lower() else "invalid_request"
-            return _result({"success": False, "tool": "read_observation", "error": str(exc), "error_class": kind})
+            return _result({"success": False, "tool": "read_observation", "error": str(exc), "error_class": kind,
+                            "next_action": "Read path=$ for the actual child directory, then use returned paths. Do not guess flattened paths."})
 
     common = {
         "instance": {"type": "string", "description": "Configured Odoo instance; defaults to the current instance."},
@@ -84,7 +85,7 @@ def build_world_tools(
                 "type": "object", "properties": {
                     **common, **read_paging,
                     "observation_ref": {"type": "string", "description": "Reference returned by search_observations."},
-                    "path": {"type": "string", "description": "JSON path such as $.result or $.result.0.name. Defaults to $.result; $ returns only a child directory."},
+                    "path": {"type": "string", "description": "Use paths returned by the receipt directory, e.g. $.result.products. Defaults to $.result; $ lists actual children. Do not flatten nested result keys."},
                     "query": {"type": "string", "description": "Keyword filter before pagination."},
                     "fields": {"type": "array", "items": {"type": "string"}, "description": "Fields to retain from object rows."},
                 }, "required": ["observation_ref"], "additionalProperties": False,

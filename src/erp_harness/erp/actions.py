@@ -692,6 +692,8 @@ class NativeActions:
             "sale.advance.payment.inv",
             "create_invoices",
         ):
+            if len(ids) != 1:
+                raise ValueError("create_invoices requires exactly one wizard ID per approved call; a wizard may contain multiple sale orders. Read existing invoices and reconcile any unknown prior write before another call.")
             wizard_fields = ["id", "sale_order_ids", "advance_payment_method", "deduct_down_payments", "amount", "fixed_amount"]
             policy = getattr(self.reads.instances[instance], "policy", None)
             if policy is not None and policy.restricted_fields(instance, model, set(wizard_fields)):
@@ -1068,12 +1070,14 @@ class NativeActions:
         state = _KNOWN_METHOD_STATES.get((model, method))
         if state:
             records = self._read_rows(instance, model, ids, ["id", state[0]])
+            sources = self.task_evidence.purchase_check(payload) if self.task_evidence is not None else []
             satisfied = bool(ids) and len(records) == len(ids) and all(
                 item.get(state[0]) in state[1] for item in records
             )
             return {
                 "status": "satisfied" if satisfied else "not_satisfied",
-                "evidence": {"records": records, "accepted_states": sorted(state[1])},
+                "evidence": {"records": records, "accepted_states": sorted(state[1]),
+                             **({"purchase_sources": sources} if sources else {})},
             }
         if (model, method) == ("sale.advance.payment.inv", "create_invoices"):
             order_ids = [

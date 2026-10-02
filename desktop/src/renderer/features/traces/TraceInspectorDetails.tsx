@@ -77,7 +77,7 @@ const toolCategories: Record<string, string[]> = {
   '字段与结构': ['get_model_fields', 'schema_catalog', 'list_models', 'inspect_model_relationships'],
   '业务规则': ['list_odoo_sops', 'get_odoo_sop', 'build_domain', 'index_knowledge', 'search_knowledge', 'knowledge_stats', 'business_pack_report'],
   '变更与审批': ['preview_write', 'validate_write', 'execute_approved_write', 'execute_method', 'chatter_post'],
-  '汇总与核验': ['aggregate_records', 'aggregate_across_instances', 'read_supply_context', 'read_invoice_eligibility', 'data_quality_report', 'receivable_payable_aging', 'accounting_health_summary', 'accounting_health_across_instances', 'refresh_business'],
+  '汇总与核验': ['aggregate_records', 'aggregate_across_instances', 'read_supply_context', 'read_invoice_eligibility', 'read_purchase_allocation', 'data_quality_report', 'receivable_payable_aging', 'accounting_health_summary', 'accounting_health_across_instances', 'refresh_business'],
   '连接与诊断': ['health_check', 'check_odoo_connection', 'diagnose_access', 'diagnose_odoo_call', 'get_odoo_profile', 'list_instances', 'get_current_time', 'generate_json2_payload', 'upgrade_risk_report', 'analyze_upgrade_log', 'lookup_model_history', 'fit_gap_report', 'scan_addons_source', 'submit_async_task', 'cancel_async_task'],
 }
 export function toolCategory(name: string) {

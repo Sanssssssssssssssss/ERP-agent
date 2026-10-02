@@ -1355,6 +1355,16 @@ class NativeActionCheckpointTests(unittest.TestCase):
         self.assertEqual(result["action_status"], "verified")
         self.assertEqual(len(writer.calls), 1)
 
+    def test_multiple_invoice_wizards_rejected_before_dispatch(self):
+        actions, writer, _ = _actions()
+        self.addCleanup(actions.store.close)
+        with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1", "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": "sale.advance.payment.inv.create_invoices"}):
+            result = actions.execute_method("sale.advance.payment.inv", "create_invoices", kwargs={"ids": [9, 10]})
+        self.assertFalse(result["success"])
+        self.assertIn("exactly one wizard", result["error"])
+        self.assertEqual(writer.calls, [])
+        self.assertEqual(actions.store.summary()["actions"], 0)
+
     def test_invoice_approval_captures_business_identity_and_rejects_changed_amount(self):
         actions, writer, runtime = _actions(approval_mode="host")
         self.addCleanup(actions.store.close)

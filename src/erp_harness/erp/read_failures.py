@@ -45,7 +45,7 @@ def read_failure(error: Exception | dict) -> dict:
         code, message, action = "endpoint_not_found", "Odoo JSON-2 接口地址不存在；请检查地址和版本。", "check_endpoint"
     elif "missingerror" in names:
         code, message, action = "record_unavailable", "目标记录不存在或当前账号不可见。", "resolve_reference"
-    elif "validationerror" in names or any(token in text for token in ("invalid field", "unknown field", "invalid domain", "unsupported parameters")):
+    elif "validationerror" in names or any(token in text for token in ("invalid field", "unknown field", "invalid domain", "unsupported parameters", "requires a non-empty domain", "offset must be greater", "limit must", "validation failed for tool")):
         code, message, action = "query_invalid", "查询字段或条件不被当前接口接受。", "correct_query"
     elif any(token in text for token in ("invalid json", "malformed records")):
         code, message, action = "invalid_response", "Odoo 返回的数据格式无效。", "check_service_logs"

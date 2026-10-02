@@ -21,7 +21,7 @@ GROUPS = {
     '上下文、缓存与长期记忆': ('context', 'history', 'memory', 'caching', 'prompt', 'thinking', 'token'),
     '模型协议与传输': ('provider', 'transport', 'http', 'stream', 'pi_ai', 'multimodal'),
     '会话、账本与持久化': ('session', 'storage', 'snapshot', 'world'),
-    'Trace、用量与诊断': ('trace', 'diagnos', 'report', 'budget', 'receipt', 'unbounded'),
+    'Trace、用量与诊断': ('trace', 'diagnos', 'self_debug', 'report', 'budget', 'receipt', 'unbounded'),
     '桌面交互与打包': ('desktop/', 'layout', 'migration', 'workbench', 'check.cjs'),
 }
 

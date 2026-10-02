@@ -29,6 +29,8 @@ class ConnectionAwarenessTests(unittest.TestCase):
             (OdooJson2Error("secret", status_code=500), "server_error"),
             (OdooJson2Error("secret", status_code=500, odoo_error={"name": "odoo.exceptions.ValidationError"}), "query_invalid"),
             (ValueError("Unknown field secret"), "query_invalid"),
+            (ValueError("find_records requires a non-empty domain"), "query_invalid"),
+            (ValueError("Validation failed for tool limit secret"), "query_invalid"),
             (ValueError("database secret does not exist"), "database_unavailable"),
             (RuntimeError("secret"), "read_failed_unknown"),
             (FileNotFoundError(2, "secret"), "read_failed_unknown"),
