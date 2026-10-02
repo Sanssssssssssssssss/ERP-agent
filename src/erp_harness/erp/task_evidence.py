@@ -17,6 +17,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+from erp_harness.erp.purchase_allocation import PurchaseAllocationError
 from erp_harness.erp.read_failures import FAILURE_GUIDANCE, tool_failure
 from erp_harness.erp.store import ActionStore
 
@@ -34,9 +35,24 @@ def failure_result(error: Exception | dict, *, code: str | None = None,
                    stage: str = "unknown", next_action: str | None = None,
                    write_dispatch_started: bool | None = None) -> dict:
     """Preserve action authority and the cause; uncertainty never permits replay."""
-    cause = tool_failure(error)
+    allocation = type(error) is PurchaseAllocationError
+    cause = tool_failure({"reason_code": "purchase_allocation_unverified"} if allocation else error)
     result = {**(error if isinstance(error, dict) else {}), **cause, "success": False}
-    if isinstance(error, dict) and error.get("error"):
+    if allocation:
+        result.update(error="采购来源数量分配未通过核验；请查看分配明细，核对采购数量、销售来源及共同需求容量。",
+                      business_condition=copy.deepcopy(error.report), approval_required=False, retry_safe=False)
+        if code is None and stage not in {"send", "verification"} and write_dispatch_started is not True:
+            code, stage, write_dispatch_started = "purchase_allocation_unverified", "before_send", False
+            scope = error.report.get("scope", {})
+            result["recovery_request"] = {"tool": "mcp_odoo_read_purchase_allocation", "arguments": {
+                "purchase_ids": copy.deepcopy(scope.get("purchase_ids", [])),
+                "order_ids": copy.deepcopy(scope.get("sale_order_ids", [])),
+            }}
+            if instance := scope.get("instance") or error.report.get("instance"):
+                result["recovery_request"]["arguments"]["instance"] = instance
+        elif code in {"action_outcome_unknown", "action_verification_failed"}:
+            result["reason_code"] = code
+    elif isinstance(error, dict) and error.get("error"):
         # Existing action refusals are local, public contract text, not transport bodies.
         result["error"] = error["error"]
     elif type(error) is ValueError and error.__cause__ is None and error.__context__ is None:

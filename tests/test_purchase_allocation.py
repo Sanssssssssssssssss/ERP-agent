@@ -1,16 +1,18 @@
 """Shared source capacity, final readback and no-send controls."""
 import copy
+import json
 import os
 from unittest.mock import patch
 
 import pytest
 
 from erp_harness.erp.purchase_allocation import (
+    PurchaseAllocationError,
     allocate,
     final_purchase_verification,
     inspect_purchase_allocation,
 )
-from erp_harness.erp.task_evidence import TaskEvidence
+from erp_harness.erp.task_evidence import TaskEvidence, failure_result
 from tests.test_actions import _actions
 
 
@@ -101,6 +103,133 @@ def test_host_capacity_blocks_release_and_final_readback_detects_later_change(tm
             assert final_purchase_verification(actions)['status'] == 'failed'
             assert final_purchase_verification(actions)['enforced'] is True
             assert len(writer.calls) == 1
+    finally:
+        actions.store.close()
+
+
+@pytest.mark.parametrize('quantity,capacity', [(10, 7), (6, 4)])
+def test_public_action_rejection_explains_allocation_before_any_write(tmp_path, quantity, capacity):
+    actions, writer, runtime = seed(tmp_path, (capacity, 12), quantity)
+    try:
+        spec = {'version': 1, 'instruction_sha256': 'confirmed-demand', 'purchase_sources': [{
+            'product': {'model': 'product.product', 'domain': [['id', '=', 1]]},
+            'source': {'model': 'sale.order', 'domain': [['id', 'in', [7, 8]]], 'field': 'name'},
+            'check_demand_capacity': True}]}
+        actions.task_evidence = TaskEvidence(actions.reads, spec, tmp_path / 'evidence.json')
+        with patch.dict(os.environ, {'ODOO_MCP_ENABLE_WRITES': '1',
+                'ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS': 'purchase.order.button_confirm'}):
+            result = actions.call('execute_method', {
+                'model': 'purchase.order', 'method': 'button_confirm', 'kwargs': {'ids': [8]},
+            })
+        assert result['success'] is False
+        assert result['reason_code'] == result['failure']['code'] == 'purchase_allocation_unverified'
+        assert result['failure']['layer'] == result['failure_layer'] == 'business_precondition'
+        assert result['next_action'] == 'read_purchase_allocation'
+        assert result['failure']['stage'] == 'before_send'
+        assert result['failure']['write_dispatch_started'] is False
+        assert result['approval_required'] is result['retry_safe'] is False
+        assert result['recovery_request'] == {'tool': 'mcp_odoo_read_purchase_allocation', 'arguments': {
+            'purchase_ids': [8], 'order_ids': [7, 8],
+        }}
+        report = result['business_condition']
+        assert report['status'] == 'failed'
+        assert report['checks'][0] == {'purchase_id': 8, 'quantity': quantity,
+            'source_capacity': capacity, 'origins': ['SO7'], 'status': 'failed'}
+        assert any(row.get('reason') == 'shared_demand_capacity' and row['status'] == 'failed'
+                   for row in report['checks'])
+        assert '分配' in result['error']
+        assert report == inspect_purchase_allocation(runtime, [8], [7, 8], product_id=1)
+        assert writer.calls == [] and actions.store.summary()['actions'] == 0
+        assert runtime.client.records['purchase.order'][8]['state'] == 'draft'
+    finally:
+        actions.store.close()
+
+
+@pytest.mark.parametrize('base', [ValueError, PurchaseAllocationError])
+def test_unknown_value_error_subclass_cannot_publish_a_report_or_body(tmp_path, base):
+    class ExternalValueError(base):
+        pass
+
+    error = ExternalValueError({'reason': 'private-external-report'}) if base is PurchaseAllocationError \
+        else ExternalValueError('private-external-body')
+    error.report = {'reason': 'private-external-report'}
+    actions, writer, _ = seed(tmp_path)
+    try:
+        with patch.object(actions, '_prestate', side_effect=error), \
+                patch.dict(os.environ, {'ODOO_MCP_ENABLE_WRITES': '1',
+                    'ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS': 'purchase.order.button_confirm'}):
+            result = actions.call('execute_method', {
+                'model': 'purchase.order', 'method': 'button_confirm', 'kwargs': {'ids': [8]},
+            })
+        assert result['reason_code'] == 'tool_failed_unknown'
+        assert 'business_condition' not in result and 'private-external' not in json.dumps(result)
+        assert writer.calls == [] and actions.store.summary()['actions'] == 0
+    finally:
+        actions.store.close()
+
+
+def test_allocation_recovery_request_preserves_scoped_instance():
+    report = {'status': 'failed', 'scope': {
+        'purchase_ids': [8], 'sale_order_ids': [7], 'instance': 'branch',
+    }, 'checks': []}
+    result = failure_result(PurchaseAllocationError(report))
+    assert result['recovery_request'] == {'tool': 'mcp_odoo_read_purchase_allocation', 'arguments': {
+        'purchase_ids': [8], 'order_ids': [7], 'instance': 'branch',
+    }}
+
+
+@pytest.mark.parametrize('code,stage', [
+    ('action_outcome_unknown', 'send'), ('action_verification_failed', 'verification'),
+])
+def test_allocation_details_do_not_override_dispatched_action_uncertainty(code, stage):
+    report = {'status': 'failed', 'scope': {'purchase_ids': [8], 'sale_order_ids': [7]},
+              'checks': [{'purchase_id': 8, 'quantity': 10, 'source_capacity': 7, 'status': 'failed'}]}
+    result = failure_result(PurchaseAllocationError(report), code=code, stage=stage,
+                            write_dispatch_started=True)
+    assert result['failure']['code'] == code and result['failure']['stage'] == stage
+    assert result['failure']['write_dispatch_started'] is True
+    assert result['reason_code'] == code
+    assert result['next_action'] == 'reconcile_without_replay'
+    assert result['retry_safe'] is False and 'recovery_request' not in result
+    assert result['business_condition'] == report
+
+
+def test_post_send_allocation_failure_stays_unresolved_and_reconcile_never_resends(tmp_path):
+    actions, writer, runtime = seed(tmp_path)
+    try:
+        runtime.client.records['purchase.order'][8]['origin'] = 'SO7, SO8'
+        spec = {'version': 1, 'instruction_sha256': 'confirmed-demand', 'purchase_sources': [{
+            'product': {'model': 'product.product', 'domain': [['id', '=', 1]]},
+            'source': {'model': 'sale.order', 'domain': [['id', 'in', [7, 8]]], 'field': 'name'},
+            'check_demand_capacity': True}]}
+        actions.task_evidence = TaskEvidence(actions.reads, spec, tmp_path / 'evidence.json')
+        original_send = writer.execute_method
+
+        def send_and_change_allocation(*args, **kwargs):
+            result = original_send(*args, **kwargs)
+            runtime.client.records['purchase.order'][8]['origin'] = 'SO7'
+            return result
+
+        with patch.object(writer, 'execute_method', side_effect=send_and_change_allocation), \
+                patch.dict(os.environ, {'ODOO_MCP_ENABLE_WRITES': '1',
+                    'ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS': 'purchase.order.button_confirm'}):
+            result = actions.call('execute_method', {
+                'model': 'purchase.order', 'method': 'button_confirm', 'kwargs': {'ids': [8]},
+            })
+            assert result['success'] is False and result['action_status'] == 'needs_reconciliation'
+            assert result['failure']['code'] == 'action_verification_failed'
+            assert result['next_action'] == 'reconcile_without_replay'
+            assert result['business_condition']['checks'][0]['source_capacity'] == 7
+            action_id = result['action_id']
+            reconciled = actions.reconcile(action_id)
+            assert reconciled['action_status'] == 'needs_reconciliation'
+            assert reconciled['failure']['code'] == 'action_verification_failed'
+            assert reconciled['failure']['stage'] == 'verification'
+            assert reconciled['failure']['write_dispatch_started'] is True
+            assert reconciled['next_action'] == 'reconcile_without_replay'
+            assert 'recovery_request' not in reconciled
+        assert actions.store.get(action_id)['status'] == 'needs_reconciliation'
+        assert len(writer.calls) == 1
     finally:
         actions.store.close()
 

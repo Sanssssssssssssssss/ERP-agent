@@ -25,6 +25,7 @@ FAILURE_GUIDANCE = {
     "permission_denied": ("authorization", "check_permissions"),
     "rate_limited": ("odoo_transport", "wait_then_recheck"),
     "endpoint_not_found": ("configuration", "check_endpoint"),
+    "model_unavailable": ("environment", "list_models"),
     "record_unavailable": ("business_reference", "resolve_reference"),
     "query_invalid": ("tool_arguments", "correct_query"),
     "invalid_response": ("odoo_response", "check_service_logs"),
@@ -60,6 +61,7 @@ FAILURE_GUIDANCE = {
     "action_validation_failed": ("tool_arguments", "correct_arguments"),
     "scope_handoff_required": ("authorization", "renew_proposal"),
     "business_choice_required": ("business_precondition", "request_user_input"),
+    "purchase_allocation_unverified": ("business_precondition", "read_purchase_allocation"),
     "scope_reconfirmation_required": ("authorization", "renew_proposal"),
     "stale_approval": ("authorization", "validate_again"),
     "needs_reconciliation": ("action_ledger", "reconcile_without_replay"),
@@ -123,6 +125,8 @@ def read_failure(error: Exception | dict) -> dict:
         code, message, action = "permission_denied", "当前账号或字段策略不允许这项读取。", "check_permissions"
     elif http == 429 or (isinstance(error, dict) and error.get("rate_limited")):
         code, message, action = "rate_limited", "只读请求受到限流。", "wait_then_recheck"
+    elif re.search(r"\bthe model ['\"][a-z0-9_.]+['\"] does not exist\b", text):
+        code, message, action = "model_unavailable", "当前 Odoo 实例没有该模型；请先查看可用模型及已安装模块。", "list_models"
     elif http == 404:
         code, message, action = "endpoint_not_found", "Odoo JSON-2 接口地址不存在；请检查地址和版本。", "check_endpoint"
     elif "missingerror" in names:
