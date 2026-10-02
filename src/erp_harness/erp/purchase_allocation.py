@@ -157,7 +157,7 @@ def inspect_purchase_allocation(runtime, purchase_ids, order_ids, *, minimum=1e-
 
 def final_purchase_verification(actions):
     """Host readback after model STOP, independently of the model's chosen tools."""
-    task = actions.task_evidence
+    task = getattr(actions, "task_evidence", None)
     enforced = bool(task and any(s.get('check_demand_capacity') for s in task.purchase_sources))
     targets = {'sale.order': set(), 'purchase.order': set()}
     instances = set()
