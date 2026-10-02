@@ -217,7 +217,9 @@ class NativeCapabilitiesTest(unittest.TestCase):
         self.assertEqual(
             result["merged"], [{"id": 1, "name": "A", "_instance": "first"}]
         )
-        self.assertIn("ConnectionError", result["errors"]["second"])
+        self.assertEqual(result["failures"]["second"]["reason_code"], "connection_unavailable")
+        self.assertEqual(result["failures"]["second"]["next_action"], "check_connection")
+        self.assertNotIn("offline", result["errors"]["second"])
 
     def test_async_result_and_restart_interruption_are_honest(self):
         with tempfile.TemporaryDirectory() as directory:

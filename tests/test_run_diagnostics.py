@@ -8,13 +8,16 @@ from unittest.mock import patch
 import pytest
 
 from erp_harness.erp._odoo_core.odoo_client import READ_CALL_ID, OdooClient
+from erp_harness.erp.read_failures import FAILURE_GUIDANCE
 from erp_harness.erp.reads import NativeReads
-from erp_harness.tools.run_diagnostics import build_diagnostic_tool, summarize_run
+from erp_harness.tools.run_diagnostics import _payload, build_diagnostic_tool, summarize_run
 
 IDENTITY = {"identity_id": "role-a", "credential_scope_sha256": "credential-scope"}
-FIELD_CASES = [case for case in json.loads((Path(__file__).resolve().parents[1]
+INCIDENTS = json.loads((Path(__file__).resolve().parents[1]
     / "experiments/agent_regression/bench_recovery_cases.json").read_text(encoding="utf-8"))
-    if case["failure_layer"] == "unknown_field"]
+FIELD_CASES = [case for case in INCIDENTS if case["failure_layer"] == "unknown_field"]
+OTHER_CASES = [case for case in INCIDENTS
+    if case["failure_layer"] in {"sop_inputs", "empty_domain", "observation_path", "diagnostic_scope"}]
 
 
 def seed(root):
@@ -286,3 +289,233 @@ def test_field_discovery_only_exposes_bounded_safe_metadata(tmp_path):
     hint = result["items"][0]["recovery_request"]
     assert len(hint["unknown_fields"]) == 3 and hint["unknown_field_count"] == 50
     assert len(json.dumps(result, ensure_ascii=False).encode()) <= 8192
+
+
+@pytest.mark.parametrize("case", OTHER_CASES, ids=lambda case: case["id"])
+def test_observed_nonfield_failures_preserve_classification(tmp_path, case):
+    from erp_harness.tools.sops import get_sop
+    from experiments.agent_regression.bench_recovery import verify_source
+    from tests.test_supply_context import SupplyClient
+
+    directory = verify_source(case)
+    messages = [json.loads(line).get("message", {}) for line in
+                (directory.parent / "pi-agent-session.jsonl").read_text(encoding="utf8").splitlines()]
+    message = next(message for message in messages if message.get("role") == "toolResult"
+                   and message.get("toolCallId") == case["tool_call_id"])
+    family = case["failure_layer"]
+    payload = _payload(message)
+    if family == "sop_inputs":
+        payload = get_sop(**case["failed_arguments"])
+        expected = "sop_inputs_invalid"
+    elif family == "empty_domain":
+        client = SupplyClient()
+        with patch.object(client, "search_records", create=True, side_effect=AssertionError("invalid query reached Odoo")):
+            payload = NativeReads(client).call("find_records", case["failed_arguments"])
+        expected = "query_invalid"
+    else:
+        # Original replies exercise compatibility, not an invented historical recovery.
+        expected = "invalid_path" if family == "observation_path" else "identity_or_scope_unavailable"
+    seed(tmp_path)
+    rows(tmp_path / "requests", "0001.meta.json", {"run_id": "run", "session_id": "session",
+         "request_id": case["causal_request"], "tool_call_ids": [case["tool_call_id"]]})
+    rows(tmp_path, "session.jsonl", {"message": {"role": "assistant", "content": [{
+         "type": "toolCall", "id": case["tool_call_id"], "name": case["tool"], "arguments": case["failed_arguments"]}]}},
+         {"message": {"role": "toolResult", "toolCallId": case["tool_call_id"],
+         "toolName": case["tool"], "details": payload}})
+    item = diagnose(tmp_path)["items"][0]
+    assert item["error_code"] == expected and item["tool_name"] == case["tool"]
+    assert item["next_action"] != "fresh_read_or_validate" and item["likely_failure_layer"] != "unknown"
+    assert item["odoo_request_seen"] is None  # Fixture absence does not prove no dispatch.
+    if family == "sop_inputs":
+        assert item["missing"] == payload["missing"]
+        assert item["allowed_inputs"] == payload["allowed_inputs"]
+        assert item["required_inputs"] == payload["required_inputs"]
+        assert item["sop_id"] == case["failed_arguments"]["sop_id"]
+
+
+@pytest.mark.parametrize("tag,code", [("reason_code", "connection_timeout"),
+    ("reason_code", "permission_denied"), ("error_code", "identity_or_scope_unavailable"),
+    ("error_class", "invalid_path"), ("failure", "method_not_supported")])
+def test_structured_failure_guidance_cannot_inject_receipt_text(tmp_path, tag, code):
+    seed(tmp_path)
+    payload = {"success": False, "error": "SECRET-RAW", "detail": "SECRET-DETAIL",
+               "next_action": "SECRET-INSTRUCTIONS", "failure_layer": "SECRET-LAYER"}
+    payload[tag] = {"code": code, "layer": "SECRET-LAYER", "next_action": "SECRET-INSTRUCTIONS"} if tag == "failure" else code
+    rows(tmp_path, "session.jsonl", {"message": {"role": "toolResult", "toolCallId": "call-a",
+         "toolName": "mcp_odoo_read_record", "details": payload}})
+    item = diagnose(tmp_path)["items"][0]
+    assert item["error_code"] == code and "SECRET" not in json.dumps(item)
+    expected = FAILURE_GUIDANCE.get(code, ("tool_contract", "read_observation_directory"))
+    assert (item["likely_failure_layer"], item["next_action"]) == expected
+    payload.update(reason_code=["SECRET"], error_code="SECRET-CODE", error_class={"SECRET": True},
+                   failure={"code": "SECRET-CODE", "stage": [], "layer": "SECRET", "next_action": "SECRET"},
+                   action_status=["sending"], action_id=["SECRET"])
+    rows(tmp_path, "session.jsonl", {"message": {"role": "toolResult", "toolCallId": "call-a", "details": payload}})
+    item = diagnose(tmp_path)["items"][0]
+    assert item["error_code"] == "tool_failed" and "SECRET" not in json.dumps(item)
+    payload.update(success=True)
+    rows(tmp_path, "session.jsonl", {"message": {"role": "toolResult", "toolCallId": "call-a", "details": payload}})
+    assert diagnose(tmp_path)["items"] == []
+
+
+@pytest.mark.parametrize("status,code,stage", [("sending", "action_outcome_unknown", "send"),
+    ("needs_reconciliation", "action_verification_failed", "verification"),
+    (None, "invoice_delivery_reconciliation_required", "before_send")])
+def test_typed_cause_does_not_authorize_uncertain_write_replay(tmp_path, status, code, stage):
+    seed(tmp_path)
+    payload = {"success": False, "reason_code": "connection_timeout", "action_status": status,
+               "failure": {"code": code, "stage": stage, "layer": "SECRET", "next_action": "retry_write"}}
+    rows(tmp_path, "session.jsonl", {"message": {"role": "toolResult", "toolCallId": "call-a", "details": payload}})
+    item = diagnose(tmp_path)["items"][0]
+    assert item["error_code"] == code and item["reason_code"] == "connection_timeout"
+    assert item["stage"] == stage and item["next_action"] == "reconcile_without_replay"
+    assert "SECRET" not in json.dumps(item) and "retry_write" not in json.dumps(item)
+    rows(tmp_path, "odoo-native-requests.jsonl", {"tool_call_id": "call-a", "event": "start",
+         "rpc_request_id": "rpc-incomplete", "dispatch_started": True})
+    item = diagnose(tmp_path)["items"][0]
+    assert item["rpc_incomplete"] is True and item["next_action"] == "reconcile_without_replay"
+    rows(tmp_path / "requests", "0002.meta.json", {"run_id": "run", "session_id": "session",
+         "request_id": "duplicate", "tool_call_ids": ["call-a"]})
+    item = diagnose(tmp_path)["items"][0]
+    assert item["error_code"] == "correlation_conflict" and "reason_code" not in item
+    assert item["stage"] == "unknown" and item["next_action"] == "reconcile_without_replay"
+
+
+def test_read_failure_classification_preserves_incomplete_rpc_and_ledger_guard(tmp_path):
+    seed(tmp_path)
+    payload = {"success": False, "reason_code": "permission_denied", "next_action": "retry_write",
+               "failure": {"code": "permission_denied", "stage": "before_send", "odoo_request_seen": False}}
+    rows(tmp_path, "session.jsonl", {"message": {"role": "toolResult", "toolCallId": "call-a", "details": payload}})
+    item = diagnose(tmp_path)["items"][0]
+    assert item["odoo_request_seen"] is False and item["next_action"] == "check_permissions"
+    rows(tmp_path, "odoo-native-requests.jsonl", {"tool_call_id": "call-a", "event": "start",
+         "rpc_request_id": "rpc-incomplete", "dispatch_started": True})
+    item = diagnose(tmp_path)["items"][0]
+    assert item["error_code"] == "correlation_conflict" and item["next_action"] == "inspect_execution_evidence"
+    payload.pop("failure")
+    rows(tmp_path, "session.jsonl", {"message": {"role": "toolResult", "toolCallId": "call-a", "details": payload}})
+    item = diagnose(tmp_path)["items"][0]
+    assert item["error_code"] == "permission_denied" and item["likely_failure_layer"] == "odoo_transport"
+    assert item["next_action"] == "inspect_execution_evidence"
+    payload["action_id"] = "act-unknown"
+    rows(tmp_path, "session.jsonl", {"message": {"role": "toolResult", "toolCallId": "call-a", "details": payload}})
+    action = {"action_id": "act-unknown", "run_id": "run", "session_id": "session",
+              "identity": IDENTITY, "status": "sending"}
+    item = diagnose(tmp_path, [action])["items"][0]
+    assert item["next_action"] == "reconcile_without_replay" and item["reason_code"] == "permission_denied"
+
+
+
+def test_older_untracked_reconciliation_receipt_is_not_hidden_by_recent_errors(tmp_path):
+    seed(tmp_path)
+    calls = ["call-a", "call-b", "call-c", "call-d"]
+    rows(tmp_path / "requests", "0001.meta.json", {"run_id": "run", "session_id": "session",
+         "request_id": "request1", "tool_call_ids": calls})
+    rows(tmp_path, "session.jsonl", {"message": {"role": "toolResult", "toolCallId": "call-a",
+         "details": {"success": False, "failure": {"code": "invoice_delivery_reconciliation_required"}}}},
+         *[{"message": {"role": "toolResult", "toolCallId": call,
+            "details": {"success": False, "reason_code": "query_invalid"}}} for call in calls[1:]])
+    items = diagnose(tmp_path)["items"]
+    assert len(items) == 3 and items[0]["tool_call_id"] == "call-a"
+    assert items[0]["next_action"] == "reconcile_without_replay"
+
+
+
+def test_auxiliary_recovery_uses_bound_read_only_arguments_and_authoritative_sop_names(tmp_path):
+    from erp_harness.tools.sops import MAX_INPUT_LENGTH, get_sop
+
+    seed(tmp_path)
+    def record(name, arguments, payload, actions=()):
+        rows(tmp_path, "session.jsonl", {"message": {"role": "assistant", "content": [{
+             "type": "toolCall", "id": "call-a", "name": name, "arguments": arguments}]}},
+             {"message": {"role": "toolResult", "toolCallId": "call-a", "toolName": name, "details": payload}})
+        return diagnose(tmp_path, actions)["items"][0]
+
+    args = {"sop_id": "po_to_receipt", "inputs": {"model": "SECRET-VALUE"}}
+    sop = get_sop(**args)
+    sop.update(missing=["SECRET-INSTRUCTIONS"], allowed_inputs=["SECRET-INSTRUCTIONS"],
+               input_constraints={"type": "SECRET-INSTRUCTIONS"})
+    item = record("get_odoo_sop", args, sop)
+    assert item["missing"] == ["purchase_order"] and item["unknown"] == ["model"]
+    assert item["input_constraints"] == {"type": "string", "max_length": MAX_INPUT_LENGTH}
+    assert "SECRET" not in json.dumps(item)
+
+    args = {"observation_ref": "obs-000001-safe", "path": "$.bad", "instance": "default"}
+    payload = {"success": False, "reason_code": "observation_path_invalid", "recovery_request": {
+        "tool": "read_observation", "arguments": {"observation_ref": args["observation_ref"],
+        "path": "$", "limit": 100, "instance": "default", "token": "SECRET-TOKEN"}, "notice": "SECRET-INSTRUCTIONS"}}
+    expected = {"tool": "read_observation", "arguments": {
+        "observation_ref": args["observation_ref"], "path": "$", "limit": 100, "instance": "default"}}
+    item = record("read_observation", args, payload)
+    assert item["recovery_request"] == expected and "SECRET" not in json.dumps(item)
+    for change in ({"tool": "mcp_odoo_execute_method"}, {"arguments": {"path": "$.bad"}},
+                   {"arguments": {**expected["arguments"], "observation_ref": "other-reference"}},
+                   {"arguments": {**expected["arguments"], "instance": "other"}}):
+        invalid = copy.deepcopy(payload)
+        invalid["recovery_request"].update(change)
+        assert "recovery_request" not in record("read_observation", args, invalid)
+    assert "recovery_request" not in record("read_observation", args, {**payload, "reason_code": "observation_access_denied"})
+
+    for guarded_args, guarded_payload in ((args, payload), ({"sop_id": "po_to_receipt"}, sop)):
+        name = "read_observation" if guarded_args is args else "get_odoo_sop"
+        rows(tmp_path, "odoo-native-requests.jsonl", {"tool_call_id": "call-a", "event": "start",
+             "rpc_request_id": "rpc-incomplete", "dispatch_started": True})
+        item = record(name, guarded_args, guarded_payload)
+        assert item["next_action"] == "inspect_execution_evidence"
+        assert "recovery_request" not in item and "allowed_inputs" not in item
+        rows(tmp_path, "odoo-native-requests.jsonl")
+        guarded_payload = {**guarded_payload, "action_id": "act-unknown"}
+        action = {"action_id": "act-unknown", "run_id": "run", "session_id": "session",
+                  "identity": IDENTITY, "status": "sending"}
+        item = record(name, guarded_args, guarded_payload, [action])
+        assert item["next_action"] == "reconcile_without_replay"
+        assert "recovery_request" not in item and "allowed_inputs" not in item
+        rows(tmp_path / "requests", "0002.meta.json", {"run_id": "run", "session_id": "session",
+             "request_id": "duplicate", "tool_call_ids": ["call-a"]})
+        item = record(name, guarded_args, guarded_payload)
+        assert item["error_code"] == "correlation_conflict"
+        assert "recovery_request" not in item and "allowed_inputs" not in item
+        rows(tmp_path / "requests", "0002.meta.json", {"run_id": "run", "session_id": "session",
+             "request_id": "duplicate", "tool_call_ids": []})
+
+
+
+def test_conflicting_call_arguments_or_tool_names_block_auxiliary_recovery(tmp_path):
+    from erp_harness.tools.sops import get_sop
+
+    seed(tmp_path)
+    part = {"type": "toolCall", "id": "call-a", "name": "get_odoo_sop",
+            "arguments": {"sop_id": "po_to_receipt"}}
+    payload = get_sop(**part["arguments"])
+    result = {"message": {"role": "toolResult", "toolCallId": "call-a", "toolName": "get_odoo_sop", "details": payload}}
+    for content, reply in (([part, {**part, "arguments": {"sop_id": "safe_write_review"}}], result),
+                           ([part], {"message": {**result["message"], "toolName": "mcp_odoo_execute_method"}})):
+        rows(tmp_path, "session.jsonl", {"message": {"role": "assistant", "content": content}}, reply)
+        diagnosed = diagnose(tmp_path)
+        item = diagnosed["items"][0]
+        assert not diagnosed["evidence_complete"] and item["error_code"] == "correlation_conflict"
+        assert item["next_action"] == "inspect_execution_evidence" and "allowed_inputs" not in item
+
+
+def test_runtime_refusal_and_nested_task_failures_keep_their_causes(tmp_path):
+    seed(tmp_path)
+    payload = {"success": False, "reason_code": "tool_arguments_invalid", "failure": {
+        "code": "tool_arguments_invalid", "stage": "before_dispatch", "odoo_request_seen": False}}
+    def record(result):
+        rows(tmp_path, "session.jsonl", {"message": {"role": "toolResult", "toolCallId": "call-a",
+            "toolName": "test", "details": {"structuredContent": result}}})
+        return diagnose(tmp_path)["items"][0]
+    item = record(payload)
+    assert item["stage"] == "before_dispatch" and item["odoo_request_seen"] is False
+    assert item["tool_started"] is False and item["next_action"] == "correct_arguments"
+    rows(tmp_path, "odoo-native-requests.jsonl", {"event": "start", "tool_call_id": "call-a",
+        "rpc_request_id": "conflict", "dispatch_started": True})
+    item = record(payload)
+    assert item["error_code"] == "correlation_conflict" and item["odoo_request_seen"] is None
+    rows(tmp_path, "odoo-native-requests.jsonl")
+    failure = {"reason_code": "permission_denied", "failure_layer": "authorization", "next_action": "check_permissions"}
+    for result in ({"success": True, "status": "failed", "execution_failure": failure},
+                   {"success": True, "failures": {"default": failure}},
+                   {"success": True, "status": "succeeded", "result": {"success": True, "failures": {"default": failure}}}):
+        item = record(result)
+        assert item["error_code"] == "permission_denied" and item["next_action"] == "check_permissions"

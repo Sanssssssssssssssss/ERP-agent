@@ -75,6 +75,7 @@ from erp_harness.erp._odoo_core.tool_helpers import (
     parse_measure_spec,
     validate_model_name,
 )
+from erp_harness.erp.read_failures import tool_failure
 
 from .knowledge import NativeKnowledge
 from .reads import NativeReads
@@ -119,6 +120,14 @@ ASYNC_OPERATIONS = frozenset(
         "index_knowledge",
     }
 )
+
+
+class _CapabilityReadFailure(RuntimeError):
+    """Carry a public read failure through client-shaped pure helper calls."""
+
+    def __init__(self, response: dict[str, Any]):
+        self.failure = tool_failure(response)
+        super().__init__(self.failure["error"])
 
 
 class _PolicyReadClient:
@@ -196,9 +205,13 @@ class _PolicyReadClient:
                     order=order,
                 )
             )
-            page = result.get("result", [])
-            if not isinstance(page, list):
-                raise TypeError("Invalid native search_read result")
+            if not isinstance(result, dict):
+                raise _CapabilityReadFailure({"reason_code": "invalid_response"})
+            if result.get("success") is False:
+                raise _CapabilityReadFailure(result)
+            page = result.get("result")
+            if not isinstance(page, list) or any(not isinstance(row, dict) for row in page):
+                raise _CapabilityReadFailure({"reason_code": "invalid_response"})
             rows.extend(page)
             if len(page) < page_limit:
                 break
@@ -329,6 +342,10 @@ class _TaskStore:
         }
         if include_result and row["status"] == "succeeded":
             result["result"] = json.loads(row["result_json"])
+        if row["status"] == "failed":
+            stored = json.loads(row["result_json"]) if row["result_json"] else {}
+            failure = stored.get("execution_failure") or tool_failure({})
+            result.update(error=failure["error"], execution_failure=failure)
         return result
 
     def _row(self, task_id: str) -> sqlite3.Row | None:
@@ -343,7 +360,8 @@ class _TaskStore:
                 "SELECT count(*) FROM capability_tasks WHERE status IN ('pending','running')"
             ).fetchone()[0]
             if live >= self.max_tasks:
-                return {"success": False, "error": f"Too many live tasks ({live})"}
+                return {"success": False, **tool_failure({"reason_code": "task_limit_reached"}),
+                        "error": f"Too many live tasks ({live})", "live_tasks": live, "max_tasks": self.max_tasks}
             task_id = uuid.uuid4().hex[:12]
             created = time.time()
             self._db.execute(
@@ -361,9 +379,17 @@ class _TaskStore:
                     (time.time(), task_id),
                 )
             try:
-                result, error = fn(), None
+                result = fn()
+                failure = (tool_failure({"reason_code": "invalid_response"}) if not isinstance(result, dict)
+                           else tool_failure(result) if result.get("success") is False else None)
+            except _CapabilityReadFailure as exc:
+                failure = exc.failure
             except Exception as exc:  # noqa: BLE001 - returned to task poller
-                result, error = None, f"{type(exc).__name__}: {exc}"
+                failure = tool_failure(exc)
+            if failure:
+                # Store only the public cause, including failures returned without an exception.
+                result = {"execution_failure": failure}
+            error = failure["error"] if failure else None
             with self._lock, self._db:
                 row = self._row(task_id)
                 if row is not None and row["status"] == "running":
@@ -386,16 +412,19 @@ class _TaskStore:
         with self._lock:
             row = self._row(task_id)
             if row is None:
-                return {"success": False, "error": f"Unknown task_id: {task_id}"}
+                return {"success": False, **tool_failure({"reason_code": "task_not_found"}),
+                        "error": f"Unknown task_id: {task_id}", "task_id": task_id}
             return {"success": True, **self._snapshot(row, include_result)}
 
     def cancel(self, task_id: str) -> dict[str, Any]:
         with self._lock, self._db:
             row = self._row(task_id)
             if row is None:
-                return {"success": False, "error": f"Unknown task_id: {task_id}"}
+                return {"success": False, **tool_failure({"reason_code": "task_not_found"}),
+                        "error": f"Unknown task_id: {task_id}", "task_id": task_id}
             if row["status"] not in {"pending", "running"}:
-                return {"success": False, "error": f"Task already {row['status']}"}
+                return {"success": False, **tool_failure({"reason_code": "task_not_cancellable"}),
+                        "error": f"Task already {row['status']}", "task_id": task_id, "status": row["status"]}
             note = (
                 "Cancelled before start."
                 if row["status"] == "pending"
@@ -497,10 +526,19 @@ class NativeCapabilities:
                 **normalize_capability_arguments(name, arguments)
             )
             if not isinstance(result, dict):
-                raise TypeError("Native capability returned a non-object")
+                return {"success": False, "tool": name, **tool_failure({"reason_code": "invalid_response"})}
+            if result.get("success") is False and not result.get("reason_code"):
+                code = {"index_missing": "knowledge_index_required", "refresh_required": "knowledge_index_required",
+                        "capacity_exceeded": "knowledge_capacity_exceeded", "identity_changed": "knowledge_identity_changed"}.get(result.get("status"))
+                failure = tool_failure({**result, **({"reason_code": code} if code else {})})
+                if code and isinstance(result.get("error"), str):
+                    failure["error"] = result["error"]
+                result = {**result, **failure, **({"status": result["status"]} if "status" in result else {})}
             return result
+        except _CapabilityReadFailure as exc:
+            return {"success": False, "tool": name, **exc.failure}
         except Exception as exc:  # noqa: BLE001 - preserve MCP's error envelope
-            return {"success": False, "tool": name, "error": str(exc)}
+            return {"success": False, "tool": name, **tool_failure(exc)}
 
     def receivable_payable_aging(
         self,
@@ -598,15 +636,24 @@ class NativeCapabilities:
     def _fan_out(selected: list[str], worker: Callable[[str], Any]):
         results: dict[str, Any] = {}
         errors: dict[str, str] = {}
+        failures: dict[str, dict[str, Any]] = {}
         with ThreadPoolExecutor(max_workers=min(4, max(1, len(selected)))) as pool:
             futures = {pool.submit(worker, name): name for name in selected}
             for future in as_completed(futures):
                 name = futures[future]
                 try:
-                    results[name] = future.result()
+                    value = future.result()
+                    if isinstance(value, dict) and value.get("success") is False:
+                        failures[name] = tool_failure(value)
+                    else:
+                        results[name] = value
+                except _CapabilityReadFailure as exc:
+                    failures[name] = exc.failure
                 except Exception as exc:  # noqa: BLE001 - partial failure is the contract
-                    errors[name] = f"{type(exc).__name__}: {exc}"
-        return results, errors
+                    failures[name] = tool_failure(exc)
+                if name in failures:
+                    errors[name] = failures[name]["error"]
+        return results, errors, failures
 
     def search_across_instances(
         self,
@@ -620,7 +667,7 @@ class NativeCapabilities:
         domain = normalize_domain_input(domain)
         limit = clamp_limit(limit_per_instance, maximum=MAX_LIMIT_PER_INSTANCE)
         selection = self._selection(instances)
-        results, errors = self._fan_out(
+        results, errors, failures = self._fan_out(
             selection.selected,
             lambda name: self._client(name).search_read(
                 model, domain, fields=fields, limit=limit
@@ -632,6 +679,7 @@ class NativeCapabilities:
             selection,
         )
         payload.update(
+            failures=failures,
             model=model,
             merged=tag_and_merge(results),
             merged_count=sum(map(len, results.values())),
@@ -654,7 +702,7 @@ class NativeCapabilities:
         # read_group already returns __count; never send it as a field aggregate.
         normalized = [f"{field}:{agg}" for field, agg in parsed if agg]
         selection = self._selection(instances)
-        results, errors = self._fan_out(
+        results, errors, failures = self._fan_out(
             selection.selected,
             lambda name: self._client(name).execute_method(
                 model, "read_group", domain, normalized, group_by
@@ -662,6 +710,7 @@ class NativeCapabilities:
         )
         payload = envelope(results, errors, selection)
         payload.update(
+            failures=failures,
             model=model,
             **combine_aggregate_rows(results, [field for field, _ in parsed]),
         )
@@ -679,7 +728,7 @@ class NativeCapabilities:
         day = parse_as_of(as_of)
         top_partners = clamp_limit(top_partners, maximum=100)
         selection = self._selection(instances)
-        results, errors = self._fan_out(
+        results, errors, failures = self._fan_out(
             selection.selected,
             lambda name: build_aging_report(
                 fetch_aging_lines(self._client(name), direction),
@@ -690,6 +739,7 @@ class NativeCapabilities:
         )
         payload = envelope(results, errors, selection)
         payload.update(
+            failures=failures,
             direction=direction,
             as_of=day.isoformat(),
             **combine_bucket_reports(results),

@@ -1,9 +1,89 @@
 """Public read diagnostics; never expose exception bodies or credential values."""
 from __future__ import annotations
 
+import ast
 import errno
+import re
 import socket
 import ssl
+
+from pydantic import ValidationError
+
+# Stable public guidance is shared by tool replies and execution diagnostics.
+# Arbitrary error bodies never become recovery instructions.
+FAILURE_GUIDANCE = {
+    "connection_unconfigured": ("configuration", "configure_connection"),
+    "instance_unknown": ("configuration", "select_configured_instance"),
+    "connection_timeout": ("odoo_transport", "check_connection"),
+    "connection_refused": ("odoo_transport", "check_service"),
+    "connection_unavailable": ("odoo_transport", "check_connection"),
+    "dns_failed": ("odoo_transport", "check_address"),
+    "tls_error": ("odoo_transport", "check_tls"),
+    "database_unavailable": ("configuration", "check_database"),
+    "authentication_failed": ("authentication", "check_credentials"),
+    "field_policy_denied": ("authorization", "check_field_policy"),
+    "permission_denied": ("authorization", "check_permissions"),
+    "rate_limited": ("odoo_transport", "wait_then_recheck"),
+    "endpoint_not_found": ("configuration", "check_endpoint"),
+    "record_unavailable": ("business_reference", "resolve_reference"),
+    "query_invalid": ("tool_arguments", "correct_query"),
+    "invalid_response": ("odoo_response", "check_service_logs"),
+    "response_too_large": ("odoo_response", "reduce_read_size"),
+    "server_error": ("odoo_server", "check_service_logs"),
+    "read_failed_unknown": ("unknown", "check_odoo_connection"),
+    "tool_failed_unknown": ("unknown", "diagnose_current_run"),
+    "tool_arguments_invalid": ("tool_arguments", "correct_arguments"),
+    "local_resource_missing": ("local_resource", "check_local_resource"),
+    "knowledge_index_required": ("knowledge", "index_knowledge"),
+    "knowledge_capacity_exceeded": ("knowledge", "reduce_index_scope"),
+    "knowledge_identity_changed": ("authorization", "use_current_identity"),
+    "knowledge_refresh_conflict": ("knowledge", "index_knowledge"),
+    "knowledge_storage_failed": ("local_resource", "check_knowledge_store"),
+    "tool_execution_failed": ("runtime", "check_host_runtime"),
+    "task_not_found": ("local_resource", "list_async_tasks"),
+    "task_limit_reached": ("runtime", "wait_then_recheck"),
+    "task_not_cancellable": ("tool_contract", "inspect_task_status"),
+    "action_identity_changed": ("authorization", "renew_proposal"),
+    "action_policy_changed": ("action_policy", "validate_again"),
+    "action_prestate_changed": ("business_precondition", "read_then_validate"),
+    "approval_required": ("authorization", "review_existing_approval"),
+    "approval_invalid": ("authorization", "validate_again"),
+    "approval_expired": ("authorization", "validate_again"),
+    "writes_disabled": ("action_policy", "request_host_enablement"),
+    "action_resource_busy": ("action_ledger", "reconcile_without_replay"),
+    "action_claim_unavailable": ("action_ledger", "review_existing_approval"),
+    "action_preparation_failed": ("local_preparation", "correct_local_inputs"),
+    "action_send_marker_failed": ("action_ledger", "reconcile_without_replay"),
+    "action_known_rejected": ("odoo_business", "correct_then_validate"),
+    "action_verification_failed": ("business_verification", "reconcile_without_replay"),
+    "action_outcome_unknown": ("odoo_transport", "reconcile_without_replay"),
+    "action_validation_failed": ("tool_arguments", "correct_arguments"),
+    "scope_handoff_required": ("authorization", "renew_proposal"),
+    "business_choice_required": ("business_precondition", "request_user_input"),
+    "scope_reconfirmation_required": ("authorization", "renew_proposal"),
+    "stale_approval": ("authorization", "validate_again"),
+    "needs_reconciliation": ("action_ledger", "reconcile_without_replay"),
+    "method_not_supported": ("action_policy", "request_supported_alternative"),
+    "invoice_delivery_reconciliation_required": ("business_verification", "reconcile_delivery"),
+    "sop_unknown": ("tool_contract", "list_odoo_sops"),
+    "sop_inputs_invalid": ("tool_contract", "correct_sop_inputs"),
+    "sop_operation_invalid": ("tool_contract", "separate_operations"),
+    "sop_method_unreviewed": ("authorization", "select_reviewed_method"),
+    "observation_reference_missing": ("tool_contract", "search_observations"),
+    "observation_access_denied": ("authorization", "use_current_identity"),
+    "observation_path_invalid": ("tool_contract", "read_observation_directory"),
+    "observation_request_invalid": ("tool_contract", "correct_observation_request"),
+    "observation_integrity_failed": ("evidence", "refresh_read"),
+    "capability_selection_invalid": ("tool_contract", "correct_capability_selection"),
+    "capability_unknown": ("tool_contract", "list_odoo_capabilities"),
+    "capability_module_missing": ("environment", "check_installed_modules"),
+    "capability_publication_failed": ("runtime", "check_host_runtime"),
+    "scope_mismatch": ("run_scope", "check_host_run_scope"),
+    "identity_mismatch": ("authorization", "check_host_run_scope"),
+    "identity_or_scope_unavailable": ("run_scope", "check_host_run_scope"),
+    "no_arguments_allowed": ("tool_arguments", "correct_arguments"),
+    "diagnostic_size_limit": ("runtime", "check_host_runtime"),
+}
 
 
 def read_failure(error: Exception | dict) -> dict:
@@ -21,6 +101,8 @@ def read_failure(error: Exception | dict) -> dict:
     http = next((getattr(item, "status_code", None) for item in chain if isinstance(getattr(item, "status_code", None), int)), None)
     if "explicit odoo connection settings" in text:
         code, message, action = "connection_unconfigured", "未配置完整的 Odoo 连接信息。", "configure_connection"
+    elif "unknown odoo instance" in text:
+        code, message, action = "instance_unknown", "指定的 Odoo 实例未配置，请选择当前已配置的实例。", "select_configured_instance"
     elif any(isinstance(item, ssl.SSLError) for item in chain):
         code, message, action = "tls_error", "Odoo TLS 连接或证书验证失败。", "check_tls"
     elif any(isinstance(item, socket.gaierror) for item in chain):
@@ -58,3 +140,48 @@ def read_failure(error: Exception | dict) -> dict:
     status = "permission_denied" if code in {"authentication_failed", "permission_denied", "field_policy_denied"} else "unconfigured" if code == "connection_unconfigured" else "unavailable" if code.startswith("connection_") or code in {"dns_failed", "tls_error", "database_unavailable", "server_error", "rate_limited", "invalid_response", "read_failed_unknown"} else "error"
     return {"status": status, "reason_code": code, "error": message, "next_action": action,
             **({"http_status": http} if http is not None else {})}
+
+
+def tool_failure(error: Exception | dict) -> dict:
+    """Classify shared tool exceptions without publishing external exception bodies."""
+    if isinstance(error, dict):
+        failure = error.get("failure")
+        code = error.get("reason_code") or (failure.get("code") if isinstance(failure, dict) else None)
+        if not isinstance(code, str) or code not in FAILURE_GUIDANCE:
+            code = "tool_failed_unknown"
+        result = {"status": "error", "reason_code": code,
+                  "error": "工具调用失败；请按错误分类检查对应条件。"}
+    else:
+        result = read_failure(error)
+        current, seen, validation = error, set(), None
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            if isinstance(current, ValidationError):
+                validation = current
+                break
+            current = current.__cause__ or current.__context__
+        if validation is not None:
+            issues = [{"path": ".".join(str(part) for part in row["loc"]), "type": row["type"]}
+                      for row in validation.errors(include_input=False, include_context=False, include_url=False)[:8]]
+            result.update(reason_code="tool_arguments_invalid", error="工具参数不符合当前契约。",
+                          parameter_issues=issues)
+            result["error"] += " 参数：" + "、".join(row["path"] for row in issues)
+        if result["reason_code"] == "field_policy_denied" and type(error) is ValueError:
+            match = re.fullmatch(r"Field policy denies access to (\[[^\n]{1,2000}\]) on ([A-Za-z0-9_.]+)(?:; aggregation on restricted fields is blocked to prevent inference\.)?", str(error))
+            if match:
+                try:
+                    fields = ast.literal_eval(match[1])
+                except (SyntaxError, ValueError):
+                    fields = None
+                if isinstance(fields, list) and all(isinstance(field, str) and re.fullmatch(r"[A-Za-z0-9_]{1,160}", field) for field in fields):
+                    result.update(restricted_fields=fields[:8], restricted_field_count=len(fields), model=match[2])
+                    result["error"] += " 字段：" + "、".join(fields[:8])
+        if result["reason_code"] == "read_failed_unknown":
+            if isinstance(error, FileNotFoundError):
+                code, message = "local_resource_missing", "工具所需的本地文件或目录不存在。"
+            else:
+                code, message = "tool_failed_unknown", "本次工具调用失败，原因尚未确定；请查看当前运行诊断。"
+            result.update(reason_code=code, error=message)
+        result["error"] = result["error"].replace("这项读取", "这项调用").replace("只读请求", "工具请求").replace("读取", "调用")
+    result["failure_layer"], result["next_action"] = FAILURE_GUIDANCE[result["reason_code"]]
+    return result

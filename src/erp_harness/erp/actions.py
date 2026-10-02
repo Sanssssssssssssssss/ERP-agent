@@ -428,7 +428,37 @@ class NativeActions:
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if name not in ACTION_TOOLS:
             raise ValueError(f"Not a native action tool: {name}")
-        return getattr(self, name)(**dict(arguments))
+        try:
+            result = getattr(self, name)(**dict(arguments))
+        except Exception as exc:  # noqa: BLE001 - retain causes at the public tool boundary
+            result = failure_result(exc)
+        if result.get("success") is not False:
+            return result
+        if result.get("failure"):
+            return result
+        status = result.get("action_status")
+        if status in {"sending", "executing", "needs_reconciliation"}:
+            return {**failure_result(result, code="action_outcome_unknown"), "retry_safe": False}
+        if status == "resource_busy":
+            return failure_result(result, code="action_resource_busy", stage="before_send")
+        if result.get("approval_required") or status == "pending_approval":
+            return failure_result(result, code="approval_required", stage="before_send")
+        if status == "expired":
+            return failure_result(result, code="approval_expired", stage="before_send")
+        text = str(result.get("error", "")).lower()
+        code = ("rate_limited" if result.get("rate_limited") else
+                "field_policy_denied" if "field policy denies" in text else
+                "action_validation_failed" if result.get("issues") else
+                "writes_disabled" if "write execution disabled" in text else
+                "action_identity_changed" if "identity changed" in text else
+                "action_policy_changed" if "policy changed" in text or "different policy" in text else
+                "action_prestate_changed" if "state changed after validation" in text else
+                "action_claim_unavailable" if "ownership changed" in text else
+                "approval_invalid" if any(token in text for token in ("approval", "action_id", "confirm=true", "token")) else
+                "method_not_supported" if "direct execute_method" in text else
+                "action_validation_failed" if name in {"preview_write", "validate_write"} or any(token in text for token in (
+                    "kwargs.ids", "use named json-2 kwargs", "official invoice pdf accepts")) else None)
+        return failure_result(result, code=code, stage="before_send" if code else "unknown")
 
     def _runtime(self, instance: str | None) -> tuple[str, Any]:
         name = instance or self.reads.instance
@@ -1130,12 +1160,20 @@ class NativeActions:
                     "reconciled": True, "cached": True, "result": row.get("result"), "verification": row.get("verification")}
         try:
             return self._reconcile(row)
-        except Exception as exc:  # read failure cannot establish success or authorize retry
-            return {"success": False, "action_id": action_id, "action_status": row["status"],
-                    "error": f"readback failed: {type(exc).__name__}"}
+        except Exception as exc:  # noqa: BLE001 - read failure cannot authorize retry
+            return {**failure_result(exc, code="action_verification_failed", stage="verification",
+                                     write_dispatch_started=True),
+                    "action_id": action_id, "action_status": row["status"], "retry_safe": False}
 
     def _reconcile(self, row: dict[str, Any]) -> dict[str, Any]:
-        verification = self._verify(row, row.get("result"))
+        try:
+            verification = self._verify(row, row.get("result"))
+        except Exception as exc:  # noqa: BLE001 - prior dispatch remains bound on readback failure
+            self.store.finish(row["action_id"], "needs_reconciliation",
+                              result=row.get("result"), verification=row.get("verification"), error=f"readback failed: {exc}")
+            return {**failure_result(exc, code="action_verification_failed", stage="verification",
+                                     write_dispatch_started=True),
+                    "action_id": row["action_id"], "action_status": "needs_reconciliation", "retry_safe": False}
         if verification["status"] == "satisfied":
             stored = self.store.finish(
                 row["action_id"], "verified", result=row.get("result"), verification=verification
@@ -1156,10 +1194,11 @@ class NativeActions:
             error="post-state does not prove the action completed",
         )
         return {
-            "success": False,
+            **failure_result({"error": "action may have reached Odoo; no retry was attempted"},
+                             code="action_verification_failed", stage="verification", write_dispatch_started=True),
             "action_id": row["action_id"],
             "action_status": "needs_reconciliation",
-            "error": "action may have reached Odoo; no retry was attempted",
+            "retry_safe": False,
             "verification": verification,
         }
 
@@ -1199,7 +1238,8 @@ class NativeActions:
         if row["identity_sha256"] != ActionStore.digest(
             self._identity(str(row["payload"]["instance"]))
         ):
-            return {"success": False, "action_id": action_id, "error": "action identity changed"}
+            return {**failure_result({"error": "action identity changed"}, code="action_identity_changed",
+                                     stage="before_send", write_dispatch_started=False), "action_id": action_id}
         if row["status"] == "verified":
             return {
                 "success": True,
@@ -1216,7 +1256,8 @@ class NativeActions:
         if self.task_evidence is not None:
             self.task_evidence.check_stage(row["kind"], row["payload"])
         if row["policy_digest"] != self._policy_snapshot(runtime)[0]:
-            return {"success": False, "action_id": action_id, "error": "action policy changed; validate again"}
+            return {**failure_result({"error": "action policy changed; validate again"}, code="action_policy_changed",
+                                     stage="before_send", write_dispatch_started=False), "action_id": action_id}
         mail = "invoice_mail" in row["prestate"]
         if mail:
             current = self._prestate(row["kind"], row["payload"])
@@ -1232,10 +1273,10 @@ class NativeActions:
         if not prestate_matches:
             # 与本次动作相关的 Odoo 状态改变或证据缺失，会要求重新验证。
             return {
-                "success": False,
+                **failure_result({"error": "Odoo state changed after validation or required evidence is unavailable; validate again"},
+                                 code="action_prestate_changed", stage="before_send", write_dispatch_started=False),
                 "action_id": action_id,
                 "action_status": row["status"],
-                "error": "Odoo state changed after validation or required evidence is unavailable; validate again",
             }
         already = {"status": "unconfirmed"} if mail else self._verify(row, None)
         if already["status"] == "satisfied":
@@ -1258,16 +1299,20 @@ class NativeActions:
         if not claim["claimed"]:
             if claim["status"] == "resource_busy":
                 return {
-                    "success": False, "action_id": action_id,
+                    **failure_result({"error": "another unresolved action holds this resource; reconcile blocking_action_id before retrying"},
+                                     code="action_resource_busy", stage="before_send", write_dispatch_started=False),
+                    "action_id": action_id,
                     "action_status": "resource_busy",
                     "blocking_action_id": claim["blocking_action_id"],
-                    "error": "another unresolved action holds this resource; reconcile blocking_action_id before retrying",
+                    "retry_safe": False,
                 }
             return {
-                "success": False,
+                **failure_result({"error": "action is not approved or another execution owns it"},
+                                 code="approval_expired" if claim["status"] == "expired" else
+                                      "approval_required" if claim["status"] == "pending_approval" else "action_claim_unavailable",
+                                 stage="before_send", write_dispatch_started=False),
                 "action_id": action_id,
                 "action_status": claim["status"],
-                "error": "action is not approved or another execution owns it",
             }
         if prepare is not None:
             try:
@@ -1275,19 +1320,20 @@ class NativeActions:
             except Exception as exc:  # noqa: BLE001 - local preparation cannot reach Odoo
                 self.store.finish(action_id, "known_failed", error=str(exc))
                 return {
-                    "success": False,
+                    **failure_result(exc, code="action_preparation_failed", stage="before_send",
+                                     write_dispatch_started=False),
                     "action_id": action_id,
                     "action_status": "known_failed",
-                    "error": str(exc),
                     "retry_safe": True,
                 }
         # 必须先持久化“可能发送”标记，再调用 Odoo。失败时不能发送。
         if not self.store.mark_sending(action_id):
             return {
-                "success": False,
+                **failure_result({"error": "durable send marker failed; Odoo was not called"},
+                                 code="action_send_marker_failed", stage="before_send", write_dispatch_started=False),
                 "action_id": action_id,
                 "action_status": "executing",
-                "error": "durable send marker failed; Odoo was not called",
+                "retry_safe": False,
             }
         try:
             result = send()
@@ -1298,10 +1344,10 @@ class NativeActions:
             if not isinstance(exc, Exception):
                 raise
             return {
-                "success": False,
+                **failure_result(exc, code="action_known_rejected" if status == "known_failed" else "action_outcome_unknown",
+                                 stage="send", write_dispatch_started=True),
                 "action_id": action_id,
                 "action_status": status,
-                "error": str(exc),
                 "retry_safe": status == "known_failed",
             }
         try:
@@ -1314,11 +1360,12 @@ class NativeActions:
                 error=f"post-state verification failed: {exc}",
             )
             return {
-                "success": False,
+                **failure_result(exc, code="action_verification_failed", stage="verification", write_dispatch_started=True),
                 "action_id": action_id,
                 "action_status": "needs_reconciliation",
                 "result": result,
                 "error": "Odoo returned, but post-state verification failed; no retry",
+                "retry_safe": False,
             }
         # verified 只表示指定字段或状态的回读满足，不代表完整业务目标已正确完成。
         status = "verified" if verification["status"] == "satisfied" else "needs_reconciliation"
@@ -1338,7 +1385,9 @@ class NativeActions:
             **(
                 {}
                 if status == "verified"
-                else {"error": "action was sent once but post-state is not verified; no retry"}
+                else {**failure_result({"error": "action was sent once but post-state is not verified; no retry"},
+                                      code="action_verification_failed", stage="verification", write_dispatch_started=True),
+                      "retry_safe": False}
             ),
         }
 
@@ -1397,7 +1446,7 @@ class NativeActions:
             )
             return report
         except Exception as exc:  # noqa: BLE001 - tool boundary returns structured errors
-            return {"tool": "preview_write", **failure_result(exc)}
+            return {"tool": "preview_write", **failure_result(exc, stage="before_send", write_dispatch_started=False)}
 
     def validate_write(
         self,
@@ -1564,7 +1613,7 @@ class NativeActions:
             )
             return report
         except Exception as exc:  # noqa: BLE001 - tool boundary returns structured errors
-            return {"tool": "validate_write", **failure_result(exc)}
+            return {"tool": "validate_write", **failure_result(exc, stage="before_send", write_dispatch_started=False)}
 
     def execute_approved_write(
         self, approval: dict[str, Any], confirm: bool = False

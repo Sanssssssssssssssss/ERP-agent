@@ -6,9 +6,9 @@ import json
 from collections.abc import Callable
 from typing import Any
 
+from erp_harness.context.world import ObservationIntegrityError, WorldStore
+from erp_harness.erp.read_failures import tool_failure
 from erp_harness.runtime.tools import AgentTool, AgentToolResult
-
-from erp_harness.context.world import WorldStore
 
 
 def _result(payload: dict[str, Any]) -> AgentToolResult:
@@ -23,6 +23,9 @@ def build_world_tools(
     async def search(call_id, arguments: dict[str, Any], _signal=None, _on_update=None):
         try:
             identity = (identity_context or world.identity)(arguments.get("instance"))
+        except Exception as exc:  # noqa: BLE001 - identity failures are distinct from observation parameters
+            return _result({"success": False, "tool": "search_observations", **tool_failure(exc)})
+        try:
             page = world.search_observations(
                 identity, query=arguments.get("query"), tool=arguments.get("tool"),
                 model=arguments.get("model"), cursor=arguments.get("cursor", 0),
@@ -33,26 +36,56 @@ def build_world_tools(
                 "acl": {"identity_id": identity["identity_id"], "instance": identity["instance"]},
                 **page,
             })
-        except (TypeError, ValueError) as exc:
-            return _result({"success": False, "tool": "search_observations", "error": str(exc)})
+        except (TypeError, ValueError):
+            return _result({"success": False, "tool": "search_observations",
+                            **tool_failure({"reason_code": "observation_request_invalid"}),
+                            "error": "Invalid observation search parameters.",
+                            "parameter_constraints": {"cursor": "integer >= 0", "limit": "integer 1..100"}})
+        except Exception as exc:  # noqa: BLE001 - tool boundary publishes sanitized diagnostics only
+            return _result({"success": False, "tool": "search_observations", **tool_failure(exc)})
 
     async def read(call_id, arguments: dict[str, Any], _signal=None, _on_update=None):
         try:
             identity = (identity_context or world.identity)(arguments.get("instance"))
+        except Exception as exc:  # noqa: BLE001 - identity failures are distinct from observation parameters
+            return _result({"success": False, "tool": "read_observation", **tool_failure(exc)})
+        try:
             page = world.read_observation(
                 identity, arguments["observation_ref"], path=arguments.get("path"),
                 query=arguments.get("query"), cursor=arguments.get("cursor", 0),
                 limit=arguments.get("limit", 20), fields=arguments.get("fields"),
             )
             return _result({"success": True, "tool": "read_observation", **page})
-        except KeyError as exc:
-            return _result({"success": False, "tool": "read_observation", "error": str(exc), "error_class": "unknown_reference"})
-        except PermissionError as exc:
-            return _result({"success": False, "tool": "read_observation", "error": str(exc), "error_class": "access"})
+        except KeyError:
+            return _result({"success": False, "tool": "read_observation",
+                            **tool_failure({"reason_code": "observation_reference_missing"}),
+                            "error": "The observation reference is missing or unavailable. Search the current identity's observations first.",
+                            "error_class": "unknown_reference"})
+        except PermissionError:
+            return _result({"success": False, "tool": "read_observation",
+                            **tool_failure({"reason_code": "observation_access_denied"}),
+                            "error": "The observation belongs to a different identity. Use references from the current identity's search results.",
+                            "error_class": "access"})
+        except ObservationIntegrityError:
+            return _result({"success": False, "tool": "read_observation",
+                            **tool_failure({"reason_code": "observation_integrity_failed"}),
+                            "error": "The stored observation failed integrity verification. Read the business record again; do not trust this payload.",
+                            "error_class": "invalid_request"})
         except (TypeError, ValueError) as exc:
             kind = "invalid_path" if "path" in str(exc).lower() else "invalid_request"
-            return _result({"success": False, "tool": "read_observation", "error": str(exc), "error_class": kind,
-                            "next_action": "Read path=$ for the actual child directory, then use returned paths. Do not guess flattened paths."})
+            payload = {"success": False, "tool": "read_observation", "error_class": kind,
+                       **tool_failure({"reason_code": "observation_path_invalid" if kind == "invalid_path" else "observation_request_invalid"}),
+                       "error": "Invalid observation path. Read path=$ and use returned child paths." if kind == "invalid_path" else "Invalid observation read parameters."}
+            if kind == "invalid_path":
+                payload["recovery_request"] = {"tool": "read_observation", "arguments": {
+                    "observation_ref": arguments["observation_ref"], "path": "$", "limit": 100,
+                    **({"instance": arguments["instance"]} if "instance" in arguments else {}),
+                }}
+            else:
+                payload["parameter_constraints"] = {"cursor": "integer >= 0", "limit": "rows/objects 1..100; strings 1..4096", "fields": "nonempty field names"}
+            return _result(payload)
+        except Exception as exc:  # noqa: BLE001 - tool boundary publishes sanitized diagnostics only
+            return _result({"success": False, "tool": "read_observation", **tool_failure(exc)})
 
     common = {
         "instance": {"type": "string", "description": "Configured Odoo instance; defaults to the current instance."},

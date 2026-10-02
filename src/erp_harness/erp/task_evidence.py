@@ -17,6 +17,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+from erp_harness.erp.read_failures import FAILURE_GUIDANCE, tool_failure
 from erp_harness.erp.store import ActionStore
 
 
@@ -29,13 +30,39 @@ class TaskHandoff(ValueError):
         self.code, self.next_action = code, next_action
 
 
-def failure_result(error: Exception) -> dict:
-    result = {"success": False, "error": str(error)}
+def failure_result(error: Exception | dict, *, code: str | None = None,
+                   stage: str = "unknown", next_action: str | None = None,
+                   write_dispatch_started: bool | None = None) -> dict:
+    """Preserve action authority and the cause; uncertainty never permits replay."""
+    cause = tool_failure(error)
+    result = {**(error if isinstance(error, dict) else {}), **cause, "success": False}
+    if isinstance(error, dict) and error.get("error"):
+        # Existing action refusals are local, public contract text, not transport bodies.
+        result["error"] = error["error"]
+    elif type(error) is ValueError and error.__cause__ is None and error.__context__ is None:
+        # Local preconditions explain what must change; Odoo exceptions are subclasses.
+        result["error"] = str(error)
+        if cause["reason_code"] == "tool_failed_unknown":
+            code = code or "action_validation_failed"
+    existing = error.get("failure") if isinstance(error, dict) else None
+    existing = existing if isinstance(existing, dict) else {}
+    code = code or existing.get("code") or cause["reason_code"]
+    if cause["reason_code"] == "tool_failed_unknown" and code != "tool_failed_unknown":
+        result["reason_code"] = code
+    layer, action = FAILURE_GUIDANCE.get(code, (cause["failure_layer"], cause["next_action"]))
+    result["failure"] = {**existing, "code": code, "layer": layer,
+                         "stage": existing.get("stage", stage),
+                         "next_action": next_action or existing.get("next_action") or action}
+    result["next_action"] = result["failure"]["next_action"]
+    result["failure_layer"] = result["failure"]["layer"]
+    if write_dispatch_started is not None:
+        result["failure"]["write_dispatch_started"] = write_dispatch_started
     if isinstance(error, TaskHandoff):
-        result.update(approval_required=False, retry_safe=False, failure={
+        result.update(error=str(error), reason_code=error.code, approval_required=False, retry_safe=False, failure={
             "code": error.code, "next_action": error.next_action, "requires_user_input": True,
             "stage": "before_send", "layer": "business_precondition" if error.code == "business_choice_required" else "authorization",
         })
+        result.update(next_action=error.next_action, failure_layer=result["failure"]["layer"])
     return result
 
 

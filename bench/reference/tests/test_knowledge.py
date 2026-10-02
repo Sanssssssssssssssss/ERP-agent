@@ -233,7 +233,11 @@ class NativeKnowledgeTest(unittest.TestCase):
             capabilities.close()
         self.assertEqual(blocked["results"], [])
         self.assertEqual(blocked["freshness"]["stale_records_removed"], 1)
-        self.assertIn("revoked", blocked["freshness"]["errors"][0]["error"])
+        failure = blocked["freshness"]["errors"][0]
+        self.assertEqual(failure["reason_code"], "permission_denied")
+        self.assertEqual(failure["next_action"], "check_permissions")
+        self.assertEqual(blocked["reason_code"], failure["reason_code"])
+        self.assertNotIn("read access revoked", json.dumps(blocked))
         self.assertEqual(still_absent["results"], [])
 
 

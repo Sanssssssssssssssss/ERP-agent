@@ -164,13 +164,15 @@ def source_inventory():
 def run():
     probes = contract_probes()
     actual = historical_inventory()
+    missing = sorted({p["tool"] for p in probes if not p["direct_reason"]})
+    lost = sorted({p["tool"] for p in probes if p["direct_reason"]
+                   and p["diagnostic_reason"] != p["expected_reason"]})
     return {"date": "2026-10-03", "native_tool_count": len(native_tool_catalog()),
         "groups": dict(Counter(row["group"] for row in probes[::len(FAULTS)])),
         "fault_families": [family for family, _, _ in FAULTS], "probe_count": len(probes),
-        "status": "coverage_gaps",
-        "direct_missing_reason_tools": sorted({p["tool"] for p in probes if not p["direct_reason"]}),
-        "diagnostic_lost_reason_tools": sorted({p["tool"] for p in probes if p["direct_reason"]
-                                               and p["diagnostic_reason"] != p["expected_reason"]}),
+        "status": "coverage_gaps" if missing or lost else "passed_offline_contracts",
+        "direct_missing_reason_tools": missing,
+        "diagnostic_lost_reason_tools": lost,
         "historical_failed_tool_count": len({row["tool"] for row in actual}),
         "historical_failed_nodes": len(actual),
         "historical_by_tool": dict(Counter(row["tool"] for row in actual)),

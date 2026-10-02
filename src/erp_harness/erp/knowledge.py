@@ -31,6 +31,7 @@ from erp_harness.erp._odoo_core.tool_helpers import (
     validate_model_name,
 )
 
+from .read_failures import tool_failure
 from .reads import NativeReads
 
 DEFAULT_KNOWLEDGE_MAX_DOCS = 5000
@@ -505,13 +506,15 @@ class NativeKnowledge:
             if not isinstance(page, list):
                 return {
                     "success": False,
+                    **tool_failure({"reason_code": "invalid_response"}),
                     "error": "Knowledge source returned a non-list result",
                 }
             pages += 1
             if keyset and page:
                 ids = [row.get("id") for row in page if isinstance(row, dict)]
                 if len(ids) != len(page) or any(type(record_id) is not int for record_id in ids) or ids != sorted(set(ids)) or ids[0] <= last_id:
-                    return {"success": False, "error": "Knowledge pagination failed to advance unique ordered IDs"}
+                    return {"success": False, **tool_failure({"reason_code": "invalid_response"}),
+                            "error": "Knowledge pagination failed to advance unique ordered IDs"}
                 last_id = ids[-1]
             records.extend(page)
             page_fields = response.get("fields_used")
@@ -565,14 +568,17 @@ class NativeKnowledge:
         )
         if not response.get("success"):
             self.store.mark_dirty(scope, model, "refresh_failed")
-            return {"success": False, "tool": "index_knowledge", "model": model, "status": "source_read_failed", "complete": False, "error": response.get("error", "Knowledge source read failed"), "coverage": self.store.coverage(scope, model)}
+            return {"success": False, **tool_failure(response), "tool": "index_knowledge", "model": model, "status": "source_read_failed", "complete": False, "coverage": self.store.coverage(scope, model)}
         records = response["result"]
         if len(records) > capacity:
             self.store.mark_dirty(scope, model, "capacity_exceeded")
-            return {"success": False, "tool": "index_knowledge", "model": model, "status": "capacity_exceeded", "complete": False, "error": f"Knowledge capacity exceeded: {capacity} documents; previous index retained", "coverage": self.store.coverage(scope, model)}
+            return {"success": False, **tool_failure({"reason_code": "knowledge_capacity_exceeded"}),
+                    "tool": "index_knowledge", "model": model, "status": "capacity_exceeded", "complete": False,
+                    "error": f"Knowledge capacity exceeded: {capacity} documents; previous index retained", "coverage": self.store.coverage(scope, model)}
         if self._scope(instance)[1] != scope:
             self.store.mark_dirty(scope, model, "identity_changed")
-            return {"success": False, "status": "identity_changed", "complete": False, "error": "Identity changed during knowledge refresh"}
+            return {"success": False, **tool_failure({"reason_code": "knowledge_identity_changed"}),
+                    "status": "identity_changed", "complete": False, "error": "Identity changed during knowledge refresh"}
         resolved_fields = response.get("fields_used")
         coverage = {
             "domain": domain,
@@ -603,7 +609,17 @@ class NativeKnowledge:
                                                expected_invalidation=previous_coverage.get("invalidated_at"))
         except (ValueError, sqlite3.Error, OSError) as exc:
             self.store.mark_dirty(scope, model, "refresh_failed")
-            return {"success": False, "tool": "index_knowledge", "model": model, "status": "refresh_failed", "complete": False, "error": str(exc), "coverage": self.store.coverage(scope, model)}
+            failure = tool_failure(exc)
+            if isinstance(exc, ValueError) and str(exc).startswith("Knowledge changed during refresh"):
+                failure = {**tool_failure({"reason_code": "knowledge_refresh_conflict"}),
+                           "error": "Knowledge changed during refresh; run full_refresh again from the current confirmed scope."}
+            elif isinstance(exc, ValueError) and str(exc).startswith("Knowledge capacity exceeded"):
+                failure = {**tool_failure({"reason_code": "knowledge_capacity_exceeded"}),
+                           "error": "Knowledge capacity exceeded; previous index retained."}
+            elif isinstance(exc, (sqlite3.Error, OSError)):
+                failure = {**tool_failure({"reason_code": "knowledge_storage_failed"}),
+                           "error": "The local knowledge store could not publish the refreshed index; previous index retained."}
+            return {"success": False, **failure, "tool": "index_knowledge", "model": model, "status": "refresh_failed", "complete": False, "coverage": self.store.coverage(scope, model)}
         result = {
             "success": True,
             "tool": "index_knowledge",
@@ -638,7 +654,7 @@ class NativeKnowledge:
         coverage = self.store.coverage(scope, model)
         if coverage and coverage.get("dirty"):
             if coverage.get("mixed_append_definitions"):
-                return {"success": False, "tool": "search_knowledge", "model": model,
+                return {"success": False, **tool_failure({"reason_code": "knowledge_index_required"}), "tool": "search_knowledge", "model": model,
                         "status": "refresh_required", "complete": False, "results": [],
                         "error": "Mixed appended index definitions require an explicit full_refresh with the complete domain and fields",
                         "coverage": coverage, "freshness": {"dirty": True, "complete_current": False}}
@@ -651,6 +667,7 @@ class NativeKnowledge:
         if candidates is None:
             return {
                 "success": False,
+                **tool_failure({"reason_code": "knowledge_index_required"}),
                 "tool": "search_knowledge",
                 "model": model,
                 "scope": public_scope,
@@ -660,7 +677,7 @@ class NativeKnowledge:
         if not candidates:
             probe = self._paged_records(runtime, model=model, domain=coverage.get("domain", []), fields=["id"], limit=1)
             if not probe.get("success"):
-                return {"success": False, "tool": "search_knowledge", "status": "source_read_failed", "complete": False, "results": [], "error": probe.get("error"), "coverage": coverage}
+                return {"success": False, **tool_failure(probe), "tool": "search_knowledge", "status": "source_read_failed", "complete": False, "results": [], "coverage": coverage}
         groups: dict[tuple[str, ...] | None, list[int]] = {}
         for candidate in candidates:
             record_id = candidate["record_id"]
@@ -673,6 +690,7 @@ class NativeKnowledge:
         stale_removed = 0
         errors: list[dict[str, Any]] = []
         failed_read = False
+        first_failure = None
         for field_key, record_ids in groups.items():
             fields = list(field_key) if field_key is not None else None
             current = self._paged_records(
@@ -684,6 +702,8 @@ class NativeKnowledge:
             )
             rows = current.get("result") if current.get("success") else []
             failed_read = failed_read or not current.get("success")
+            if not current.get("success") and first_failure is None:
+                first_failure = tool_failure(current)
             by_id = {
                 row["id"]: row
                 for row in rows
@@ -697,9 +717,7 @@ class NativeKnowledge:
                     errors.append(
                         {
                             "record_id": record_id,
-                            "error": current.get(
-                                "error", "record missing or no longer readable"
-                            ),
+                            **tool_failure(current if not current.get("success") else {"reason_code": "record_unavailable"}),
                         }
                     )
                     continue
@@ -711,11 +729,13 @@ class NativeKnowledge:
         reranked = self.store.candidates(scope, model, query, candidate_limit) or []
         results = [row for row in reranked if row["record_id"] in revalidated][:limit]
         if self._scope(instance)[1] != scope:
-            return {"success": False, "tool": "search_knowledge", "status": "identity_changed", "complete": False, "results": [], "error": "Identity changed during candidate revalidation"}
+            return {"success": False, **tool_failure({"reason_code": "knowledge_identity_changed"}),
+                    "tool": "search_knowledge", "status": "identity_changed", "complete": False, "results": [], "error": "Identity changed during candidate revalidation"}
         if failed_read:
             results = []
         return {
             "success": not failed_read,
+            **(first_failure or {}),
             "tool": "search_knowledge",
             "instance": public_scope["instance"],
             "model": model,

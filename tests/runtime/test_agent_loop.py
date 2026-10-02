@@ -1,10 +1,20 @@
 import asyncio
+import json
 from collections.abc import AsyncIterator, Mapping
 from itertools import chain, repeat
 
 import pytest
+from pi_event_helpers import (
+    assistant_done,
+    assistant_error,
+    assistant_start,
+    text_delta,
+    thinking_delta,
+    tool_call_end,
+)
 
 import erp_harness.runtime.loop as loop_module
+from erp_harness.providers import CancellationToken, FakeProvider
 from erp_harness.runtime import (
     AgentEvent,
     AgentMessage,
@@ -25,15 +35,6 @@ from erp_harness.runtime import (
 from erp_harness.runtime.loop import run_agent_loop
 from erp_harness.runtime.provider_events import ThinkingDeltaEvent
 from erp_harness.runtime.types import JSONValue
-from erp_harness.providers import CancellationToken, FakeProvider
-from pi_event_helpers import (
-    assistant_done,
-    assistant_error,
-    assistant_start,
-    text_delta,
-    thinking_delta,
-    tool_call_end,
-)
 
 
 async def _collect(stream: AsyncIterator[AgentEvent]) -> list[AgentEvent]:
@@ -375,6 +376,40 @@ async def test_bare_odoo_name_only_suggests_published_name_without_executing() -
     end = next(event for event in events if isinstance(event, ToolExecutionEndEvent))
     assert end.is_error and "mcp_odoo_read_record" in end.result.text
     assert calls == []
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("failure", ["schema", "execute", "hook"])
+async def test_tool_failure_guidance_reaches_next_provider_request(failure) -> None:
+    executed = []
+
+    async def execute(call_id, arguments, _signal=None, _update=None):
+        executed.append(call_id)
+        if failure == "execute":
+            raise RuntimeError("SECRET external failure body")
+        return AgentToolResult(content="ok")
+
+    async def after(*_args):
+        raise RuntimeError("SECRET hook failure body")
+
+    tool = AgentTool(name="check", label="Check", description="Check a bounded read",
+        parameters={"type": "object", "properties": {"limit": {"type": "integer", "maximum": 20}},
+                    "required": ["limit"], "additionalProperties": False}, execute_fn=execute)
+    call = ToolCall(id="failure-1", name="check", arguments={"limit": 30 if failure == "schema" else 10})
+    first = AssistantMessage(content=[call], model="fake")
+    final = AssistantMessage(content="I will correct the failure", model="fake")
+    provider = FakeProvider([[assistant_start(), tool_call_end(call), assistant_done(first, "toolUse")],
+                             [assistant_start(), assistant_done(final)]])
+    await _collect(run_agent_loop(provider=provider, model="fake", system="ERP",
+        messages=[UserMessage(content="Check")], tools=[tool], after_tool_call=after if failure == "hook" else None))
+    reply = next(message for message in provider.calls[1][2] if isinstance(message, ToolResultMessage))
+    payload = reply.details["structuredContent"]
+    assert payload["failure"]["stage"] == {"schema": "before_dispatch", "execute": "execute", "hook": "after_tool_call"}[failure]
+    assert payload["reason_code"] in reply.text and payload["next_action"] in reply.text
+    assert json.loads(reply.content[-1].text) == payload
+    assert "SECRET" not in reply.text
+    assert executed == ([] if failure == "schema" else ["failure-1"])
+    assert payload["failure"]["odoo_request_seen"] is (False if failure == "schema" else None)
 
 
 @pytest.mark.anyio

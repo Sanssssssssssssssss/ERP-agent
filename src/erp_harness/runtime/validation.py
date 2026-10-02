@@ -13,6 +13,14 @@ from erp_harness.runtime.messages import ToolCall
 from erp_harness.runtime.tools import AgentTool
 
 
+class ToolArgumentsError(ValueError):
+    """A schema refusal before dispatch, with paths and rules rather than input values."""
+
+    def __init__(self, message: str, issues: list[dict]):
+        super().__init__(message)
+        self.issues = issues
+
+
 def validate_tool_arguments(tool: AgentTool, tool_call: ToolCall) -> dict[str, Any]:
     """Normalize, coerce, and validate exactly at Pi's tool-call boundary."""
     schema = dict(tool.parameters)
@@ -25,12 +33,15 @@ def validate_tool_arguments(tool: AgentTool, tool_call: ToolCall) -> dict[str, A
     )
     if errors:
         details = "\n".join(f"  - {_error_path(error)}: {error.message}" for error in errors)
-        raise ValueError(
+        raise ToolArgumentsError(
             f'Validation failed for tool "{tool_call.name}":\n{details}\n\n'
-            f"Received arguments:\n{tool_call.arguments}"
+            f"Received arguments:\n{tool_call.arguments}",
+            [{"path": _error_path(error), "rule": error.validator, "expected": error.validator_value}
+             for error in errors[:8]],
         )
     if not isinstance(coerced, dict):
-        raise ValueError(f'Validation failed for tool "{tool_call.name}": root must be an object')
+        raise ToolArgumentsError(f'Validation failed for tool "{tool_call.name}": root must be an object',
+                                 [{"path": "root", "rule": "type"}])
     return coerced
 
 

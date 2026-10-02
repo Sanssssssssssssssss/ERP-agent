@@ -11,7 +11,7 @@ import os
 import re
 from typing import Any, List, NoReturn, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .agent_tools import DEFAULT_MAX_SMART_FIELDS
 from .odoo_client import OdooClient
@@ -64,6 +64,8 @@ class EmployeeSearchResult(BaseModel):
 class SearchEmployeeResponse(BaseModel):
     """Response model for the search_employee tool."""
 
+    model_config = ConfigDict(extra="allow")
+
     success: bool = Field(description="Indicates if the search was successful")
     result: Optional[List[EmployeeSearchResult]] = Field(
         default=None, description="List of employee search results"
@@ -86,6 +88,8 @@ class Holiday(BaseModel):
 
 class SearchHolidaysResponse(BaseModel):
     """Response model for the search_holidays tool."""
+
+    model_config = ConfigDict(extra="allow")
 
     success: bool = Field(description="Indicates if the search was successful")
     result: Optional[List[Holiday]] = Field(

@@ -8,7 +8,6 @@ from __future__ import annotations
 # 模块探测只判断模型是否存在。ACL 和写入授权仍在实际调用时检查。
 # 探测失败记为 unknown；仅明确 module_missing 的组会被拒绝启用。
 # 发布记录包含工具名和契约哈希；审批续跑据此恢复选择。
-
 import json
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
@@ -17,6 +16,7 @@ from inspect import isawaitable
 from pathlib import Path
 from typing import Any
 
+from erp_harness.erp.read_failures import tool_failure
 from erp_harness.runtime.tools import AgentTool, AgentToolResult
 
 BASE_TOOLS = frozenset(
@@ -171,6 +171,7 @@ class DynamicToolController:
         self._publisher: Callable[[Sequence[AgentTool]], None] | None = None
         self._active: tuple[str, ...] = ()
         self._availability: dict[str, dict[str, Any]] | None = None
+        self._probe_failure: dict[str, Any] | None = None
         self._probe_groups = set(CAPABILITY_GROUPS)
         self._module_cache = None
         self._module_scope = None
@@ -246,9 +247,11 @@ class DynamicToolController:
         details = result.details if isinstance(result.details, dict) else {}
         payload = details.get("structuredContent", details)
         if not isinstance(payload, dict) or payload.get("success") is False:
+            self._probe_failure = tool_failure(payload if isinstance(payload, dict) else ValueError("Invalid JSON response"))
             return None
         rows = payload.get("result")
         if not isinstance(rows, list):
+            self._probe_failure = tool_failure(ValueError("Malformed records response"))
             return None
         installed = {
             row["model"]
@@ -262,10 +265,12 @@ class DynamicToolController:
         return installed
 
     async def _list(self, call_id: str) -> dict[str, Any]:
+        self._probe_failure = None
         try:
             installed = await self._installed_models(call_id)
-        except Exception:  # noqa: BLE001 - availability stays unknown on any probe failure
+        except Exception as exc:  # noqa: BLE001 - availability stays unknown on any probe failure
             installed = None
+            self._probe_failure = tool_failure(exc)
         groups = []
         availability = {}
         for group_id, spec in CAPABILITY_GROUPS.items():
@@ -288,6 +293,7 @@ class DynamicToolController:
                 "missing_models": missing,
                 "authorization": "checked_at_call",
                 "active": group_id in self._active,
+                **({"availability_failure": self._probe_failure} if status == "unknown" and self._probe_failure else {}),
             }
             groups.append(row)
             availability[group_id] = row
@@ -306,20 +312,26 @@ class DynamicToolController:
         ):
             return {
                 "success": False,
+                **tool_failure({"reason_code": "capability_selection_invalid"}),
                 "error": "capabilities must be an array of strings.",
+                "allowed_capabilities": list(CAPABILITY_GROUPS),
             }
         if len(requested) != len(set(requested)):
             return {
                 "success": False,
+                **tool_failure({"reason_code": "capability_selection_invalid"}),
                 "error": "capabilities must not contain duplicates.",
+                "allowed_capabilities": list(CAPABILITY_GROUPS),
             }
         unknown = sorted(set(requested) - set(CAPABILITY_GROUPS))
         if unknown:
             return {
                 "success": False,
+                **tool_failure({"reason_code": "capability_unknown"}),
                 "error": "Invalid dynamic tool selection.",
                 "unknown": unknown,
                 "module_missing": [],
+                "allowed_capabilities": list(CAPABILITY_GROUPS),
             }
         if self._availability is None:
             await self._list(call_id)
@@ -332,18 +344,26 @@ class DynamicToolController:
         if blocked:
             return {
                 "success": False,
-                "error": "Invalid dynamic tool selection.",
+                **tool_failure({"reason_code": "capability_module_missing"}),
+                "error": "Required Odoo models are not installed; these capabilities cannot be enabled.",
                 "unknown": unknown,
                 "module_missing": blocked,
+                "missing_models": sorted({model for group_id in blocked for model in self._availability[group_id]["missing_models"]}),
             }
         if self._publisher is None:
-            raise RuntimeError("Dynamic tool controller is not bound to a session")
+            return {"success": False, **tool_failure({"reason_code": "capability_publication_failed"}),
+                    "error": "Dynamic tool controller is not bound to a session. Ask the host to restore the session; no tools were published."}
         before = {tool.name for tool in self.tools}
+        previous_active = self._active
         self._active = tuple(requested)
         # 此处改变期望集合。publisher 接到 session.stage_tools_for_next_turn。
         # 同一条模型响应不能通过 configure 立即调用刚启用的工具。
         published = self.tools
-        self._publisher(published)
+        try:
+            self._publisher(published)
+        except BaseException:
+            self._active = previous_active
+            raise
         after = {tool.name for tool in published}
         contracts = [
             {
@@ -388,6 +408,7 @@ class DynamicToolController:
                     "end_sequence": self._next_sequence(),
                     "success": False,
                     "error_type": type(exc).__name__,
+                    **tool_failure(exc),
                 }
             )
             raise
@@ -403,6 +424,7 @@ class DynamicToolController:
                 "published_tools": payload.get("published_tools"),
                 "tool_contract_sha256": payload.get("tool_contract_sha256"),
                 "recovery_groups": payload.get("recovery_groups"),
+                **{key: payload[key] for key in ("reason_code", "failure_layer", "next_action") if key in payload},
             }
         )
         return AgentToolResult(content=json.dumps(payload, separators=(",", ":")), details=payload)
@@ -416,8 +438,12 @@ class DynamicToolController:
                 if (not isinstance(requested, list) or not requested
                         or any(not isinstance(g, str) for g in requested)
                         or len(requested) != len(set(requested))):
-                    return {'success': False, 'error': 'Provide distinct missing capability names.'}
+                    return {'success': False, 'tool': 'recover_capabilities',
+                            **tool_failure({'reason_code': 'capability_selection_invalid'}),
+                            'error': 'Provide distinct missing capability names.',
+                            'allowed_capabilities': list(CAPABILITY_GROUPS)}
                 result = await self._configure(call_id, [*before, *sorted(set(requested) - set(before))])
+                result['tool'] = 'recover_capabilities'
                 if result.get('success'):
                     result.update(tool='recover_capabilities', recovery_groups=requested)
                 return result
@@ -442,7 +468,13 @@ class DynamicToolController:
             )
 
         async def configure_tool(call_id, arguments, _signal=None, _on_update=None):
-            return await self.publish(call_id, arguments.get("capabilities"))
+            try:
+                return await self.publish(call_id, arguments.get("capabilities"))
+            except Exception as exc:
+                payload = {"success": False, "tool": "configure_odoo_tools",
+                           **tool_failure({"reason_code": "capability_publication_failed"}),
+                           "cause": tool_failure(exc), "active": list(self._active)}
+                return AgentToolResult(content=json.dumps(payload, separators=(",", ":")), details=payload)
 
         return (
             AgentTool(

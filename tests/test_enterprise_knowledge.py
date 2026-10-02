@@ -2,6 +2,7 @@
 
 import copy
 import json
+import sqlite3
 
 import pytest
 
@@ -95,12 +96,15 @@ def test_refresh_failure_retains_prior_index_and_marks_stale(setup):
     client.fail_after = 100
     failed = refresh(knowledge)
     assert not failed["success"] and failed["status"] == "source_read_failed"
+    assert failed["reason_code"] == "permission_denied"
+    assert failed["failure_layer"] == "authorization" and failed["next_action"] == "check_permissions"
     reopened = NativeKnowledge(NativeReads(client))
     stats = reopened.knowledge_stats()["indexes"][0]
     assert stats["documents"] == 3 and stats["last_coverage"]["generation"] == before
     assert stats["last_coverage"]["dirty"]
     blocked = reopened.search_knowledge("ORDER", "res.partner")
     assert not blocked["success"] and blocked["results"] == []
+    assert blocked["reason_code"] == "permission_denied"
 
 
 def test_capacity_failure_is_explicit_and_does_not_publish_partial_data(setup, monkeypatch):
@@ -110,6 +114,7 @@ def test_capacity_failure_is_explicit_and_does_not_publish_partial_data(setup, m
     client.rows = Odoo(5).rows
     result = refresh(knowledge)
     assert not result["success"] and result["status"] == "capacity_exceeded"
+    assert result["reason_code"] == "knowledge_capacity_exceeded"
     assert knowledge.knowledge_stats()["total_documents"] == 3
 
 
@@ -133,6 +138,8 @@ def test_write_during_refresh_prevents_publishing_as_current(setup):
     client.after_read = lambda: knowledge.invalidate(reason="concurrent_write")
     failed = refresh(knowledge)
     assert not failed["success"] and failed["status"] == "refresh_failed"
+    assert failed["reason_code"] == "knowledge_refresh_conflict"
+    assert failed["next_action"] == "index_knowledge"
     assert knowledge.knowledge_stats()["indexes"][0]["last_coverage"]["dirty"]
 
 
@@ -146,6 +153,7 @@ def test_mixed_appended_definitions_require_explicit_refresh_after_write(setup):
     before = len(client.calls)
     blocked = reopened.search_knowledge("ORDER", "res.partner")
     assert not blocked["success"] and blocked["status"] == "refresh_required"
+    assert blocked["reason_code"] == "knowledge_index_required"
     assert blocked["results"] == [] and len(client.calls) == before
     assert reopened.knowledge_stats()["total_documents"] == 3
     assert refresh(reopened)["success"]
@@ -160,10 +168,14 @@ def test_cached_snippets_do_not_bypass_permission_failures(setup):
     client.fail_after = 0
     result = knowledge.search_knowledge("ORDER", "res.partner")
     assert not result["success"] and result["status"] == "source_read_failed"
+    assert result["reason_code"] == "permission_denied"
+    assert result["failure_layer"] == "authorization" and result["next_action"] == "check_permissions"
     assert result["results"] == []
     assert result["freshness"]["errors"]
+    assert all(error["reason_code"] == "permission_denied" for error in result["freshness"]["errors"])
     unmatched = knowledge.search_knowledge("missing_term", "res.partner")
     assert not unmatched["success"] and unmatched["status"] == "source_read_failed"
+    assert unmatched["reason_code"] == "permission_denied"
     assert unmatched["results"] == []
 
 
@@ -180,6 +192,7 @@ def test_scope_change_never_reuses_other_identity_material(setup, change):
         runtime._policy_override = FieldPolicy({"default": {"res.partner": ModelFieldRule("deny", frozenset({"note"}))}})
     result = knowledge.search_knowledge("ORDER", "res.partner")
     assert not result["success"] and result["status"] == "index_missing"
+    assert result["reason_code"] == "knowledge_index_required"
     assert result["results"] == []
 
 
@@ -192,3 +205,53 @@ def test_chinese_substring_and_existing_english_id_tokens(setup):
     missing = knowledge.search_knowledge("unmatched_unique_term", "res.partner")
     assert missing["success"] and missing["status"] == "no_candidate_match"
     assert missing["coverage"]["complete"] and not missing["complete"]
+
+
+@pytest.mark.parametrize("error_type,expected", [(sqlite3.OperationalError, "knowledge_storage_failed"),
+                                                (OSError, "knowledge_storage_failed"),
+                                                (ValueError, "tool_failed_unknown")])
+def test_failed_local_publish_keeps_index_and_sanitizes_exception(setup, monkeypatch, error_type, expected):
+    client, knowledge = setup
+    assert refresh(knowledge)["success"]
+    previous = knowledge.knowledge_stats()["indexes"][0]["last_coverage"]["generation"]
+    secret = "external-error-body-with-credential-value"
+    def fail_publish(*_args, **_kwargs):
+        raise error_type(secret)
+    monkeypatch.setattr(knowledge.store, "_publish", fail_publish)
+    client.rows[4] = {"id": 4, "name": "never-published", "note": ""}
+    result = refresh(knowledge)
+    assert not result["success"] and result["status"] == "refresh_failed"
+    assert result["reason_code"] == expected
+    assert secret not in json.dumps(result)
+    stats = knowledge.knowledge_stats()["indexes"][0]
+    assert stats["documents"] == 3 and stats["last_coverage"]["generation"] == previous
+    assert stats["last_coverage"]["dirty"]
+
+
+def test_real_permission_failure_reaches_capability_wrapper_without_losing_reason(setup, tmp_path):
+    from erp_harness.erp.capabilities import NativeCapabilities
+    client, knowledge = setup
+    assert refresh(knowledge)["success"]
+    client.fail_after = 0
+    capabilities = NativeCapabilities(knowledge.reads, task_path=tmp_path / "tasks.sqlite3")
+    capabilities.knowledge = knowledge
+    try:
+        indexed = capabilities.call("index_knowledge", {"model": "res.partner", "full_refresh": True})
+        found = capabilities.call("search_knowledge", {"query": "ORDER", "model": "res.partner"})
+    finally:
+        capabilities.close()
+    for result in (indexed, found):
+        assert not result["success"] and result["reason_code"] == "permission_denied"
+        assert result["failure_layer"] == "authorization" and result["next_action"] == "check_permissions"
+    assert indexed["status"] == "source_read_failed"
+    assert found["status"] == "refresh_required" and found["results"] == []
+
+
+def test_nonadvancing_source_ids_are_classified_before_publishing(setup):
+    client, knowledge = setup
+    client.rows[2]["id"] = 1
+    result = refresh(knowledge)
+    assert not result["success"] and result["status"] == "source_read_failed"
+    assert result["reason_code"] == "invalid_response"
+    assert result["failure_layer"] == "odoo_response"
+    assert knowledge.knowledge_stats()["total_documents"] == 0

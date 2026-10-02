@@ -9,16 +9,18 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from erp_harness.context import world as world_module
+from erp_harness.context.projection import (
+    expand_lossless_tables,
+    project_messages,
+    project_read_history,
+)
+from erp_harness.context.world import READ_TOOLS, WorldStore
+from erp_harness.context.world_tools import build_world_tools
 from erp_harness.runtime.messages import AssistantMessage, TextContent, ToolResultMessage
 from erp_harness.runtime.tools import AgentTool, AgentToolResult
-
-from erp_harness.tools.router import route_tools
-from erp_harness.context.projection import expand_lossless_tables, project_messages, project_read_history
 from erp_harness.tools.dynamic_tools import OPTIONAL_NATIVE_BASE_TOOLS
-from erp_harness.context.world import READ_TOOLS, WorldStore
-from erp_harness.context import world as world_module
-from erp_harness.context.world_tools import build_world_tools
-
+from erp_harness.tools.router import route_tools
 
 ENV = {
     "ODOO_URL": "http://odoo.test",
@@ -351,6 +353,8 @@ class WorldStoreTest(unittest.TestCase):
                 "observation_ref": "obs-nope",
             }))
             self.assertEqual(json.loads(missing.text)["error_class"], "unknown_reference")
+            self.assertEqual(missing.details["reason_code"], "observation_reference_missing")
+            self.assertEqual(missing.details["next_action"], "search_observations")
 
             with self.assertRaises(PermissionError):
                 world.read_observation({**identity, "identity_id": "other"}, receipt["receipt_id"])
@@ -372,6 +376,8 @@ class WorldStoreTest(unittest.TestCase):
                 "observation_ref": native_receipt["receipt_id"],
             }))
             self.assertEqual(json.loads(denied.text)["error_class"], "access")
+            self.assertEqual(denied.details["reason_code"], "observation_access_denied")
+            self.assertEqual(denied.details["failure_layer"], "authorization")
 
             world.invalidate(instance="default", reason="write", call_id="write")
             stale = world.read_observation(identity, receipt["receipt_id"])
@@ -390,6 +396,46 @@ class WorldStoreTest(unittest.TestCase):
                 "observation_ref": receipt["receipt_id"],
             }))
             self.assertEqual(json.loads(corrupted.text)["error_class"], "invalid_request")
+            self.assertEqual(corrupted.details["reason_code"], "observation_integrity_failed")
+            self.assertEqual(corrupted.details["next_action"], "refresh_read")
+
+    def test_observation_failure_points_to_directory_and_actual_child_paths(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, ENV):
+            world = self.store(Path(directory))
+            receipt = world.finish(world.begin("nested", "read_record", {"model": "x.model", "record_id": 1}, "native"),
+                                   json.dumps({"success": True, "result": [{"id": 1}]}))
+            search, read = build_world_tools(world)
+            invalid_search = asyncio.run(search.execute("invalid-search", {"cursor": -1})).details
+            self.assertEqual(invalid_search["reason_code"], "observation_request_invalid")
+            self.assertEqual(invalid_search["next_action"], "correct_observation_request")
+            invalid_paging = asyncio.run(read.execute("invalid-page", {"observation_ref": receipt["receipt_id"], "limit": 101})).details
+            self.assertEqual(invalid_paging["reason_code"], "observation_request_invalid")
+            bad_path = asyncio.run(read.execute("invalid-path", {
+                "observation_ref": receipt["receipt_id"], "path": "$.credential-value-must-not-be-published",
+            })).details
+            self.assertEqual(bad_path["reason_code"], "observation_path_invalid")
+            self.assertEqual(bad_path["next_action"], "read_observation_directory")
+            self.assertNotIn("credential-value-must-not-be-published", json.dumps(bad_path))
+            recovery = bad_path["recovery_request"]
+            self.assertEqual(recovery["tool"], "read_observation")
+            directory_page = asyncio.run(read.execute("directory", recovery["arguments"])).details
+            self.assertTrue(directory_page["success"])
+            actual_result = next(row["value"]["path"] for row in directory_page["result"]["items"] if row["key"] == "result")
+            actual_page = asyncio.run(read.execute("actual-path", {
+                "observation_ref": receipt["receipt_id"], "path": actual_result,
+            })).details
+            self.assertTrue(actual_page["success"])
+            self.assertEqual(actual_result, "$.result")
+
+    def test_identity_failures_are_not_misreported_as_observation_paths(self):
+        def denied_identity(_instance):
+            raise PermissionError("credential-value-must-not-be-published")
+        for tool in build_world_tools(None, identity_context=denied_identity):
+            with self.subTest(tool=tool.name):
+                result = asyncio.run(tool.execute("identity-failure", {"observation_ref": "obs-any"})).details
+                self.assertEqual(result["reason_code"], "permission_denied")
+                self.assertEqual(result["failure_layer"], "authorization")
+                self.assertNotIn("credential-value-must-not-be-published", json.dumps(result))
 
     def test_bounded_value_keeps_small_scalar_lists_only_within_byte_limit(self):
         self.assertEqual(WorldStore._bounded_value([42, "BOM-42"], "$.bom_id"), [42, "BOM-42"])
