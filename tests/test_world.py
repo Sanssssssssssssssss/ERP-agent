@@ -17,6 +17,7 @@ from erp_harness.context.projection import (
 )
 from erp_harness.context.world import READ_TOOLS, WorldStore
 from erp_harness.context.world_tools import build_world_tools
+from erp_harness.erp.reads import NATIVE_READ_RESPONSES
 from erp_harness.runtime.messages import AssistantMessage, TextContent, ToolResultMessage
 from erp_harness.runtime.tools import AgentTool, AgentToolResult
 from erp_harness.tools.dynamic_tools import OPTIONAL_NATIVE_BASE_TOOLS
@@ -35,6 +36,10 @@ ENV = {
 class WorldStoreTest(unittest.TestCase):
     def store(self, root: Path) -> WorldStore:
         return WorldStore(root / "world.jsonl")
+
+    def test_all_odoo_read_tools_have_world_observation_mapping(self):
+        self.assertFalse(set(NATIVE_READ_RESPONSES) - {"health_check"} - READ_TOOLS)
+        self.assertIn("search_records", READ_TOOLS)
 
     def test_overlap_uses_pending_calls_not_equal_wall_clock_strings(self):
         result = lambda record_id, name: json.dumps(

@@ -129,7 +129,7 @@ def test_public_action_rejection_explains_allocation_before_any_write(tmp_path, 
         assert result['failure']['write_dispatch_started'] is False
         assert result['approval_required'] is result['retry_safe'] is False
         assert result['recovery_request'] == {'tool': 'mcp_odoo_read_purchase_allocation', 'arguments': {
-            'purchase_ids': [8], 'order_ids': [7, 8],
+            'purchase_ids': [8], 'order_ids': [7, 8], 'instance': 'default',
         }}
         report = result['business_condition']
         assert report['status'] == 'failed'
@@ -138,7 +138,7 @@ def test_public_action_rejection_explains_allocation_before_any_write(tmp_path, 
         assert any(row.get('reason') == 'shared_demand_capacity' and row['status'] == 'failed'
                    for row in report['checks'])
         assert '分配' in result['error']
-        assert report == inspect_purchase_allocation(runtime, [8], [7, 8], product_id=1)
+        assert report == {**inspect_purchase_allocation(runtime, [8], [7, 8], product_id=1), 'instance': 'default'}
         assert writer.calls == [] and actions.store.summary()['actions'] == 0
         assert runtime.client.records['purchase.order'][8]['state'] == 'draft'
     finally:
@@ -221,6 +221,14 @@ def test_post_send_allocation_failure_stays_unresolved_and_reconcile_never_resen
             assert result['next_action'] == 'reconcile_without_replay'
             assert result['business_condition']['checks'][0]['source_capacity'] == 7
             action_id = result['action_id']
+            repeated = actions.call('execute_method', {
+                'model': 'purchase.order', 'method': 'button_confirm', 'kwargs': {'ids': [8]},
+            })
+            assert repeated['action_id'] == action_id and repeated['action_status'] == 'needs_reconciliation'
+            assert repeated['reason_code'] == repeated['failure']['code'] == 'action_verification_failed'
+            assert repeated['failure']['write_dispatch_started'] is True
+            assert repeated['next_action'] == 'reconcile_without_replay'
+            assert 'recovery_request' not in repeated
             reconciled = actions.reconcile(action_id)
             assert reconciled['action_status'] == 'needs_reconciliation'
             assert reconciled['failure']['code'] == 'action_verification_failed'

@@ -17,6 +17,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+from erp_harness.erp.invoice_eligibility import InvoiceEligibilityError
 from erp_harness.erp.purchase_allocation import PurchaseAllocationError
 from erp_harness.erp.read_failures import FAILURE_GUIDANCE, tool_failure
 from erp_harness.erp.store import ActionStore
@@ -36,7 +37,10 @@ def failure_result(error: Exception | dict, *, code: str | None = None,
                    write_dispatch_started: bool | None = None) -> dict:
     """Preserve action authority and the cause; uncertainty never permits replay."""
     allocation = type(error) is PurchaseAllocationError
-    cause = tool_failure({"reason_code": "purchase_allocation_unverified"} if allocation else error)
+    eligibility = type(error) is InvoiceEligibilityError
+    cause = tool_failure({"reason_code": "purchase_allocation_unverified"} if allocation else {
+        "reason_code": "business_choice_required" if error.report.get("requires_business_choice") else "invoice_eligibility_blocked",
+    } if eligibility else error)
     result = {**(error if isinstance(error, dict) else {}), **cause, "success": False}
     if allocation:
         result.update(error="采购来源数量分配未通过核验；请查看分配明细，核对采购数量、销售来源及共同需求容量。",
@@ -50,6 +54,20 @@ def failure_result(error: Exception | dict, *, code: str | None = None,
             }}
             if instance := scope.get("instance") or error.report.get("instance"):
                 result["recovery_request"]["arguments"]["instance"] = instance
+        elif code in {"action_outcome_unknown", "action_verification_failed"}:
+            result["reason_code"] = code
+    elif eligibility:
+        result.update(error=str(error), business_condition=copy.deepcopy(error.report),
+                      approval_required=False, retry_safe=False)
+        if code is None and stage not in {"send", "verification"} and write_dispatch_started is not True:
+            code, stage, write_dispatch_started = cause["reason_code"], "before_send", False
+            arguments = {"order_ids": [row["id"] for row in error.report.get("orders", [])],
+                         "final": error.report.get("final", True)}
+            if instance := error.report.get("instance"):
+                arguments["instance"] = instance
+            result["recovery_request"] = {"tool": "mcp_odoo_read_invoice_eligibility", "arguments": arguments}
+            if error.report.get("requires_business_choice"):
+                next_action = next_action or "clarify_business_choice"
         elif code in {"action_outcome_unknown", "action_verification_failed"}:
             result["reason_code"] = code
     elif isinstance(error, dict) and error.get("error"):
@@ -73,12 +91,19 @@ def failure_result(error: Exception | dict, *, code: str | None = None,
     result["failure_layer"] = result["failure"]["layer"]
     if write_dispatch_started is not None:
         result["failure"]["write_dispatch_started"] = write_dispatch_started
-    if isinstance(error, TaskHandoff):
-        result.update(error=str(error), reason_code=error.code, approval_required=False, retry_safe=False, failure={
-            "code": error.code, "next_action": error.next_action, "requires_user_input": True,
-            "stage": "before_send", "layer": "business_precondition" if error.code == "business_choice_required" else "authorization",
-        })
-        result.update(next_action=error.next_action, failure_layer=result["failure"]["layer"])
+    if eligibility and code == "business_choice_required":
+        result["failure"]["requires_user_input"] = True
+    if type(error) is TaskHandoff:
+        result.update(error=str(error), approval_required=False, retry_safe=False)
+        if code in {"action_outcome_unknown", "action_verification_failed"}:
+            result["reason_code"] = code
+        else:
+            result.update(reason_code=error.code, failure={
+                "code": error.code, "next_action": error.next_action, "requires_user_input": True,
+                "stage": "before_send", "write_dispatch_started": False,
+                "layer": "business_precondition" if error.code == "business_choice_required" else "authorization",
+            })
+            result.update(next_action=error.next_action, failure_layer=result["failure"]["layer"])
     return result
 
 
@@ -265,7 +290,7 @@ class TaskEvidence:
                 minimum=scope.get("minimum_per_origin", 1e-6), product_id=scope["product_id"])
             if report["status"] != "passed":
                 self._event("rejected", reason="purchase_demand_allocation", report=report)
-                raise PurchaseAllocationError(report)
+                raise PurchaseAllocationError({**report, "instance": self.instance})
             capacity_evidence.append(["purchase_allocation", report])
         if len(capacity_scopes) == len(self.purchase_sources):
             return capacity_evidence

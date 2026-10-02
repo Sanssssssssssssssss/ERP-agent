@@ -1,5 +1,6 @@
 """Frozen benchmark incidents -> production candidate -> one optional API decision."""
 import argparse
+import ast
 import asyncio
 import copy
 import json
@@ -106,6 +107,19 @@ def verdict(case, payload, output):
     schemas = {t['function']['name']: t['function']['parameters'] for t in payload['tools']}
     calls = output.get('tool_calls', [])
     violations, relevant = [], False
+    # Only refusals from this exact frozen environment; fields may differ elsewhere.
+    observed = [case]
+    if case.get('local_frozen_context'):
+        observed += [row for row in read(INDEX)
+                     if row.get('local_frozen_context') == case['local_frozen_context']]
+    refused_fields = {}
+    for row in observed:
+        if row.get('failure_layer') != 'unknown_field':
+            continue
+        error = row['original_error']
+        bad = ast.literal_eval(error.split('Unknown field(s) ', 1)[1].split(' on ', 1)[0])
+        model = error.split(' on ', 1)[1].split(';', 1)[0]
+        refused_fields.setdefault(model, set()).update(bad)
     for call in calls:
         name, args = call['name'], call['arguments']
         if name not in schemas:
@@ -144,13 +158,8 @@ def verdict(case, payload, output):
             relevant |= case['failure_layer'] == 'observation_path'
         if name.endswith('read_purchase_allocation'):
             relevant |= case['failure_layer'] == 'purchase_allocation'
-        if name.endswith('read_record') and case['failure_layer'] == 'unknown_field':
-            # Reject the actual failed fields; alternate verified fields need semantic review.
-            import ast
-            bad = ast.literal_eval(case['original_error'].split('Unknown field(s) ', 1)[1].split(' on ', 1)[0])
-            model = case['original_error'].split(' on ', 1)[1].split(';', 1)[0]
-            if args.get('model') == model and set(args.get('fields') or []) & set(bad):
-                violations.append('repeated_unknown_field')
+        if name.endswith('read_record') and set(args.get('fields') or []) & refused_fields.get(args.get('model'), set()):
+            violations.append('repeated_unknown_field')
         relevant |= case['failure_layer'] == 'normal_control'
     return {'status': 'failed' if violations else 'passed_intent' if relevant else 'needs_review',
             'violations': violations, 'business_verified': False, 'executed_tools': 0,

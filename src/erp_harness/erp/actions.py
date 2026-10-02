@@ -60,6 +60,7 @@ from erp_harness.erp.task_evidence import TaskHandoff, failure_result
 from erp_harness.erp.write_guards import business_write_prestate, manufacturing_confirm_prestate
 from erp_harness.erp import invoice_mail
 from erp_harness.erp.invoice_eligibility import InvoiceEligibilityError, inspect_invoice_eligibility
+from erp_harness.erp.purchase_allocation import PurchaseAllocationError
 
 ACTION_TOOLS = frozenset(
     {
@@ -767,7 +768,7 @@ class NativeActions:
                                       "order_samples_complete": False,
                                       "reason_code": "no_invoiceable_lines",
                                       "next_step": "No selected sale order has invoiceable lines. Explain the order conditions; do not retry another API or choose a down payment without the user's business decision."}
-                        raise InvoiceEligibilityError(report)
+                        raise InvoiceEligibilityError({**report, "instance": instance})
                     eligibility.extend(reports)
                 elif method not in {"percentage", "fixed"}:
                     raise ValueError("invoice wizard method is unavailable; read the wizard again")
@@ -777,7 +778,9 @@ class NativeActions:
     def _current_prestate_matches(self, row: dict[str, Any]) -> bool:
         try:
             return self._prestate(row["kind"], row["payload"]) == row["prestate"]
-        except ValueError:
+        except ValueError as exc:
+            if type(exc) in {InvoiceEligibilityError, PurchaseAllocationError, TaskHandoff}:
+                raise
             # A target removed after approval is stale; transport/read failures still propagate.
             return False
 
@@ -1253,23 +1256,27 @@ class NativeActions:
             # 一旦可能已发送，只能回读确认，绝不能因未知结果再次发送。
             return self._reconcile(row)
         runtime = self.reads.instances[str(row["payload"]["instance"])]
-        if self.task_evidence is not None:
-            self.task_evidence.check_stage(row["kind"], row["payload"])
-        if row["policy_digest"] != self._policy_snapshot(runtime)[0]:
-            return {**failure_result({"error": "action policy changed; validate again"}, code="action_policy_changed",
-                                     stage="before_send", write_dispatch_started=False), "action_id": action_id}
         mail = "invoice_mail" in row["prestate"]
-        if mail:
-            current = self._prestate(row["kind"], row["payload"])
-            same_delivery = invoice_mail.same_delivery(row["prestate"]["invoice_mail"], current["invoice_mail"])
-            existing = self._invoice_mail_readback(row["payload"], current) if same_delivery else None
-            if existing is not None:
-                # The approved action did not send. Persist the observed result so the
-                # host cannot turn a completed readback into an abandoned approval.
-                return self._finish_unsent_mail(row, existing)
-            prestate_matches = current == row["prestate"]
-        else:
-            prestate_matches = self._current_prestate_matches(row)
+        try:
+            if self.task_evidence is not None:
+                self.task_evidence.check_stage(row["kind"], row["payload"])
+            if row["policy_digest"] != self._policy_snapshot(runtime)[0]:
+                return {**failure_result({"error": "action policy changed; validate again"}, code="action_policy_changed",
+                                         stage="before_send", write_dispatch_started=False), "action_id": action_id}
+            if mail:
+                current = self._prestate(row["kind"], row["payload"])
+                same_delivery = invoice_mail.same_delivery(row["prestate"]["invoice_mail"], current["invoice_mail"])
+                existing = self._invoice_mail_readback(row["payload"], current) if same_delivery else None
+                if existing is not None:
+                    # The approved action did not send. Persist the observed result so the
+                    # host cannot turn a completed readback into an abandoned approval.
+                    return self._finish_unsent_mail(row, existing)
+                prestate_matches = current == row["prestate"]
+            else:
+                prestate_matches = self._current_prestate_matches(row)
+        except (InvoiceEligibilityError, PurchaseAllocationError, TaskHandoff) as exc:
+            return {**failure_result(exc, stage="before_send", write_dispatch_started=False),
+                    "action_id": action_id, "action_status": row["status"]}
         if not prestate_matches:
             # 与本次动作相关的 Odoo 状态改变或证据缺失，会要求重新验证。
             return {
@@ -2012,17 +2019,31 @@ class NativeActions:
                     session_id=os.environ.get("PI_AGENT_SESSION_ID", "local"),
                 )
                 if previous is not None:
-                    self._prestate("method", payload)  # Current scope and role still apply to receipt reuse.
+                    try:
+                        self._prestate("method", payload)  # Current scope and role still apply to receipt reuse.
+                    except Exception as exc:  # A current guard cannot erase prior dispatch.
+                        if previous["status"] not in {"sending", "needs_reconciliation"}:
+                            raise
+                        return {**failure_result(exc, code="action_verification_failed", stage="verification",
+                                                 write_dispatch_started=True),
+                                "action_id": previous["action_id"], "action_status": previous["status"], "retry_safe": False}
                     return self._reconcile(previous)  # Fresh business evidence; no new approval or dispatch.
-            if (model, method) == invoice_mail.METHOD:
-                # Bind the current host intent and role before accepting any historical receipt.
-                prestate = self._prestate("method", payload)
             if f"{model}.{method}" in ONE_SHOT_METHODS or (model, method) == invoice_mail.METHOD:
                 previous = self.store.find_sent(
                     kind="method", payload=payload, identity=identity,
                     run_id=os.environ.get("HARBOR_TRIAL_ID", os.environ.get("PI_AGENT_SESSION_ID", "local")),
                     session_id=os.environ.get("PI_AGENT_SESSION_ID", "local"),
                 )
+                if (model, method) == invoice_mail.METHOD:
+                    # Bind current authority before inspecting historical delivery; retain any unknown dispatch.
+                    try:
+                        prestate = self._prestate("method", payload)
+                    except Exception as exc:  # Unavailable authority cannot authorize resending.
+                        if previous is None or previous["status"] not in {"sending", "needs_reconciliation"}:
+                            raise
+                        return {**failure_result(exc, code="action_verification_failed", stage="verification",
+                                                 write_dispatch_started=True),
+                                "action_id": previous["action_id"], "action_status": previous["status"], "retry_safe": False}
                 if prestate is not None:
                     if previous is not None and previous["status"] in {"sending", "needs_reconciliation"}:
                         return self._reconcile(previous)  # A real unknown dispatch cannot be hidden by an older sent message.
@@ -2101,9 +2122,7 @@ class NativeActions:
             )
             return {**result, "classification": safety}
         except InvoiceEligibilityError as exc:
-            error = TaskHandoff(str(exc), code="business_choice_required", next_action="clarify_business_choice") if exc.report.get("requires_business_choice") else exc
-            return {**failure_result(error), "business_condition": exc.report,
-                    "approval_required": False, "retry_safe": False}
+            return failure_result(exc, stage="before_send", write_dispatch_started=False)
         except Exception as exc:  # noqa: BLE001 - tool boundary returns structured errors
             return failure_result(exc)
 

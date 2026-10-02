@@ -49,6 +49,26 @@ class MinimalWriteGuardTests(unittest.TestCase):
     def validate(self, model="mrp.workorder", values=None, ids=(30,), operation="write", **kwargs):
         return self.actions.validate_write(model, operation, values=values, record_ids=list(ids) if operation == "write" else None, **kwargs)
 
+    def test_purchase_nested_quantity_uses_writable_live_field_before_approval(self):
+        self.reader.metadata.update({
+            "order_line": {"type": "one2many", "relation": "purchase.order.line"},
+            "product_uom_qty": {"type": "float", "readonly": True},
+            "product_qty": {"type": "float", "readonly": False},
+        })
+        args = {"model": "purchase.order", "operation": "create",
+                "values": {"name": "PO regression", "order_line": [[0, 0, {"product_uom_qty": 10}]]}}
+        rejected = self.actions.call("validate_write", args)
+        self.assertFalse(rejected["success"])
+        self.assertEqual(rejected["reason_code"], "action_validation_failed")
+        self.assertIn("product_uom_qty", json.dumps(rejected["issues"]))
+        self.assertEqual(self.actions.store.summary()["actions"], 0)
+        self.assertEqual(self.writer.calls, [])
+        args["values"]["order_line"][0][2] = {"product_qty": 10}
+        approved = self.actions.call("validate_write", args)
+        self.assertTrue(approved["success"], approved)
+        self.assertEqual(self.actions.store.get(approved["approval"]["action_id"])["status"], "approved")
+        self.assertEqual(self.writer.calls, [])
+
     def test_return_identity_is_checked_before_approval_and_again_before_send(self):
         for field, kind in {"picking_id": "many2one", "wizard_id": "many2one", "move_id": "many2one", "quantity": "float"}.items():
             self.reader.metadata[field] = {"type": kind}

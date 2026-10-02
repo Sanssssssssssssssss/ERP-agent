@@ -62,6 +62,7 @@ FAILURE_GUIDANCE = {
     "scope_handoff_required": ("authorization", "renew_proposal"),
     "business_choice_required": ("business_precondition", "request_user_input"),
     "purchase_allocation_unverified": ("business_precondition", "read_purchase_allocation"),
+    "invoice_eligibility_blocked": ("business_precondition", "read_invoice_eligibility"),
     "scope_reconfirmation_required": ("authorization", "renew_proposal"),
     "stale_approval": ("authorization", "validate_again"),
     "needs_reconciliation": ("action_ledger", "reconcile_without_replay"),

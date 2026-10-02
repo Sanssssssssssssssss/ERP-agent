@@ -36,6 +36,7 @@ FAULTS = (
     ("field_acl", ValueError("Field policy denies access: offline fault"), "field_policy_denied"),
     ("rate_limit", OdooJson2Error("offline fault", status_code=429), "rate_limited"),
     ("endpoint", OdooJson2Error("offline fault", status_code=404), "endpoint_not_found"),
+    ("model_missing", OdooJson2Error("the model 'base.automation' does not exist", status_code=404), "model_unavailable"),
     ("database", ValueError("database offline does not exist"), "database_unavailable"),
     ("server", OdooJson2Error("offline fault", status_code=500), "server_error"),
     ("query", ValueError("Invalid domain: offline fault"), "query_invalid"),

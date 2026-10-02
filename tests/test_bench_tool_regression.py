@@ -44,17 +44,44 @@ def test_all_actual_incidents_have_root_evidence_and_test_routes():
     assert result['success']
 
 
+def test_recovery_verdict_checks_sibling_fields_from_the_same_frozen_environment():
+    case = next(row for row in read(INDEX) if row['id'] == 'BT2066-10')
+    tools = definitions()
+    payload = {'tools': [tools['mcp_odoo_get_model_fields'], tools['mcp_odoo_read_record']]}
+    output = {'stop_reason': 'toolUse', 'tool_calls': [
+        {'name': 'mcp_odoo_get_model_fields', 'arguments': {'model': 'mrp.workcenter', 'query': 'capacity'}},
+        {'name': 'mcp_odoo_read_record', 'arguments': {'model': 'mrp.routing.workcenter', 'record_id': 1, 'fields': ['batch']}},
+    ]}
+    assert verdict(case, payload, output)['status'] == 'failed'
+    assert verdict(case, payload, output)['violations'] == ['repeated_unknown_field']
+    output['tool_calls'][1]['arguments']['fields'] = ['time_mode_batch']
+    assert verdict(case, payload, output)['status'] == 'passed_intent'
+    # A refusal in one installed schema does not establish absence in another.
+    elsewhere = {**case, 'local_frozen_context': 'different-frozen-environment'}
+    output['tool_calls'][1]['arguments']['fields'] = ['batch']
+    assert verdict(elsewhere, payload, output)['violations'] == []
+
+
 def test_all_observed_unknown_fields_refuse_before_data_rpc_and_offer_discovery():
     from erp_harness.erp.reads import NativeReads
     from tests.test_supply_context import SupplyClient
-    for case in read(INDEX):
-        if case['failure_layer'] != 'unknown_field':
+    fresh = read(INDEX.parent / 'self-debug-fresh-20261003/cases.json')['cases']
+    fresh += [{'id': row['case_id'], 'failure_kind': 'unknown_field',
+               'unknown_fields': row['public_failure']['recovery_request']['unknown_fields'],
+               'model': row['failed_arguments']['model']}
+              for row in read(INDEX.parent / 'tool-self-debug-20261003/fresh-fixed-cases.json')['cases']
+              if row['tool'] == 'mcp_odoo_read_record']
+    for case in [*read(INDEX), *fresh]:
+        if case.get('failure_layer', case.get('failure_kind')) not in {'unknown_field', 'invalid_query_field'}:
             continue
-        error = case['original_error']
-        fields = ast.literal_eval(error.split('Unknown field(s) ', 1)[1].split(' on ', 1)[0])
-        model = error.split(' on ', 1)[1].split(';', 1)[0]
+        if 'unknown_fields' in case:
+            fields, model = case['unknown_fields'], case['model']
+        else:
+            error = case['original_error']
+            fields = ast.literal_eval(error.split('Unknown field(s) ', 1)[1].split(' on ', 1)[0])
+            model = error.split(' on ', 1)[1].split(';', 1)[0]
         client = SupplyClient()
-        client._add(model, ['id', 'name'], [{'id': 1, 'name': 'Known'}])
+        client._add(model, [field for field in ['id', 'name', 'display_name'] if field not in fields], [{'id': 1, 'name': 'Known'}])
         client.read_records = lambda *a, **k: (_ for _ in ()).throw(AssertionError('invalid field reached data RPC'))
         runtime = NativeReads(client)
         result = runtime.call('read_record', {'model': model, 'record_id': 1, 'fields': fields})
@@ -88,13 +115,14 @@ def test_actual_sop_and_empty_domain_arguments():
 
 
 def test_actual_schema_argument_calls_are_invalid():
-    for case in read(INDEX):
-        if case['failure_layer'] != 'schema_argument':
+    fresh = read(INDEX.parent / 'self-debug-fresh-20261003/cases.json')['cases']
+    for case in [*read(INDEX), *fresh]:
+        if case.get('failure_layer', case.get('failure_kind')) not in {'schema_argument', 'schema_argument_limit'}:
             continue
         payload = {'tools': [definitions()[case['tool']]]}
         output = {'stop_reason': 'toolUse', 'tool_calls': [
             {'name': case['tool'], 'arguments': case['failed_arguments']}]}
-        assert verdict(case, payload, output)['status'] == 'failed', case['id']
+        assert verdict({**case, 'failure_layer': 'schema_argument'}, payload, output)['status'] == 'failed', case['id']
 
 
 def test_corrective_replay_preserves_every_other_message_schema_and_id():

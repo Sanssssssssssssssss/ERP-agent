@@ -75,6 +75,8 @@ npm run check:trace
 
 [ERP-Bench 与 Harbor](bench/)提供独立评估路径，包含固定任务、快照和评分。Mock 与 renderer 检查验证界面机制；真实 API 跑测和 Odoo 回读验证记录中的业务。
 
+[工具纠错验证](docs/tool-self-debug-20261003.md)逐项记录故障根因、局部 API 决策、完整业务复跑与 token 用量。
+
 ## 仓库
 
 | 路径 | 作用 |
