@@ -13,6 +13,7 @@
 | 实验入口（含准备/评估；并非全部付费） | [q4_input_report.py](../experiments/tool_routing/q4_input_report.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [report.py](../experiments/enterprise_validation/report.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [run_module_slice.py](../experiments/dynamic-tools-budgeted/run_module_slice.py) | 见入口中的断言 |
+| 实验入口（含准备/评估；并非全部付费） | [self_debug_audit.py](../experiments/agent_regression/self_debug_audit.py) | 见入口中的断言 |
 | 桌面检查 | [trace-check.mjs](../desktop/scripts/trace-check.mjs) | 见入口中的断言 |
 | 桌面检查 | [trace-model-check.mjs](../desktop/scripts/trace-model-check.mjs) | 见入口中的断言 |
 | 桌面检查 | [trace-v2-check.mjs](../desktop/scripts/trace-v2-check.mjs) | 见入口中的断言 |
@@ -22,6 +23,7 @@
 | 离线测试套件 | [test_request_receipts.py](../tests/test_request_receipts.py) | 见入口中的断言 |
 | 离线测试套件 | [test_run_diagnostics.py](../tests/test_run_diagnostics.py) | 见入口中的断言 |
 | 离线测试套件 | [test_runner_budget.py](../tests/test_runner_budget.py) | 见入口中的断言 |
+| 离线测试套件 | [test_self_debug_audit.py](../tests/test_self_debug_audit.py) | 见入口中的断言 |
 | 离线测试套件 | [test_trace_inspector.py](../tests/test_trace_inspector.py) | 见入口中的断言 |
 | 离线测试套件 | [test_unbounded_execution.py](../tests/test_unbounded_execution.py) | 见入口中的断言 |
 
@@ -56,6 +58,7 @@
 
 | 类型 | 案例 / 文件 | 故障位置 / 检查范围 |
 |---|---|---|
+| 实验入口（含准备/评估；并非全部付费） | [bench_recovery.py](../experiments/agent_regression/bench_recovery.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [consumption_recovery.py](../experiments/agent_regression/consumption_recovery.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [contract_recovery.py](../experiments/agent_regression/contract_recovery.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [hitl_revision.py](../experiments/agent_regression/hitl_revision.py) | 见入口中的断言 |
@@ -402,6 +405,48 @@
 | 真实模型节点 | [A02 · first_method_as_field_write](../experiments/agent_regression/cases.py) | tool_contract |
 | 真实模型节点 | [A03 · correct_action_after_metadata_access_failure](../experiments/agent_regression/cases.py) | tool_contract |
 | 真实模型节点 | [A04 · first request consuming the runtime endorsement, before the erroneous execute_method](../experiments/agent_regression/cases.py) | tool_contract |
+| 真实模型节点 | [BC2010](../experiments/agent_regression/bench_recovery_cases.json) | normal_control |
+| 真实模型节点 | [BT2010-01](../experiments/agent_regression/bench_recovery_cases.json) | sop_inputs |
+| 真实模型节点 | [BT2010-02](../experiments/agent_regression/bench_recovery_cases.json) | sop_inputs |
+| 真实模型节点 | [BT2010-03](../experiments/agent_regression/bench_recovery_cases.json) | sop_inputs |
+| 真实模型节点 | [BT2010-04](../experiments/agent_regression/bench_recovery_cases.json) | empty_domain |
+| 真实模型节点 | [BT2010-05](../experiments/agent_regression/bench_recovery_cases.json) | empty_domain |
+| 真实模型节点 | [BT2010-06](../experiments/agent_regression/bench_recovery_cases.json) | unknown_field |
+| 真实模型节点 | [BT2010-07](../experiments/agent_regression/bench_recovery_cases.json) | unknown_field |
+| 真实模型节点 | [BT2010-08](../experiments/agent_regression/bench_recovery_cases.json) | unknown_field |
+| 真实模型节点 | [BT2010-09](../experiments/agent_regression/bench_recovery_cases.json) | singleton |
+| 真实模型节点 | [BT2030-01](../experiments/agent_regression/bench_recovery_cases.json) | sop_inputs |
+| 真实模型节点 | [BT2030-02](../experiments/agent_regression/bench_recovery_cases.json) | sop_inputs |
+| 真实模型节点 | [BT2030-03](../experiments/agent_regression/bench_recovery_cases.json) | unknown_field |
+| 真实模型节点 | [BT2030-04](../experiments/agent_regression/bench_recovery_cases.json) | unknown_field |
+| 真实模型节点 | [BT2030-05](../experiments/agent_regression/bench_recovery_cases.json) | empty_domain |
+| 真实模型节点 | [BT2030-06](../experiments/agent_regression/bench_recovery_cases.json) | observation_path |
+| 真实模型节点 | [BT2030-07](../experiments/agent_regression/bench_recovery_cases.json) | observation_path |
+| 真实模型节点 | [BT2030-08](../experiments/agent_regression/bench_recovery_cases.json) | observation_path |
+| 真实模型节点 | [BT2030-09](../experiments/agent_regression/bench_recovery_cases.json) | schema_argument |
+| 真实模型节点 | [BT2030-10](../experiments/agent_regression/bench_recovery_cases.json) | unknown_field |
+| 真实模型节点 | [BT2030-11](../experiments/agent_regression/bench_recovery_cases.json) | unknown_field |
+| 真实模型节点 | [BT2030-12](../experiments/agent_regression/bench_recovery_cases.json) | unknown_field |
+| 真实模型节点 | [BT2066-01](../experiments/agent_regression/bench_recovery_cases.json) | sop_inputs |
+| 真实模型节点 | [BT2066-02](../experiments/agent_regression/bench_recovery_cases.json) | sop_inputs |
+| 真实模型节点 | [BT2066-03](../experiments/agent_regression/bench_recovery_cases.json) | sop_inputs |
+| 真实模型节点 | [BT2066-04](../experiments/agent_regression/bench_recovery_cases.json) | unknown_field |
+| 真实模型节点 | [BT2066-05](../experiments/agent_regression/bench_recovery_cases.json) | empty_domain |
+| 真实模型节点 | [BT2066-06](../experiments/agent_regression/bench_recovery_cases.json) | empty_domain |
+| 真实模型节点 | [BT2066-07](../experiments/agent_regression/bench_recovery_cases.json) | empty_domain |
+| 真实模型节点 | [BT2066-08](../experiments/agent_regression/bench_recovery_cases.json) | empty_domain |
+| 真实模型节点 | [BT2066-09](../experiments/agent_regression/bench_recovery_cases.json) | schema_argument |
+| 真实模型节点 | [BT2066-10](../experiments/agent_regression/bench_recovery_cases.json) | unknown_field |
+| 真实模型节点 | [BT2066-11](../experiments/agent_regression/bench_recovery_cases.json) | unknown_field |
+| 真实模型节点 | [BT2066-12](../experiments/agent_regression/bench_recovery_cases.json) | unknown_field |
+| 真实模型节点 | [BT2066-13](../experiments/agent_regression/bench_recovery_cases.json) | unknown_field |
+| 真实模型节点 | [BT2279-01](../experiments/agent_regression/bench_recovery_cases.json) | unknown_field |
+| 真实模型节点 | [BT2279-02](../experiments/agent_regression/bench_recovery_cases.json) | empty_domain |
+| 真实模型节点 | [BT2279-03](../experiments/agent_regression/bench_recovery_cases.json) | empty_domain |
+| 真实模型节点 | [BT2279-04](../experiments/agent_regression/bench_recovery_cases.json) | unknown_field |
+| 真实模型节点 | [BT2279-05](../experiments/agent_regression/bench_recovery_cases.json) | unknown_field |
+| 真实模型节点 | [BT2279-06](../experiments/agent_regression/bench_recovery_cases.json) | unknown_field |
+| 真实模型节点 | [BT2279-07](../experiments/agent_regression/bench_recovery_cases.json) | diagnostic_scope |
 | 真实模型节点 | [LA01](../experiments/agent_regression/laya_additive_observations.json) | 见冻结清单 |
 | 真实模型节点 | [LA02](../experiments/agent_regression/laya_additive_observations.json) | 见冻结清单 |
 | 真实模型节点 | [LA03](../experiments/agent_regression/laya_additive_observations.json) | 见冻结清单 |
@@ -427,6 +472,7 @@
 | 真实模型节点 | [R16 · 不存在的工具](../experiments/agent_regression/README.md) | 详见原节点因果边界；不把首个报错当根因 |
 | 真实模型节点 | [R17 · 缺 SOP 输入](../experiments/agent_regression/README.md) | 详见原节点因果边界；不把首个报错当根因 |
 | 真实模型节点 | [R18 · 财务旧字段](../experiments/agent_regression/README.md) | 详见原节点因果边界；不把首个报错当根因 |
+| 离线测试套件 | [test_bench_tool_regression.py](../tests/test_bench_tool_regression.py) | 见入口中的断言 |
 | 离线测试套件 | [test_capability_routing.py](../tests/test_capability_routing.py) | 见入口中的断言 |
 | 离线测试套件 | [test_dynamic_tools.py](../tests/test_dynamic_tools.py) | 见入口中的断言 |
 | 离线测试套件 | [test_host_routing_state.py](../tests/test_host_routing_state.py) | 见入口中的断言 |
@@ -547,6 +593,8 @@
 | 真实模型节点 | [B02 · authorized_delivery_proposal](../experiments/agent_regression/cases.py) | phase_boundary |
 | 真实模型节点 | [B03](../experiments/agent_regression/hitl_revision.json) | 见冻结清单 |
 | 真实模型节点 | [B03 · correct_final_status_after_smtp_receipt](../experiments/agent_regression/cases.py) | phase_boundary |
+| 真实模型节点 | [BP2010](../experiments/agent_regression/bench_recovery_cases.json) | purchase_allocation |
+| 真实模型节点 | [BP2030](../experiments/agent_regression/bench_recovery_cases.json) | purchase_allocation |
 | 真实模型节点 | [D01 · repaired_internal_company_contact_semantics](../experiments/agent_regression/cases.py) | evidence_semantics |
 | 真实模型节点 | [D02 · repaired_ambiguous_company_customer_scope](../experiments/agent_regression/cases.py) | evidence_semantics |
 | 真实模型节点 | [D03 · amount_conflict_before_confirmation](../experiments/agent_regression/cases.py) | evidence_semantics |
@@ -762,6 +810,8 @@
 | 实验入口（含准备/评估；并非全部付费） | [staff.py](../experiments/enterprise_validation/staff.py) | 见入口中的断言 |
 | 实验入口（含准备/评估；并非全部付费） | [verifier.py](../experiments/dynamic_business_mvp/verifier.py) | 见入口中的断言 |
 | 实验检查 | [test.sh](../experiments/dynamic_business_mvp/tests/test.sh) | 见入口中的断言 |
+| 真实模型节点 | [BP2010](../experiments/agent_regression/bench_recovery_cases.json) | purchase_allocation |
+| 真实模型节点 | [BP2030](../experiments/agent_regression/bench_recovery_cases.json) | purchase_allocation |
 | 真实模型节点 | [M03](../experiments/agent_regression/manual_cases.json) | Reviewed purchase cancellation method absent |
 | 真实模型节点 | [M05](../experiments/agent_regression/manual_cases.json) | History used as current supplier commitment |
 | 真实模型节点 | [M11](../experiments/agent_regression/manual_cases.json) | Existing successful sales confirmation control |
@@ -771,6 +821,7 @@
 | 离线测试套件 | [test_enterprise_actions.py](../tests/test_enterprise_actions.py) | 见入口中的断言 |
 | 离线测试套件 | [test_enterprise_knowledge.py](../tests/test_enterprise_knowledge.py) | 见入口中的断言 |
 | 离线测试套件 | [test_enterprise_workbench.py](../tests/test_enterprise_workbench.py) | 见入口中的断言 |
+| 离线测试套件 | [test_purchase_allocation.py](../tests/test_purchase_allocation.py) | 见入口中的断言 |
 | 离线测试套件 | [test_workbench_sale_view.py](../tests/test_workbench_sale_view.py) | 见入口中的断言 |
 | 隔离完整业务 | [E03 · 客户收款核销](../experiments/enterprise_validation/README.md) | 最终状态＋安全约束＋效率；历史通过不代表当前通过 |
 | 隔离完整业务 | [E04 · 供应商付款核销](../experiments/enterprise_validation/README.md) | 最终状态＋安全约束＋效率；历史通过不代表当前通过 |

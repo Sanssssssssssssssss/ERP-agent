@@ -1,5 +1,19 @@
 # 单次决策回归
 
+2026-10-02后续：[根因修复与纠错验证](../../docs/bench-root-cause-20261002.md)。7次新请求验证字段恢复及两题采购修复；两题隔离终态的原评分均为100。实际纠错切面替换单个失败回包，后续请求严格匹配实际调用与回执ID；原44节点分类保留。
+
+2026-10-02：四条 ERPBench 运行的 41 个工具错误、两处采购来源失败及一个正常对照，已绑定到 [案例清单](bench_recovery_cases.json) 与 [普通测试](../../tests/test_bench_tool_regression.py)。最早错误、可识别的纠正请求、完整消息、工具定义和哈希保留在原冻结目录。当前共 44 个节点，准备候选不调用 API：
+
+```powershell
+.venv/Scripts/python.exe -m experiments.agent_regression.bench_recovery --output .runtime/bench-recovery-next
+# 仅对明确选中的实际节点发送一次；必须使用新目录，改源码后重新冻结。
+.venv/Scripts/python.exe -m experiments.agent_regression.bench_recovery --output .runtime/bench-recovery-next --case BT2010-01 --paid
+```
+
+本轮已发送的 10 次请求及用量见 [结果](../../docs/bench-regression-20261002.md)；返回工具没有执行，不自动重试。7 个节点结构/原错误判定通过、1 个仍猜错字段、2 个缺少完整关联核验。API 所测版本早于最后的宿主结束检查和结构化字段恢复回包，这些后续修改通过离线测试，不能计为已通过真实模型或完整业务验收。
+
+采购回归同时检查审批前、执行后和模型 STOP 后；销售单在本轮前已存在时也要查回真实来源。强制需求容量检查须来自宿主确认的 `purchase_sources` 契约；普通补库存不直接套用基准题规则。配置、范围和未覆盖路径见同一报告。
+
 HITL01/02：真实用户“帮我生成更加详细的正文内容，目前太短且不够礼貌”。覆盖修改意见进入原执行断点及新稿参数；与旧 B02 正常发送、B03 发送后回读组成关联回归。分类、入口、手动模板见 [HITL 邮件修订](../../docs/hitl-mail-revision.md)。完整原请求和日志在本机 `.runtime/hitl-mail-revision-20260930/`。
 
 [按能力查找全部测试](../../TESTING.md) · [IR01/IR02 中断恢复结果](../../docs/interrupted-recovery.md)。新故障保留原请求及来源哈希；索引不要求移动历史文件。

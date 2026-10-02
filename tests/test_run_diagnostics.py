@@ -1,14 +1,20 @@
+import ast
 import asyncio
+import copy
 import json
 from pathlib import Path
 from unittest.mock import patch
 
-from erp_harness.erp._odoo_core.odoo_client import OdooClient, READ_CALL_ID
+import pytest
+
+from erp_harness.erp._odoo_core.odoo_client import READ_CALL_ID, OdooClient
 from erp_harness.erp.reads import NativeReads
 from erp_harness.tools.run_diagnostics import build_diagnostic_tool, summarize_run
 
-
 IDENTITY = {"identity_id": "role-a", "credential_scope_sha256": "credential-scope"}
+FIELD_CASES = [case for case in json.loads((Path(__file__).resolve().parents[1]
+    / "experiments/agent_regression/bench_recovery_cases.json").read_text(encoding="utf-8"))
+    if case["failure_layer"] == "unknown_field"]
 
 
 def seed(root):
@@ -112,6 +118,7 @@ def test_identity_scope_and_unresolved_writes_never_replay(tmp_path):
 
 def test_live_routing_is_scoped_read_only_and_not_reused_as_current_history(tmp_path):
     from unittest.mock import Mock
+
     from erp_harness.app.capability_routing import project_routing_result
     seed(tmp_path)
     context=Mock(return_value={'status':'held','reason':'unresolved_write','active':['actions'],
@@ -182,3 +189,100 @@ def test_uncertain_write_is_not_hidden_by_recent_failures(tmp_path):
     assert len(result["items"]) == 3
     assert result["items"][0]["action_id"] == "act-unknown"
     assert result["items"][0]["next_action"] == "reconcile_without_replay"
+
+
+@pytest.mark.parametrize("case", FIELD_CASES, ids=lambda case: case["id"])
+def test_observed_field_refusals_keep_live_discovery_in_self_debug(tmp_path, case):
+    from erp_harness.app.capability_routing import project_routing_result
+    from erp_harness.tools.router import native_tool_catalog, route_tools
+    from tests.test_supply_context import SupplyClient
+
+    seed(tmp_path)
+    client = SupplyClient()
+    model = case["failed_arguments"]["model"]
+    unknown = ast.literal_eval(case["original_error"].split("Unknown field(s) ", 1)[1].split(" on ", 1)[0])
+    client._add(model, [field for field in case["failed_arguments"]["fields"] if field not in unknown], [])
+    routed = next(tool for tool in route_tools(native_tool_catalog(), tmp_path / "tool-backends.jsonl",
+        native=NativeReads(client), native_health=True) if tool.name == case["tool"])
+    with patch.object(client, "read_records", create=True, side_effect=AssertionError("invalid field reached data RPC")):
+        reply = asyncio.run(routed.execute("call-a", case["failed_arguments"]))
+    failure = reply.details["structuredContent"]
+    assert failure["success"] is False and failure["recovery_request"]
+    rows(tmp_path, "session.jsonl", {"message": {"role": "toolResult", "toolCallId": "call-a",
+         "details": reply.details}})
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    result = diagnose(tmp_path)
+    item = result["items"][0]
+    assert item["error_code"] == "unknown_field"
+    assert item["reason_code"] == "query_invalid"
+    assert item["likely_failure_layer"] == "tool_arguments"
+    assert item["next_action"] == "discover_live_fields"
+    assert item["recovery_request"]["tool"] == "mcp_odoo_get_model_fields"
+    assert item["recovery_request"]["arguments"]["model"] == model
+    assert item["recovery_request"]["unknown_fields"] == unknown
+    assert item["recovery_request"]["arguments"]["instance"] == failure["recovery_request"]["arguments"]["instance"]
+    assert "类型" in item["recovery_request"]["notice"] and "必要" in item["recovery_request"]["notice"]
+    assert item["odoo_request_seen"] is None  # No RPC evidence cannot prove no dispatch.
+    assert result["business_truth"] is False and len(json.dumps(result, ensure_ascii=False).encode()) <= 8192
+    projected = json.loads(project_routing_result("diagnose_current_run", json.dumps({**result, "routing": {}})))
+    assert projected["items"] == result["items"] and "routing" not in projected
+    assert before == {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+
+
+def test_field_discovery_does_not_override_conflicts_or_uncertain_writes(tmp_path):
+    from erp_harness.erp.reads import UnknownFieldsError
+
+    seed(tmp_path)
+    recovery = UnknownFieldsError("sale.order", ["old_field"], ["name"]).recovery
+    recovery["arguments"]["instance"] = "default"
+    failure = {"success": False, "reason_code": "query_invalid", "recovery_request": recovery,
+               "error": "SECRET-RAW", "action_id": "act-unknown"}
+    action = {"action_id": "act-unknown", "run_id": "run", "session_id": "session",
+              "identity": IDENTITY, "status": "sending"}
+    rows(tmp_path, "session.jsonl", {"message": {"role": "toolResult", "toolCallId": "call-a",
+         "content": [{"type": "text", "text": json.dumps(failure)}]}})
+    item = diagnose(tmp_path, [action])["items"][0]
+    assert item["next_action"] == "reconcile_without_replay" and "recovery_request" not in item
+    rows(tmp_path / "requests", "0002.meta.json", {"run_id": "run", "session_id": "session",
+         "request_id": "request2", "tool_call_ids": ["call-a"]})
+    item = diagnose(tmp_path)["items"][0]
+    assert item["error_code"] == "correlation_conflict" and "recovery_request" not in item
+    assert "SECRET" not in json.dumps(item)
+    rows(tmp_path / "requests", "0002.meta.json", {"run_id": "run", "session_id": "session",
+         "request_id": "request2", "tool_call_ids": []})
+    rows(tmp_path, "odoo-native-requests.jsonl", {"tool_call_id": "call-a", "event": "start",
+         "rpc_request_id": "rpc-incomplete", "dispatch_started": True})
+    item = diagnose(tmp_path)["items"][0]
+    assert item["likely_failure_layer"] == "odoo_transport" and "recovery_request" not in item
+
+
+def test_field_discovery_only_exposes_bounded_safe_metadata(tmp_path):
+    from erp_harness.erp.reads import UnknownFieldsError
+
+    seed(tmp_path)
+    recovery = UnknownFieldsError("sale.order", ["old_field"], ["name"]).recovery
+    recovery["arguments"].update(instance="secondary", token="SECRET-TOKEN")
+    recovery.update(notice="SECRET-INSTRUCTIONS", candidate_fields=["SECRET-CANDIDATES"])
+    failure = {"success": False, "reason_code": "query_invalid", "recovery_request": recovery,
+               "error": "SECRET-RAW", "detail": "SECRET-DETAIL"}
+    def record(value):
+        rows(tmp_path, "session.jsonl", {"message": {"role": "toolResult", "toolCallId": "call-a",
+             "content": [{"type": "text", "text": json.dumps(value)}]}})
+        return diagnose(tmp_path)
+
+    result = record(failure)
+    hint = result["items"][0]["recovery_request"]
+    assert hint["arguments"] == {"model": "sale.order", "instance": "secondary", "query": "old_field"}
+    assert "SECRET" not in json.dumps(result)
+    for change in ({"tool": "mcp_odoo_write_record"}, {"arguments": []},
+                   {"unknown_fields": "old_field"}, {"unknown_fields": ["../SECRET"]}):
+        invalid = copy.deepcopy(failure)
+        invalid["recovery_request"].update(change)
+        assert "recovery_request" not in record(invalid)["items"][0]
+    assert "recovery_request" not in record({**failure, "reason_code": "permission_denied"})["items"][0]
+    bounded = copy.deepcopy(failure)
+    bounded["recovery_request"]["unknown_fields"] = ["x" * 155 + str(i) for i in range(50)]
+    result = record(bounded)
+    hint = result["items"][0]["recovery_request"]
+    assert len(hint["unknown_fields"]) == 3 and hint["unknown_field_count"] == 50
+    assert len(json.dumps(result, ensure_ascii=False).encode()) <= 8192

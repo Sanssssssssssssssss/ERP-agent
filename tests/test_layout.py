@@ -67,8 +67,8 @@ class CleanHarnessTest(unittest.TestCase):
             (ROOT / "bench" / "configs" / "capabilities.json").read_text(encoding="utf-8")
         )
         self.assertEqual(inventory["compiler"], "out_of_scope")
-        self.assertEqual(len(inventory["tools"]), 43)
-        self.assertEqual(len({row["name"] for row in inventory["tools"]}), 43)
+        self.assertEqual(len(inventory["tools"]), 44)
+        self.assertEqual(len({row["name"] for row in inventory["tools"]}), 44)
         self.assertEqual(len(inventory["prompts"]), 11)
         self.assertEqual(len(inventory["resources"]), 4)
         self.assertEqual(
@@ -154,11 +154,11 @@ class CleanHarnessTest(unittest.TestCase):
             }
             for tool in tools
         ]
-        self.assertEqual(len(tools), 46)
+        self.assertEqual(len(tools), 47)
         self.assertEqual(
             hashlib.sha256(json.dumps(contract, sort_keys=True).encode()).hexdigest(),
-            # Reviewed purchase cancellation now documents its linked receipt effect.
-            "5babfc2be15967cf404f98e302109e9014c3e3a862b6679436e46f5849a36c8b",
+            # Source allocation inspection and corrected tool contracts.
+            "3239d05c6270dce5422bcf274673ee3ad5acf991d3edffe1c92f10fd966b69e6",
         )
 
 

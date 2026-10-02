@@ -81,6 +81,16 @@ BUSINESS_EXECUTION_POLICY = (
     "reinterpret established facts merely because adjacent records or another tool reveal "
     "more data. Reuse facts already read and their observation receipts when there is no "
     "new evidence; refresh Odoo only when current state is needed."
+    " Discover version-specific fields with get_model_fields before requesting notes, taxes, "
+    "units or manufacturing fields; reuse the live schema and never guess a replacement. "
+    "Respect required SOP inputs and published limits; JSON null differs from the string 'null'. "
+    "For procurement tied to sales demand, verify origin references and quantities before "
+    "confirmation and again before declaring completion: use read_purchase_allocation with "
+    "all related purchase and sale IDs, including competing purchases. Each origin must "
+    "support a positive allocation of the same product, company and unit; shared demand "
+    "cannot be counted twice. MOQ surplus needs actual source allocation or an explicitly "
+    "authorized stock policy; never add arbitrary origins. Missing evidence remains unknown. "
+    "Use diagnose_current_run for runtime faults, not as final business verification."
 )
 
 
@@ -703,6 +713,14 @@ async def run(args: argparse.Namespace, *, source_toolset=None) -> None:
                     "commitSha": os.environ.get("PI_ODOO_SOURCE_COMMIT"),
                 }
                 args.usage_file.write_text(json.dumps(usage), encoding="utf-8")
+                if actions is not None and assistant and assistant[-1].stop_reason == "stop":
+                    from erp_harness.erp.purchase_allocation import final_purchase_verification
+                    verification = final_purchase_verification(actions)
+                    (receipt_dir / "purchase-final-verification.json").write_text(
+                        json.dumps(verification, ensure_ascii=False), encoding="utf-8")
+                    print(json.dumps({"type": "business_verification", "verification": verification}, ensure_ascii=False), flush=True)
+                    if verification.get("enforced") and verification["status"] != "passed":
+                        raise RuntimeError("Host-bound final purchase allocation is not verified; inspect the receipt without replaying writes")
                 if memory is not None and assistant and assistant[-1].stop_reason == "stop" and actions is not None:
                     try:
                         from erp_harness.memory.store import save

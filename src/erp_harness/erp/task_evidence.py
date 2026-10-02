@@ -81,6 +81,13 @@ class TaskEvidence:
                 raise ValueError("release fields require a host-selected model, method and nonempty field list")
         self.purchase_sources = copy.deepcopy(self.spec.get("purchase_sources", []))
         for scope in self.purchase_sources:
+            if ("check_demand_capacity" in scope and type(scope["check_demand_capacity"]) is not bool
+                    or scope.get("check_demand_capacity") and (
+                        scope["product"].get("model") != "product.product"
+                        or scope["source"].get("model") != "sale.order"
+                        or scope["source"].get("field") != "name"
+                        or scope.get("purchases", {}).get("model", "purchase.order") != "purchase.order")):
+                raise ValueError("demand capacity requires explicit product and sale-name sources, with purchase-order peers")
             products = self._search(scope["product"], ["id"])
             minimum = scope.get("minimum_per_origin")
             if len(products) != 1 or (minimum is not None and (type(minimum) not in (int, float) or not math.isfinite(minimum) or minimum <= 0)):
@@ -203,9 +210,27 @@ class TaskEvidence:
         orders = self._search({"model": "purchase.order", "domain": [["id", "in", ids]]}, ["id", "origin"])
         if len(orders) != len(set(ids)):
             raise ValueError("purchase source target is unavailable")
+        capacity_scopes = [s for s in self.purchase_sources if s.get("check_demand_capacity")]
+        capacity_evidence = []
+        for scope in capacity_scopes:
+            from .purchase_allocation import PurchaseAllocationError, inspect_purchase_allocation
+            allowed = self._search(scope["source"], ["id"])
+            # Host chooses the competing purchase scope; model cannot weaken it.
+            peers = self._search(scope["purchases"], ["id"]) if scope.get("purchases") else orders
+            report = inspect_purchase_allocation(self.reads.instances[self.instance],
+                sorted({*ids, *(r["id"] for r in peers)}), [r["id"] for r in allowed],
+                minimum=scope.get("minimum_per_origin", 1e-6), product_id=scope["product_id"])
+            if report["status"] != "passed":
+                self._event("rejected", reason="purchase_demand_allocation", report=report)
+                raise PurchaseAllocationError(report)
+            capacity_evidence.append(["purchase_allocation", report])
+        if len(capacity_scopes) == len(self.purchase_sources):
+            return capacity_evidence
         lines = self._search({"model": "purchase.order.line", "domain": [["order_id", "in", ids]]}, ["id", "order_id", "product_id", "product_uom_qty"])
-        evidence = []
+        evidence = capacity_evidence
         for scope in self.purchase_sources:
+            if scope.get("check_demand_capacity"):
+                continue
             source = scope["source"]
             allowed = self._search(source, ["id", source["field"]])
             by_name = {row[source["field"]]: row for row in allowed}

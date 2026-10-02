@@ -306,6 +306,8 @@ def get_sop(sop_id: str, inputs: dict[str, Any] | None = None) -> dict[str, Any]
             "unknown": unknown,
             "missing": missing,
             "invalid": invalid,
+            "reason_code": "sop_inputs_invalid",
+            "next_action": "Use the listed parameter names and nonempty strings from the actual business context; do not invent missing choices.",
         }
     if sop_id == "safe_write_review" and supplied["operation"] not in {"create", "write", "unlink"}:
         operation = supplied["operation"]
@@ -445,7 +447,10 @@ def build_sop_tools(
         AgentTool(
             name="get_odoo_sop",
             label="Get Odoo SOP",
-            description="Read one audited Odoo procedure and its authorization checkpoints before acting.",
+            description=("Read one audited Odoo procedure and its authorization checkpoints before acting. "
+                         "Supply required inputs from the actual business context: " + "; ".join(
+                             name + ": " + ", ".join(k for k, required in spec["parameters"].items() if required)
+                             for name, spec in SOPS.items() if any(spec["parameters"].values()))),
             parameters={
                 "type": "object",
                 "properties": {

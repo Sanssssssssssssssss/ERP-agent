@@ -70,6 +70,26 @@ def _error(message, payload):
     return None
 
 
+def _field_recovery(payload):
+    recovery = payload.get("recovery_request")
+    if payload.get("success") is not False or payload.get("reason_code") != "query_invalid" or not isinstance(recovery, dict):
+        return None
+    arguments = recovery.get("arguments")
+    fields = recovery.get("unknown_fields")
+    if (recovery.get("tool") != "mcp_odoo_get_model_fields" or not isinstance(arguments, dict)
+            or not _identifier(arguments.get("model")) or not _identifier(arguments.get("instance"))
+            or not isinstance(fields, list) or not fields or not all(_identifier(field) for field in fields)):
+        return None
+    # Bound diagnostics, retaining the total so truncation cannot look like a complete field list.
+    return {"tool": "mcp_odoo_get_model_fields",
+            "arguments": {"model": arguments["model"], "instance": arguments["instance"],
+                          "query": " ".join(fields[:3])},
+            "unknown_fields": fields[:3], "unknown_field_count": len(fields),
+            "notice": "当前实例的字段定义中不存在这些字段，可能是版本或命名差异，不能据此认定权限不足。"
+                      "先调用本只读字段发现工具，查验名称、类型和关联；候选字段不是语义替代。"
+                      "若检索不足，按业务含义扩大查询。必要业务信息仍无法获取时保留未知，不能只删字段就认定核验通过。"}
+
+
 def summarize_run(directory: Path, session_file: Path, identity: dict, *, run_id: str, session_id: str):
     """Only explicit IDs join artifacts; missing evidence never proves no dispatch."""
     result = {"success": True, "scope": "current_run", "business_truth": False,
@@ -135,7 +155,7 @@ def summarize_run(directory: Path, session_file: Path, identity: dict, *, run_id
         conflict = call in ambiguous_calls or any(
             r.get("rpc_request_id") in rpc_ids and r.get("tool_call_id") != call for r in rpc)
         text = "".join(p.get("text", "") for p in message.get("content", []) if isinstance(p, dict))
-        before_dispatch = bool(message.get("isError") and re.fullmatch(r"Tool [\w.-]+ not found(?:\..*)?", text, re.S))
+        before_dispatch = bool(message.get("isError") and re.fullmatch(r"Tool [\w.-]+ not found(?:\..*)?", text, re.DOTALL))
         observed_dispatch = any(r.get("dispatch_started") is True for r in matching)
         explicit_no_dispatch = bool(matching) and all(r.get("dispatch_started") is False for r in matching)
         policy_no_dispatch = failure.get("stage") == "before_send" and failure.get("odoo_request_seen") is False
@@ -183,6 +203,11 @@ def summarize_run(directory: Path, session_file: Path, identity: dict, *, run_id
         })
         if not conflict and failure.get("code") in {"method_not_supported", "scope_handoff_required", "business_choice_required", "scope_reconfirmation_required"}:
             result["items"][-1].update(error_code=failure["code"], likely_failure_layer=failure.get("layer", "handoff"), next_action=failure.get("next_action", "request_user_input"))
+        if not conflict and not action_id and not incomplete_rpc and not failure and code == "tool_failed":
+            recovery = _field_recovery(payload)
+            if recovery:
+                result["items"][-1].update(error_code="unknown_field", reason_code="query_invalid",
+                    likely_failure_layer="tool_arguments", next_action="discover_live_fields", recovery_request=recovery)
         if len(result["items"]) == 3:
             break
     unresolved = []

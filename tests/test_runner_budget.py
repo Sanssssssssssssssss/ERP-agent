@@ -53,6 +53,9 @@ class RunnerBudgetTest(unittest.TestCase):
             context = SimpleNamespace()
             with patch.object(harbor_agent, "_start_task_mcp", new=AsyncMock()):
                 await agent._run("do work", object(), context)
+            runtime = next(c for c in agent.exec_as_agent.call_args_list if c.kwargs.get('env'))
+            self.assertEqual(runtime.kwargs['env']['PI_AGENT_RUN_ID'], 'test')
+            self.assertEqual(runtime.kwargs['env']['PI_AGENT_SESSION_ID'], 'test')
             return context
 
         unknown = asyncio.run(run_case({}))

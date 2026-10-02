@@ -29,7 +29,7 @@ from erp_harness.erp._odoo_core.odoo_client import (
 READ_TOOLS = frozenset({
     "get_odoo_profile", "get_model_fields", "search_records", "find_records", "read_record",
     "list_instances", "list_models", "schema_catalog", "read_attachment",
-    "aggregate_records", "search_employee", "search_holidays", "read_supply_context",
+    "aggregate_records", "search_employee", "search_holidays", "read_supply_context", "read_purchase_allocation",
 })
 SIDE_EFFECT_TOOLS = frozenset({"execute_approved_write", "chatter_post", "execute_method"})
 RELATION_TYPES = frozenset({"many2one", "one2many", "many2many"})
