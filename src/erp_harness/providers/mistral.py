@@ -14,6 +14,7 @@ from erp_harness.runtime.messages import (
     ImageContent,
     ThinkingContent,
     ToolResultMessage,
+    Usage,
     UserMessage,
     assistant_content,
     message_to_user,
@@ -39,6 +40,7 @@ from erp_harness.providers.env import OpenAICompatibleConfig
 from erp_harness.providers.events import AssistantMessageEvent
 from erp_harness.providers.http import create_async_client
 from erp_harness.providers.http_errors import provider_http_error_message
+from erp_harness.providers.openai_compatible import _parse_chunk_usage
 from erp_harness.providers.provider import (
     CancellationToken,
     apply_provider_headers,
@@ -110,6 +112,8 @@ class MistralConversationsProvider:
             max_tokens=self._config.max_tokens,
             supports_images=self._config.supports_images,
         )
+        if self._config.compat.get("supportsUsageInStreaming") is not False:
+            payload["stream_options"] = {"include_usage": True}
         return self._stream(
             model=model,
             url=f"{_mistral_base_url(self._config.base_url)}/chat/completions",
@@ -247,13 +251,26 @@ class _MistralStreamParser:
         self._thinking_parts: list[str] = []
         self._tool_call_builders: dict[int, _ToolCallBuilder] = {}
         self._finish_reason: str | None = None
+        self._done_seen = False
+        self._usage = Usage()
 
     def feed(self, event: str) -> tuple[list[ProviderEvent], bool]:
         if event == "[DONE]":
+            self._done_seen = True
             return [], True
         chunk = _loads_object(event)
         if chunk is None:
             return [], False
+        raw_usage = chunk.get("usage")
+        if isinstance(raw_usage, Mapping):
+            prompt = raw_usage.get("prompt_tokens")
+            details = raw_usage.get("prompt_tokens_details")
+            # Mistral documents omitted cached_tokens as no cache hit.
+            if (isinstance(prompt, int) and not isinstance(prompt, bool) and prompt >= 0
+                    and (details is None or isinstance(details, Mapping))):
+                raw_usage = {**raw_usage, "prompt_tokens_details": {"cached_tokens": 0, **(details or {})}}
+            reported_usage = _parse_chunk_usage(raw_usage, preserve_unknown=True)
+            self._usage = self._usage.model_copy(update=reported_usage.model_dump(exclude_unset=True, by_alias=False))
         choice = _first_choice(chunk)
         if choice is None:
             return [], False
@@ -280,6 +297,16 @@ class _MistralStreamParser:
         return events, False
 
     def finalize(self) -> list[ProviderEvent]:
+        if not self._done_seen:
+            return [ProviderErrorEvent(message="Mistral stream ended without [DONE]", usage=self._usage)]
+        if self._finish_reason is None:
+            return [ProviderErrorEvent(message="Mistral stream ended without finish_reason", usage=self._usage)]
+        if not isinstance(self._finish_reason, str) or self._finish_reason not in {"stop", "tool_calls", "length", "model_length"}:
+            reason = self._finish_reason[:80] if isinstance(self._finish_reason, str) else type(self._finish_reason).__name__
+            return [ProviderErrorEvent(message=f"Mistral rejected response with finish_reason={reason}", usage=self._usage)]
+        if any(builder.invalid_arguments or _loads_object("".join(builder.arguments_parts)) is None
+               for builder in self._tool_call_builders.values()):
+            return [ProviderErrorEvent(message="Mistral returned missing, non-object or incomplete tool arguments", usage=self._usage)]
         tool_calls = [
             builder.build(index) for index, builder in sorted(self._tool_call_builders.items())
         ]
@@ -291,8 +318,8 @@ class _MistralStreamParser:
             content.insert(0, ThinkingContent(thinking="".join(self._thinking_parts)))
         events.append(
             ProviderResponseEndEvent(
-                message=AssistantMessage(content=content),
-                finish_reason=self._finish_reason or ("tool_calls" if tool_calls else "stop"),
+                message=AssistantMessage(content=content, usage=self._usage),
+                finish_reason="length" if self._finish_reason == "model_length" else self._finish_reason,
             )
         )
         return events
@@ -303,6 +330,7 @@ class _ToolCallBuilder:
         self.id = ""
         self.name = ""
         self.arguments_parts: list[str] = []
+        self.invalid_arguments = False
 
     def add_delta(self, delta: Mapping[str, Any]) -> None:
         call_id = delta.get("id")
@@ -319,6 +347,8 @@ class _ToolCallBuilder:
             self.arguments_parts.append(arguments)
         elif isinstance(arguments, Mapping):
             self.arguments_parts.append(dumps(arguments))
+        elif "arguments" in function:
+            self.invalid_arguments = True
 
     def build(self, index: int) -> ToolCall:
         arguments_text = "".join(self.arguments_parts)

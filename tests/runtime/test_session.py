@@ -16,7 +16,7 @@ from erp_harness.runtime import (
     ToolResultMessage,
     UserMessage,
 )
-from erp_harness.runtime.messages import convert_to_llm
+from erp_harness.runtime.messages import Usage, UsageCost, convert_to_llm
 from erp_harness.runtime.storage import (
     BranchSummaryEntry,
     CompactionEntry,
@@ -33,6 +33,87 @@ from erp_harness.runtime.storage import (
     entry_to_json_line,
     path_to_entry,
 )
+
+
+@pytest.mark.parametrize("kind", ["message", "compaction", "branch_summary"])
+def test_session_usage_roundtrip_preserves_missing_and_reported_zero(kind: str) -> None:
+    from erp_harness.app.request_receipts import RequestReceipts, _sum_usage_bucket
+
+    usage = Usage(input=4, output=0)
+    if kind == "message":
+        entry = MessageEntry(message=AssistantMessage(usage=usage))
+    else:
+        cls = CompactionEntry if kind == "compaction" else BranchSummaryEntry
+        entry = cls(summary="keep the summary", usage=usage)
+    payload = json.loads(entry_to_json_line(entry))
+    encoded_usage = payload["message"]["usage"] if kind == "message" else payload["usage"]
+    assert encoded_usage == {"input": 4, "output": 0}
+    loaded = entry_from_json_line(entry_to_json_line(entry))
+    restored_usage = loaded.message.usage if kind == "message" else loaded.usage
+    assert _sum_usage_bucket([restored_usage], "input") == 4
+    assert _sum_usage_bucket([restored_usage], "output") == 0
+    assert _sum_usage_bucket([restored_usage], "total_tokens") is None
+    assert _sum_usage_bucket([restored_usage], "cache_read") is None
+    if kind == "message":
+        assert payload["message"]["stopReason"] == "stop"
+        assert RequestReceipts._usage(loaded.message)["total_tokens"] is None
+    else:
+        assert loaded.summary == "keep the summary"
+
+
+def test_session_legacy_complete_usage_roundtrip_keeps_values() -> None:
+    usage = Usage(input=4, cache_read=8, cache_write=0, output=6, reasoning=2, total_tokens=18)
+    message = AssistantMessage(usage=usage)
+    entry = MessageEntry(message=message)
+    line = entry_to_json_line(entry)
+    loaded = entry_from_json_line(line)
+    assert loaded.message.usage == usage
+    assert json.loads(entry_to_json_line(loaded))["message"]["usage"] == json.loads(line)["message"]["usage"]
+
+
+def test_compaction_combines_only_reported_usage_and_cost_through_storage() -> None:
+    from erp_harness.app.request_receipts import _sum_usage_bucket
+    from erp_harness.runtime.session import _combine_usage
+
+    first = Usage(total_tokens=12, cost=UsageCost(total=0.2))
+    second = Usage(input=4, output=2, total_tokens=6, cost=UsageCost(total=0.1, input=0.01))
+    combined = _combine_usage(first, second)
+    loaded = entry_from_json_line(entry_to_json_line(CompactionEntry(summary="offline", usage=combined)))
+    assert _sum_usage_bucket([loaded.usage], "total_tokens") == 18
+    assert _sum_usage_bucket([loaded.usage], "input") is None
+    assert _sum_usage_bucket([loaded.usage], "output") is None
+    assert loaded.usage.cost.model_fields_set == {"total"}
+    assert loaded.usage.cost.total == pytest.approx(0.3)
+    known = Usage(input=4, output=0, cache_read=8, cache_write=0, reasoning=2, total_tokens=12)
+    assert _combine_usage(known, known).model_dump(exclude_unset=True) == {
+        "input": 8, "output": 0, "cacheRead": 16, "cacheWrite": 0, "reasoning": 4, "totalTokens": 24}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("has_history", [False, True])
+async def test_turn_prefix_compaction_omits_unrequested_history_usage(has_history: bool) -> None:
+    from types import SimpleNamespace
+
+    from erp_harness.app.request_receipts import _sum_usage_bucket
+    from erp_harness.runtime.session import HarnessSession, _SummaryResult
+
+    calls = []
+    async def history(*_args, **_kwargs):
+        calls.append("history")
+        return _SummaryResult(text="history", usage=Usage(total_tokens=12), details={})
+    async def prefix(*_args, **_kwargs):
+        calls.append("prefix")
+        return _SummaryResult(text="prefix", usage=Usage(input=4, output=2, total_tokens=6), details={})
+    plan = SimpleNamespace(turn_prefix_messages=(UserMessage(content="preserve current turn"),),
+        messages_to_summarize=(UserMessage(content="history"),) if has_history else (),
+        previous_summary=None, read_files=(), modified_files=())
+    session = SimpleNamespace(_generate_compaction_summary=history, _complete_summary_prompt=prefix)
+    result = await HarnessSession._generate_compaction_plan_summary(session, plan)
+    loaded = entry_from_json_line(entry_to_json_line(CompactionEntry(summary=result.text, usage=result.usage)))
+    assert calls == (["history", "prefix"] if has_history else ["prefix"])
+    assert _sum_usage_bucket([loaded.usage], "total_tokens") == (18 if has_history else 6)
+    assert _sum_usage_bucket([loaded.usage], "input") == (None if has_history else 4)
+    assert _sum_usage_bucket([loaded.usage], "output") == (None if has_history else 2)
 
 
 def test_session_entry_round_trips_canonical_jsonl() -> None:
@@ -87,7 +168,7 @@ def test_assistant_and_tool_result_round_trip_canonical_blocks() -> None:
     result_payload = json.loads(entry_to_json_line(result))["message"]
 
     assert assistant_payload["content"][0]["text"] == "Hi"
-    assert assistant_payload["usage"]["totalTokens"] == 0
+    assert assistant_payload["usage"] == {}
     assert "timing" not in assistant_payload
     assert result_payload["role"] == "toolResult"
     assert result_payload["toolName"] == "edit"
@@ -210,7 +291,7 @@ def test_assistant_message_with_legacy_null_usage_cost_migrates() -> None:
     assert entry.message.usage.total_tokens == 12
     assert entry.message.usage.cost.total == 0.0
     rewritten = json.loads(entry_to_json_line(entry))["message"]
-    assert rewritten["usage"]["cost"]["total"] == 0.0
+    assert rewritten["usage"]["cost"] == {}
 
 
 def test_legacy_tool_message_migrates_and_preserves_data() -> None:

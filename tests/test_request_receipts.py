@@ -14,7 +14,11 @@ from unittest.mock import patch
 import httpx
 
 from erp_harness.app.host import Workbench
-from erp_harness.app.request_receipts import ReceiptPersistenceError, RequestReceipts
+from erp_harness.app.request_receipts import (
+    ReceiptPersistenceError,
+    RequestReceipts,
+    _sum_usage_bucket,
+)
 from erp_harness.app.worker import child_environment
 from erp_harness.context.paths import RuntimePaths
 from erp_harness.context.resources import ResourcePaths
@@ -32,7 +36,7 @@ from erp_harness.providers.provider import ProviderRequestRejected
 from erp_harness.providers.retry import is_retryable_assistant_error
 from erp_harness.runtime.harness import SimpleCancellationToken
 from erp_harness.runtime.loop import run_agent_loop
-from erp_harness.runtime.messages import AssistantMessage, UserMessage
+from erp_harness.runtime.messages import AssistantMessage, Usage, UserMessage
 from erp_harness.runtime.provider import provider_request_kind, scoped_provider_stream
 from erp_harness.runtime.session import HarnessSession, SessionConfig
 from erp_harness.runtime.storage import JsonlSessionStorage
@@ -374,6 +378,168 @@ class RequestReceiptTests(unittest.IsolatedAsyncioTestCase):
                             _ = [event async for event in compatibility_provider(api, client, receipts).stream_response(
                                 model="test", system="s", messages=[], tools=[])]
                     self.assertEqual(len(sent), 0 if phase == "headers" else 1)
+
+    async def test_google_and_mistral_wire_usage_preserves_known_and_missing_buckets(self):
+        for api in ("google", "mistral"):
+            for variant in ("full", "partial", "invalid", "missing"):
+                with self.subTest(api=api, variant=variant):
+                    root = self.root / api / variant
+                    receipts = RequestReceipts(root)
+                    if api == "google":
+                        normal = {"candidates": [{"content": {"parts": [{"text": "ok"}]}, "finishReason": "STOP"}]}
+                        values = {"full": {"promptTokenCount": 100, "cachedContentTokenCount": 20,
+                                             "candidatesTokenCount": 5, "thoughtsTokenCount": 3, "totalTokenCount": 108},
+                                  "partial": {"totalTokenCount": 12},
+                                  "invalid": {"promptTokenCount": True, "cachedContentTokenCount": False,
+                                              "candidatesTokenCount": -1, "thoughtsTokenCount": 3.5, "totalTokenCount": "8"}}
+                        key = "usageMetadata"
+                    else:
+                        normal = {"choices": [{"delta": {"content": "ok"}, "finish_reason": "stop"}]}
+                        values = {"full": {"prompt_tokens": 100, "prompt_tokens_details": {"cached_tokens": 20},
+                                             "completion_tokens": 8, "total_tokens": 108},
+                                  "partial": {"total_tokens": 12},
+                                  "invalid": {"prompt_tokens": True, "prompt_tokens_details": {"cached_tokens": False},
+                                              "completion_tokens": -1, "total_tokens": "8"}}
+                        key = "usage"
+                    body = "data: " + json.dumps(normal) + "\n\n"
+                    if variant != "missing":
+                        # Repeated cumulative usage and an empty trailing usage must not add or erase counts.
+                        usage_line = "data: " + json.dumps({key: values[variant]}) + "\n\n"
+                        body += usage_line * 2 + "data: " + json.dumps({key: {}}) + "\n\n"
+                    if api == "mistral":
+                        body += "data: [DONE]\n\n"
+                    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _, _body=body: httpx.Response(200, text=_body))) as client:
+                        events = [event async for event in compatibility_provider(api, client, receipts).stream_response(
+                            model="test", system="s", messages=[], tools=[])]
+                    self.assertEqual(events[-1].type, "done")
+                    usage = rows(root)[0]["usage"]
+                    if variant == "full":
+                        self.assertEqual((usage["input"], usage["cache_read"], usage["output"], usage["total_tokens"]), (80, 20, 8, 108))
+                        self.assertEqual(usage["reasoning"], 3 if api == "google" else None)
+                    elif variant == "partial":
+                        self.assertEqual(usage["total_tokens"], 12)
+                        self.assertTrue(all(value is None for field, value in usage.items() if field != "total_tokens"))
+                    else:
+                        self.assertTrue(all(value is None for value in usage.values()))
+                    self.assertIsNone(usage["cache_write"])
+                    self.assertEqual(_sum_usage_bucket([events[-1].message.usage], "total_tokens"), usage["total_tokens"])
+
+    async def test_mistral_stream_usage_configuration_respects_optout_and_payload_hook(self):
+        for mode in ("default", "compat_optout", "hook_optout"):
+            with self.subTest(mode=mode):
+                class Capture(RequestReceipts):
+                    async def before_provider_request(self, payload, _mode=mode):
+                        if _mode == "hook_optout":
+                            payload["stream_options"] = {"include_usage": False}
+                        return await super().before_provider_request(payload)
+                sent = []
+                def handler(request, _sent=sent):
+                    _sent.append(json.loads(request.content))
+                    return compatibility_response("mistral")
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    adapter = MistralConversationsProvider(OpenAICompatibleConfig(api_key="test-only",
+                        max_retries=0, provider_hooks=Capture(self.root / mode),
+                        compat={"supportsUsageInStreaming": False} if mode == "compat_optout" else {}), client=client)
+                    _ = [event async for event in adapter.stream_response(model="test", system="s", messages=[], tools=[])]
+                if mode == "compat_optout":
+                    self.assertNotIn("stream_options", sent[0])
+                else:
+                    self.assertEqual(sent[0]["stream_options"], {"include_usage": mode == "default"})
+
+    async def test_compatibility_terminal_guards_prevent_incomplete_tool_dispatch(self):
+        cases = [("google", reason, True, "{}", 1 if reason == "STOP" else 0)
+                 for reason in ("STOP", "MAX_TOKENS", "SAFETY", "MALFORMED_FUNCTION_CALL", "UNKNOWN", None)]
+        cases += [("mistral", reason, done, arguments, expected) for reason, done, arguments, expected in (
+            ("stop", True, "{}", 1), ("tool_calls", True, "{}", 1),
+            ("length", True, "{}", 0), ("model_length", True, "{}", 0),
+            ("unknown", True, "{}", 0), (None, False, "{}", 0), ("stop", False, "{}", 0),
+            (None, True, "{}", 0), ("stop", True, "{", 0), ("length", True, "{", 0))]
+        for index, (api, reason, done, arguments, expected) in enumerate(cases):
+            with self.subTest(api=api, reason=reason, done=done, arguments=arguments):
+                dispatched, sent = [], []
+                async def execute(*_args, _dispatched=dispatched):
+                    _dispatched.append(True)
+                    return AgentToolResult(content="offline only")
+                tool = AgentTool(name="offline_tool", label="Offline", description="Offline terminal control",
+                    parameters={"type": "object", "properties": {}}, execute_fn=execute)
+                if api == "google":
+                    body = {"candidates": [{"content": {"parts": [{"functionCall": {
+                        "id": "call", "name": "offline_tool", "args": {}}}]}, "finishReason": reason}],
+                        "usageMetadata": {"promptTokenCount": 100, "cachedContentTokenCount": 20,
+                            "candidatesTokenCount": 5, "thoughtsTokenCount": 3, "totalTokenCount": 108}}
+                else:
+                    body = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call", "type": "function",
+                        "function": {"name": "offline_tool", "arguments": arguments}}]}, "finish_reason": reason}],
+                        "usage": {"prompt_tokens": 100, "prompt_tokens_details": {"cached_tokens": 20},
+                            "completion_tokens": 8, "total_tokens": 108}}
+                wire = "data: " + json.dumps(body) + "\n\n" + ("data: [DONE]\n\n" if api == "mistral" and done else "")
+                def handler(request, _sent=sent, _wire=wire, _api=api):
+                    _sent.append(request)
+                    return httpx.Response(200, text=_wire) if len(_sent) == 1 else compatibility_response(_api)
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    events = [event async for event in run_agent_loop(provider=compatibility_provider(api, client, RequestReceipts(self.root / str(index))),
+                        model="test", system="s", messages=[], prompts=[UserMessage(content="offline guard")], tools=[tool])]
+                self.assertEqual(len(dispatched), expected)
+                # Length rejects dispatch, then the existing loop may request a corrected response.
+                continuation = reason in {"MAX_TOKENS", "length", "model_length"} and arguments == "{}"
+                self.assertEqual(len(sent), 2 if continuation else 1 + expected)
+                if continuation:
+                    self.assertEqual(rows(self.root / str(index))[0]["stop_reason"], "length")
+                usage = rows(self.root / str(index))[0]["usage"]
+                self.assertEqual((usage["input"], usage["cache_read"], usage["output"], usage["total_tokens"]), (80, 20, 8, 108))
+                if not expected and not continuation:
+                    error = next(event.message for event in events if event.type == "message_end" and getattr(event.message, "stop_reason", None) == "error")
+                    if reason in {"SAFETY", "MALFORMED_FUNCTION_CALL", "UNKNOWN", "unknown"}:
+                        self.assertIn(reason, error.error_message)
+                    elif api == "mistral" and not done:
+                        self.assertIn("[DONE]", error.error_message)
+                    elif reason is None:
+                        self.assertIn("finish", error.error_message)
+                    else:
+                        self.assertIn("arguments", error.error_message)
+
+    async def test_explicit_bad_argument_shapes_are_not_replaced_with_empty_arguments(self):
+        absent = object()
+        cases = [(api, value) for api in ("google", "mistral") for value in (None, [], True, 1)]
+        cases += [("mistral", value) for value in (absent, "", "[]", "null")]
+        cases += [("google", absent), ("google", {}), ("mistral", "{}")]
+        for index, (api, value) in enumerate(cases):
+            with self.subTest(api=api, value=value):
+                dispatched, sent = [], []
+                async def execute(_call, arguments, *_args, _dispatched=dispatched):
+                    _dispatched.append(arguments)
+                    return AgentToolResult(content="offline only")
+                tool = AgentTool(name="offline_tool", label="Offline", description="Offline shape control",
+                    parameters={"type": "object", "properties": {}}, execute_fn=execute)
+                function = {"name": "offline_tool"}
+                if value is not absent:
+                    function["args" if api == "google" else "arguments"] = value
+                if api == "google":
+                    body = {"candidates": [{"content": {"parts": [{"functionCall": function}]}, "finishReason": "STOP"}]}
+                else:
+                    body = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call", "function": function}]}, "finish_reason": "tool_calls"}]}
+                wire = "data: " + json.dumps(body) + "\n\n" + ("data: [DONE]\n\n" if api == "mistral" else "")
+                def handler(request, _sent=sent, _wire=wire, _api=api):
+                    _sent.append(request)
+                    return httpx.Response(200, text=_wire) if len(_sent) == 1 else compatibility_response(_api)
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    _ = [event async for event in run_agent_loop(provider=compatibility_provider(api, client, RequestReceipts(self.root / f"shape-{index}")),
+                        model="test", system="s", messages=[], prompts=[UserMessage(content="offline guard")], tools=[tool])]
+                expected = api == "google" and (value is absent or value == {}) or api == "mistral" and value == "{}"
+                self.assertEqual(dispatched, [{}] if expected else [])
+                self.assertEqual(len(sent), 2 if expected else 1)
+
+    def test_terminal_error_usage_distinguishes_reported_zero_from_missing(self):
+        from erp_harness.app.request_receipts import _message_usage
+
+        reported = AssistantMessage(stop_reason="error", usage=Usage(output=0, total_tokens=0))
+        missing = AssistantMessage(stop_reason="error")
+        self.assertEqual(RequestReceipts._usage(reported)["output"], 0)
+        self.assertEqual(RequestReceipts._usage(reported)["total_tokens"], 0)
+        self.assertIsNone(RequestReceipts._usage(reported)["input"])
+        self.assertEqual(_message_usage(reported).output, 0)
+        self.assertIsNone(_message_usage(missing))
+        self.assertTrue(all(value is None for value in RequestReceipts._usage(missing).values()))
 
     async def test_retry_capture_failures_block_new_posts_in_both_endpoints(self):
         write, replace = Path.write_text, Path.replace

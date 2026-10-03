@@ -193,6 +193,8 @@ async def canonicalize_provider_stream(
             terminal = True
         elif isinstance(event, ProviderErrorEvent):
             error = partial.model_copy(deep=True)
+            if event.usage is not None:
+                error.usage = event.usage.model_copy(deep=True)
             error.response_provider = event.response_provider or partial.response_provider
             error.stop_reason = "error"
             error.error_message = event.message

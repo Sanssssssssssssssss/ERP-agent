@@ -10,6 +10,7 @@ from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic
+from types import SimpleNamespace
 from uuid import uuid4
 
 from erp_harness.app.stream_events import public_events
@@ -32,19 +33,25 @@ def _sum_usage_bucket(usages: list[object], name: str, *, empty: int | None = No
     """
     if not usages:
         return empty
-    values = [getattr(usage, name, None) if usage is not None else None for usage in usages]
+    values = [_reported_usage_value(usage, name) for usage in usages]
     if any(value is None for value in values):
         return None
     return sum(values)
+
+
+def _reported_usage_value(usage, name):
+    supplied = getattr(usage, "model_fields_set", None)
+    return (getattr(usage, name, None) if supplied is None or name in supplied else None)
 
 
 def _message_usage(message: AssistantMessage) -> object | None:
     usage = getattr(message, "usage", None)
     if getattr(message, "stop_reason", None) in {"error", "aborted"}:
         fields = ("input", "cache_read", "cache_write", "output", "total_tokens", "reasoning")
-        if usage is None or not any(getattr(usage, field, None) not in (None, 0) for field in fields):
+        if usage is None or not getattr(usage, "model_fields_set", None) and not any(getattr(usage, field, None) not in (None, 0) for field in fields):
             return None
-    return usage
+    fields = ("input", "cache_read", "cache_write", "cache_write_1h", "output", "total_tokens", "reasoning")
+    return SimpleNamespace(**{field: _reported_usage_value(usage, field) for field in fields}) if usage is not None else None
 
 
 class ReceiptPersistenceError(ProviderRequestRejected):
@@ -209,9 +216,9 @@ class RequestReceipts:
     def _usage(message):
         usage = message.usage
         fields = ("input", "cache_read", "cache_write", "cache_write_1h", "output", "reasoning", "total_tokens")
-        if usage is None or not usage.model_fields_set or message.stop_reason in {"error", "aborted"} and not any(getattr(usage, name, None) for name in fields):
+        if usage is None or not usage.model_fields_set:
             return {name: None for name in fields}
-        return {name: getattr(usage, name, None) for name in fields}
+        return {name: _reported_usage_value(usage, name) for name in fields}
 
     async def events(self, source):
         async def correlated():

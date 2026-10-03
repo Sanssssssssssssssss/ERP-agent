@@ -1434,7 +1434,7 @@ def _int_or_none(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def _parse_chunk_usage(raw: Mapping[str, Any]) -> Usage:
+def _parse_chunk_usage(raw: Mapping[str, Any], *, preserve_unknown: bool = False) -> Usage:
     """Parse an OpenAI-compatible ``usage`` payload into a Usage.
 
     Ports Pi's openai-completions.ts parseChunkUsage: ``cached_tokens`` are
@@ -1442,6 +1442,34 @@ def _parse_chunk_usage(raw: Mapping[str, Any]) -> Usage:
     and ``completion_tokens`` already includes reasoning tokens. Cost is left
     unset (None) because Pi has no per-model pricing table.
     """
+    if preserve_unknown:
+        reported: dict[str, int] = {}
+
+        def count(value: object) -> int | None:
+            parsed = _int_or_none(value)
+            return parsed if parsed is not None and parsed >= 0 else None
+
+        prompt = count(raw.get("prompt_tokens"))
+        details = raw.get("prompt_tokens_details")
+        cached = count(details.get("cached_tokens")) if isinstance(details, Mapping) else None
+        written = count(details.get("cache_write_tokens")) if isinstance(details, Mapping) else None
+        if cached is not None:
+            reported["cache_read"] = cached
+        if written is not None:
+            reported["cache_write"] = written
+        valid_write = not isinstance(details, Mapping) or "cache_write_tokens" not in details or written is not None
+        if prompt is not None and cached is not None and valid_write and cached + (written or 0) <= prompt:
+            reported["input"] = prompt - cached - (written or 0)
+        for field, key in (("output", "completion_tokens"), ("total_tokens", "total_tokens")):
+            value = count(raw.get(key))
+            if value is not None:
+                reported[field] = value
+        details = raw.get("completion_tokens_details")
+        reasoning = count(details.get("reasoning_tokens")) if isinstance(details, Mapping) else None
+        if reasoning is not None:
+            reported["reasoning"] = reasoning
+        return Usage(**reported)
+
     prompt_tokens = _int_or_zero(raw.get("prompt_tokens"))
     prompt_details = raw.get("prompt_tokens_details")
     cached_tokens: int | None = None
