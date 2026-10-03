@@ -313,12 +313,16 @@ class NativeReads:
                 if name in {"search_employee", "search_holidays"}:
                     result = READ_RESPONSES[name].model_validate(result).model_dump()
         except Exception as exc:
-            from .read_failures import read_failure
+            from .read_failures import is_malformed_domain_error, read_failure, tool_failure
             failure = read_failure(exc)
+            public_error = str(exc)
+            if failure["reason_code"] == "query_invalid" and is_malformed_domain_error(exc):
+                failure = tool_failure(exc)
+                public_error = failure["error"]
             if name in {"get_odoo_profile", "schema_catalog", "list_instances", "read_attachment"}:
-                result = {"success": False, "tool": name, **failure, "detail": failure["error"], "error": str(exc)}
+                result = {"success": False, "tool": name, **failure, "detail": failure["error"], "error": public_error}
             else:
-                result = {"success": False, **failure, "detail": failure["error"], "error": str(exc)}
+                result = {"success": False, **failure, "detail": failure["error"], "error": public_error}
             if isinstance(exc, UnknownFieldsError):
                 exc.recovery['arguments']['instance'] = instance
                 result["recovery_request"] = exc.recovery

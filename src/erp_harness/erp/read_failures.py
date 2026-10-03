@@ -9,6 +9,8 @@ import ssl
 
 from pydantic import ValidationError
 
+from ._odoo_core.odoo_client import OdooJson2Error
+
 # Stable public guidance is shared by tool replies and execution diagnostics.
 # Arbitrary error bodies never become recovery instructions.
 FAILURE_GUIDANCE = {
@@ -89,6 +91,20 @@ FAILURE_GUIDANCE = {
 }
 
 
+def is_malformed_domain_error(error: Exception | dict) -> bool:
+    """Recognize the structured Odoo query error, never an arbitrary error body."""
+    current = error if isinstance(error, Exception) else None
+    seen = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, OdooJson2Error) and isinstance(current.odoo_error, dict):
+            message = current.odoo_error.get("message")
+            if isinstance(message, str) and re.match(r"^Domain\(\) malformed domain(?:\s|$)", message, re.IGNORECASE):
+                return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
 def read_failure(error: Exception | dict) -> dict:
     if isinstance(error, dict) and error.get("reason_code"):
         result = {key: error[key] for key in ("status", "reason_code", "error", "next_action", "http_status") if key in error}
@@ -132,6 +148,9 @@ def read_failure(error: Exception | dict) -> dict:
         code, message, action = "endpoint_not_found", "Odoo JSON-2 接口地址不存在；请检查地址和版本。", "check_endpoint"
     elif "missingerror" in names:
         code, message, action = "record_unavailable", "目标记录不存在或当前账号不可见。", "resolve_reference"
+    elif is_malformed_domain_error(error):
+        code, action = "query_invalid", "correct_query"
+        message = "查询条件 domain 的逻辑结构无效。请检查前缀运算符与条件数量；仅用 OR 组合 n 个条件时需要 n−1 个 |。也可拆成简单只读查询；字段或运算符不确定时先查字段定义。"
     elif "validationerror" in names or any(token in text for token in ("invalid field", "unknown field", "invalid domain", "unsupported parameters", "requires a non-empty domain", "offset must be greater", "limit must", "validation failed for tool")):
         code, message, action = "query_invalid", "查询字段或条件不被当前接口接受。", "correct_query"
     elif any(token in text for token in ("invalid json", "malformed records")):

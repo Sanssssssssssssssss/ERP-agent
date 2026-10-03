@@ -1,11 +1,15 @@
 """Offline fault boundaries; run with the candidate host on sys.path."""
 import asyncio
+import io
 import json
 import os
 import socket
 import ssl
+import tempfile
 import threading
 import unittest
+import urllib.error
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -13,8 +17,9 @@ from erp_harness.app import conversation
 from erp_harness.erp._odoo_core.field_policy import FieldPolicy
 from erp_harness.erp._odoo_core.odoo_client import OdooClient, OdooJson2Error
 from erp_harness.erp.gateway import Json2ReadClient
-from erp_harness.erp.read_failures import read_failure, tool_failure
+from erp_harness.erp.read_failures import is_malformed_domain_error, read_failure, tool_failure
 from erp_harness.erp.reads import NativeReads, configured_identity
+from erp_harness.tools.router import native_tool_catalog, route_tools
 
 
 class ConnectionAwarenessTests(unittest.TestCase):
@@ -133,6 +138,105 @@ class ConnectionAwarenessTests(unittest.TestCase):
         wrapper = ValueError("Failed to authenticate")
         wrapper.__cause__ = OdooJson2Error("secret", status_code=503)
         self.assertEqual(read_failure(wrapper)["reason_code"], "server_error")
+
+    def test_structured_malformed_domain_keeps_http_status_and_actionable_public_guidance(self):
+        message = "Domain() malformed domain ['|', '|', ['name', '=', 'private-value']]"
+        error = OdooJson2Error("private transport message", status_code=500,
+                               odoo_error={"name": "builtins.ValueError", "message": message},
+                               response_body="private-body")
+        wrapper = ValueError("Failed to complete native read: private-wrapper")
+        wrapper.__cause__ = error
+        # The semantic classification must survive wrapper causes, not generalize HTTP 500.
+        for source in (error, wrapper):
+            with self.subTest(source=type(source).__name__):
+                direct, shared = read_failure(source), tool_failure(source)
+                for result in (direct, shared):
+                    self.assertEqual(result["reason_code"], "query_invalid")
+                    self.assertEqual(result["next_action"], "correct_query")
+                    self.assertEqual(result["http_status"], 500)
+                    self.assertEqual(result["status"], "error")
+                    self.assertNotIn("private", json.dumps(result))
+                    self.assertIn("OR", result["error"])
+                    self.assertIn("简单只读查询", result["error"])
+                    self.assertIn("字段定义", result["error"])
+                self.assertEqual(shared["failure_layer"], "tool_arguments")
+
+    def test_malformed_domain_match_requires_typed_structured_error_and_preserves_priorities(self):
+        message = "Domain() malformed domain ['|']"
+        controls = [
+            (OdooJson2Error(message, status_code=500), "server_error"),
+            (OdooJson2Error(message, status_code=500, odoo_error={"message": "server failed"}), "server_error"),
+            (OdooJson2Error("backend", status_code=500, odoo_error={"message": "Malformed records response"}), "server_error"),
+            (OdooJson2Error("Malformed records response", status_code=500), "invalid_response"),
+            (ValueError(message), "read_failed_unknown"),
+            ({"error": message}, "read_failed_unknown"),
+            ({"error": message, "odoo_error": {"message": message}}, "read_failed_unknown"),
+            ({"reason_code": "server_error", "error": message}, "server_error"),
+        ]
+        for status, name, expected in [(401, "builtins.ValueError", "authentication_failed"),
+                                        (403, "builtins.ValueError", "permission_denied"),
+                                        (429, "builtins.ValueError", "rate_limited"),
+                                        (500, "odoo.exceptions.AccessError", "permission_denied"),
+                                        (500, "odoo.exceptions.MissingError", "record_unavailable")]:
+            controls.append((OdooJson2Error("backend", status_code=status,
+                                           odoo_error={"name": name, "message": message}), expected))
+        for structured in ("Malformed unrelated domain", "Domain() malformed domains", None, [], {}):
+            controls.append((OdooJson2Error("backend", status_code=500,
+                                           odoo_error={"message": structured}), "server_error"))
+        timeout = TimeoutError("request timed out")
+        timeout.__cause__ = OdooJson2Error("backend", status_code=500, odoo_error={"message": message})
+        controls.append((timeout, "connection_timeout"))
+        for error, expected in controls:
+            with self.subTest(source=type(error).__name__, expected=expected):
+                self.assertEqual(read_failure(error)["reason_code"], expected)
+        self.assertFalse(is_malformed_domain_error({"error": message}))
+
+    def test_real_native_http_failure_reaches_model_without_domain_or_body_echo(self):
+        case_path = Path(__file__).resolve().parents[1] / "experiments/agent_regression/harness-maturity-20261003/malformed-domain-case.json"
+        case = json.loads(case_path.read_text(encoding="utf-8"))
+        leaves = [["name", "ilike", f"private-value-{index}"] for index in range(case["cause"]["leaf_count"])]
+        domain = ["|"] * case["cause"]["operator_count"] + leaves
+        body = json.dumps({"name": "builtins.ValueError", "message": f"Domain() malformed domain {domain}",
+                           "debug": "private-trace", "context": {"token": "private-token"}}).encode()
+        with patch.object(Json2ReadClient, "_json2_call_once", return_value={}):
+            client = Json2ReadClient(url="http://offline.fixture", db="bench", username="reader", api_key="private-api-key")
+        reads = NativeReads(client, policy=FieldPolicy({}))
+        reads.cache["res.partner"] = {"id": {"type": "integer"}, "display_name": {"type": "char"}, "name": {"type": "char"}}
+        original = {"model": "res.partner", "domain": domain, "limit": 20}
+        with tempfile.TemporaryDirectory() as directory:
+            routed = next(row for row in route_tools(native_tool_catalog(), Path(directory) / "tool-backends.jsonl",
+                                                    native=reads, native_health=True)
+                          if row.name == "mcp_odoo_find_records")
+            error = urllib.error.HTTPError("http://offline.fixture/json/2/res.partner/search_read", 500,
+                                          "Internal Server Error", {}, io.BytesIO(body))
+            with patch("urllib.request.urlopen", side_effect=error) as sender:
+                response = asyncio.run(routed.execute("offline-malformed-domain", original))
+        result = json.loads(response.text)
+        self.assertFalse(result["success"])
+        for key in ("reason_code", "failure_layer", "next_action"):
+            self.assertEqual(result[key], case["expected_contract"][key])
+        self.assertEqual(result["http_status"], 500)
+        self.assertEqual(result["error"], result["detail"])
+        self.assertNotIn("private", response.text)
+        self.assertNotIn("\ufffd", response.text)
+        self.assertEqual(sender.call_count, 1)
+        self.assertEqual(json.loads(sender.call_args.args[0].data)["domain"], domain)
+        self.assertTrue(sender.call_args.args[0].full_url.endswith("/res.partner/search_read"))
+        # The query is rejected; correction is left to the model, never replayed by the boundary.
+        self.assertEqual(original["domain"], domain)
+
+    def test_native_malformed_domain_fix_retains_unknown_field_discovery(self):
+        with patch.object(Json2ReadClient, "_json2_call_once", return_value={}):
+            client = Json2ReadClient(url="http://offline.fixture", db="bench", username="reader", api_key="private-api-key")
+        reads = NativeReads(client, policy=FieldPolicy({}))
+        reads.cache["res.partner"] = {"id": {"type": "integer"}, "name": {"type": "char"}}
+        with patch("urllib.request.urlopen", side_effect=AssertionError("must not send RPC")) as sender:
+            failure = reads.call("read_record", {"model": "res.partner", "record_id": 1, "fields": ["old_field"]})
+        self.assertEqual(failure["reason_code"], "query_invalid")
+        self.assertIn("old_field", failure["error"])
+        self.assertEqual(failure["recovery_request"]["tool"], "mcp_odoo_get_model_fields")
+        self.assertEqual(failure["recovery_request"]["arguments"]["instance"], "default")
+        sender.assert_not_called()
 
     def test_native_failure_keeps_classification_through_reference_and_eligibility(self):
         reads = NativeReads.__new__(NativeReads)
