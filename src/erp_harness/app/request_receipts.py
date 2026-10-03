@@ -13,6 +13,7 @@ from time import monotonic
 from uuid import uuid4
 
 from erp_harness.app.stream_events import public_events
+from erp_harness.providers.provider import ProviderRequestRejected
 from erp_harness.runtime.messages import AssistantMessage
 from erp_harness.runtime.provider import provider_request_kind
 
@@ -46,7 +47,7 @@ def _message_usage(message: AssistantMessage) -> object | None:
     return usage
 
 
-class ReceiptPersistenceError(RuntimeError):
+class ReceiptPersistenceError(ProviderRequestRejected):
     """Request capture is required before a new model request may be sent."""
 
     def __init__(self):
@@ -95,7 +96,11 @@ class RequestReceipts:
             self._write(row["request_file"], "meta", public)
             print(json.dumps({"type": event_type, **public}, ensure_ascii=False), flush=True)
 
-    def _allocate(self, payload, *, strict=False):
+    def _allocate(self, payload):
+        if self._persistence_failed:
+            raise ReceiptPersistenceError()
+        if self.max_model_requests is not None and self.number >= self.max_model_requests:
+            raise ProviderRequestRejected("max_model_requests exceeded; no new request was sent")
         self.number += 1
         scope = self._scope.get()
         row = {"schema_version": 1, "request_id": "req_" + uuid4().hex,
@@ -110,9 +115,8 @@ class RequestReceipts:
         else:
             self._unwrapped = row
         self._rows[row["request_id"]] = row
-        self._write(row["request_file"], "request", payload, strict=strict)
-        if strict:
-            self._write(row["request_file"], "meta", row, strict=True)
+        self._write(row["request_file"], "request", payload, strict=True)
+        self._write(row["request_file"], "meta", row, strict=True)
         return row
 
     def _current(self):
@@ -120,11 +124,7 @@ class RequestReceipts:
         return scope.get("row") if scope else self._unwrapped
 
     async def before_provider_request(self, payload):
-        if self._persistence_failed:
-            raise ReceiptPersistenceError()
-        if self.max_model_requests is not None and self.number >= self.max_model_requests:
-            raise RuntimeError(f"max_model_requests ({self.max_model_requests}) exceeded")
-        self._allocate(payload, strict=True)
+        self._allocate(payload)
         return payload
 
     async def before_provider_headers(self, headers):

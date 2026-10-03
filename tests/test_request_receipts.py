@@ -16,14 +16,18 @@ import httpx
 from erp_harness.app.host import Workbench
 from erp_harness.app.request_receipts import ReceiptPersistenceError, RequestReceipts
 from erp_harness.app.worker import child_environment
+from erp_harness.context.paths import RuntimePaths
+from erp_harness.context.resources import ResourcePaths
 from erp_harness.providers.env import OpenAICompatibleConfig
 from erp_harness.providers.openai_compatible import OpenAICompatibleProvider
+from erp_harness.providers.provider import ProviderRequestRejected
 from erp_harness.providers.retry import is_retryable_assistant_error
 from erp_harness.runtime.harness import SimpleCancellationToken
 from erp_harness.runtime.loop import run_agent_loop
 from erp_harness.runtime.messages import AssistantMessage, UserMessage
 from erp_harness.runtime.provider import provider_request_kind, scoped_provider_stream
-from erp_harness.runtime.session import HarnessSession
+from erp_harness.runtime.session import HarnessSession, SessionConfig
+from erp_harness.runtime.storage import JsonlSessionStorage
 from erp_harness.runtime.tools import AgentTool, AgentToolResult
 
 
@@ -37,9 +41,19 @@ def response(text="done", tool=False):
                           headers={"content-type": "text/event-stream", "x-request-id": "provider-id", "authorization": "PRIVATE_HEADER"})
 
 
-def provider(client, receipts=None, retries=0):
+def provider(client, receipts=None, retries=0, api="openai-completions"):
     return OpenAICompatibleProvider(OpenAICompatibleConfig(api_key="test-only", base_url="https://unused.invalid/v1",
-                                    max_retries=retries, max_retry_delay_seconds=0, provider_hooks=receipts), client=client)
+                                    api=api, max_retries=retries, max_retry_delay_seconds=0, provider_hooks=receipts), client=client)
+
+
+def endpoint_response(api):
+    if api == "openai-completions":
+        return response()
+    return httpx.Response(200, text=(
+        'data: {"type":"response.output_text.delta","delta":"done"}\n\n'
+        'data: {"type":"response.completed","response":{"status":"completed",'
+        '"usage":{"input_tokens":4,"output_tokens":2,"total_tokens":6}}}\n\n'
+    ), headers={"content-type": "text/event-stream"})
 
 
 def rows(root):
@@ -119,6 +133,132 @@ class RequestReceiptTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rows(self.root)), 3)
         self.assertEqual(rows(self.root)[2]["request_kind"], "unknown")
         self.assertTrue(all((self.root / name).read_bytes() == body for name, body in snapshot.items()))
+
+    async def test_request_cap_blocks_retry_posts_in_both_endpoints(self):
+        for api in ("openai-completions", "openai-responses"):
+            for cap in (1, 2):
+                with self.subTest(api=api, cap=cap):
+                    root = self.root / api / str(cap)
+                    receipts, sent = RequestReceipts(root, max_model_requests=cap), []
+                    def handler(request, _sent=sent, _api=api):
+                        _sent.append(request)
+                        return httpx.Response(503, text="retry") if len(_sent) == 1 else endpoint_response(_api)
+                    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                        stream = scoped_provider_stream(provider(client, receipts, retries=1, api=api).stream_response(
+                            model="test", system="s", messages=[], tools=[]), "normal")
+                        if cap == 1:
+                            with self.assertRaises(ProviderRequestRejected) as caught:
+                                _ = [event async for event in stream]
+                            self.assertFalse(is_retryable_assistant_error(AssistantMessage(
+                                model="test", stop_reason="error", error_message=str(caught.exception))))
+                        else:
+                            events = [event async for event in stream]
+                            self.assertEqual(events[-1].type, "done")
+                            self.assertEqual(events[-1].message.usage.total_tokens, 6)
+                    self.assertEqual(len(sent), cap)
+                    self.assertEqual(receipts.number, cap)
+                    self.assertEqual([row["status"] for row in rows(root)],
+                                     ["retry"] if cap == 1 else ["retry", "completed"])
+
+    async def test_retry_capture_failures_block_new_posts_in_both_endpoints(self):
+        write, replace = Path.write_text, Path.replace
+        for api in ("openai-completions", "openai-responses"):
+            for fault in ("request_write", "metadata_replace", "first_response_write"):
+                with self.subTest(api=api, fault=fault):
+                    root = self.root / api / fault
+                    receipts, sent = RequestReceipts(root), []
+                    def handler(request, _sent=sent, _api=api):
+                        _sent.append(request)
+                        return httpx.Response(503, text="retry") if len(_sent) == 1 else endpoint_response(_api)
+                    def write_fault(path, *args, _root=root, _fault=fault, **kwargs):
+                        selected = path.parent == _root and (
+                            _fault == "request_write" and path.name == "0002.request.tmp"
+                            or _fault == "first_response_write" and path.name == "0001.response.tmp")
+                        if selected:
+                            raise OSError("PRIVATE_STORAGE_DETAIL 503 timeout")
+                        return write(path, *args, **kwargs)
+                    def replace_fault(path, target, *, _root=root, _fault=fault):
+                        if _fault == "metadata_replace" and path.parent == _root and path.name == "0002.meta.tmp":
+                            raise PermissionError("PRIVATE_STORAGE_DETAIL 503 timeout")
+                        return replace(path, target)
+                    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                        with (patch.object(Path, "write_text", write_fault),
+                              patch.object(Path, "replace", replace_fault),
+                              self.assertRaises(ReceiptPersistenceError)):
+                            _ = [event async for event in provider(client, receipts, retries=1, api=api).stream_response(
+                                model="test", system="s", messages=[], tools=[])]
+                        with self.assertRaises(ReceiptPersistenceError):
+                            _ = [event async for event in provider(client, receipts, retries=1, api=api).stream_response(
+                                model="test", system="s", messages=[], tools=[])]
+                    self.assertEqual(len(sent), 1)
+                    self.assertEqual(receipts.number, 1 if fault == "first_response_write" else 2)
+                    self.assertFalse(any(row.get("http_status") == 200 for row in rows(root)))
+        self.assertNotIn("PRIVATE_STORAGE_DETAIL", self.output.getvalue())
+
+    async def test_generic_attempt_observation_failures_keep_retry_compatibility(self):
+        class FailedObserver(RequestReceipts):
+            async def before_provider_attempt(self, payload, attempt):
+                await super().before_provider_attempt(payload, attempt)
+                raise PermissionError("optional observation failed")
+            async def after_provider_attempt(self, status):
+                await super().after_provider_attempt(status)
+                raise PermissionError("optional observation failed")
+        for api in ("openai-completions", "openai-responses"):
+            with self.subTest(api=api):
+                root = self.root / api
+                receipts, sent = FailedObserver(root), []
+                def handler(request, _sent=sent, _api=api):
+                    _sent.append(request)
+                    return httpx.Response(503, text="retry") if len(_sent) == 1 else endpoint_response(_api)
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    events = [event async for event in provider(client, receipts, retries=1, api=api).stream_response(
+                        model="test", system="s", messages=[], tools=[])]
+                self.assertEqual(len(sent), 2)
+                self.assertEqual(events[-1].type, "done")
+                self.assertEqual([row["status"] for row in rows(root)], ["retry", "completed"])
+
+    async def test_authoritative_gate_failures_do_not_trigger_session_recovery(self):
+        write = Path.write_text
+        for fault in ("cap", "cap_503", "retry_request_write", "initial_sticky"):
+            with self.subTest(fault=fault):
+                root = self.root / fault
+                receipts = RequestReceipts(root / "requests", max_model_requests={"cap": 1, "cap_503": 503}.get(fault))
+                if fault == "cap_503":
+                    # Resumed chronology near the cap must not look like HTTP503.
+                    receipts.number = 502
+                sent = []
+                def handler(request, _sent=sent):
+                    _sent.append(request)
+                    return httpx.Response(503, text="retry")
+                def write_fault(path, *args, _root=root, _fault=fault, **kwargs):
+                    selected = path.parent == _root / "requests" and (
+                        _fault == "retry_request_write" and path.name == "0002.request.tmp"
+                        or _fault == "initial_sticky" and path.name == "previous.meta.tmp")
+                    if selected:
+                        raise OSError("PRIVATE_STORAGE_DETAIL 503 timeout")
+                    return write(path, *args, **kwargs)
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    session = await HarnessSession.load(SessionConfig(
+                        provider=provider(client, receipts, retries=1), model="test", system="s", tools=[],
+                        storage=JsonlSessionStorage(root / "session.jsonl"), cwd=root,
+                        resource_paths=ResourcePaths(root=root / ".pi-agent", paths=RuntimePaths(
+                            home=root / ".pi-agent", agents_home=root / ".agents"),
+                            project_resources_enabled=False),
+                        skills_enabled=False, extensions_enabled=False, auto_compact_enabled=False,
+                        retry_enabled=True, retry_max_retries=3, retry_base_delay_ms=0))
+                    try:
+                        with patch.object(Path, "write_text", write_fault):
+                            if fault == "initial_sticky":
+                                receipts._write("previous", "meta", {})
+                            events = [event async for event in session.prompt("offline test")]
+                    finally:
+                        await session.aclose()
+                self.assertEqual(len(sent), 0 if fault == "initial_sticky" else 1)
+                self.assertFalse(any(event.type == "auto_retry_start" for event in events))
+                failures = [event.message for event in events if event.type == "message_end"
+                            and isinstance(event.message, AssistantMessage) and event.message.stop_reason == "error"]
+                self.assertEqual(len(failures), 1)
+                self.assertNotIn("PRIVATE_STORAGE_DETAIL", failures[0].error_message)
 
     async def test_compaction_history_and_turn_prefix_are_two_explicit_requests(self):
         receipts = RequestReceipts(self.root)

@@ -62,6 +62,7 @@ from erp_harness.providers.http_errors import provider_http_error_message
 from erp_harness.providers.openai_cache import is_direct_openai_url, openai_prompt_cache_key
 from erp_harness.providers.provider import (
     CancellationToken,
+    ProviderRequestRejected,
     apply_provider_headers,
     apply_provider_payload,
     emit_provider_response,
@@ -418,8 +419,12 @@ class OpenAICompatibleProvider:
     async def _observe_attempt(self, name: str, *args: object) -> None:
         observer = getattr(self._config.provider_hooks, name, None)
         if callable(observer):
-            with suppress(Exception):
+            try:
                 await observer(*args)
+            except ProviderRequestRejected:
+                raise
+            except Exception:  # noqa: BLE001 - optional observers are isolated
+                return
 
     def _prompt_cache_key(self, affinity_id: str | None) -> str | None:
         supports = self._config.compat.get("supportsPromptCacheKey")

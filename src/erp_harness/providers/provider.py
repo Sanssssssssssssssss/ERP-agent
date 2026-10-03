@@ -8,6 +8,10 @@ from typing import Protocol
 from erp_harness.runtime.provider import CancellationToken, ModelProvider
 
 
+class ProviderRequestRejected(RuntimeError):
+    """An authoritative request gate rejected sending a provider request."""
+
+
 class ProviderHooks(Protocol):
     async def before_provider_request(self, payload: object) -> object: ...
 
@@ -42,6 +46,7 @@ __all__ = [
     "CancellationToken",
     "ModelProvider",
     "ProviderHooks",
+    "ProviderRequestRejected",
     "apply_provider_headers",
     "apply_provider_payload",
     "emit_provider_response",
