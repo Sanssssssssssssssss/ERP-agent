@@ -11,7 +11,7 @@ import time
 import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from functools import cache, partial
+from functools import cache
 from pathlib import Path
 from typing import Any, get_type_hints
 
@@ -24,9 +24,9 @@ from erp_harness.erp._odoo_core.access_helpers import (
     _field_names,
     _group_field_names,
     _m2m_ids,
+    _m2o_id,
     _record_id_domain,
     _rule_applies,
-    _safe_odoo_read,
     access_permission_field,
 )
 from erp_harness.erp._odoo_core.accounting_tools import (
@@ -61,6 +61,7 @@ from erp_harness.erp._odoo_core.diagnostics import (
     diagnose_odoo_call_report,
     generate_json2_payload_report,
     inspect_model_relationships_report,
+    sanitize_odoo_error,
 )
 from erp_harness.erp._odoo_core.diagnostics import (
     fit_gap_report as build_fit_gap_report,
@@ -125,7 +126,7 @@ ASYNC_OPERATIONS = frozenset(
 class _CapabilityReadFailure(RuntimeError):
     """Carry a public read failure through client-shaped pure helper calls."""
 
-    def __init__(self, response: dict[str, Any]):
+    def __init__(self, response: Exception | dict[str, Any]):
         self.failure = tool_failure(response)
         super().__init__(self.failure["error"])
 
@@ -136,11 +137,22 @@ class _PolicyReadClient:
     def __init__(self, runtime: NativeReads):
         self.runtime = runtime
         self.uid = getattr(runtime.client, "uid", None)
+        self.read_failures: list[dict[str, Any]] = []
+        self.read_failure_count = 0
 
     def _locked(self, fn: Callable[[], Any]) -> Any:
-        with self.runtime._lock:
-            self.runtime._refresh_scope()
-            return fn()
+        try:
+            with self.runtime._lock:
+                self.runtime._refresh_scope()
+                return fn()
+        except Exception as exc:
+            failure = exc if isinstance(exc, _CapabilityReadFailure) else _CapabilityReadFailure(exc)
+            self.read_failure_count += 1
+            if len(self.read_failures) < 8:
+                self.read_failures.append(dict(failure.failure))
+            if failure is exc:
+                raise
+            raise failure from exc
 
     def get_model_fields(self, model: str) -> dict[str, Any]:
         validate_model_name(model)
@@ -194,9 +206,9 @@ class _PolicyReadClient:
         rows: list[dict[str, Any]] = []
         while len(rows) < limit:
             page_limit = min(100, limit - len(rows))
-            result = self._locked(
-                partial(
-                    self.runtime.search_records,
+
+            def read_page(page_limit: int = page_limit) -> list[dict[str, Any]]:
+                result = self.runtime.search_records(
                     model=model,
                     domain=domain,
                     fields=fields,
@@ -204,14 +216,16 @@ class _PolicyReadClient:
                     offset=offset + len(rows),
                     order=order,
                 )
-            )
-            if not isinstance(result, dict):
-                raise _CapabilityReadFailure({"reason_code": "invalid_response"})
-            if result.get("success") is False:
-                raise _CapabilityReadFailure(result)
-            page = result.get("result")
-            if not isinstance(page, list) or any(not isinstance(row, dict) for row in page):
-                raise _CapabilityReadFailure({"reason_code": "invalid_response"})
+                if not isinstance(result, dict):
+                    raise _CapabilityReadFailure({"reason_code": "invalid_response"})
+                if result.get("success") is False:
+                    raise _CapabilityReadFailure(result)
+                page = result.get("result")
+                if not isinstance(page, list) or any(not isinstance(row, dict) for row in page):
+                    raise _CapabilityReadFailure({"reason_code": "invalid_response"})
+                return page
+
+            page = self._locked(read_page)
             rows.extend(page)
             if len(page) < page_limit:
                 break
@@ -756,14 +770,20 @@ class NativeCapabilities:
     ) -> dict[str, Any]:
         validate_model_name(model)
         runtime = self._runtime(instance)
-        return build_data_quality_report(
-            self._client(runtime.instance),
+        client = self._client(runtime.instance)
+        report = build_data_quality_report(
+            client,
             runtime.instance,
             model,
             checks,
             key_fields,
             clamp_limit(sample_limit, maximum=2000),
         )
+        if client.read_failure_count:
+            report.update(read_failure_details=client.read_failures,
+                          read_failure_count=client.read_failure_count,
+                          read_failures_truncated=client.read_failure_count > len(client.read_failures))
+        return report
 
     def diagnose_odoo_call(
         self,
@@ -832,13 +852,15 @@ class NativeCapabilities:
         source, error = (
             ("input", None) if fields_metadata is not None else ("none", None)
         )
+        failure = None
         if fields_metadata is None and use_live_metadata:
             source = "server"
             try:
                 fields_metadata = self._client(instance).get_model_fields(model)
             except Exception as exc:  # noqa: BLE001 - report preserves uncertainty
-                fields_metadata, error = None, str(exc)
-        return inspect_model_relationships_report(
+                failure = exc.failure if isinstance(exc, _CapabilityReadFailure) else tool_failure(exc)
+                fields_metadata, error = None, failure["error"]
+        report = inspect_model_relationships_report(
             model=model,
             fields_metadata=fields_metadata,
             metadata_source=source,
@@ -846,6 +868,9 @@ class NativeCapabilities:
             include_readonly=include_readonly,
             include_computed=include_computed,
         )
+        if failure:
+            report.update(failure)
+        return report
 
     def diagnose_access(
         self,
@@ -870,11 +895,13 @@ class NativeCapabilities:
         errors: list[dict[str, Any]] = []
 
         def safe(label: str, fn: Callable[[], Any], default: Any):
-            value, error = _safe_odoo_read(label, fn)
-            if error:
-                errors.append(error)
+            try:
+                return fn()
+            except Exception as exc:  # noqa: BLE001 - partial diagnostics retain classified failures
+                failure = exc.failure if isinstance(exc, _CapabilityReadFailure) else tool_failure(exc)
+                errors.append({**failure, "stage": label,
+                               "error": sanitize_odoo_error(failure["error"])})
                 return default
-            return value
 
         model_rows = safe(
             "ir.model",
@@ -930,9 +957,14 @@ class NativeCapabilities:
                 )
                 direct_ids = _m2m_ids(rows[0].get(direct)) if direct else set()
                 all_ids = _m2m_ids(rows[0].get(all_groups)) if all_groups else set()
-                user_group_ids = all_ids or direct_ids
-                current_user["group_ids"] = sorted(user_group_ids)
-                current_user["direct_group_ids"] = sorted(direct_ids)
+                if direct_ids is None or all_ids is None:
+                    failure = tool_failure({"reason_code": "invalid_response"})
+                    errors.append({**failure, "stage": "res.users.groups",
+                                   "error": sanitize_odoo_error(failure["error"])})
+                else:
+                    user_group_ids = all_ids or direct_ids
+                current_user["group_ids"] = sorted(user_group_ids) if user_group_ids is not None else None
+                current_user["direct_group_ids"] = sorted(direct_ids) if direct_ids is not None else None
 
         acl_rows: list[dict[str, Any]] = []
         if model_id is not None:
@@ -956,7 +988,13 @@ class NativeCapabilities:
                 ),
                 [],
             )
+            if any(row.get("group_id") is not None and row.get("group_id") is not False
+                   and _m2o_id(row.get("group_id")) is None for row in acl_rows):
+                failure = tool_failure({"reason_code": "invalid_response"})
+                errors.append({**failure, "stage": "ir.model.access.group_id",
+                               "error": sanitize_odoo_error(failure["error"])})
         active: list[dict[str, Any]] = []
+        rules_read = False
         if include_rules and model_id is not None:
             rules = safe(
                 "ir.rule",
@@ -980,6 +1018,11 @@ class NativeCapabilities:
                 ),
                 [],
             )
+            rules_read = not any(error["stage"] == "ir.rule" for error in errors)
+            if any(_m2m_ids(row.get("groups")) is None for row in rules):
+                failure = tool_failure({"reason_code": "invalid_response"})
+                errors.append({**failure, "stage": "ir.rule.groups",
+                               "error": sanitize_odoo_error(failure["error"])})
             active = [
                 row
                 for row in rules
@@ -987,7 +1030,7 @@ class NativeCapabilities:
                 and row.get("active", True)
                 and row.get(permission, True)
             ]
-        global_rules = [row for row in active if not _m2m_ids(row.get("groups"))]
+        global_rules = [row for row in active if _m2m_ids(row.get("groups")) == set()]
         group_rules = [row for row in active if _m2m_ids(row.get("groups"))]
         applicable = [row for row in active if _rule_applies(row, user_group_ids)]
         actual_count = None
@@ -1047,7 +1090,7 @@ class NativeCapabilities:
             "metadata_used": {
                 "live_odoo": True,
                 "acl": bool(acl_rows),
-                "rules": include_rules,
+                "rules": rules_read,
                 "current_user": current_user["record"] is not None,
                 "sudo": False,
                 "impersonation": False,

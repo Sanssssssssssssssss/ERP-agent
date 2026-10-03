@@ -38,24 +38,24 @@ def _safe_odoo_read(
 
 
 def _m2o_id(value: Any) -> int | None:
-    if isinstance(value, list) and value and isinstance(value[0], int):
-        return int(value[0])
-    if isinstance(value, tuple) and value and isinstance(value[0], int):
-        return int(value[0])
-    if isinstance(value, int):
+    if isinstance(value, (list, tuple)) and len(value) == 2 and isinstance(value[1], str):
+        value = value[0]
+    if type(value) is int and value > 0:
         return value
     return None
 
 
-def _m2m_ids(value: Any) -> set[int]:
-    if not isinstance(value, list):
+def _m2m_ids(value: Any) -> set[int] | None:
+    if value is None or value is False:
         return set()
+    if not isinstance(value, list):
+        return None
     result: set[int] = set()
     for item in value:
-        if isinstance(item, int):
-            result.add(item)
-        elif isinstance(item, (list, tuple)) and item and isinstance(item[0], int):
-            result.add(int(item[0]))
+        group_id = _m2o_id(item)
+        if group_id is None:
+            return None
+        result.add(group_id)
     return result
 
 
@@ -88,14 +88,17 @@ def _group_field_names(record: Dict[str, Any]) -> tuple[str | None, str | None]:
 
 
 def _acl_row_applies(row: Dict[str, Any], user_group_ids: set[int] | None) -> bool:
-    group_id = _m2o_id(row.get("group_id"))
-    if group_id is None:
+    group = row.get("group_id")
+    if group is None or group is False:
         return True
-    return user_group_ids is not None and group_id in user_group_ids
+    group_id = _m2o_id(group)
+    return group_id is not None and user_group_ids is not None and group_id in user_group_ids
 
 
 def _rule_applies(row: Dict[str, Any], user_group_ids: set[int] | None) -> bool:
     group_ids = _m2m_ids(row.get("groups"))
+    if group_ids is None:
+        return False
     if not group_ids:
         return True
     return user_group_ids is not None and bool(group_ids & user_group_ids)
