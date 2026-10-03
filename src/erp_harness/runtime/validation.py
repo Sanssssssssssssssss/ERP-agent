@@ -71,7 +71,7 @@ def _coerce_primitive(value: object, kind: str) -> object:
         if value is None:
             return 0
         if isinstance(value, bool):
-            return int(value)
+            return value  # A boolean must not silently become a record ID or quantity.
         if isinstance(value, str) and value.strip():
             try:
                 parsed = float(value)

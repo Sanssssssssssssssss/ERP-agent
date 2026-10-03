@@ -518,6 +518,45 @@ async def test_integer_coercion_accepts_the_same_numeric_strings_as_pi() -> None
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("ids,expected", [
+    ({"record_id": True}, None),
+    ({"record_id": False}, None),
+    ({"record_ids": [2, True]}, None),
+    ({"record_id": 1}, {"record_id": 1}),
+    ({"record_ids": ["2", 3]}, {"record_ids": [2, 3]}),
+])
+async def test_native_record_ids_reject_booleans_before_dispatch(ids, expected):
+    from erp_harness.tools.router import native_tool_catalog
+
+    observed = []
+
+    async def execute(_call_id, arguments, *_args):
+        observed.append(dict(arguments))
+        return AgentToolResult(content="observed")
+
+    tool = next(t for t in native_tool_catalog() if t.name == "mcp_odoo_read_record")
+    tool = _tool(tool.name, execute, parameters=tool.parameters)
+    args = {"model": "sale.order", "fields": ["id"], **ids}
+    call = ToolCall(id="boolean-boundary", name=tool.name, arguments=args)
+    provider = FakeProvider([
+        [assistant_start(), tool_call_end(call), assistant_done(AssistantMessage(content=[call]), "toolUse")],
+        [assistant_start(), assistant_done(AssistantMessage(content="done"))],
+    ])
+    messages = [UserMessage(content="Read the selected record.")]
+    await _collect(run_agent_loop(provider=provider, model="fake", system="test",
+                                  messages=messages, tools=[tool]))
+    if expected is None:
+        assert observed == []
+        result = next(m for m in messages if isinstance(m, ToolResultMessage))
+        refusal = result.details["structuredContent"]
+        assert result.is_error and refusal["reason_code"] == "tool_arguments_invalid"
+        assert refusal["stage"] == "before_dispatch" and refusal["odoo_request_seen"] is False
+        assert refusal["parameter_issues"][0]["rule"] == "type"
+    else:
+        assert observed == [{"model": "sale.order", "fields": ["id"], **expected}]
+
+
+@pytest.mark.anyio
 async def test_settled_tool_ignores_late_updates_while_parallel_peer_runs() -> None:
     slow_started = asyncio.Event()
     settled_ended = asyncio.Event()
