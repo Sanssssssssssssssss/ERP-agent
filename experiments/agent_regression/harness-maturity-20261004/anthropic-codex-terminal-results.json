@@ -1,0 +1,144 @@
+{
+  "report_id": "OFFLINE-ANTHROPIC-CODEX-TERMINAL-20261004",
+  "kind": "synthetic_offline_parser_to_actual_agent_loop",
+  "model_case": false,
+  "status": "passed_related_and_full_offline_checks",
+  "baseline_commit": "a45791d8bd05ab5fdd49ddf5c71075547ba0b33a",
+  "source_commit": "7ff66a0d09861115423121af2515303cadc2a245",
+  "shared_usage_dependency_commit": "a144cd289ead0c7b981d3fc92dbdcb0ef4235df5",
+  "validation_source_state": "Frozen working candidate before commit; published source bytes match the tested hashes.",
+  "root_cause": "Both parsers synthesized successful completion at EOF. Invalid or missing tool arguments could become an executable object; Codex also ignored explicitly malformed final arguments and reused earlier valid parameters.",
+  "changes": [
+    "Require Anthropic message_stop and an executable stop reason; max_tokens remains truncated and never dispatches.",
+    "Require a Codex response terminal, reject failed/cancelled/non-completed status and unfinished tool items.",
+    "Require complete JSON object parameters; a missing Codex item argument only reuses a formal completed argument event.",
+    "Carry explicitly reported final error usage; initial Anthropic counters without a final usage delta remain unknown."
+  ],
+  "dispatch_checks": {
+    "initial_eof_bad_json_empty_argument_fixtures": {
+      "cases": 6,
+      "before_dispatches": 6,
+      "after_dispatches": 0
+    },
+    "anthropic_refusal_pause_context_unknown_reason_fixtures": {
+      "cases": 4,
+      "before_dispatches": 4,
+      "after_dispatches": 0
+    },
+    "codex_bad_final_shape_after_valid_parameters": {
+      "cases": 1,
+      "before_dispatches": 1,
+      "after_dispatches": 0
+    },
+    "anthropic_max_tokens_with_incomplete_parameters": {
+      "before_stop_reason": "error",
+      "after_stop_reason": "length",
+      "dispatches": 0
+    },
+    "explicit_empty_object_normal_controls": {
+      "protocols": [
+        "anthropic",
+        "codex"
+      ],
+      "before_dispatches": 2,
+      "after_dispatches": 2
+    }
+  },
+  "tests": {
+    "related_command": ".venv/Scripts/python.exe -m pytest tests/runtime/test_pi_ai.py tests/runtime/test_provider_runtime.py -q",
+    "related_passed": 207,
+    "full_passed": 1816,
+    "full_skipped": 4,
+    "full_subtests_passed": 576,
+    "full_elapsed_seconds": 104.87,
+    "lint": "3 existing I001 signatures; no new findings",
+    "diff_check": "passed"
+  },
+  "independent_review": {
+    "path": ".runtime/harness-maturity-20261004/anthropic-codex-terminal/independent-review.json",
+    "sha256": "751404decd7339bbaef39778fbb462b88d80276f02a973b441bee1fc0dfa64ce"
+  },
+  "patch_source": [
+    {
+      "path": "src/erp_harness/providers/anthropic.py",
+      "sha256": "0e36d64bb348c2d13a95cc649e23012af6ae3b5c6e69ed8f80ccd36f3d130bb1",
+      "git_blob_sha256": "0e36d64bb348c2d13a95cc649e23012af6ae3b5c6e69ed8f80ccd36f3d130bb1",
+      "working_bytes_match_published_source": true
+    },
+    {
+      "path": "src/erp_harness/providers/openai_codex.py",
+      "sha256": "6fe63a6a435f47f0b07523bf599ec0c8b0c91ae6931874d807a7fa2b46a7c4ce",
+      "git_blob_sha256": "6fe63a6a435f47f0b07523bf599ec0c8b0c91ae6931874d807a7fa2b46a7c4ce",
+      "working_bytes_match_published_source": true
+    },
+    {
+      "path": "tests/runtime/test_pi_ai.py",
+      "sha256": "e609580b0b3b637e0d8b67c3b4c571b3a9ac3c1b06acfce1be7de7ce48b014f5",
+      "git_blob_sha256": "e609580b0b3b637e0d8b67c3b4c571b3a9ac3c1b06acfce1be7de7ce48b014f5",
+      "working_bytes_match_published_source": true
+    }
+  ],
+  "usage": {
+    "request_count": 0,
+    "fresh_input": 0,
+    "cache_reads": 0,
+    "output_including_reasoning": 0,
+    "reasoning_subset": 0,
+    "compaction": 0,
+    "total_tokens": 0,
+    "cost": null
+  },
+  "business_verified": false,
+  "limitations": [
+    "All provider responses and token counters in these controls are synthetic MockTransport fixtures; no live Anthropic/Codex API or Odoo business transaction was executed.",
+    "Intermediate before snapshots separately bind stop-reason and final-argument defects after the initial EOF guard; they are not all the original baseline.",
+    "These checks preserve local dispatch, retry-hook and unknown-usage boundaries; they do not prove every remote provider protocol variant."
+  ],
+  "protocol_reference": "https://platform.claude.com/docs/en/build-with-claude/handling-stop-reasons",
+  "private_evidence": [
+    {
+      "path": ".runtime/harness-maturity-20261004/anthropic-codex-terminal/before/observations.json",
+      "sha256": "d479827bb135b0f5e5c17271aa414eee9135972808efe2d6372732120fec3f40"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/anthropic-codex-terminal/before-stop-semantics/observations.json",
+      "sha256": "46c6cc2a0c962281a7aa144b0c608167c17a0b2ff40aadacf0f4b49331f39484"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/anthropic-codex-terminal/before-final-argument-shape/observations.json",
+      "sha256": "2232860298e36b5e985a9246ed17ca36d17d1f42ca3162d64ad1752a534d37a1"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/anthropic-codex-terminal/after-final/observations.json",
+      "sha256": "d0e1ac39f2acae5b229142060cec91173f797e95a2d1d1d2997ec8bc0d8f4e54"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/anthropic-codex-terminal/before-tests.log",
+      "sha256": "abd31e7c5c2347e2b8d20c398d8e74e95f8c71e1162d31a6571404209641f1f8"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/anthropic-codex-terminal/final-related-tests.log",
+      "sha256": "aec8dd83d2465654a4adfc00de7dbe3908e17189a43f49746c303e2a63a02324"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/anthropic-codex-terminal/final-lint.log",
+      "sha256": "acc0607ff2cdb5cd6b07f46a9a63e99d85addbf95faa9343dc6a03f7d2b5c437"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/anthropic-codex-terminal/final.diff",
+      "sha256": "45a3f9e5bdff56a5c7670e5ca0bdab780c93173e12dc34d561c1b9232417f8fe"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/anthropic-codex-terminal/probe.py",
+      "sha256": "3fcc6c89a1c1900a44bf8e5350a9266da10739364a47d131ff7bad791f74b403"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/anthropic-codex-terminal/final-binding.json",
+      "sha256": "78e771a38a57af3c550db17b79c9b0b41cdc64cd5321055d23579d84bb7541e7"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/final-tests.log",
+      "sha256": "41fcae905d1c1645403f08fa64700964d66a275d5ee34a6329c0704dce97dd4d"
+    }
+  ]
+}

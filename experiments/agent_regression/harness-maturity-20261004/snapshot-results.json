@@ -1,0 +1,75 @@
+{
+  "case_id": "INFRA-REPAIR-SIDECAR-20261004",
+  "kind": "benchmark_snapshot_infrastructure",
+  "model_case": false,
+  "source_commit": "a45791d8bd05ab5fdd49ddf5c71075547ba0b33a",
+  "status": "passed_related_checks",
+  "source_files": {
+    "bench/adapters/snapshot.py": "05099337b5de8d1596c21b565b3a9805344f8684e68825e96686535a8512d5cc",
+    "bench/adapters/harbor_agent.py": "e0745093d9b4b167d76e224e525d17d93c4f9cc27fd986bd63536962e5eb38dd",
+    "tests/test_snapshot.py": "a1d8a8aeda85ad9900ed5fa3adab5bc9728c95875efb628e4b8c4cea272c01a4"
+  },
+  "source_before": {
+    "bench/adapters/snapshot.py": "615357561d63e04225f7127e52e0d9f75123fec9d7c2348dfd1b6ad00ad74619",
+    "bench/adapters/harbor_agent.py": "95cbd170b748079c622ac0f55adb779bd5f9a50fa0c01cd221eb6e542c680780",
+    "tests/test_snapshot.py": "b8a35cd1f68b930e8f4843954fce4eeba61287552fe0ae2972211fa254a1394f"
+  },
+  "observed_cause": "PiAgentMcpBaseline._capture_bench_state captured SQL but omitted the original/tmp/repair_seeded_records.json checker dependency; restored SQL alone scored0 due to missing repair seed mapping.",
+  "before_evidence": {
+    "sql_only_restore_score": 0,
+    "same_sql_with_reconstructed_original_sidecar_score": 21.09,
+    "checker_modified": false
+  },
+  "changes": [
+    "Capture original sidecar bytes and SHA under separate initial/final filenames.",
+    "Include the optional sidecar hash in complete snapshots and restore the original bytes.",
+    "Reject damaged bytes/schema or a conflicting existing target before any PostgreSQL mutation.",
+    "A legacy snapshot missing the sidecar remains compatible with a fresh target; an existing unbound target is refused without deletion."
+  ],
+  "tests": {
+    "command": "PYTHONPATH=<repo>/src;<repo> .venv/Scripts/python.exe -m pytest tests/test_snapshot.py tests/test_reporting.py tests/test_layout.py -q",
+    "passed": 21,
+    "subtests_passed": 14,
+    "failed": 0,
+    "diff_check": "passed"
+  },
+  "real_container_capture_cli": {
+    "status": "passed",
+    "source_sha256": "ce83316bed9a5065e85884504c0a7910814f1424bf899c6ddd152681fb4e47d9",
+    "captured_original_sha256": "191e6b1bcb22001afc1f698a0723edf9d70025c2e0772b56cdd67773b31b576f",
+    "boundary": "CLI verified an intermediate candidate; only the subsequent restore guard changed. Full snapshot capture/restore and final stale-target guard are covered by offline controls, not a new live full restore."
+  },
+  "usage": {
+    "requests": 0,
+    "fresh_input": 0,
+    "cache_reads": 0,
+    "output_including_reasoning": 0,
+    "reasoning_subset": 0,
+    "compaction": 0,
+    "total_tokens": 0,
+    "cost": null
+  },
+  "product_model_or_business_contract_changed": false,
+  "private_receipts": [
+    {
+      "path": ".runtime/harness-maturity-20261004/snapshot-sidecar-review/before-manifest.json",
+      "sha256": "38843d212a62ff94732675b8cac9d570548bd83fe27dd9a89e0f28a05ed8757b"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/snapshot-sidecar-review/after-review.json",
+      "sha256": "79adce7d256824728a57c912a2ee9c30282d30829eada68f0f6a6c6d6a838606"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/snapshot-sidecar-review/final-review.json",
+      "sha256": "3ec84c6cf7c5b8e15d7a191f980aa5df3dd50167635daf0dfaf3b7edd030d229"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/snapshot-sidecar-review/related-tests-final.log",
+      "sha256": "8984d0fdae2714878bc8d224c7b6357a4716ad45b2836448d8383d0aa0e375b2"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/snapshot-sidecar-root-cli.json",
+      "sha256": "dd15bcab7bef107e62d087db2eb46a7c4f6e39d2dea65ef43ea8e062cffebf36"
+    }
+  ]
+}
