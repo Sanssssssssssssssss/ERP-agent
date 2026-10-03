@@ -408,6 +408,28 @@ class ConnectionAwarenessTests(unittest.TestCase):
             self.assertEqual(payload["reason_code"], "connection_refused")
             self.assertNotIn("secret", json.dumps(payload))
 
+    def test_typed_argument_failure_precedes_text_but_not_http_or_bad_reply(self):
+        from erp_harness.erp.capabilities import normalize_capability_arguments
+        from erp_harness.erp.read_failures import InvalidReadResponseError, tool_failure
+
+        for value in (1, "connection refused PRIVATE", "forbidden PRIVATE", "unknown field PRIVATE"):
+            with self.assertRaises(RuntimeError) as caught:
+                normalize_capability_arguments("build_domain", {"conditions": [], "extra": value})
+            error = caught.exception
+            result = tool_failure(error)
+            self.assertEqual(result["reason_code"], "tool_arguments_invalid")
+            self.assertEqual(result["next_action"], "correct_arguments")
+            self.assertEqual(result["parameter_issues"], [{"path": "extra", "type": "extra_forbidden"}])
+            self.assertNotIn("PRIVATE", json.dumps(result))
+            for wrapper, expected in (
+                (InvalidReadResponseError(), "invalid_response"),
+                (urllib.error.HTTPError("http://offline.fixture", 401, "denied", {}, None), "authentication_failed"),
+                (urllib.error.HTTPError("http://offline.fixture", 403, "denied", {}, None), "permission_denied"),
+                (urllib.error.HTTPError("http://offline.fixture", 429, "limited", {}, None), "rate_limited"),
+            ):
+                wrapper.__cause__ = error
+                self.assertEqual(tool_failure(wrapper)["reason_code"], expected)
+
     def test_diagnosis_is_fresh_read_only_and_rejects_arguments(self):
         with patch.object(conversation, "_odoo_reads", return_value=object()) as reads:
             result = asyncio.run(conversation._check_odoo_connection("call", {})).details

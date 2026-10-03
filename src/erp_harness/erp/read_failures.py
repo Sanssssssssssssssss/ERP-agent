@@ -152,6 +152,10 @@ def read_failure(error: Exception | dict) -> dict:
         code, message, action = "authentication_failed", "Odoo 认证失败，请检查账号及 API 密钥。", "check_credentials"
     elif "accesserror" in names:
         code, message, action = "permission_denied", "当前账号或字段策略不允许这项读取。", "check_permissions"
+    elif any(isinstance(item, InvalidReadResponseError) for item in chain):
+        code, message, action = "invalid_response", "Odoo 返回的数据格式无效或缺少请求字段。", "check_service_logs"
+    elif any(isinstance(item, ValidationError) for item in chain):
+        code, message, action = "tool_arguments_invalid", "工具参数不符合当前契约。", "correct_arguments"
     elif "explicit odoo connection settings" in text:
         code, message, action = "connection_unconfigured", "未配置完整的 Odoo 连接信息。", "configure_connection"
     elif "unknown odoo instance" in text:
@@ -172,8 +176,6 @@ def read_failure(error: Exception | dict) -> dict:
         code, message, action = "field_policy_denied", "本地字段访问策略拒绝这项读取。", "check_field_policy"
     elif any(isinstance(item, PermissionError) for item in chain) or any(token in text for token in ("accesserror", "access denied", "permission denied", "forbidden")):
         code, message, action = "permission_denied", "当前账号或字段策略不允许这项读取。", "check_permissions"
-    elif any(isinstance(item, InvalidReadResponseError) for item in chain):
-        code, message, action = "invalid_response", "Odoo 返回的数据格式无效或缺少请求字段。", "check_service_logs"
     elif re.search(r"\bthe model ['\"][a-z0-9_.]+['\"] does not exist\b", text):
         code, message, action = "model_unavailable", "当前 Odoo 实例没有该模型；请先查看可用模型及已安装模块。", "list_models"
     elif http == 404:
@@ -218,7 +220,7 @@ def tool_failure(error: Exception | dict) -> dict:
                 validation = current
                 break
             current = current.__cause__ or current.__context__
-        if validation is not None and result["reason_code"] in {"read_failed_unknown", "query_invalid"}:
+        if validation is not None and result["reason_code"] == "tool_arguments_invalid":
             issues = [{"path": ".".join(str(part) for part in row["loc"]), "type": row["type"]}
                       for row in validation.errors(include_input=False, include_context=False, include_url=False)[:8]]
             result.update(reason_code="tool_arguments_invalid", error="工具参数不符合当前契约。",
