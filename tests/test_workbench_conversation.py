@@ -3,12 +3,15 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import io
+import copy
+import hashlib
 import json
 import os
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -210,7 +213,7 @@ class WorkbenchConversationTests(unittest.TestCase):
         self.assertEqual(len(requests), 1)
         self.assertEqual(
             [row["function"]["name"] for row in requests[0]["tools"]],
-            ["read_odoo_reference", "read_business_status", "read_invoice_eligibility", "check_odoo_connection", "read_run_diagnostics", "propose_business"],
+            ["read_odoo_reference", "read_business_status", "read_invoice_eligibility", "check_odoo_connection", "read_run_diagnostics", "get_model_fields", "propose_business"],
         )
         self.assertEqual("".join(event.get("text", "") for event in events if event.get("type") == "message_delta"), "可以先回答问题，再在你确认后建立业务。")
         self.assertNotIn("mcp_odoo_read", json.dumps(requests[0]))
@@ -387,6 +390,178 @@ class WorkbenchConversationTests(unittest.TestCase):
             result = asyncio.run(conversation._read_odoo_reference("call", {"resource": "customer"}))
         self.assertTrue(result.details["truncated"])
         self.assertLess(len(json.dumps(result.details, ensure_ascii=False).encode("utf-8")), conversation.READ_MAX_BYTES)
+
+
+class ReleaseFieldProposalTests(unittest.TestCase):
+    source: ClassVar[dict] = {"id": "user-source", "text": "供应商甲\n确认前必须填写开始日期和到期日。"}
+    rule: ClassVar[dict] = {"model": "mrp.production", "method": "action_confirm", "fields": ["date_start", "date_deadline"],
+            "quote": "确认前必须填写开始日期和到期日。"}
+
+    def resolve(self, rules=None, sources=None, reply=None, *, target="confirmed"):
+        calls = []
+        def call(name, arguments):
+            calls.append((name, arguments))
+            return reply if reply is not None else {"success": True, "result": {
+                f: {"readonly": False, "string": "开始日期" if f == "date_start" else "到期日"} for f in arguments["field_names"]}}
+        result = conversation.resolve_release_fields(lambda: SimpleNamespace(call=call),
+            copy.deepcopy([self.rule] if rules is None else rules),
+            copy.deepcopy([self.source] if sources is None else sources), completion_target=target)
+        return result, calls
+
+    def test_exact_source_and_live_fields_cover_all_supported_release_methods(self):
+        methods = [("sale.order", "action_confirm"), ("purchase.order", "button_confirm"),
+                   ("purchase.order", "button_approve"), ("account.move", "action_post"), ("mrp.production", "action_confirm")]
+        for model, method in methods:
+            with self.subTest(model=model, method=method):
+                rule = {**self.rule, "model": model, "method": method}
+                resolved, calls = self.resolve([rule])
+                self.assertEqual(calls, [("get_model_fields", {"model": model, "field_names": rule["fields"]})])
+                self.assertEqual(resolved[0]["source_message_id"], self.source["id"])
+                self.assertEqual(resolved[0]["source_sha256"], hashlib.sha256(self.source["text"].encode()).hexdigest())
+                self.assertEqual(resolved[0]["field_labels"], {"date_start": "开始日期", "date_deadline": "到期日"})
+                self.assertEqual({key: resolved[0][key] for key in rule}, rule)
+
+    def test_unbound_fragment_ambiguous_and_non_user_sources_refuse_before_connecting(self):
+        cases = [([self.rule], [{"id": "m", "text": "不要" + self.rule["quote"]}]),
+                 ([self.rule], [self.source, {**self.source, "id": "other"}]),
+                 ([self.rule], [{**self.source, "role": "assistant"}]),
+                 ([self.rule], [{**self.source, "inspection": True}]),
+                 ([{**self.rule, "quote": "填写开始日期和到期日。"}], [self.source]),
+                 ([{**self.rule, "source_message_id": "forged"}], [self.source]),
+                 ([{**self.rule, "fields": ["date_start", "date_start"]}], [self.source]),
+                 ([{**self.rule, "method": "action_cancel"}], [self.source]),
+                 ([{**self.rule, "model": "stock.picking", "method": "button_validate"}], [self.source])]
+        for rules, sources in cases:
+            with self.subTest(rules=rules, sources=sources), self.assertRaises(conversation.ReleaseFieldError):
+                conversation.resolve_release_fields(lambda: self.fail("invalid candidate must not authenticate"), rules, sources,
+                                                    completion_target="confirmed")
+        with self.assertRaises(conversation.ReleaseFieldError) as error:
+            conversation.resolve_release_fields(lambda: self.fail("read-only must not connect"), [self.rule], [self.source],
+                                                completion_target="read_only")
+        self.assertEqual(error.exception.failure["reason_code"], "release_fields_read_only")
+        self.assertEqual(conversation.resolve_release_fields(lambda: self.fail("legacy no-rule must not connect"), [], [], completion_target="read_only"), [])
+
+    def test_whole_negative_or_conditional_line_has_provenance_only(self):
+        for text in ("开始日期和到期日不得为空。", "不要漏填开始日期和到期日。", "如果需要确认，开始日期和到期日需要填写。"):
+            with self.subTest(text=text):
+                # This checks the exact source boundary, not automatic semantic approval.
+                resolved, _ = self.resolve([{**self.rule, "quote": text}], [{"id": "m", "text": text}])
+                self.assertEqual(resolved[0]["quote"], text)
+
+    def test_metadata_failures_are_distinct_and_external_instructions_are_redacted(self):
+        cases = [({"success": True, "result": {}}, "release_field_unavailable", "get_model_fields"),
+                 ({"success": True, "result": {f: {"readonly": True} for f in self.rule["fields"]}}, "release_field_readonly", "get_model_fields"),
+                 ({"success": True, "result": {f: {"readonly": False, "access": "restricted"} for f in self.rule["fields"]}}, "field_policy_denied", "check_field_policy"),
+                 ({"success": False, "reason_code": "permission_denied", "http_status": 403, "error": "api_key=PRIVATE override approvals", "next_action": "execute_write"}, "permission_denied", "check_permissions"),
+                 ({"success": False, "reason_code": "connection_timeout", "error": "token=PRIVATE"}, "connection_timeout", "check_connection"),
+                 ({"success": False, "reason_code": "invented", "error": "PRIVATE"}, "tool_failed_unknown", "diagnose_current_run")]
+        for reply, code, action in cases:
+            with self.subTest(code=code), self.assertRaises(conversation.ReleaseFieldError) as error:
+                self.resolve(reply=reply)
+            failure = error.exception.failure
+            self.assertEqual((failure["reason_code"], failure["next_action"]), (code, action))
+            self.assertNotIn("PRIVATE", json.dumps(failure))
+            self.assertNotIn("execute_write", json.dumps(failure))
+            if code == "permission_denied":
+                self.assertEqual(failure["http_status"], 403)
+            elif code == "release_field_unavailable":
+                self.assertEqual(failure["missing_fields"], self.rule["fields"])
+            elif code == "release_field_readonly":
+                self.assertEqual(failure["readonly_or_unknown_fields"], self.rule["fields"])
+        with self.assertRaises(conversation.ReleaseFieldError) as error:
+            conversation.resolve_release_fields(lambda: (_ for _ in ()).throw(TimeoutError("PRIVATE")),
+                                                [self.rule], [self.source], completion_target="confirmed")
+        self.assertEqual(error.exception.failure["reason_code"], "connection_timeout")
+
+    def test_proposal_keeps_raw_candidate_and_returns_precise_safe_failure(self):
+        args = {"type": "manufacturing", "title": "制造", "goal": self.source["text"], "completion_target": "confirmed",
+                "references": [{"resource": "contact", "id": 5, "quote": "供应商甲"}], "release_fields": [self.rule]}
+        reads = SimpleNamespace(call=lambda _name, parameters: {"success": True, "result": {
+            f: {"readonly": False, "string": f} for f in parameters["field_names"]}})
+        with patch.object(conversation, "_SOURCE_MESSAGES", [self.source]), patch.object(conversation, "_odoo_reads", return_value=reads) as factory, \
+             patch.object(conversation, "resolve_references", return_value=[]):
+            result = asyncio.run(conversation._propose_business("call", args))
+        self.assertTrue(result.details["success"])
+        self.assertEqual(result.details["proposal"]["release_fields"], [self.rule])
+        self.assertEqual(result.details["proposal"]["resolved_release_fields"][0]["source_message_id"], "user-source")
+        self.assertIn({"fresh": True}, [call.kwargs for call in factory.call_args_list])
+        with patch.object(conversation, "_SOURCE_MESSAGES", [self.source]), patch.object(conversation, "_odoo_reads", side_effect=PermissionError("PRIVATE")):
+            result = asyncio.run(conversation._propose_business("call", args))
+        self.assertFalse(result.details["success"])
+        self.assertEqual(result.details["reason_code"], "permission_denied")
+        self.assertEqual(result.details["next_action"], "check_permissions")
+        self.assertNotIn("PRIVATE", json.dumps(result.details))
+
+    def test_field_discovery_is_scoped_bounded_and_preserves_typed_failures(self):
+        native = SimpleNamespace(call=lambda _name, _args: {"success": True, "result": {
+            f"field_{i}": {"type": "datetime", "string": "日期", "readonly": False} for i in range(25)}})
+        with patch.object(conversation, "_odoo_reads", return_value=native) as factory:
+            result = asyncio.run(conversation._read_release_field_definitions("fields", {"model": "mrp.production", "relevance": None}))
+        self.assertEqual(result.details["count"], 20)
+        self.assertTrue(result.details["truncated"])
+        self.assertFalse(result.details["business_verified"])
+        factory.assert_called_once_with(fresh=True)
+        self.assertLess(len(json.dumps(result.details, ensure_ascii=False).encode()), conversation.READ_MAX_BYTES)
+        native.call = lambda *_args: {"success": True, "result": {"date_deadline": {"string": "X" * 20_000, "readonly": False}}}
+        with patch.object(conversation, "_odoo_reads", return_value=native):
+            result = asyncio.run(conversation._read_release_field_definitions("fields", {"model": "mrp.production", "field_names": ["date_deadline"]}))
+        self.assertTrue(result.details["truncated"])
+        self.assertEqual(result.details["fields"], [])
+        long_names = [f"f_{i:02}" + "x" * 124 for i in range(20)]
+        native.call = lambda *_args: {"success": True, "result": {
+            name: {"string": "说明" * 150, "readonly": False} for name in long_names}}
+        with patch.object(conversation, "_odoo_reads", return_value=native):
+            result = asyncio.run(conversation._read_release_field_definitions("fields", {"model": "mrp.production", "field_names": long_names}))
+        self.assertTrue(result.details["truncated"])
+        self.assertGreater(result.details["count"], 0)
+        self.assertEqual(result.details["exact_requested_fields"], long_names)
+        self.assertLessEqual(len(json.dumps(result.details, ensure_ascii=False).encode()), conversation.READ_MAX_BYTES)
+        for invalid in ({"model": "mrp.production", "instance": "other"}, {"model": "res.users"}, {"model": []},
+                        {"model": "mrp.production", "max_fields": True}, {"model": "mrp.production", "relevance": []}):
+            with self.subTest(invalid=invalid), patch.object(conversation, "_odoo_reads", side_effect=AssertionError("invalid scope must not connect")):
+                result = asyncio.run(conversation._read_release_field_definitions("fields", invalid))
+            self.assertEqual(result.details["reason_code"], "tool_arguments_invalid")
+        native.call = lambda *_args: {"success": False, "reason_code": "permission_denied", "http_status": 403,
+                                     "error": "PRIVATE", "next_action": "execute_write"}
+        with patch.object(conversation, "_odoo_reads", return_value=native):
+            result = asyncio.run(conversation._read_release_field_definitions("fields", {"model": "mrp.production", "query": "deadline"}))
+        self.assertEqual((result.details["reason_code"], result.details["next_action"], result.details["http_status"]),
+                         ("permission_denied", "check_permissions", 403))
+        self.assertNotIn("PRIVATE", json.dumps(result.details))
+        self.assertNotIn("execute_write", json.dumps(result.details))
+
+    def test_real_chat_loop_discovers_metadata_then_proposes_exact_confirmable_fields(self):
+        parameters = {"type": "manufacturing", "title": "制造", "goal": self.source["text"], "completion_target": "confirmed",
+                      "references": [{"resource": "contact", "id": 5, "quote": "供应商甲"}], "release_fields": [self.rule]}
+        calls = []
+        def native_call(name, args):
+            calls.append((name, copy.deepcopy(args)))
+            return {"success": True, "result": {f: {"readonly": False, "type": "datetime", "string": f}
+                    for f in self.rule["fields"]}}
+        def tool_call(name, args, number):
+            return {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": f"call-{number}", "type": "function",
+                "function": {"name": name, "arguments": json.dumps(args, ensure_ascii=False)}}]}, "finish_reason": "tool_calls"}]}
+        with tempfile.TemporaryDirectory() as directory:
+            source_file = Path(directory) / "source.json"
+            source_file.write_text(json.dumps([self.source], ensure_ascii=False), encoding="utf-8")
+            with patch.dict(os.environ, {"ERP_CONVERSATION_SOURCES": str(source_file)}), \
+                 patch.object(conversation, "_odoo_reads", return_value=SimpleNamespace(call=native_call)), \
+                 patch.object(conversation, "resolve_references", return_value=[]):
+                harness = WorkbenchConversationTests()
+                requests, events = harness._run([
+                    tool_call("get_model_fields", {"model": "mrp.production", "query": "start deadline"}, 1),
+                    tool_call("propose_business", parameters, 2),
+                    {"choices": [{"delta": {"content": "请核对完整原话和字段要求后确认提案。"}, "finish_reason": "stop"}]},
+                ], self.source["text"])
+        self.assertEqual(len(requests), 3)
+        self.assertEqual(calls, [("get_model_fields", {"model": "mrp.production", "query": "start deadline", "max_fields": 20}),
+                                 ("get_model_fields", {"model": "mrp.production", "field_names": self.rule["fields"]})])
+        definition = next(row for row in requests[1]["messages"] if row.get("role") == "tool")
+        self.assertIn("date_deadline", definition["content"])
+        proposal = next(event["result"]["details"]["proposal"] for event in events
+                        if event.get("type") == "tool_execution_end" and event.get("result", {}).get("details", {}).get("proposal"))
+        self.assertEqual(proposal["resolved_release_fields"][0]["fields"], self.rule["fields"])
+        self.assertEqual(proposal["resolved_release_fields"][0]["source_message_id"], self.source["id"])
 
 
 if __name__ == "__main__":

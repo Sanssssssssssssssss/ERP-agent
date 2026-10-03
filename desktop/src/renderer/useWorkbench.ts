@@ -16,13 +16,14 @@ Run,
 SessionDetail,
 SessionSummary,
 Settings,
-TraceBundle
+TraceBundle,
+liveMessageKey
 } from './protocol'
 import type { TraceDetail, TraceDetailKind } from './protocol'
 import { ApprovalProgress,ConnectionState,DownloadReceipt,MaterialRecord,ProposalLike } from './view-types'
 import { transitionView } from './view-transition'
 
-export const liveMessageKey = (message: Pick<LiveMessage, 'session_id' | 'business_id' | 'run_id' | 'id'>) => `${message.session_id}:${message.business_id ?? '__conversation__'}:${message.run_id}:${message.id}`
+export { liveMessageKey } from './protocol'
 
 export function useWorkbench() {
 
@@ -224,12 +225,12 @@ export function useWorkbench() {
     if (latestConversation && ['completed', 'failed', 'cancelled', 'interrupted'].includes(latestConversation.status)) {
       setThinkingRun((current) => current && current.runId && current.sessionId === sessionId && current.runId === latestConversation.id ? null : current)
     }
-    const persistedMessageIds = new Set(result.messages.map((message) => message.id))
+    const persistedMessageKeys = new Set(result.messages.map((message) => liveMessageKey({ ...message, session_id: sessionId })))
     for (const message of result.messages) {
       if (message.run_id) finalizedStreamKeysRef.current.add(liveMessageKey({ session_id: sessionId, business_id: message.business_id ?? null, run_id: message.run_id, id: message.id }))
     }
     for (const message of result.live_messages ?? []) {
-      if (!persistedMessageIds.has(message.id) && message.session_id === sessionId && Number.isInteger(message.sequence)) {
+      if (!persistedMessageKeys.has(liveMessageKey(message)) && message.session_id === sessionId && Number.isInteger(message.sequence)) {
         const key = liveMessageKey(message)
         const current = conversationStreamsRef.current.get(key)
         if (!current || message.sequence >= current.sequence) conversationStreamsRef.current.set(key, message)
@@ -237,7 +238,7 @@ export function useWorkbench() {
       }
     }
     for (const [key, message] of conversationStreamsRef.current) {
-      if (message.session_id !== sessionId || persistedMessageIds.has(message.id)) conversationStreamsRef.current.delete(key)
+      if (message.session_id !== sessionId || persistedMessageKeys.has(key)) conversationStreamsRef.current.delete(key)
     }
     setLiveMessages([...conversationStreamsRef.current.values()])
     drainPendingStreamEvents()

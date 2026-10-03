@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import copy
+import hashlib
 import io
 import os
 import sqlite3
@@ -13,6 +14,7 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 
@@ -1893,6 +1895,159 @@ class WorkbenchHostTests(unittest.TestCase):
         result = self.host.confirm_business(self.sid, normal["proposal_ids"][0], True)
         self.assertEqual(result["goal"], "只查看采购草稿")
         self.assertNotIn("查询旧运行有没有工具错误", [m["text"] for m in result["source_messages"]])
+
+
+class ReleaseFieldHostTests(unittest.TestCase):
+    setUp = WorkbenchHostTests.setUp
+    tearDown = WorkbenchHostTests.tearDown
+    source_text = "供应商甲\n确认采购单前计划日期不得为空。"
+    rule: ClassVar[dict] = {"model": "purchase.order", "method": "button_confirm", "fields": ["date_planned"],
+            "quote": "确认采购单前计划日期不得为空。"}
+
+    def _candidate(self, *, existing=None, rules=None, include_rules=True, text=None, metadata=None):
+        self.metadata_calls = []
+        def call(name, arguments):
+            if name == "get_model_fields":
+                self.metadata_calls.append(copy.deepcopy(arguments))
+                return metadata if metadata is not None else {"success": True, "result": {
+                    "date_planned": {"readonly": False, "type": "datetime", "string": "计划日期"}}}
+            self.assertEqual(name, "search_records")
+            return {"success": True, "result": [{"id": 5, "name": "供应商甲"}]}
+        self.host._native_reads = lambda: SimpleNamespace(call=call)
+        self.host._launch_conversation = lambda _run: None
+        run = self.host.store.data["conversation_runs"][self.host.send_message(
+            self.sid, text or self.source_text, context_business_id=existing)["run_id"]]
+        proposal = {"type": "purchase", "title": "采购确认", "goal": "确认采购单并保留计划日期", "completion_target": "confirmed",
+                    "references": [{"resource": "contact", "id": 5, "quote": "供应商甲"}]}
+        if include_rules:
+            proposal["release_fields"] = copy.deepcopy([self.rule] if rules is None else rules)
+        if existing:
+            proposal["existing_business_id"] = existing
+        # A worker's projection never supplies source binding or field authorization.
+        proposal["resolved_release_fields"] = [{"model": "purchase.order", "method": "button_confirm", "fields": ["forged"],
+                                               "source_message_id": "forged", "field_labels": {"date_planned": "forged"}}]
+        self.host._conversation_tool_end(run, {"tool_call_id": "proposal", "tool_name": "propose_business",
+                                             "result": {"success": True, "proposal": proposal}})
+        self.host._finalize_conversation(run, "completed")
+        row = next((m["proposal"] for m in self.host.store.data["messages"][self.sid] if m.get("proposal", {}).get("id") in run.get("proposal_ids", [])), None)
+        return run, row
+
+    def test_candidate_confirm_contract_and_before_send_guard_share_the_confirmed_fields(self):
+        from erp_harness.app.host import build_task_contract
+        from erp_harness.erp.task_evidence import TaskEvidence
+        from tests.test_actions import _actions
+
+        run, proposal = self._candidate()
+        self.assertEqual(len(self.metadata_calls), 1)
+        projected = proposal["resolved_release_fields"][0]
+        self.assertEqual(projected["fields"], ["date_planned"])
+        self.assertEqual(projected["field_labels"], {"date_planned": "计划日期"})
+        self.assertEqual(projected["source_message_id"], run["source_message_id"])
+        self.assertEqual(self.host.store.data["businesses"], {})
+        business = self.host.confirm_business(self.sid, proposal["id"], True)
+        self.assertEqual(len(self.metadata_calls), 2)
+        path = self.host._instruction(business, "field-contract-run")
+        contract = json.loads(path.with_name("task-sources.json").read_text(encoding="utf-8"))
+        self.assertEqual(contract["release_fields"], [{"model": "purchase.order", "method": "button_confirm", "fields": ["date_planned"]}])
+        self.assertNotIn("quote", contract["release_fields"][0])
+        self.assertIn("Confirmed release field presence", path.read_text(encoding="utf-8"))
+        self.assertEqual(contract["release_fields"], build_task_contract(business, path.read_text(encoding="utf-8"))["release_fields"])
+        self.assertEqual(contract["instruction_sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
+        actions, writer, runtime = _actions(path=Path(self.tmp.name) / "guard.sqlite3")
+        with closing(actions.store):
+            runtime.client.metadata["date_planned"] = {"type": "datetime", "readonly": False}
+            runtime.client.records["purchase.order"][8].update(date_planned=False, partner_id=5)
+            runtime.client.records.setdefault("res.partner", {})[5] = {"id": 5, "name": "供应商甲"}
+            actions.task_evidence = TaskEvidence(actions.reads, contract, Path(self.tmp.name) / "field-evidence.json")
+            with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1", "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": "purchase.order.button_confirm"}):
+                result = actions.execute_method("purchase.order", "button_confirm", kwargs={"ids": [8]})
+            self.assertFalse(result["success"], result)
+            self.assertIn("date_planned", result["error"])
+            self.assertEqual(writer.calls, [])
+
+    def test_confirm_rechecks_metadata_and_reports_distinct_deduplicated_host_feedback(self):
+        from erp_harness.app.conversation import ReleaseFieldError
+        _, proposal = self._candidate()
+        for reply, code in [({"success": False, "reason_code": "permission_denied", "http_status": 403, "error": "PRIVATE"}, "permission_denied"),
+                            ({"success": True, "result": {"date_planned": {"readonly": True}}}, "release_field_readonly")]:
+            self.host._native_reads = lambda reply=reply: SimpleNamespace(call=lambda *_args: reply)
+            for _ in range(2):
+                with self.assertRaises(ReleaseFieldError) as error:
+                    self.host.confirm_business(self.sid, proposal["id"], True)
+                self.assertEqual(error.exception.failure["reason_code"], code)
+            self.assertEqual(proposal["status"], "pending")
+            self.assertEqual(self.host.store.data["businesses"], {})
+        feedback = [m for m in self.host.store.data["messages"][self.sid] if m.get("host_feedback_key")]
+        self.assertEqual(len(feedback), 2)
+        self.assertTrue(all("提案未确认" in m["text"] and m["reason_code"] not in m["text"] for m in feedback))
+        prompt = self.host._conversation_prompt(self.sid, "为什么没有确认", None)
+        self.assertIn("Previous host feedback", prompt)
+        self.assertIn("只读", prompt)
+        self.assertNotIn("PRIVATE", prompt)
+
+    def test_host_rejection_creates_safe_feedback_without_saving_a_candidate(self):
+        run, proposal = self._candidate(metadata={"success": False, "reason_code": "connection_timeout", "error": "PRIVATE"})
+        self.assertIsNone(proposal)
+        self.assertEqual(run["tools"][-1]["result"]["next_action"], "check_connection")
+        feedback = [m for m in self.host.store.data["messages"][self.sid] if m.get("host_feedback_key")]
+        self.assertEqual(len(feedback), 1)
+        self.assertIn("提案未保存", feedback[0]["text"])
+        self.assertNotIn("PRIVATE", json.dumps(feedback))
+        self.assertEqual(self.host.store.data["businesses"], {})
+
+    def test_goal_update_retains_confirmed_rule_and_original_source_when_model_omits_it(self):
+        _, proposal = self._candidate()
+        business = self.host.confirm_business(self.sid, proposal["id"], True)
+        original = copy.deepcopy(business["resolved_release_fields"])
+        _, amendment = self._candidate(existing=business["id"], include_rules=False, text="供应商甲\n同时检查采购单状态。")
+        self.assertEqual(amendment["release_fields"], [self.rule])
+        self.assertEqual(amendment["resolved_release_fields"], original)
+        self.assertIn(self.source_text, [m["text"] for m in amendment["source_messages"]])
+        updated = self.host.confirm_business(self.sid, amendment["id"], True)
+        self.assertEqual(updated["resolved_release_fields"], original)
+        self.assertEqual(updated["release_fields"], [self.rule])
+
+    def test_existing_rule_cannot_be_changed_or_cleared_and_unresolved_business_cannot_confirm(self):
+        from erp_harness.app.conversation import ReleaseFieldError
+        _, proposal = self._candidate()
+        business = self.host.confirm_business(self.sid, proposal["id"], True)
+        for rules in ([], [{**self.rule, "fields": ["other"]}]):
+            with self.subTest(rules=rules):
+                _, amendment = self._candidate(existing=business["id"], rules=rules)
+                self.assertIsNone(amendment)
+                self.assertEqual(self.metadata_calls, [])
+                self.assertEqual(business["release_fields"], [self.rule])
+        _, amendment = self._candidate(existing=business["id"], include_rules=False, text="供应商甲\n增加查看采购单状态。")
+        before = copy.deepcopy(business)
+        business["status"] = "needs_reconciliation"
+        self.host._native_reads = lambda: self.fail("unknown writes must be reconciled before field validation")
+        with self.assertRaises(RuntimeError):
+            self.host.confirm_business(self.sid, amendment["id"], True)
+        self.assertEqual(business["goal"], before["goal"])
+        self.assertEqual(amendment["status"], "pending")
+        with self.assertRaises(ReleaseFieldError) as error:
+            self.host._proposal_release_fields(self.sid, {**amendment, "completion_target": "read_only"}, amendment["source_messages"])
+        self.assertEqual(error.exception.failure["reason_code"], "release_fields_read_only")
+
+    def test_source_binding_rejects_other_session_and_inspection_and_changed_source(self):
+        from erp_harness.app.conversation import ReleaseFieldError
+        _, proposal = self._candidate()
+        source = proposal["source_messages"][0]
+        for change in ("foreign", "inspection"):
+            original = next(m for m in self.host.store.data["messages"][self.sid] if m["id"] == source["id"])
+            original["inspection"] = change == "inspection"
+            invalid = {**source, "id": "other-session"} if change == "foreign" else source
+            with self.subTest(change=change), self.assertRaises(ReleaseFieldError):
+                self.host._proposal_release_fields(self.sid, proposal, [invalid])
+            original.pop("inspection", None)
+        original["text"] += "需求已变更"
+        self.host._native_reads = lambda: self.fail("changed source must not authenticate")
+        with self.assertRaises(ValueError):
+            self.host.confirm_business(self.sid, proposal["id"], True)
+        feedback = [m for m in self.host.store.data["messages"][self.sid] if m.get("host_feedback_key")]
+        self.assertEqual(feedback[-1]["reason_code"], "release_source_invalid")
+        self.assertEqual(proposal["status"], "pending")
+        self.assertEqual(self.host.store.data["businesses"], {})
 
 
 if __name__ == "__main__":

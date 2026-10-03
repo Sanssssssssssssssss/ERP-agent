@@ -78,6 +78,15 @@ export interface BusinessProposal {
   goal: string;
   source_messages?: { id: string; text: string }[];
   resolved_references?: { resource: string; id: number; quote: string; model: string; expected_state?: "cancel" }[];
+  resolved_release_fields?: {
+    model: string;
+    method: string;
+    fields: string[];
+    quote: string;
+    source_message_id: string;
+    source_sha256: string;
+    field_labels: Record<string, string>;
+  }[];
   status: "pending" | "confirmed" | "rejected";
   completion_target?: CompletionTarget;
   material_ids?: string[];

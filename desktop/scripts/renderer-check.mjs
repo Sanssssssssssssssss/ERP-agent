@@ -325,6 +325,24 @@ const proposalButton = page.getByRole('button', { name: '创建业务工作区' 
 await proposalButton.waitFor()
 assert.equal(await page.locator('.proposal-card').count(), 1)
 assert.equal(await page.locator('.proposal-card h3').textContent(), '新业务意图')
+// Display-only fixture: even a short quoted fragment must show the full source.
+// Host whole-line validation and confirmation are covered by Python checks.
+await page.evaluate(() => {
+  window.__updateProposal('proposal-1', {
+    source_messages: [{ id: 'm-user', text: '制造单确认前填写开始日期和到期日期，不要用预计完成日期替代。' }],
+    resolved_release_fields: [{ model: 'mrp.production', method: 'action_confirm', fields: ['date_start', 'date_deadline'], quote: '填写开始日期和到期日期', source_message_id: 'm-user', source_sha256: 'offline-renderer-fixture', field_labels: { date_start: 'Start', date_deadline: 'Deadline' } }]
+  })
+  window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } })
+})
+const fieldRequirements = page.getByRole('group', { name: '执行前字段要求' })
+await fieldRequirements.waitFor()
+assert.match(await fieldRequirements.innerText(), /开始日期、到期日期/)
+assert.equal(await fieldRequirements.getByText('用户原话：制造单确认前填写开始日期和到期日期，不要用预计完成日期替代。', { exact: true }).isVisible(), true)
+assert.equal(await page.getByRole('button', { name: '创建业务并确认字段要求' }).count(), 1)
+await fieldRequirements.getByText('字段映射', { exact: true }).click()
+assert.match(await fieldRequirements.locator('code').innerText(), /mrp.production · action_confirm · date_start, date_deadline/)
+await page.evaluate(() => { window.__updateProposal('proposal-1', { source_messages: undefined, resolved_release_fields: undefined }); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
+await fieldRequirements.waitFor({ state: 'detached' })
 await page.evaluate(() => { window.__setRunState(false, 'running'); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
 await page.getByText('正在整理业务方案，回复完成后可确认。', { exact: true }).waitFor()
 assert.equal(await proposalButton.count(), 0)
@@ -566,7 +584,7 @@ assert.equal(await page.getByText('终态后不应追加', { exact: true }).coun
 await page.locator('.activity-card').getByText('业务流公开进度', { exact: true }).waitFor()
 await page.getByText('取消前已经收到的片段', { exact: true }).waitFor()
 await page.evaluate(() => {
-  window.__persistConversationMessage({ id: 'conversation-live-1', role: 'assistant', text: '最终回答：当前能力与业务范围已确认。\n\n| 项目 | 状态 |\n| --- | --- |\n| 能力 | 已确认 |', created_at: '2026-09-08T09:01:00Z', context_business_id: null })
+  window.__persistConversationMessage({ id: 'conversation-live-1', run_id: 'conversation-run-b', business_id: null, role: 'assistant', text: '最终回答：当前能力与业务范围已确认。\n\n| 项目 | 状态 |\n| --- | --- |\n| 能力 | 已确认 |', created_at: '2026-09-08T09:01:00Z', context_business_id: null })
   window.__persistConversationMessage({ id: 'long-markdown', role: 'assistant', text: '## 长摘要\n\n' + '公开业务内容 '.repeat(200), created_at: '2026-09-08T09:01:10Z', context_business_id: null })
   window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', status: 'completed' } })
 })
@@ -587,6 +605,25 @@ const visibleStreamText = await page.locator('.conversation-pane').textContent()
 assert.ok(!visibleStreamText?.includes('不能显示'))
 const streamRows = await page.locator('.conversation-pane .live-message').count()
 assert.ok(streamRows >= 2)
+// Persistence of another run's same message ID must not erase the active stream.
+await page.evaluate(() => {
+  window.__emitWorkbench({ event: 'message_delta', data: { session_id: 'session-b', business_id: null, run_id: 'conversation-run-b', message_id: 'shared-message-id', sequence: 0, text: '当前查询仍在输出' } })
+  window.__persistConversationMessage({ id: 'shared-message-id', role: 'assistant', run_id: 'older-conversation-run', business_id: null, text: '旧查询的同编号消息' })
+  window.__persistConversationMessage({ id: 'shared-message-id', role: 'assistant', run_id: 'business-b2-run', business_id: 'business-b2', text: '业务运行的同编号消息' })
+  window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } })
+})
+await page.locator('.conversation-pane').getByText('旧查询的同编号消息', { exact: true }).waitFor()
+assert.equal(await page.locator('.conversation-pane').getByText('当前查询仍在输出', { exact: true }).count(), 1)
+assert.equal(await page.locator('.conversation-pane').getByText('业务运行的同编号消息', { exact: true }).count(), 1)
+await page.evaluate(() => {
+  window.__emitWorkbench({ event: 'message_end', data: { session_id: 'session-b', business_id: null, run_id: 'conversation-run-b', message_id: 'shared-message-id', sequence: 1, text: '当前查询同编号最终回复' } })
+  window.__persistConversationMessage({ id: 'shared-message-id', role: 'assistant', run_id: 'conversation-run-b', business_id: null, text: '当前查询同编号最终回复' })
+  window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } })
+})
+await page.locator('.conversation-pane .message:not(.live-message)').getByText('当前查询同编号最终回复', { exact: true }).waitFor()
+assert.equal(await page.locator('.conversation-pane').getByText('当前查询同编号最终回复', { exact: true }).count(), 1)
+assert.equal(await page.locator('.conversation-pane').getByText('旧查询的同编号消息', { exact: true }).count(), 1)
+await page.evaluate(() => { window.__removeConversationMessage('shared-message-id'); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
 await page.getByRole('button', { name: /停止对话/ }).click()
 await page.getByRole('button', { name: /正在停止/ }).waitFor()
 assert.equal(await page.locator('.thinking-message').count(), 0)

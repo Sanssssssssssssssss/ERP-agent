@@ -2,7 +2,7 @@ import { AlertDialog as RadixAlertDialog,Button as RadixButton,IconButton as Rad
 import { Archive,FilePlus2,FileText,FolderPlus,LoaderCircle,PanelLeftClose,PanelLeftOpen,Search,Send,Settings2,Square,Trash2 } from 'lucide-react'
 import { useEffect,useRef,useState,type FormEvent,type ReactNode } from 'react'
 import { EmptyState,MessageText } from '../../components/common'
-import { businessTypeMeta,completionTargetLabel,materialRowLabel } from '../../presentation'
+import { businessTypeMeta,completionTargetLabel,documentModelLabel,materialRowLabel,operationLabel } from '../../presentation'
 import {
 Approval,
 Business,
@@ -14,10 +14,11 @@ SessionDetail,
 SessionSummary,
 businessStatusLabel,
 formatInstant,
-labelFor
+labelFor,
+liveMessageKey
 } from '../../protocol'
 import { ApprovalProgress,MaterialRecord,MessageWithMaterials,ProposalLike } from '../../view-types'
-import { ApprovalInboxCard } from '../approvals/ApprovalsPage'
+import { ApprovalInboxCard,approvalFieldLabel } from '../approvals/ApprovalsPage'
 
 export function SessionRail({
   sessions,
@@ -123,12 +124,13 @@ export function ConversationPane({ session, draft, liveMessages, conversationRun
   const activeConversation = latestConversation && ['running', 'cancel_requested'].includes(latestConversation.status) ? latestConversation : undefined
   const terminalConversation = latestConversation && ['failed', 'cancelled', 'interrupted'].includes(latestConversation.status) ? latestConversation : undefined
   const visibleLiveMessages = liveMessages.filter((message) => message.session_id === session?.session.id && (message.business_id == null || message.business_id === selectedBusinessId))
-  const persistedMessageKeys = new Set(messages.map((message) => `${message.business_id ?? '__conversation__'}:${message.id}`))
+  const messageKey = (message: Message | LiveMessage) => liveMessageKey({ ...message, session_id: session?.session.id })
+  const persistedMessageKeys = new Set(messages.map(messageKey))
   const orderedMessages = [
     ...messages.filter((message) => message.proposal ? message.proposal.status === 'confirmed' && businesses.some((business) => business.id === message.business_id) : message.text.trim()).map((message) => message.proposal
       ? { kind: 'receipt' as const, message, created_at: message.created_at }
       : { kind: 'message' as const, message, created_at: message.created_at }),
-    ...visibleLiveMessages.filter((message) => !persistedMessageKeys.has(`${message.business_id ?? '__conversation__'}:${message.id}`)).map((message) => ({ kind: 'live' as const, message, created_at: message.created_at }))
+    ...visibleLiveMessages.filter((message) => !persistedMessageKeys.has(messageKey(message))).map((message) => ({ kind: 'live' as const, message, created_at: message.created_at }))
   ]
   // Legacy history can omit timestamps. Keep its stored order, including proposal receipts.
   if (orderedMessages.every((item) => typeof item.created_at === 'string' && Number.isFinite(Date.parse(item.created_at)))) {
@@ -178,7 +180,7 @@ export function ConversationPane({ session, draft, liveMessages, conversationRun
       <div ref={scrollRef} className="conversation-scroll" onScroll={(event) => { const element = event.currentTarget; const latest = element.scrollHeight - element.scrollTop - element.clientHeight < 24; setAtLatest(latest); if (latest) setHasNew(false) }}>
         {!session && <EmptyState title="选择一个会话" detail="从左侧继续处理，或新建会话。" />}
         {session && orderedMessages.length === 0 && visibleLiveMessages.length === 0 && !pendingProposal && !showThinking && <ConversationWelcome onStarter={onStarter} />}
-        {orderedMessages.map((item) => item.kind === 'receipt' ? <article className="proposal-receipt" key={item.message.id}><strong>{item.message.proposal?.title}</strong><span>业务已确认</span><RadixButton variant="soft" onClick={() => onOpenBusiness(item.message.business_id!)}>打开业务</RadixButton></article> : item.kind === 'message' ? (() => { const ids = (item.message as MessageWithMaterials).material_ids ?? []; const inherited = ids.filter((id) => materialSeen.has(id)); ids.forEach((id) => materialSeen.add(id)); return <MessageRow key={`message:${item.message.id}`} message={item.message} inheritedMaterialIds={inherited} contextLabel={inspectionLabel(item.message)} /> })() : <article className="message assistant live-message" key={`live:${item.message.run_id}:${item.message.id}`}><span className="avatar agent-avatar">A</span><div><div className="message-meta"><strong>Agent</strong><span>{item.message.status === 'ended' ? '回复完成' : item.message.status === 'interrupted' || item.message.status === 'failed' ? '已停止 · 回复未完成' : '实时回复'}</span></div><small>{inspectionLabel(item.message)}</small><MessageText text={item.message.text} collapsible={false} /></div></article>)}
+        {orderedMessages.map((item) => item.kind === 'receipt' ? <article className="proposal-receipt" key={messageKey(item.message)}><strong>{item.message.proposal?.title}</strong><span>业务已确认</span><RadixButton variant="soft" onClick={() => onOpenBusiness(item.message.business_id!)}>打开业务</RadixButton></article> : item.kind === 'message' ? (() => { const ids = (item.message as MessageWithMaterials).material_ids ?? []; const inherited = ids.filter((id) => materialSeen.has(id)); ids.forEach((id) => materialSeen.add(id)); return <MessageRow key={`message:${messageKey(item.message)}`} message={item.message} inheritedMaterialIds={inherited} contextLabel={inspectionLabel(item.message)} /> })() : <article className="message assistant live-message" key={`live:${messageKey(item.message)}`}><span className="avatar agent-avatar">A</span><div><div className="message-meta"><strong>Agent</strong><span>{item.message.status === 'ended' ? '回复完成' : item.message.status === 'interrupted' || item.message.status === 'failed' ? '已停止 · 回复未完成' : '实时回复'}</span></div><small>{inspectionLabel(item.message)}</small><MessageText text={item.message.text} collapsible={false} /></div></article>)}
         {showThinking && <article className="message assistant thinking-message" aria-live="polite"><span className="avatar agent-avatar">A</span><div><div className="message-meta"><strong>Agent</strong></div><p className="thinking-copy">正在思考…</p></div></article>}
         {(pendingApprovals.length > 0 || approvalProgress?.businessId === selectedBusinessId || Boolean(selectedBusinessId && approvalActivity && approvalActivity.phase !== 'idle')) && <ApprovalInboxCard approvals={pendingApprovals} businessName={approvalBusinessName} progress={approvalProgress} activity={approvalActivity} onOpenApprovals={onOpenApprovals} onOpenExecution={onOpenExecution} />}
         {pendingProposal && proposalBusy && <p className="proposal-preparing" role="status"><LoaderCircle size={15} className="spin" />正在整理业务方案，回复完成后可确认。</p>}
@@ -225,7 +227,29 @@ export function MaterialReuseTray({ materials, hasNewMaterials }: { materials: M
 
 export function ProposalCard({ proposal, disabled, preparing, unavailable, onDecision, onOpenBusiness }: { onOpenBusiness?: (id: string) => void; proposal: ProposalLike; disabled: boolean; preparing?: boolean; unavailable?: string; onDecision: (proposal: ProposalLike, confirmed: boolean) => void }) {
   const continuesBusiness = Boolean(proposal.existing_business_id)
-  return <section className="proposal-card"><div className="proposal-icon"><FolderPlus size={18} /></div><div className="proposal-kicker">{continuesBusiness ? '延续当前业务' : '业务提案'} · {businessTypeMeta(proposal.type).title}</div><h3>{proposal.title}</h3><p>{proposal.goal}</p>{proposal.source_messages?.length ? <details className="proposal-sources"><summary>执行依据：用户原话</summary>{proposal.source_messages.map((message) => <p key={message.id}>{message.text}</p>)}<small>提案是摘要，执行时保留上述原始要求。</small></details> : <small>历史提案：开始执行前请核对目标。</small>}<div className="proposal-references">{proposal.resolved_references?.map((r) => <small key={`${r.model}:${r.id}`}>{r.quote}<br /></small>)}</div><div className="proposal-target">完成目标：{completionTargetLabel(proposal.completion_target, proposal.type)}</div>{(preparing || unavailable) && <p role="status">{unavailable || "正在完善提案，回复结束后可确认。"}</p>}{unavailable && proposal.existing_business_id && onOpenBusiness && <RadixButton variant="soft" onClick={() => onOpenBusiness(proposal.existing_business_id!)}>打开当前业务核对</RadixButton>}<div className="proposal-actions"><RadixButton className="secondary-button" variant="soft" disabled={disabled} onClick={() => onDecision(proposal, false)}>{continuesBusiness ? '暂不更新' : '暂不创建'}</RadixButton><RadixButton className="primary-button" disabled={disabled} onClick={() => onDecision(proposal, true)}><FolderPlus size={15} />{continuesBusiness ? '更新业务目标' : '创建业务工作区'}</RadixButton></div></section>
+  const requirements = proposal.resolved_release_fields || []
+  const requirementSources = proposal.source_messages?.filter(message => requirements.some(rule => rule.source_message_id === message.id)) || []
+  return <section className="proposal-card">
+    <div className="proposal-icon"><FolderPlus size={18} /></div>
+    <div className="proposal-kicker">{continuesBusiness ? '延续当前业务' : '业务提案'} · {businessTypeMeta(proposal.type).title}</div>
+    <h3>{proposal.title}</h3><p>{proposal.goal}</p>
+    {requirements.length > 0 && <div className="proposal-target" role="group" aria-label="执行前字段要求">
+      <strong>执行前字段要求</strong>
+      {requirements.map((rule, index) => <p key={`${rule.model}:${rule.method}:${index}`}>
+        {documentModelLabel(rule.model)} · {operationLabel(rule.method)}前必须填写：
+        {rule.fields.map((field, i) => { const translated = approvalFieldLabel(field, rule.model); return <span key={field} title={`${rule.model}.${field}`}>{i > 0 ? '、' : ''}{translated === field ? rule.field_labels[field] || field : translated}</span> })}
+      </p>)}
+      <small>确认后启用；此项检查字段是否有值。</small>
+      {requirementSources.map(message => <p key={message.id}>用户原话：{message.text}</p>)}
+      <details className="proposal-sources"><summary>字段映射</summary>{requirements.map((rule, index) => <p key={index}><code>{rule.model} · {rule.method} · {rule.fields.join(', ')}</code></p>)}</details>
+    </div>}
+    {proposal.source_messages?.length ? <details className="proposal-sources"><summary>执行依据：用户原话</summary>{proposal.source_messages.map((message) => <p key={message.id}>{message.text}</p>)}<small>提案是摘要，执行时保留上述原始要求。</small></details> : <small>历史提案：开始执行前请核对目标。</small>}
+    <div className="proposal-references">{proposal.resolved_references?.map((r) => <small key={`${r.model}:${r.id}`}>{r.quote}<br /></small>)}</div>
+    <div className="proposal-target">完成目标：{completionTargetLabel(proposal.completion_target, proposal.type)}</div>
+    {(preparing || unavailable) && <p role="status">{unavailable || "正在完善提案，回复结束后可确认。"}</p>}
+    {unavailable && proposal.existing_business_id && onOpenBusiness && <RadixButton variant="soft" onClick={() => onOpenBusiness(proposal.existing_business_id!)}>打开当前业务核对</RadixButton>}
+    <div className="proposal-actions"><RadixButton className="secondary-button" variant="soft" disabled={disabled} onClick={() => onDecision(proposal, false)}>{continuesBusiness ? '暂不更新' : '暂不创建'}</RadixButton><RadixButton className="primary-button" disabled={disabled} onClick={() => onDecision(proposal, true)}><FolderPlus size={15} />{requirements.length ? (continuesBusiness ? '确认目标与字段要求' : '创建业务并确认字段要求') : (continuesBusiness ? '更新业务目标' : '创建业务工作区')}</RadixButton></div>
+  </section>
 }
 
 export function BlockedSendDialog({ message, onClose }: { message: string; onClose: () => void }) {
