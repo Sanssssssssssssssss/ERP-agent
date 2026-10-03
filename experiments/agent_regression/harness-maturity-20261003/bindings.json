@@ -37,8 +37,8 @@
       "api_candidate_sha256": "004105a5a6fc25ecba214148e27383bb27b8c047a9de1cd2703515d32ee7095a",
       "api_status": "corrective_discovery_intent_observed",
       "api_result": "experiments/agent_regression/harness-maturity-20261003/api-results.json",
-      "business_result": null,
-      "boundary": "Warning delivery and first corrective discovery intent observed. Returned tools not executed. Corrected proposals, host scope binding and final business acceptance remain unverified."
+      "business_result": "experiments/agent_regression/harness-maturity-20261003/business-results.json",
+      "boundary": "Full 2066 now scores100, but it supplied complete dates before validation, so the unavailable warning was not triggered. Local API proves first corrective intent; no causal claim that the warning alone produced the score improvement."
     },
     {
       "case_id": "TFR2-2066-02",
@@ -127,5 +127,83 @@
         "producer_git_blob_sha256": "d526d5837fa6e9a17b04b85129481ba344ec94af83b53724e7ea5c6770048c25"
       }
     ]
-  }
+  },
+  "third_patchset": {
+    "commit": "b561f64",
+    "verification": {
+      "passed": 1554,
+      "skipped": 4,
+      "subtests_passed": 310,
+      "log": ".runtime/harness-maturity-20261003/patchset3-full-tests.log",
+      "test_index_check": "passed",
+      "desktop_typecheck": "passed",
+      "desktop_trace_check": "passed",
+      "independent_review": "passed",
+      "ruff_new_findings": 0
+    },
+    "bindings": [
+      {
+        "origin": "offline_actual_host_entry",
+        "fix_commit": "1def8af",
+        "category": "connection_failure_classification",
+        "producer": "src/erp_harness/app/host.py",
+        "offline_tests": [
+          "tests/test_workbench_host.py"
+        ],
+        "evidence": {
+          "path": ".runtime/harness-maturity-20261003/host-readback-client-failure/before-source.json",
+          "sha256": "e865d586746ffe4d4da7845ebcd9d74e3ed3725d7ef702035230dd77ede73636"
+        },
+        "boundary": "Manual/background client-construction failures preserve the typed reason. No paid model failure invented."
+      },
+      {
+        "origin": "synthetic_offline_io_and_retry_pressure",
+        "fix_commits": [
+          "7d9ed22",
+          "0ea60ea"
+        ],
+        "category": "request_receipts_and_budget",
+        "producer": "src/erp_harness/app/request_receipts.py",
+        "offline_tests": [
+          "tests/test_request_receipts.py",
+          "tests/runtime/test_pi_session_retry.py"
+        ],
+        "evidence": {
+          "path": ".runtime/harness-maturity-20261003/request-receipt-audit/retry/patch-review.json",
+          "sha256": "ab6a45238ee282c75fd640cd4a9945170c79a5fdf631d5b83970e0af7a2ba016"
+        },
+        "boundary": "Initial/retry request and prepared metadata must persist before POST. Observation failure preserves current result and blocks later requests. Counts are allocated requests; failed-attempt billing may be unknown."
+      },
+      {
+        "origin": "offline_original_identity_equivalence",
+        "fix_commit": "b853d77",
+        "category": "identity_scope",
+        "producer": "src/erp_harness/erp/reads.py",
+        "offline_tests": [
+          "tests/test_connection_awareness.py"
+        ],
+        "evidence": {
+          "path": ".runtime/harness-maturity-20261003/configured-identity/after-comparison.json",
+          "sha256": "faa3a79c80c90e3a6f078b1698786afe6bc87b8d062b5bc1fded4fc322cc9628"
+        },
+        "boundary": "Pure configuration fingerprint matches original scope; not a remote authentication or ACL claim. Native client still authenticates."
+      },
+      {
+        "origin": "observed_ui_capability_gap_without_model_request",
+        "fix_commit": "b561f64",
+        "category": "conversation_run_diagnostics",
+        "producer": "src/erp_harness/app/conversation.py",
+        "offline_tests": [
+          "tests/test_workbench_conversation.py",
+          "tests/test_workbench_host.py"
+        ],
+        "evidence": {
+          "path": ".runtime/harness-maturity-20261003/chat-diagnostics-independent-review/review.json",
+          "sha256": "8d26a34c45955986bfb81f6248895fabe70ac32dd73868801924802082cf21b4"
+        },
+        "boundary": "Host-selected idle-chat diagnostic snapshot reaches mock API loop, no RPC in diagnostic tool. Existing startup connectivity probe is separate; running-business chat still blocked. Actual model tool selection untested."
+      }
+    ]
+  },
+  "usage_results": "experiments/agent_regression/harness-maturity-20261003/business-results.json"
 }
