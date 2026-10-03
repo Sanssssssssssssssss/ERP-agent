@@ -530,10 +530,12 @@ class _ChatStreamParser:
         self._tool_call_builders: dict[int, _ToolCallBuilder] = {}
         self._pending_reasoning_details: dict[str, str] = {}
         self._finish_reason: str | None = None
+        self._done = False
         self._usage: Usage | None = None
 
     def feed(self, event: str) -> tuple[list[ProviderEvent], bool]:
         if event == "[DONE]":
+            self._done = True
             return [], True
 
         chunk = _loads_object(event)
@@ -610,6 +612,8 @@ class _ChatStreamParser:
         return events, False
 
     def finalize(self) -> list[ProviderEvent]:
+        if not self._finish_reason and not self._done:
+            return [ProviderErrorEvent(message="Provider stream ended without a terminal event")]
         tool_calls = [
             builder.build(index) for index, builder in sorted(self._tool_call_builders.items())
         ]
@@ -719,13 +723,17 @@ class _ResponsesStreamParser:
             )
 
         elif chunk_type in ("response.completed", "response.incomplete"):
-            self._status = _responses_finish_reason(chunk)
+            self._status = "incomplete" if chunk_type == "response.incomplete" else _responses_finish_reason(chunk) or "completed"
             self._usage = _usage_from_responses_event(chunk) or self._usage
             return [], True
 
         elif chunk_type == "response.failed":
             self.fatal = True
             return [_responses_failure_event(chunk)], True
+
+        elif chunk_type == "response.cancelled":
+            self.fatal = True
+            return [ProviderErrorEvent(message="Provider response was cancelled")], True
 
         elif chunk_type == "error":
             self.fatal = True
@@ -736,6 +744,8 @@ class _ResponsesStreamParser:
         return [], False
 
     def finalize(self) -> list[ProviderEvent]:
+        if self._status not in {"completed", "incomplete"}:
+            return [ProviderErrorEvent(message="Provider stream ended without a terminal event")]
         tool_calls = [
             builder.build(index)
             for index, builder in enumerate(_ordered_builders(self._tool_call_builders))
@@ -1214,10 +1224,10 @@ def _responses_finish_reason(chunk: Mapping[str, Any]) -> str | None:
 
 def _normalize_finish_reason(status: str | None, *, has_tool_calls: bool) -> str:
     """Map a Responses-API status to chat-completions-style finish reasons."""
-    if has_tool_calls:
-        return "tool_calls"
     if status == "incomplete":
         return "length"
+    if has_tool_calls:
+        return "tool_calls"
     return "stop"
 
 

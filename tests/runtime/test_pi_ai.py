@@ -1,9 +1,10 @@
 from collections.abc import AsyncIterator, Mapping
-from json import loads
+from json import dumps, loads
 
 import httpx
 import pytest
 
+from erp_harness.app.request_receipts import RequestReceipts
 from erp_harness.runtime import (
     AgentTool,
     AgentToolResult,
@@ -3393,6 +3394,87 @@ async def test_responses_api_maps_incomplete_status_to_length() -> None:
     assert isinstance(end, AssistantDoneEvent)
     assert end.message.text == "partial"
     assert end.reason == "length"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("has_tools", [False, True])
+@pytest.mark.parametrize(
+    ("api", "terminal", "expected_reason"),
+    [
+        ("openai-completions", None, "error"),
+        ("openai-completions", "done_only", "stop"),
+        ("openai-completions", "stop", "stop"),
+        ("openai-completions", "tool_calls", "toolUse"),
+        ("openai-completions", "length", "length"),
+        ("openai-responses", None, "error"),
+        ("openai-responses", "completed", "stop"),
+        ("openai-responses", "incomplete", "length"),
+        ("openai-responses", "failed", "error"),
+        ("openai-responses", "cancelled", "error"),
+    ],
+)
+async def test_openai_terminal_signals_guard_actual_agent_loop(
+    api: str, terminal: str | None, expected_reason: str, has_tools: bool,
+) -> None:
+    executed: list[str] = []
+    requests: list[httpx.Request] = []
+
+    async def execute(call_id, arguments, signal=None, on_update=None):
+        executed.append(call_id)
+        return AgentToolResult(content="local read control")
+
+    tool = AgentTool("read", "read", "Local read control", {"type": "object"}, execute)
+    if api == "openai-completions":
+        delta = {"content": "partial answer"}
+        if has_tools:
+            delta["tool_calls"] = [{"index": 0, "id": "call-guard", "type": "function",
+                                    "function": {"name": "read", "arguments": "{}"}}]
+        body = "data: " + dumps({"choices": [{"delta": delta,
+            "finish_reason": None if terminal == "done_only" else terminal}]}) + "\n\n"
+        if terminal is not None:
+            # Usage may arrive after the finish reason and before [DONE]/EOF.
+            body += 'data: {"choices":[],"usage":{"prompt_tokens":4,"completion_tokens":2,"total_tokens":6}}\n\n'
+        if terminal == "done_only":
+            body += "data: [DONE]\n\n"
+    else:
+        body = 'data: {"type":"response.output_text.delta","delta":"partial answer"}\n\n'
+        if has_tools:
+            body += 'data: {"type":"response.output_item.added","output_index":0,"item":{' \
+                    '"id":"item-guard","type":"function_call","call_id":"call-guard",' \
+                    '"name":"read","arguments":"{}"}}\n\n'
+        if terminal is not None:
+            body += "data: " + dumps({"type": "response." + terminal, "response": {
+                "status": terminal, "usage": {"input_tokens": 4, "output_tokens": 2, "total_tokens": 6},
+            }}) + "\n\n"
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, text=body, headers={"content-type": "text/event-stream"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleProvider(OpenAICompatibleConfig(
+            api_key="offline-test", base_url="https://example.test/v1", api=api,
+            infer_api_from_model=False, max_retries=2, max_retry_delay_seconds=0,
+        ), client=client)
+        events = await _collect(run_agent_loop(provider=provider, model="test-model", system="Pi",
+            messages=[UserMessage(content="inspect")], tools=[tool], should_stop_after_turn=lambda turn: True))
+
+    turn = next(event for event in events if event.type == "turn_end")
+    safe_terminal = expected_reason not in {"error", "length"}
+    if has_tools and safe_terminal:
+        expected_reason = "toolUse"
+    assert turn.message.stop_reason == expected_reason
+    assert executed == (["call-guard"] if has_tools and safe_terminal else [])
+    assert len(requests) == 1
+    if expected_reason == "error":
+        assert RequestReceipts._usage(turn.message)["total_tokens"] is None
+        assert turn.message.error_message
+    else:
+        assert turn.message.usage.total_tokens == 6
+    if has_tools and expected_reason == "length":
+        result = next(event for event in events if event.type == "tool_execution_end")
+        assert result.is_error
+        assert "was not executed" in result.result.text
 
 
 @pytest.mark.anyio

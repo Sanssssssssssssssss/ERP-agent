@@ -78,10 +78,10 @@ def _copy_replay_metadata(target: AssistantMessage, source: AssistantMessage) ->
 
 
 def _finish_reason(value: str | None, *, has_tools: bool) -> str:
-    if has_tools or value in {"tool_calls", "tool_use", "toolUse"}:
-        return "toolUse"
     if value in {"length", "max_tokens", "MAX_TOKENS", "incomplete"}:
         return "length"
+    if has_tools or value in {"tool_calls", "tool_use", "toolUse"}:
+        return "toolUse"
     return "stop"
 
 
