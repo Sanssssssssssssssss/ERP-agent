@@ -12,6 +12,15 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from .read_failures import InvalidReadResponseError, tool_failure
+
+
+class _FactReadFailure(ValueError):
+    def __init__(self, error, model, fields):
+        self.failure = tool_failure(error)
+        self.source = {"model": model, "fields": fields}
+        super().__init__(self.failure["error"])
+
 
 _MO_FIELDS = ["id", "name", "bom_id", "date_start", "date_deadline", "origin"]
 _BOM_FIELDS = ["id", "produce_delay"]
@@ -88,16 +97,18 @@ class BusinessFacts:
             "instance": instance, "model": model, "domain": domain,
             "fields": fields, "limit": max(1, min(limit, 100)),
         })
+        if not isinstance(response, dict):
+            raise _FactReadFailure(InvalidReadResponseError(), model, fields)
         if not response.get("success"):
-            raise ValueError(response.get("error") or f"business facts read failed for {model}")
+            raise _FactReadFailure(response, model, fields)
         if response.get("redacted_fields"):
-            raise ValueError(f"business facts redacted for {model}: {response['redacted_fields']}")
+            raise _FactReadFailure({"reason_code": "field_policy_denied"}, model, fields)
         rows = response.get("result")
-        if not isinstance(rows, list):
-            raise ValueError(f"business facts read returned no records for {model}")
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise _FactReadFailure(InvalidReadResponseError(), model, fields)
         missing = sorted({field for field in fields if any(field not in row for row in rows)})
         if missing:
-            raise ValueError(f"business facts unavailable for {model}: {missing}")
+            raise _FactReadFailure(InvalidReadResponseError(), model, missing)
         return rows
 
     def inspect(self, payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -110,11 +121,14 @@ class BusinessFacts:
             rows = self._rows(payload, instance)
             return self._check_rows(model, rows, instance)
         except Exception as exc:
+            failure = exc.failure if isinstance(exc, _FactReadFailure) else tool_failure(exc)
             return {
                 "facts": [],
                 "issues": [{
+                    **failure,
                     "code": "business_facts_unavailable", "severity": "warning", "status": "unavailable",
-                    "message": str(exc), "sources": [],
+                    "message": failure["error"],
+                    "sources": [exc.source] if isinstance(exc, _FactReadFailure) else [],
                 }],
             }
 
@@ -127,7 +141,7 @@ class BusinessFacts:
         fields = _MO_FIELDS if payload["model"] == "mrp.production" else _PO_FIELDS
         existing = {row["id"]: row for row in self._read(instance, payload["model"], ids, fields)}
         if len(existing) != len(ids):
-            raise ValueError("target record unavailable for business fact merge")
+            raise _FactReadFailure({"reason_code": "record_unavailable"}, payload["model"], fields)
         return [{**existing[record_id], **values} for record_id in ids]
 
     def _check_rows(self, model: str, rows: list[dict], instance: str) -> dict[str, Any]:

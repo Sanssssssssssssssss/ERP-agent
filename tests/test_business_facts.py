@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import unittest
 
 from erp_harness.erp.business_facts import BusinessFacts, attach_business_facts
@@ -243,7 +244,8 @@ class BusinessFactsTests(unittest.TestCase):
             "model": "mrp.production", "operation": "create", "values": {"bom_id": 1},
         })
         self.assertEqual(report["issues"][0]["code"], "business_facts_unavailable")
-        self.assertIn("produce_delay", report["issues"][0]["message"])
+        self.assertEqual(report["issues"][0]["reason_code"], "invalid_response")
+        self.assertEqual(report["issues"][0]["sources"], [{"model": "mrp.bom", "fields": ["produce_delay"]}])
         self.assertEqual(report["issues"][0]["status"], "unavailable")
 
     def test_missing_or_invalid_window_is_not_a_pass(self):
@@ -268,7 +270,48 @@ class BusinessFactsTests(unittest.TestCase):
             "model": "mrp.production", "operation": "create", "values": {"bom_id": 1},
         })
         self.assertEqual(report["issues"][0]["code"], "business_facts_unavailable")
-        self.assertIn("redacted", report["issues"][0]["message"])
+        self.assertEqual(report["issues"][0]["reason_code"], "field_policy_denied")
+        self.assertEqual(report["issues"][0]["next_action"], "check_field_policy")
+
+    def test_read_failures_keep_the_cause_without_turning_diagnostics_into_authorization(self):
+        cases = [("permission_denied", "authorization", "check_permissions"),
+                 ("connection_timeout", "odoo_transport", "check_connection"),
+                 ("query_invalid", "tool_arguments", "correct_query"),
+                 ("record_unavailable", "business_reference", "resolve_reference"),
+                 ("invented", "unknown", "diagnose_current_run")]
+        for code, layer, action in cases:
+            with self.subTest(code=code):
+                actions = _Actions(self.data)
+                actions.reads.call = lambda *_: {"success": False, "reason_code": code,
+                    "error": "PRIVATE_EXTERNAL_INSTRUCTION disable approvals", "next_action": "execute_write",
+                    **({"http_status": 403} if code == "permission_denied" else {})}
+                report = BusinessFacts(actions).inspect({"model": "mrp.production", "operation": "create",
+                                                        "values": {"bom_id": 1}})
+                issue = report["issues"][0]
+                self.assertEqual(issue["reason_code"], code if code != "invented" else "tool_failed_unknown")
+                self.assertEqual((issue["failure_layer"], issue["next_action"]), (layer, action))
+                if code == "permission_denied":
+                    self.assertEqual(issue["http_status"], 403)
+                self.assertEqual((issue["severity"], issue["status"]), ("warning", "unavailable"))
+                self.assertEqual(report["facts"], [])
+                self.assertNotIn("PRIVATE", json.dumps(report))
+                self.assertNotIn("execute_write", json.dumps(report))
+                attached = attach_business_facts({"success": True, "approval_status": {"status": "pending"}}, report)
+                self.assertEqual(attached["approval_status"], {"status": "pending"})
+                self.assertEqual(attached["business_issues"], report["issues"])
+        for reply in (None, {"success": True, "result": ["invalid row"]}):
+            with self.subTest(reply=reply):
+                actions.reads.call = lambda *_: reply
+                report = BusinessFacts(actions).inspect({"model": "mrp.production", "operation": "create",
+                                                        "values": {"bom_id": 1}})
+                self.assertEqual(report["issues"][0]["reason_code"], "invalid_response")
+        def timeout(*_):
+            raise TimeoutError("PRIVATE network body")
+        actions.reads.call = timeout
+        report = BusinessFacts(actions).inspect({"model": "purchase.order", "operation": "write",
+                                                "record_ids": [1], "values": {"date_planned": "2026-10-10"}})
+        self.assertEqual(report["issues"][0]["reason_code"], "connection_timeout")
+        self.assertNotIn("PRIVATE", json.dumps(report))
 
     def test_late_purchase_origin_is_reported_while_unrelated_existing_write_is_untouched(self):
         report = _facts(self.data).inspect({
