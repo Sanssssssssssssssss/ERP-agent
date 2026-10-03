@@ -8,7 +8,12 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
+from pydantic_core import to_json
 
+from erp_harness.context.compaction import (
+    build_compaction_summary_prompt,
+    build_turn_prefix_summary_prompt,
+)
 from erp_harness.erp._odoo_core.access_helpers import (
     _acl_row_applies,
     _m2m_ids,
@@ -26,7 +31,7 @@ from erp_harness.erp.capabilities import (
 from erp_harness.erp.gateway import Json2ReadClient
 from erp_harness.erp.reads import NativeReads
 from erp_harness.runtime.loop import AgentContext, _execute_and_finalize, _PreparedToolCall
-from erp_harness.runtime.messages import AssistantMessage, ToolCall
+from erp_harness.runtime.messages import AssistantMessage, TextContent, ToolCall, ToolResultMessage
 from erp_harness.tools.router import native_tool_catalog, route_tools
 
 
@@ -473,6 +478,24 @@ def test_native_data_quality_failure_details_are_bounded_without_hiding_failed_c
     assert "PRIVATE" not in text
 
 
+def test_large_native_partial_diagnostics_survive_both_compaction_inputs(tmp_path):
+    reads, capabilities = _native_diagnostics()
+    reads.cache["sale.order"] = {"id": {"type": "integer"}, "name": {"type": "char"}}
+    with patch("urllib.request.urlopen", side_effect=lambda *_args, **_kwargs: (_ for _ in ()).throw(_http_diagnostic_failure(403))) as sender:
+        result, text = _diagnostic_model_reply(tmp_path, reads, capabilities, "data_quality_report",
+                                              {"model": "sale.order", "checks": ["missing_required"] * 10 + ["duplicates"],
+                                               "key_fields": ["name"]})
+    assert sender.call_count == 1 and len(text) > 2000
+    assert len(result["results"]) == 11 and all(row["ok"] for row in result["results"][:10])
+    assert result["summary"]["clean"] is False and result["summary"]["checks_errored"] == ["duplicates"]
+    message = ToolResultMessage(tool_call_id="offline-data_quality_report", tool_name="mcp_odoo_data_quality_report",
+                                content=[TextContent(text=text)])
+    for prompt in (build_compaction_summary_prompt((message,)), build_turn_prefix_summary_prompt((message,))):
+        assert '"clean":false' in prompt and "checks_errored" in prompt
+        assert "permission_denied" in prompt and "check_permissions" in prompt
+        assert '"http_status":403' in prompt and "PRIVATE" not in prompt
+
+
 @pytest.mark.parametrize("name", ["inspect_model_relationships", "data_quality_report"])
 def test_native_diagnostic_normal_paths_preserve_input_metadata_and_clean_report(tmp_path, name):
     reads, capabilities = _native_diagnostics()
@@ -484,7 +507,9 @@ def test_native_diagnostic_normal_paths_preserve_input_metadata_and_clean_report
     else:
         arguments.update(checks=["missing_required"])
     with patch("urllib.request.urlopen", side_effect=AssertionError("no RPC needed")) as sender:
+        expected = capabilities.call(name, arguments)
         result, _text = _diagnostic_model_reply(tmp_path, reads, capabilities, name, arguments)
+    assert _text == to_json(expected).decode()
     assert result["success"] is True
     if name == "inspect_model_relationships":
         assert result["metadata_used"]["source"] == "input"
