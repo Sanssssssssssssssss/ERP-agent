@@ -260,6 +260,23 @@ class WorkbenchConversationTests(unittest.TestCase):
                 with patch.dict(snapshot, {"business_id": "other"}):
                     self.assertFalse(asyncio.run(conversation._read_run_diagnostics("c", {})).details["success"])
 
+    def test_inspection_loop_cannot_propose_even_if_model_requests_it(self):
+        with patch.dict(os.environ, {"ERP_CONVERSATION_MODE": "inspection"}), patch.object(
+                conversation, "resolve_references", side_effect=AssertionError("proposal must not execute")):
+            requests, events, usage = self._run([
+                {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "forbidden-proposal", "type": "function",
+                    "function": {"name": "propose_business", "arguments": '{"type":"query","title":"change","goal":"change"}'}}]},
+                    "finish_reason": "tool_calls"}], "usage": {"prompt_tokens": 4, "completion_tokens": 8, "total_tokens": 12}},
+                {"choices": [{"delta": {"content": "这里可以查询运行记录；修改动作请使用审批入口。"}, "finish_reason": "stop"}],
+                 "usage": {"prompt_tokens": 8, "completion_tokens": 8, "total_tokens": 16}},
+            ], "现在帮我改业务目标", return_usage=True)
+        names = [row["function"]["name"] for row in requests[0]["tools"]]
+        self.assertEqual(names, ["read_run_diagnostics"])
+        reply = next(m for m in requests[1]["messages"] if m.get("role") == "tool")
+        self.assertIn("not found", reply["content"].lower())
+        self.assertFalse(any(e.get("proposal") for e in events))
+        self.assertEqual(usage["toolMode"], "inspection_readonly")
+
     def test_real_coding_session_emits_server_checked_proposal_tool_result(self):
         requests, events = self._run(
             [

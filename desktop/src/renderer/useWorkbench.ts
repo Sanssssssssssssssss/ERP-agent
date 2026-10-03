@@ -482,6 +482,9 @@ export function useWorkbench() {
       || session?.businesses.some((business) => ['running', 'awaiting_approval', 'cancel_requested'].includes(business.status))
       || sessions.some((item) => ['running', 'awaiting_approval', 'cancel_requested'].includes(item.status))
   )
+  const inspectionMode = Boolean(resolvedMessageBusinessId && ['running', 'awaiting_approval', 'cancel_requested'].includes(
+    (businessDetail?.business.id === resolvedMessageBusinessId ? businessDetail.business : session?.businesses.find((business) => business.id === resolvedMessageBusinessId))?.status || ''
+  ))
 
   const chooseSession = (id: string) => {
     if (sessionIdRef.current === id && selectedSessionId === id) return
@@ -516,6 +519,7 @@ export function useWorkbench() {
   }
 
   const importMaterials = async (files: File[]) => {
+    if (inspectionMode) { setError('运行查询只接受文字，业务材料请在当前运行结束后补充。'); return }
     if (!selectedSessionId || !files.length || materialsBusy) return
     const requestSessionId = selectedSessionId
     const requestId = ++materialRequestRef.current
@@ -650,8 +654,12 @@ export function useWorkbench() {
     const requestSessionId = selectedSessionId
     const messageKey = `${requestSessionId}:${text}:${attachedMaterials.map((material) => material.id).join(',')}`
     if (messageInFlightRef.current.has(messageKey)) return
-    if (hasActiveExecution || conversationRunsRef.current.some((run) => ['running', 'cancel_requested'].includes(run.status))) {
-      setBlockedSend('请等待当前运行结束；需要修改待审批动作，请在审批卡选择“提出修改”。输入已保留。')
+    if ((hasActiveExecution && !inspectionMode) || conversationRunsRef.current.some((run) => ['running', 'cancel_requested'].includes(run.status))) {
+      setBlockedSend('请选择正在执行的业务查询进度；已有对话请等待回复结束。修改动作请使用审批入口。输入已保留。')
+      return
+    }
+    if (inspectionMode && attachedMaterials.length) {
+      setBlockedSend('运行查询只接受文字，请先移除本次附加材料。输入已保留。')
       return
     }
     messageInFlightRef.current.add(messageKey)
@@ -662,6 +670,7 @@ export function useWorkbench() {
       const result = await call<{ ok?: boolean; run_id?: string }>('send_message', {
         session_id: requestSessionId,
         text,
+        ...(inspectionMode ? { inspection: true } : {}),
         ...(attachedMaterials.length ? { material_ids: attachedMaterials.map((material) => material.id) } : {}),
         ...(resolvedMessageBusinessId ? { context_business_id: resolvedMessageBusinessId } : {})
       })
@@ -1136,6 +1145,7 @@ export function useWorkbench() {
     checkConnection,
     activeBusiness,
     hasActiveExecution,
+    inspectionMode,
     chooseSession,
     importMaterials,
     downloadDocument,

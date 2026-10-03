@@ -20,6 +20,8 @@ export interface Message {
   created_at?: string;
   business_id?: string;
   context_business_id?: string | null;
+  inspection?: boolean;
+  inspected_run_id?: string;
   run_id?: string;
   sequence?: number;
   proposal?: BusinessProposal;
@@ -46,6 +48,8 @@ export interface ConversationRun {
   session_id: string;
   business_id?: string | null;
   context_business_id?: string | null;
+  inspection?: boolean;
+  inspected_run_id?: string;
   kind: "conversation";
   status: string;
   started_at?: string;

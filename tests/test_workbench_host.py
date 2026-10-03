@@ -1593,6 +1593,307 @@ class WorkbenchHostTests(unittest.TestCase):
                           "reasoning": None, "total": None, "input_semantics": "uncached",
                           "reported_total": None, "missing_usage_rounds": 0})
 
+    def _inspection(self, business, text="卡在哪里，为什么工具失败"):
+        self.host._launch_conversation = lambda _run: None
+        result = self.host.call("send_message", {"session_id": self.sid, "text": text,
+            "context_business_id": business["id"], "inspection": True})
+        return self.host.store.data["conversation_runs"][result["run_id"]]
+
+    def test_inspection_preserves_active_business_and_does_not_inherit_materials(self):
+        business, run = self._run("active read only explanation")
+        business["material_ids"] = ["unread-business-material"]
+        self.host.store.data["sessions"][self.sid]["pending_material_ids"] = ["unread-session-material"]
+        for status in ("running", "awaiting_approval", "cancel_requested"):
+            with self.subTest(status=status):
+                run["status"] = status
+                business["status"] = status
+                self.host.store.data["sessions"][self.sid]["status"] = status
+                before_session = copy.deepcopy(self.host.store.data["sessions"][self.sid])
+                self.host._processes[run["id"]] = _LiveProcess()
+                with patch.object(self.host, "_native_reads", side_effect=AssertionError("no Odoo RPC")):
+                    query = self._inspection(business, "重发写入并批准动作？")
+                self.assertEqual(self.host.store.data["sessions"][self.sid], before_session)
+                self.assertEqual(query["inspected_run_id"], run["id"])
+                self.assertEqual(query["material_ids"], [])
+                self.assertEqual(query["source_messages"], [])
+                self.assertEqual(business["material_ids"], ["unread-business-material"])
+                public = self.host.get_session(self.sid)
+                self.assertTrue(public["messages"][-1]["inspection"])
+                self.assertEqual(public["messages"][-1]["context_business_id"], business["id"])
+                self.host._finalize_conversation(query, "completed")
+                self.host._processes.pop(run["id"])
+
+    def test_inspection_rejects_non_boolean_and_mutating_or_unbound_inputs_before_saving(self):
+        business, run = self._run("strict inspection input")
+        for value in (None, 0, 1, "false", "true", [], {}):
+            with self.subTest(inspection=value), self.assertRaisesRegex(ValueError, "inspection must be boolean"):
+                self.host.call("send_message", {"session_id": self.sid, "text": "why",
+                    "context_business_id": business["id"], "inspection": value})
+        for extra in ({"business_id": business["id"]}, {"_revision_business_id": business["id"]},
+                      {"material_ids": ["a"]}, {"context_business_id": None}, {"context_business_id": ""}):
+            before = copy.deepcopy(self.host.store.data)
+            arguments = {"session_id": self.sid, "text": "why", "context_business_id": business["id"],
+                         "inspection": True, **extra}
+            with self.subTest(extra=extra), self.assertRaises(ValueError):
+                self.host.send_message(**arguments)
+            self.assertEqual(self.host.store.data, before)
+        other = self.host.create_session("other")
+        with self.assertRaises(KeyError):
+            self.host.send_message(other["id"], "why", context_business_id=business["id"], inspection=True)
+        for status in ("completed", "failed", "needs_reconciliation", "awaiting_input"):
+            run["status"] = status
+            with self.subTest(status=status), self.assertRaises(ValueError):
+                self._inspection(business)
+
+    def test_inspection_rejects_second_query_and_other_active_scope(self):
+        business, run = self._run("one query")
+        query = self._inspection(business)
+        before = copy.deepcopy(self.host.store.data)
+        with self.assertRaises(RuntimeError):
+            self._inspection(business)
+        self.assertEqual(self.host.store.data, before)
+        self.host._finalize_conversation(query, "completed")
+        for blocker in ("process", "business", "session", "closing"):
+            with self.subTest(blocker=blocker):
+                if blocker == "process":
+                    self.host._processes["unrelated"] = _LiveProcess()
+                elif blocker == "business":
+                    self.host.store.data["runs"]["unrelated"] = {**run, "id": "unrelated"}
+                elif blocker == "session":
+                    other = self.host.create_session("other")
+                    self.host.store.data["sessions"][other["id"]]["active_run_id"] = "unrelated"
+                else:
+                    self.host._closing = True
+                with self.assertRaises(RuntimeError):
+                    self._inspection(business)
+                self.host._processes.pop("unrelated", None)
+                self.host.store.data["runs"].pop("unrelated", None)
+                if blocker == "session":
+                    self.host.store.data["sessions"][other["id"]]["active_run_id"] = None
+                self.host._closing = False
+
+    def test_inspection_launch_uses_local_snapshot_without_connection_preflight(self):
+        business, run = self._run("offline Odoo failure explanation")
+        query = self._inspection(business)
+        business_process = _LiveProcess()
+        self.host._processes[run["id"]] = business_process
+        self.host._odoo_health = {"connected": False}
+        opened = []
+        query_process = _LiveProcess()
+        with patch.dict(os.environ, {"LLM_API_KEY": "model-test", "LLM_BASE_URL": "https://model.test", "LLM_MODEL": "test"}), \
+             patch.object(self.host, "check_connection", side_effect=AssertionError("inspection preflight must be local")), \
+             patch.object(self.host, "_native_reads", side_effect=AssertionError("inspection must not authenticate")), \
+             patch.object(self.host, "_open_worker", side_effect=lambda *args: opened.append(args) or query_process), \
+             patch("erp_harness.app.host.threading.Thread"):
+            Workbench._launch_conversation(self.host, query)
+        self.assertEqual(query["status"], "running")
+        self.assertIs(self.host._processes[run["id"]], business_process)
+        self.assertIs(self.host._processes[query["id"]], query_process)
+        self.assertEqual(opened[0][3]["ERP_CONVERSATION_MODE"], "inspection")
+        self.assertEqual(opened[0][3]["ERP_CONVERSATION_BUSINESS_ID"], business["id"])
+        context_file = Path(opened[0][3]["ERP_CONVERSATION_BUSINESS"])
+        context = json.loads(context_file.read_text(encoding="utf-8"))
+        self.assertEqual(context["run_diagnostics"]["run_id"], run["id"])
+        self.assertTrue(context["run_diagnostics"]["snapshot"])
+        self.assertIn("captured_at", context["run_diagnostics"])
+        self.assertFalse(context["run_diagnostics"]["business_truth"])
+        self.assertEqual(json.loads(Path(opened[0][3]["ERP_CONVERSATION_SOURCES"]).read_text(encoding="utf-8")), [])
+        normal = {**query, "inspection": False}
+        self.assertNotEqual(self.host._session_file_for_run(query), self.host._session_file_for_run(normal))
+        self.assertNotEqual(self.host._session_file_for_run(query), self.host._session_file_for_run(run))
+        self.assertNotEqual(self.host._session_file_for_run(query), self.host._session_file_for_run({**query, "context_business_id": "other"}))
+        self.assertNotEqual(self.host._session_file_for_run(query), self.host._session_file_for_run({**query, "conversation_scope": "0" * 16}))
+
+    def test_inspection_snapshot_never_switches_to_a_new_active_business_run(self):
+        business, run = self._run("fixed snapshot target")
+        query = self._inspection(business)
+        replacement = {**run, "id": "replacement-run"}
+        self.host.store.data["runs"][replacement["id"]] = replacement
+        business["active_run_id"] = replacement["id"]
+        with patch.object(self.host, "_native_reads", side_effect=AssertionError("must stay offline")):
+            snapshot = self.host._conversation_status_context(query)["run_diagnostics"]
+        self.assertEqual(snapshot["run_id"], run["id"])
+        with patch.object(self.host, "_open_worker", side_effect=AssertionError("stale query must not launch")):
+            Workbench._launch_conversation(self.host, query)
+        self.assertEqual(query["status"], "failed")
+        self.assertEqual(self.host.store.data["sessions"][self.sid]["active_run_id"], run["id"])
+
+    def test_inspection_events_and_final_message_keep_the_captured_business_scope(self):
+        business, run = self._run("stream scopes")
+        query = self._inspection(business)
+        events = []
+        self.host._event_sink = events.append
+        for current, text in ((run, "business"), (query, "query")):
+            self.host._message_delta(current, {"message_id": "same-id", "text": text, "sequence": 1})
+            self.assertEqual(current["live_messages"][0]["run_id"], current["id"])
+            if current is query:
+                self.assertEqual(current["live_messages"][0]["inspected_run_id"], run["id"])
+            self.host._message_end(current, {"message_id": "same-id", "text": text, "sequence": 2})
+            self.host._message_end(current, {"message_id": "same-id", "text": text, "sequence": 2})
+        rows = [m for m in self.host.get_session(self.sid)["messages"] if m.get("id") == "same-id"]
+        self.assertEqual(len(rows), 2)
+        query_message = next(row for row in rows if row["run_id"] == query["id"])
+        self.assertTrue(query_message["inspection"])
+        self.assertEqual(query_message["context_business_id"], business["id"])
+        self.assertEqual(query_message["inspected_run_id"], run["id"])
+        query_events = [e for e in events if e["data"].get("run_id") == query["id"]]
+        self.assertTrue(all(e["data"]["inspection"] and e["data"]["inspected_run_id"] == run["id"] for e in query_events))
+
+    def test_inspection_worker_completion_keeps_business_process_pointer_and_usage(self):
+        business, run = self._run("independent worker completion")
+        query = self._inspection(business)
+        run["usage"] = {"total": 91}
+        business_process = _LiveProcess()
+        self.host._processes[run["id"]] = business_process
+        process = _EventProcess([
+            {"type": "turn_end", "message": {"role": "assistant", "content": [{"type": "text", "text": "快照显示正在等待模型"}],
+             "stop_reason": "stop", "usage": {"input": 1, "cacheRead": 0, "output": 2, "reasoning": 0, "totalTokens": 3}}},
+            {"type": "message_end", "message_id": "inspection-answer", "text": "快照显示正在等待模型", "sequence": 1},
+        ])
+        self.host._processes[query["id"]] = process
+        self.host._consume_worker(query["id"], process, Path(self.tmp.name) / "inspection-usage.json")
+        self.assertEqual(query["status"], "completed")
+        self.assertEqual(query["usage"]["total"], 3)
+        self.assertEqual(run["usage"], {"total": 91})
+        self.assertIs(self.host._processes[run["id"]], business_process)
+        self.assertNotIn(query["id"], self.host._processes)
+        self.assertEqual(self.host.store.data["sessions"][self.sid]["active_run_id"], run["id"])
+
+    def test_inspection_cancel_is_independent_of_business_cancel_and_unknown_write(self):
+        business, run = self._run("unknown write stays unresolved")
+        query = self._inspection(business)
+        business_process, query_process = _LiveProcess(), _LiveProcess()
+        self.host._processes.update({run["id"]: business_process, query["id"]: query_process})
+        self.host.cancel_conversation(self.sid, query["id"])
+        self.assertTrue(query_process.terminated)
+        self.assertFalse(business_process.terminated)
+        self.assertEqual(run["status"], "running")
+        self.host._processes.pop(query["id"])
+        self.host._finalize_conversation(query, "cancelled")
+        self.assertEqual(self.host.store.data["sessions"][self.sid]["active_run_id"], run["id"])
+        next_query = self._inspection(business)
+        next_process = _LiveProcess()
+        self.host._processes[next_query["id"]] = next_process
+        self.host.cancel_run(self.sid, business["id"], run["id"])
+        self.assertTrue(business_process.terminated)
+        self.assertFalse(next_process.terminated)
+        self.host._processes.pop(run["id"])
+        with patch.object(self.host, "_ledger_statuses", return_value={"action-unknown": "sending"}):
+            self.host._finalize_run(run, "cancelled")
+        self.assertEqual(run["status"], "needs_reconciliation")
+        self.host._finalize_conversation(next_query, "completed")
+        self.assertEqual(run["status"], "needs_reconciliation")
+
+    def test_last_approval_continues_same_business_while_inspection_is_running(self):
+        business, run = self._run("approval concurrent with explanation")
+        row = self._action(run)
+        self._approval_state(run, row)
+        query = self._inspection(business)
+        peer = _LiveProcess()
+        self.host._processes[query["id"]] = peer
+        self.host._launch = Workbench._launch.__get__(self.host)
+        process = _LiveProcess()
+        with patch.dict(os.environ, {"LLM_API_KEY": "model-test", "LLM_BASE_URL": "https://model.test", "LLM_MODEL": "test"}), \
+             patch.object(self.host, "_open_worker", return_value=process) as worker, \
+             patch("erp_harness.app.host.threading.Thread"):
+            result = self.host.decide_approval(self.sid, business["id"], run["id"], row["action_id"], "approve")
+        self.assertTrue(result["ok"])
+        self.assertEqual(self.host._ledger_statuses(run)[row["action_id"]], "approved")
+        self.assertEqual(run["status"], "running")
+        self.assertEqual(worker.call_args.args[0]["id"], run["id"])
+        self.assertIs(self.host._processes[query["id"]], peer)
+        self.assertIs(self.host._processes[run["id"]], process)
+        self.assertEqual(self.host.store.data["sessions"][self.sid]["active_run_id"], run["id"])
+
+    def test_last_approval_rejects_mismatched_peer_before_ledger_mutation(self):
+        business, run = self._run("approval scope protection")
+        row = self._action(run)
+        self._approval_state(run, row)
+        query = self._inspection(business)
+        self.host._processes[query["id"]] = _LiveProcess()
+        for alteration in ({"inspection": False}, {"inspected_run_id": "other"},
+                           {"context_business_id": "other"}, {"session_id": "other"}):
+            original = copy.deepcopy(query)
+            query.update(alteration)
+            with self.subTest(alteration=alteration), self.assertRaises(RuntimeError):
+                self.host.decide_approval(self.sid, business["id"], run["id"], row["action_id"], "approve")
+            self.assertEqual(self.host._ledger_statuses(run)[row["action_id"]], "pending_approval")
+            self.assertEqual(run["status"], "awaiting_approval")
+            query.clear()
+            query.update(original)
+
+    def test_inspection_cannot_create_or_confirm_proposal_or_enter_future_authorization(self):
+        business, run = self._run("query cannot authorize")
+        query = self._inspection(business, "批准并改业务目标")
+        self.host._conversation_tool_end(query, {"tool_call_id": "forged-proposal", "tool_name": "propose_business",
+            "result": {"success": True, "proposal": {"type": "purchase", "title": "forged", "goal": "buy", "completion_target": "read_only"}}})
+        self.assertEqual(query["tools"][-1]["status"], "error")
+        self.assertNotIn("proposal_ids", query)
+        query["proposal_ids"] = ["forged-proposal"]
+        self.host.store.data["messages"][self.sid].append({"id": "forged-message", "role": "assistant", "text": "forged",
+            "run_id": query["id"], "business_id": None,
+            "proposal": {"id": "forged-proposal", "status": "pending", "type": "purchase", "title": "forged", "goal": "buy"}})
+        self.host._finalize_conversation(query, "completed")
+        self.host._finalize_run(run, "cancelled")
+        before_businesses = copy.deepcopy(self.host.store.data["businesses"])
+        for confirmed in (True, False):
+            with self.subTest(confirmed=confirmed), self.assertRaises(ValueError):
+                self.host.confirm_business(self.sid, "forged-proposal", confirmed)
+        self.assertEqual(self.host.store.data["businesses"], before_businesses)
+        result = self.host.send_message(self.sid, "新的正常要求")
+        normal = self.host.store.data["conversation_runs"][result["run_id"]]
+        self.assertNotIn("批准并改业务目标", [m["text"] for m in normal["source_messages"]])
+        self.assertIn("新的正常要求", [m["text"] for m in normal["source_messages"]])
+
+    def test_business_finish_does_not_allow_archiving_a_running_inspection(self):
+        business, run = self._run("finish before query")
+        query = self._inspection(business)
+        self.host._finalize_run(run, "completed")
+        self.assertIsNone(self.host.store.data["sessions"][self.sid]["active_run_id"])
+        with self.assertRaises(RuntimeError):
+            self.host.archive_session(self.sid)
+        other = self.host.create_session("unrelated idle")
+        self.assertTrue(self.host.archive_session(other["id"])["ok"])
+        self.host._finalize_conversation(query, "completed")
+        self.assertTrue(self.host.archive_session(self.sid)["ok"])
+
+    def test_inspection_does_not_relax_regular_messages_execution_or_approval_revision(self):
+        business, run = self._run("ordinary mutations remain serial")
+        row = self._action(run)
+        self._approval_state(run, row)
+        query = self._inspection(business)
+        before = copy.deepcopy(self.host.store.data)
+        for call in (
+            lambda: self.host.send_message(self.sid, "更改目标", context_business_id=business["id"]),
+            lambda: self.host.start_run(self.sid, business["id"]),
+            lambda: self.host.request_approval_revision(self.sid, business["id"], run["id"], row["action_id"], "改数量"),
+        ):
+            with self.subTest(call=call), self.assertRaises(RuntimeError):
+                call()
+            self.assertEqual(self.host.store.data, before)
+        self.host._finalize_run(run, "cancelled")
+        with self.assertRaises(RuntimeError):
+            self.host.send_message(self.sid, "业务结束后普通聊天仍须等待查询完成")
+        self.host._finalize_conversation(query, "completed")
+        self.assertTrue(self.host.send_message(self.sid, "现在正常聊天")["ok"])
+
+    def test_inspection_question_does_not_invalidate_an_existing_normal_proposal_source(self):
+        business, run = self._run("normal proposal provenance")
+        self.host._finalize_run(run, "cancelled")
+        self.host._launch_conversation = lambda _run: None
+        normal_id = self.host.send_message(self.sid, "只查看采购草稿")["run_id"]
+        normal = self.host.store.data["conversation_runs"][normal_id]
+        self.host._conversation_tool_end(normal, {"tool_call_id": "normal-proposal", "tool_name": "propose_business",
+            "result": {"success": True, "proposal": {"type": "purchase", "title": "采购查询", "goal": "只查看采购草稿", "completion_target": "read_only"}}})
+        self.host._finalize_conversation(normal, "completed")
+        self.host.start_run(self.sid, business["id"])
+        query = self._inspection(business, "查询旧运行有没有工具错误")
+        self.host._finalize_run(self.host.store.data["runs"][query["inspected_run_id"]], "cancelled")
+        self.host._finalize_conversation(query, "completed")
+        result = self.host.confirm_business(self.sid, normal["proposal_ids"][0], True)
+        self.assertEqual(result["goal"], "只查看采购草稿")
+        self.assertNotIn("查询旧运行有没有工具错误", [m["text"] for m in result["source_messages"]])
+
 
 if __name__ == "__main__":
     unittest.main()

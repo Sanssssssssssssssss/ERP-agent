@@ -81,7 +81,7 @@ export function SessionRail({
   )
 }
 
-export function ConversationPane({ session, draft, liveMessages, conversationRuns, thinkingRun, selectedBusinessId, loading, pendingProposal, proposalBusy, proposalUnavailable, pendingApprovals, approvalBusinessName, approvalProgress, onOpenApprovals, onOpenExecution, approvalActivity, businesses, messageBusinessId, onMessageBusinessChange, onDraftChange, onSubmit, onProposal, onOpenBusiness, onCancelConversation, pendingMaterials, reusedMaterials, materialsBusy, onFiles, onRemoveMaterial, onStarter }: {
+export function ConversationPane({ session, draft, liveMessages, conversationRuns, thinkingRun, selectedBusinessId, loading, inspectionMode = false, pendingProposal, proposalBusy, proposalUnavailable, pendingApprovals, approvalBusinessName, approvalProgress, onOpenApprovals, onOpenExecution, approvalActivity, businesses, messageBusinessId, onMessageBusinessChange, onDraftChange, onSubmit, onProposal, onOpenBusiness, onCancelConversation, pendingMaterials, reusedMaterials, materialsBusy, onFiles, onRemoveMaterial, onStarter }: {
   session: SessionDetail | null
   draft: string
   liveMessages: LiveMessage[]
@@ -89,6 +89,7 @@ export function ConversationPane({ session, draft, liveMessages, conversationRun
   thinkingRun: { sessionId: string; runId: string } | null
   selectedBusinessId: string
   loading: boolean
+  inspectionMode?: boolean
   pendingProposal?: ProposalLike
   proposalBusy: boolean
   proposalUnavailable: string
@@ -145,6 +146,12 @@ export function ConversationPane({ session, draft, liveMessages, conversationRun
   const showThinking = Boolean(!activePublicText && (localThinkingForRun || activeConversation?.status === 'running'))
   const reusedMaterialIds = new Set(pendingMaterials.map((material) => material.id))
   const inheritedMaterials = reusedMaterials.filter((material) => !reusedMaterialIds.has(material.id))
+  const inspectionLabel = (message: { run_id?: string; inspection?: boolean; context_business_id?: string | null }) => {
+    const run = conversationRuns.find((row) => row.id === message.run_id)
+    if (!message.inspection && !run?.inspection) return undefined
+    const businessId = message.context_business_id || run?.context_business_id
+    return `运行查询 · ${businesses.find((business) => business.id === businessId)?.title || '历史业务'}`
+  }
   const materialSeen = new Set<string>()
   const scrollToLatest = () => {
     const element = scrollRef.current
@@ -171,31 +178,31 @@ export function ConversationPane({ session, draft, liveMessages, conversationRun
       <div ref={scrollRef} className="conversation-scroll" onScroll={(event) => { const element = event.currentTarget; const latest = element.scrollHeight - element.scrollTop - element.clientHeight < 24; setAtLatest(latest); if (latest) setHasNew(false) }}>
         {!session && <EmptyState title="选择一个会话" detail="从左侧继续处理，或新建会话。" />}
         {session && orderedMessages.length === 0 && visibleLiveMessages.length === 0 && !pendingProposal && !showThinking && <ConversationWelcome onStarter={onStarter} />}
-        {orderedMessages.map((item) => item.kind === 'receipt' ? <article className="proposal-receipt" key={item.message.id}><strong>{item.message.proposal?.title}</strong><span>业务已确认</span><RadixButton variant="soft" onClick={() => onOpenBusiness(item.message.business_id!)}>打开业务</RadixButton></article> : item.kind === 'message' ? (() => { const ids = (item.message as MessageWithMaterials).material_ids ?? []; const inherited = ids.filter((id) => materialSeen.has(id)); ids.forEach((id) => materialSeen.add(id)); return <MessageRow key={`message:${item.message.id}`} message={item.message} inheritedMaterialIds={inherited} /> })() : <article className="message assistant live-message" key={`live:${item.message.run_id}:${item.message.id}`}><span className="avatar agent-avatar">A</span><div><div className="message-meta"><strong>Agent</strong><span>{item.message.status === 'ended' ? '回复完成' : item.message.status === 'interrupted' || item.message.status === 'failed' ? '已停止 · 回复未完成' : '实时回复'}</span></div><MessageText text={item.message.text} collapsible={false} /></div></article>)}
+        {orderedMessages.map((item) => item.kind === 'receipt' ? <article className="proposal-receipt" key={item.message.id}><strong>{item.message.proposal?.title}</strong><span>业务已确认</span><RadixButton variant="soft" onClick={() => onOpenBusiness(item.message.business_id!)}>打开业务</RadixButton></article> : item.kind === 'message' ? (() => { const ids = (item.message as MessageWithMaterials).material_ids ?? []; const inherited = ids.filter((id) => materialSeen.has(id)); ids.forEach((id) => materialSeen.add(id)); return <MessageRow key={`message:${item.message.id}`} message={item.message} inheritedMaterialIds={inherited} contextLabel={inspectionLabel(item.message)} /> })() : <article className="message assistant live-message" key={`live:${item.message.run_id}:${item.message.id}`}><span className="avatar agent-avatar">A</span><div><div className="message-meta"><strong>Agent</strong><span>{item.message.status === 'ended' ? '回复完成' : item.message.status === 'interrupted' || item.message.status === 'failed' ? '已停止 · 回复未完成' : '实时回复'}</span></div><small>{inspectionLabel(item.message)}</small><MessageText text={item.message.text} collapsible={false} /></div></article>)}
         {showThinking && <article className="message assistant thinking-message" aria-live="polite"><span className="avatar agent-avatar">A</span><div><div className="message-meta"><strong>Agent</strong></div><p className="thinking-copy">正在思考…</p></div></article>}
         {(pendingApprovals.length > 0 || approvalProgress?.businessId === selectedBusinessId || Boolean(selectedBusinessId && approvalActivity && approvalActivity.phase !== 'idle')) && <ApprovalInboxCard approvals={pendingApprovals} businessName={approvalBusinessName} progress={approvalProgress} activity={approvalActivity} onOpenApprovals={onOpenApprovals} onOpenExecution={onOpenExecution} />}
         {pendingProposal && proposalBusy && <p className="proposal-preparing" role="status"><LoaderCircle size={15} className="spin" />正在整理业务方案，回复完成后可确认。</p>}
         {pendingProposal && !proposalBusy && <ProposalCard proposal={pendingProposal} disabled={loading || proposalBusy || Boolean(proposalUnavailable)} preparing={proposalBusy} unavailable={proposalUnavailable} onDecision={onProposal} onOpenBusiness={onOpenBusiness} />}
         {hasNew && <button className="new-message-indicator" type="button" onClick={scrollToLatest}>有新消息 · 回到最新</button>}
       </div>
-      <form className="composer" onSubmit={onSubmit} onDragOver={(event) => { event.preventDefault(); event.currentTarget.classList.add('drop-active') }} onDragLeave={(event) => event.currentTarget.classList.remove('drop-active')} onDrop={(event) => { event.preventDefault(); event.currentTarget.classList.remove('drop-active'); onFiles(Array.from(event.dataTransfer.files)) }}>
+      <form className="composer" onSubmit={onSubmit} onDragOver={(event) => { event.preventDefault(); event.currentTarget.classList.add('drop-active') }} onDragLeave={(event) => event.currentTarget.classList.remove('drop-active')} onDrop={(event) => { event.preventDefault(); event.currentTarget.classList.remove('drop-active'); if (!inspectionMode) onFiles(Array.from(event.dataTransfer.files)) }}>
         <MaterialTray materials={pendingMaterials} busy={materialsBusy} onRemove={onRemoveMaterial} onFiles={onFiles} />
-        {inheritedMaterials.length > 0 && <MaterialReuseTray materials={inheritedMaterials} hasNewMaterials={pendingMaterials.length > 0} />}
-        <textarea rows={2} value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={!session || loading} placeholder={session ? '输入要查询或办理的业务…' : '先选择或创建一个会话'} aria-label="会话消息" />
+        {!inspectionMode && inheritedMaterials.length > 0 && <MaterialReuseTray materials={inheritedMaterials} hasNewMaterials={pendingMaterials.length > 0} />}
+        <textarea rows={2} value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={!session || loading} placeholder={session ? (inspectionMode ? '询问当前进度或故障原因…' : '输入要查询或办理的业务…') : '先选择或创建一个会话'} aria-label="会话消息" />
         <div className="composer-footer">
           {businesses.length > 0 && <div className="composer-context"><label htmlFor="message-business-target" className="sr-only">讨论范围</label><RadixSelect.Root value={messageBusinessId || '__current__'} onValueChange={(value) => onMessageBusinessChange(value === '__current__' ? '' : value)} disabled={!session || loading}><RadixSelect.Trigger id="message-business-target" data-scope={messageBusinessId} aria-label="讨论范围" /><RadixSelect.Content position="popper"><RadixSelect.Item value="__current__">{selectedBusiness ? `当前业务：${selectedBusiness.title || '未命名业务'}` : '新业务讨论'}</RadixSelect.Item><RadixSelect.Item value="__conversation__">整个会话 · 新业务讨论</RadixSelect.Item>{businesses.map((business) => <RadixSelect.Item key={business.id} value={business.id}>{business.title || '未命名业务'} · {labelFor(businessStatusLabel, business.status)}</RadixSelect.Item>)}</RadixSelect.Content></RadixSelect.Root></div>}
-        <div className="composer-actions"><label className="material-picker"><FilePlus2 size={15} />添加材料<input type="file" accept=".csv,.txt,.xlsx,.pdf,.png,.jpg,.jpeg,text/csv,text/plain,application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple disabled={!session || loading || materialsBusy} onChange={(event) => { onFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = '' }} /></label><RadixButton type="submit" disabled={!session || loading || materialsBusy || pendingMaterials.some((material) => material.status === 'parsing' || material.status === 'failed') || (!draft.trim() && !pendingMaterials.length)}>{loading ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}{loading ? '处理中…' : '发送'}</RadixButton></div>
+        <div className="composer-actions">{inspectionMode && <small>只读询问</small>}<label className="material-picker"><FilePlus2 size={15} />添加材料<input type="file" accept=".csv,.txt,.xlsx,.pdf,.png,.jpg,.jpeg,text/csv,text/plain,application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple disabled={!session || loading || materialsBusy || inspectionMode} onChange={(event) => { onFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = '' }} /></label><RadixButton type="submit" disabled={!session || loading || materialsBusy || pendingMaterials.some((material) => material.status === 'parsing' || material.status === 'failed') || (!draft.trim() && !pendingMaterials.length)}>{loading ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}{loading ? '处理中…' : inspectionMode ? '询问' : '发送'}</RadixButton></div>
         </div>
       </form>
     </section>
   )
 }
 
-export function MessageRow({ message, inheritedMaterialIds = [] }: { message: Message; inheritedMaterialIds?: string[] }) {
+export function MessageRow({ message, inheritedMaterialIds = [], contextLabel }: { message: Message; inheritedMaterialIds?: string[]; contextLabel?: string }) {
   const role = message.role === 'user' ? 'user' : message.role === 'system' ? 'system' : 'assistant'
   const materialIds = (message as MessageWithMaterials).material_ids ?? []
   const isProposalEnvelope = Boolean(message.proposal)
-  return <article className={`message ${role}`}><span className={`avatar ${role === 'user' ? 'user-avatar' : role === 'system' ? 'system-avatar' : 'agent-avatar'}`}>{role === 'user' ? '你' : role === 'system' ? '·' : 'A'}</span><div><div className="message-meta">{role !== 'user' && <strong>{role === 'system' ? '系统' : 'Agent'}</strong>}<span>{formatInstant(message.created_at)}</span></div>{!isProposalEnvelope && <MessageText text={message.text} collapsible={false} />}{materialIds.length > 0 && <span className="message-materials"><FileText size={12} />{inheritedMaterialIds.length === materialIds.length ? `沿用 ${materialIds.length} 个业务材料` : inheritedMaterialIds.length > 0 ? `新附 ${materialIds.length - inheritedMaterialIds.length} 个，沿用 ${inheritedMaterialIds.length} 个材料` : `已附 ${materialIds.length} 个业务材料`}</span>}</div></article>
+  return <article className={`message ${role}`}><span className={`avatar ${role === 'user' ? 'user-avatar' : role === 'system' ? 'system-avatar' : 'agent-avatar'}`}>{role === 'user' ? '你' : role === 'system' ? '·' : 'A'}</span><div><div className="message-meta">{role !== 'user' && <strong>{role === 'system' ? '系统' : 'Agent'}</strong>}<span>{formatInstant(message.created_at)}</span></div>{contextLabel && <small>{contextLabel}</small>}{!isProposalEnvelope && <MessageText text={message.text} collapsible={false} />}{materialIds.length > 0 && <span className="message-materials"><FileText size={12} />{inheritedMaterialIds.length === materialIds.length ? `沿用 ${materialIds.length} 个业务材料` : inheritedMaterialIds.length > 0 ? `新附 ${materialIds.length - inheritedMaterialIds.length} 个，沿用 ${inheritedMaterialIds.length} 个材料` : `已附 ${materialIds.length} 个业务材料`}</span>}</div></article>
 }
 
 export function ConversationWelcome({ onStarter }: { onStarter: (goal: string) => void }) {
