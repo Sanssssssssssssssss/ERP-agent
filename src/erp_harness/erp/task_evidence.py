@@ -291,7 +291,8 @@ class TaskEvidence:
             peers = self._search(scope["purchases"], ["id"]) if scope.get("purchases") else orders
             report = inspect_purchase_allocation(self.reads.instances[self.instance],
                 sorted({*ids, *(r["id"] for r in peers)}), [r["id"] for r in allowed],
-                minimum=scope.get("minimum_per_origin", 1e-6), product_id=scope["product_id"])
+                minimum=scope.get("minimum_per_origin", 1e-6), product_id=scope["product_id"],
+                include_split_diagnostic=False)
             if report["status"] != "passed":
                 self._event("rejected", reason="purchase_demand_allocation", report=report)
                 raise PurchaseAllocationError({**report, "instance": self.instance})
