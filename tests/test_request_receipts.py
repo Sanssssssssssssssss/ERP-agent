@@ -13,14 +13,15 @@ from unittest.mock import patch
 
 import httpx
 
-from erp_harness.app.request_receipts import RequestReceipts
 from erp_harness.app.host import Workbench
+from erp_harness.app.request_receipts import ReceiptPersistenceError, RequestReceipts
 from erp_harness.app.worker import child_environment
 from erp_harness.providers.env import OpenAICompatibleConfig
 from erp_harness.providers.openai_compatible import OpenAICompatibleProvider
-from erp_harness.runtime.loop import run_agent_loop
+from erp_harness.providers.retry import is_retryable_assistant_error
 from erp_harness.runtime.harness import SimpleCancellationToken
-from erp_harness.runtime.messages import UserMessage
+from erp_harness.runtime.loop import run_agent_loop
+from erp_harness.runtime.messages import AssistantMessage, UserMessage
 from erp_harness.runtime.provider import provider_request_kind, scoped_provider_stream
 from erp_harness.runtime.session import HarnessSession
 from erp_harness.runtime.tools import AgentTool, AgentToolResult
@@ -136,7 +137,106 @@ class RequestReceiptTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all("message_id" not in row and "round_id" not in row for row in metadata))
         self.assertEqual(provider_request_kind.get(), "unknown")
 
-    async def test_network_error_and_observation_io_failure_preserve_outcome(self):
+    async def test_pre_send_request_and_metadata_failures_block_http(self):
+        write, replace = Path.write_text, Path.replace
+        for failure in ("request_write", "request_replace", "metadata_write", "metadata_replace"):
+            with self.subTest(failure=failure):
+                root = self.root / failure
+                receipts, sent = RequestReceipts(root), []
+                def write_fault(path, *args, _root=root, _failure=failure, **kwargs):
+                    suffix = ".request.tmp" if _failure == "request_write" else ".meta.tmp"
+                    if _failure.endswith("write") and path.parent == _root and path.name.endswith(suffix):
+                        raise OSError("PRIVATE_STORAGE_DETAIL 503 timeout")
+                    return write(path, *args, **kwargs)
+                def replace_fault(path, target, *, _root=root, _failure=failure):
+                    suffix = ".request.tmp" if _failure == "request_replace" else ".meta.tmp"
+                    if _failure.endswith("replace") and path.parent == _root and path.name.endswith(suffix):
+                        raise PermissionError("PRIVATE_STORAGE_DETAIL 503 timeout")
+                    return replace(path, target)
+                def handler(request, _sent=sent):
+                    _sent.append(request)
+                    return response()
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    with (patch.object(Path, "write_text", write_fault),
+                          patch.object(Path, "replace", replace_fault),
+                          self.assertRaises(ReceiptPersistenceError) as caught):
+                        _ = [event async for event in provider(client, receipts).stream_response(
+                            model="test", system="s", messages=[], tools=[])]
+                    # Repairing the disk alone does not silently resume this worker.
+                    with self.assertRaises(ReceiptPersistenceError):
+                        _ = [event async for event in provider(client, receipts).stream_response(
+                            model="test", system="s", messages=[], tools=[])]
+                self.assertEqual(sent, [])
+                self.assertEqual(receipts.number, 1)
+                self.assertIsInstance(caught.exception.__cause__, OSError)
+                self.assertNotIn("PRIVATE_STORAGE_DETAIL", str(caught.exception))
+                self.assertFalse(is_retryable_assistant_error(AssistantMessage(
+                    model="test", stop_reason="error", error_message=str(caught.exception))))
+        self.assertIn('"type": "receipt_warning"', self.output.getvalue())
+        self.assertNotIn("PRIVATE_STORAGE_DETAIL", self.output.getvalue())
+
+    async def test_post_send_receipt_failures_keep_terminal_and_block_next_request(self):
+        write = Path.write_text
+        for suffix in ("response", "meta", "output"):
+            with self.subTest(suffix=suffix):
+                root = self.root / suffix
+                receipts, sent = RequestReceipts(root), []
+                def handler(request, _root=root, _sent=sent):
+                    # The prepared request and metadata must exist at the POST boundary.
+                    self.assertTrue((_root / "0001.request.json").is_file())
+                    self.assertEqual(rows(_root)[0]["status"], "running")
+                    _sent.append(request)
+                    return response()
+                def write_fault(path, *args, _root=root, _sent=sent, _suffix=suffix, **kwargs):
+                    if _sent and path.parent == _root and path.name.endswith(f".{_suffix}.tmp"):
+                        raise OSError("post-send disk unavailable")
+                    return write(path, *args, **kwargs)
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    with patch.object(Path, "write_text", write_fault):
+                        events = [event async for event in scoped_provider_stream(
+                            provider(client, receipts).stream_response(model="test", system="s", messages=[], tools=[]), "normal")]
+                    self.assertEqual(events[-1].type, "done")
+                    self.assertEqual(events[-1].message.text, "done")
+                    self.assertEqual(events[-1].message.usage.total_tokens, 6)
+                    with self.assertRaises(ReceiptPersistenceError):
+                        _ = [event async for event in provider(client, receipts).stream_response(
+                            model="test", system="s", messages=[], tools=[])]
+                self.assertEqual(len(sent), 1)
+                self.assertEqual(receipts.number, 1)
+
+    async def test_compaction_capture_failure_blocks_history_and_prefix_posts(self):
+        write = Path.write_text
+        for stage in ("before_history", "after_history"):
+            with self.subTest(stage=stage):
+                root = self.root / stage
+                receipts, sent = RequestReceipts(root), []
+                def handler(request, _sent=sent):
+                    _sent.append(request)
+                    return response("summary")
+                def write_fault(path, *args, _root=root, _sent=sent, _stage=stage, **kwargs):
+                    selected = path.parent == _root and (
+                        _stage == "before_history" and path.name.endswith(".request.tmp")
+                        or _stage == "after_history" and _sent and path.name.endswith(".output.tmp"))
+                    if selected:
+                        raise OSError("compaction receipt disk unavailable")
+                    return write(path, *args, **kwargs)
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    session = SimpleNamespace(model="test", session_id="session", _retry_cancel_event=asyncio.Event(),
+                                              _config=SimpleNamespace(retry_enabled=False),
+                                              _harness=SimpleNamespace(config=SimpleNamespace(provider=provider(client, receipts))))
+                    for method in ("_complete_summary_prompt", "_generate_compaction_summary"):
+                        setattr(session, method, MethodType(getattr(HarnessSession, method), session))
+                    plan = SimpleNamespace(turn_prefix_messages=(UserMessage(content="prefix"),),
+                                           messages_to_summarize=(UserMessage(content="history"),),
+                                           previous_summary=None, read_files=(), modified_files=())
+                    with patch.object(Path, "write_text", write_fault), self.assertRaises(ReceiptPersistenceError):
+                        await HarnessSession._generate_compaction_plan_summary(session, plan)
+                self.assertEqual(len(sent), 0 if stage == "before_history" else 1)
+                self.assertEqual(receipts.number, 1)
+                self.assertEqual(next(iter(receipts._rows.values()))["request_kind"], "compaction")
+                self.assertEqual(provider_request_kind.get(), "unknown")
+
+    async def test_network_error_preserves_unknown_usage(self):
         def fail(request):
             raise httpx.ConnectError("offline", request=request)
         async with httpx.AsyncClient(transport=httpx.MockTransport(fail)) as client:
@@ -147,12 +247,6 @@ class RequestReceiptTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(metadata["status"], "error")
         self.assertNotIn("http_status", metadata)
         self.assertTrue(all(value is None for value in metadata["usage"].values()))
-        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: response())) as client:
-            receipts = RequestReceipts(self.root / "unwritable")
-            with patch.object(Path, "write_text", side_effect=OSError("disk unavailable")):
-                events = [event async for event in provider(client, receipts).stream_response(model="test", system="s", messages=[], tools=[])]
-        self.assertEqual(events[-1].type, "done")
-        self.assertIn('"type": "receipt_warning"', self.output.getvalue())
 
     async def test_headers_are_not_end_and_consumer_close_closes_http(self):
         class SlowStream(httpx.AsyncByteStream):
