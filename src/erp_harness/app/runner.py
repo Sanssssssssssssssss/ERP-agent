@@ -715,12 +715,19 @@ async def run(args: argparse.Namespace, *, source_toolset=None) -> None:
                 args.usage_file.write_text(json.dumps(usage), encoding="utf-8")
                 if actions is not None and assistant and assistant[-1].stop_reason == "stop":
                     from erp_harness.erp.purchase_allocation import final_purchase_verification
+                    from erp_harness.erp.task_evidence import final_release_verification
                     verification = final_purchase_verification(actions)
                     (receipt_dir / "purchase-final-verification.json").write_text(
                         json.dumps(verification, ensure_ascii=False), encoding="utf-8")
                     print(json.dumps({"type": "business_verification", "verification": verification}, ensure_ascii=False), flush=True)
+                    release_verification = final_release_verification(actions)
+                    (receipt_dir / "task-final-verification.json").write_text(
+                        json.dumps(release_verification, ensure_ascii=False), encoding="utf-8")
+                    print(json.dumps({"type": "task_verification", "verification": release_verification}, ensure_ascii=False), flush=True)
                     if verification.get("enforced") and verification["status"] != "passed":
                         raise RuntimeError("Host-bound final purchase allocation is not verified; inspect the receipt without replaying writes")
+                    if release_verification.get("enforced") and release_verification["status"] != "passed":
+                        raise RuntimeError("Host-bound release fields are not verified; inspect the receipt without replaying writes")
                 if memory is not None and assistant and assistant[-1].stop_reason == "stop" and actions is not None:
                     try:
                         from erp_harness.memory.store import save

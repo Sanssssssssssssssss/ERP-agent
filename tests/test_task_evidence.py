@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from erp_harness.erp.task_evidence import TaskEvidence
+from erp_harness.erp.task_evidence import TaskEvidence, final_release_verification
 from tests.test_actions import _actions
 
 
@@ -140,6 +140,83 @@ class TaskEvidenceTests(unittest.TestCase):
         spec['release_fields'] = [{'model': 'purchase.order', 'method': 'button_confirm', 'fields': ['active', 'quantity']}]
         evidence = TaskEvidence(a.reads, spec, a.store.path.parent / 'presence-evidence.json')
         self.assertTrue(evidence.release_check({'model': 'purchase.order', 'method': 'button_confirm', 'instance': 'default', 'kwargs': {'ids': [8]}}))
+
+    def test_final_release_readback_preserves_scope_and_never_writes(self):
+        for change in ('none', 'missing_date', 'unresolved', 'identity', 'context', 'session', 'payload_hash', 'hidden_method', 'read_timeout', 'bad_ledger'):
+            with self.subTest(change=change), patch.dict(os.environ, {
+                    'ODOO_MCP_ENABLE_WRITES': '1', 'ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS': 'purchase.order.button_confirm'}):
+                a, writer, rt, _ = self.setup_action()
+                rt.client.metadata.update(date_planned={'type': 'datetime'}, active={'type': 'boolean'}, quantity={'type': 'float'})
+                rt.client.records['purchase.order'][8].update(date_planned='2026-10-10', active=False, quantity=0)
+                spec = {'version': 1, 'instruction_sha256': 'confirmed-fields', 'release_fields': [{
+                    'model': 'purchase.order', 'method': 'button_confirm', 'fields': ['date_planned', 'active', 'quantity']}]}
+                a.task_evidence = TaskEvidence(a.reads, spec, a.store.path.parent / 'release.json')
+                # A conditional rule does not require an otherwise legitimate draft to be released.
+                draft = final_release_verification(a)
+                self.assertEqual((draft['status'], draft['enforced']), ('not_applicable', False))
+                sent = a.execute_method('purchase.order', 'button_confirm', kwargs={'ids': [8]})
+                self.assertTrue(sent['success'], sent)
+                self.assertEqual(len(writer.calls), 1)
+                writer.calls.clear()
+                if change == 'missing_date':
+                    rt.client.records['purchase.order'][8]['date_planned'] = False
+                elif change == 'unresolved':
+                    a.store.finish(sent['action_id'], status='needs_reconciliation')
+                elif change == 'identity':
+                    rt.client.db = 'another-db'
+                elif change in {'context', 'session', 'payload_hash', 'hidden_method'}:
+                    row = a.store.get(sent['action_id'])
+                    if change == 'context':
+                        row['payload']['kwargs']['context'] = {'allowed_company_ids': [999]}
+                        a.store._db.execute('UPDATE action_ledger SET payload=?,payload_sha256=?',
+                                            (json.dumps(row['payload']), a.store.digest(row['payload'])))
+                    elif change == 'payload_hash':
+                        a.store._db.execute("UPDATE action_ledger SET payload_sha256='corrupted'")
+                    elif change == 'hidden_method':
+                        row['payload']['method'] = 'unrelated'
+                        a.store._db.execute('UPDATE action_ledger SET payload=?', (json.dumps(row['payload']),))
+                    else:
+                        a.store._db.execute("UPDATE action_ledger SET session_id='another-session'")
+                    a.store._db.commit()
+                elif change == 'read_timeout':
+                    rt.client.search_read = lambda *args, **kwargs: (_ for _ in ()).throw(TimeoutError())
+                elif change == 'bad_ledger':
+                    a.task_evidence.ledger_paths.append(a.store.path.parent / 'missing.sqlite3')
+                result = final_release_verification(a)
+                self.assertEqual(result['status'], 'passed' if change == 'none' else 'failed' if change == 'missing_date' else 'unknown', result)
+                self.assertTrue(result['enforced'])
+                self.assertFalse(result['retry_safe'])
+                self.assertEqual(writer.calls, [])
+                if change == 'missing_date':
+                    self.assertEqual(result['reason'], 'missing_release_fields')
+                    self.assertIn('date_planned', result['error'])
+                if change == 'unresolved':
+                    self.assertEqual(result['next_action'], 'reconcile_without_replay')
+                if change in {'payload_hash', 'hidden_method'}:
+                    self.assertEqual(result['reason'], 'receipt_integrity_unverified')
+
+    def test_final_release_uses_host_bound_history_and_current_requirements(self):
+        a, writer, rt, _ = self.setup_action()
+        rt.client.metadata.update(date_planned={'type': 'datetime'}, extra_date={'type': 'datetime'})
+        rt.client.records['purchase.order'][8].update(date_planned='2026-10-10', extra_date=False)
+        spec = {'version': 1, 'instruction_sha256': 'first-goal', 'release_fields': [{
+            'model': 'purchase.order', 'method': 'button_confirm', 'fields': ['date_planned']}]}
+        a.task_evidence = TaskEvidence(a.reads, spec, a.store.path.parent / 'release.json')
+        with patch.dict(os.environ, {'ODOO_MCP_ENABLE_WRITES': '1', 'ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS': 'purchase.order.button_confirm'}):
+            sent = a.execute_method('purchase.order', 'button_confirm', kwargs={'ids': [8]})
+        self.assertTrue(sent['success'], sent)
+        resumed, writer2, _ = _actions(runtime=rt, path=a.store.path.parent / 'new-run.sqlite3')
+        self.addCleanup(resumed.store.close)
+        renewed = {**spec, 'instruction_sha256': 'current-goal', 'verified_creation_ledgers': [str(a.store.path)]}
+        resumed.task_evidence = TaskEvidence(resumed.reads, renewed, a.store.path.parent / 'new-release.json')
+        result = final_release_verification(resumed)
+        self.assertEqual(result['status'], 'passed', result)
+        self.assertEqual(result['action_ids'], [sent['action_id']])
+        renewed['release_fields'][0]['fields'].append('extra_date')
+        resumed.task_evidence = TaskEvidence(resumed.reads, renewed, a.store.path.parent / 'updated-release.json')
+        self.assertEqual(final_release_verification(resumed)['status'], 'failed')
+        self.assertEqual(writer2.calls, [])
+        self.assertEqual(len(writer.calls), 1)
 
     def test_purchase_release_checks_sources_and_quantity_without_rewriting(self):
         for origin, quantity, quantum, expected in [('SO7, SO8', 2, 1, True), ('SO7, SO8', 1, 1, False),

@@ -1602,8 +1602,8 @@ class Workbench:
                             self._trace(run, kind, {key: event[key] for key in ("request_id", "call_id", "request_file", "request_kind", "attempt", "status", "started_at", "headers_received_at", "finished_at", "duration_ms", "http_status", "message_id", "round_id", "tool_call_ids", "error") if key in event})
                         elif kind == "receipt_warning":
                             self._trace(run, kind, {key: event[key] for key in ("file", "error_type") if key in event})
-                        elif kind == "business_verification":
-                            run["business_verification"] = event.get("verification")
+                        elif kind in {"business_verification", "task_verification"}:
+                            run[kind] = event.get("verification")
                             self._trace(run, kind, {"verification": event.get("verification")})
                         elif kind == "auto_retry_start":
                             run["phase"] = "retrying"

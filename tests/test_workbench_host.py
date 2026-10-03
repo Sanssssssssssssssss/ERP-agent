@@ -113,6 +113,21 @@ class WorkbenchHostTests(unittest.TestCase):
             self.host._consume_worker(run["id"], _EventProcess([]), Path(self.tmp.name) / "missing-usage.json")
         self.assertNotIn("watchdog", [call.kwargs["target"].__name__ for call in threads.call_args_list])
 
+    def test_final_verification_events_keep_distinct_receipts(self):
+        _, run = self._run()
+        purchase = {'status': 'passed', 'enforced': True}
+        release = {'check': 'release_fields_presence', 'status': 'failed', 'enforced': True}
+        process = _EventProcess([
+            {'type': 'business_verification', 'verification': purchase},
+            {'type': 'task_verification', 'verification': release},
+        ])
+        process.returncode = 1
+        self.host._processes[run['id']] = process
+        self.host._consume_worker(run['id'], process, Path(self.tmp.name) / 'missing-usage.json')
+        self.assertEqual(run['business_verification'], purchase)
+        self.assertEqual(run['task_verification'], release)
+        self.assertEqual(run['status'], 'failed')
+
     def test_business_connection_binds_new_business_and_accepts_same_identity(self):
         business = self._business("connection binding")
         env = {"ODOO_URL": "https://odoo.example/", "ODOO_DB": "demo", "ODOO_USERNAME": "alice", "ODOO_API_KEY": "secret"}
