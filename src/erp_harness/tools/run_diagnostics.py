@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import os
 import re
 import sqlite3
@@ -119,6 +120,44 @@ def _field_recovery(payload):
                       "若检索不足，按业务含义扩大查询。必要业务信息仍无法获取时保留未知，不能只删字段就认定核验通过。"}
 
 
+def _parameter_issues(payload):
+    """Keep bounded schema constraints, never rejected values or arbitrary text."""
+    issues = payload.get("parameter_issues")
+    if payload.get("reason_code") != "tool_arguments_invalid" or not isinstance(issues, list):
+        return {}
+    numeric = {"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+               "minItems", "maxItems", "minLength", "maxLength", "minProperties", "maxProperties"}
+    rules = numeric | {"type", "required", "enum", "const", "pattern", "additionalProperties",
+                       "uniqueItems", "anyOf", "oneOf", "allOf", "not", "format"}
+    kinds = {"object", "array", "string", "integer", "number", "boolean", "null"}
+    safe = []
+    for issue in issues[:8]:
+        if not isinstance(issue, dict):
+            continue
+        path, rule = issue.get("path"), issue.get("rule")
+        if (not isinstance(path, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", path)
+                or any(re.search(r"secret|token|password|authorization|cookie|api.?key", part, re.IGNORECASE)
+                       for part in path.split(".")) or not isinstance(rule, str) or rule not in rules):
+            continue
+        item = {"path": path, "rule": rule}
+        expected = issue.get("expected")
+        if ((rule in numeric and type(expected) in {int, float}
+                and abs(expected) <= 1e12 and math.isfinite(expected))
+                or (rule in {"additionalProperties", "uniqueItems"} and type(expected) is bool)
+                or (rule == "type" and isinstance(expected, str) and expected in kinds)):
+            item["expected"] = expected
+        elif rule == "type" and isinstance(expected, list) and expected and all(
+                isinstance(kind, str) and kind in kinds for kind in expected):
+            item["expected"] = list(dict.fromkeys(expected))
+        elif rule in {"required", "enum"} and isinstance(expected, list):
+            item["expected_count"] = len(expected)  # Values/names may contain confidential text.
+        safe.append(item)
+        if len(safe) == 3:
+            break
+    return {"parameter_issues": safe, "recorded_parameter_issue_count": len(issues),
+            "parameter_issues_truncated": len(safe) != len(issues)}
+
+
 def _auxiliary_recovery(payload, call):
     arguments = call.get("arguments")
     if payload.get("success") is not False or not isinstance(arguments, dict):
@@ -168,7 +207,8 @@ def _auxiliary_recovery(payload, call):
 def summarize_run(directory: Path, session_file: Path, identity: dict, *, run_id: str, session_id: str):
     """Only explicit IDs join artifacts; missing evidence never proves no dispatch."""
     result = {"success": True, "scope": "current_run", "business_truth": False,
-              "note": "Execution evidence only. Verify business facts using current-permission Odoo reads.",
+              "note": "Tool failure items are historical receipts, not proof of a current unresolved failure. "
+                      "Action ledger items report recorded local status. Verify business facts using current-permission Odoo reads.",
               "items": [], "evidence_complete": True}
     calls, ambiguous_calls = {}, set()
     # ponytail: scan local receipt metadata; index only if measured run size warrants it.
@@ -280,6 +320,8 @@ def summarize_run(directory: Path, session_file: Path, identity: dict, *, run_id
             # A receipt can conservatively require reconciliation; it cannot authorize a retry.
             status = reported_status
         result["items"].append({
+            "record_kind": "historical_tool_failure" if code else "incomplete_tool_execution",
+            "resolution_status": "unknown",
             "tool_call_id": call, "request_id": _identifier(calls[call]) if call not in ambiguous_calls else None,
             "tool_name": _identifier(message.get("toolName")),
             "tool_started": True if starts else False if before_dispatch or policy_no_dispatch and failure.get("stage") == "before_dispatch" else None,
@@ -318,6 +360,8 @@ def summarize_run(directory: Path, session_file: Path, identity: dict, *, run_id
                 result["items"][-1].update(error_code="unknown_field", reason_code="query_invalid",
                     likely_failure_layer="tool_arguments", next_action="discover_live_fields", recovery_request=recovery)
         if not conflict and not action_id and not uncertain and not incomplete_rpc:
+            if code == "tool_arguments_invalid" and stage == "before_dispatch":
+                result["items"][-1].update(_parameter_issues(payload))
             result["items"][-1].update(_auxiliary_recovery(payload, requested_call))
     unresolved = []
     linked = {item["action_id"] for item in result["items"]}
@@ -325,6 +369,7 @@ def summarize_run(directory: Path, session_file: Path, identity: dict, *, run_id
         if action["action_id"] not in linked and action.get("status") in {
             "pending_approval", "approved", "sending", "executing", "needs_reconciliation"}:
             unresolved.append({"action_id": _identifier(action["action_id"]),
+                "record_kind": "action_ledger_status", "resolution_status": "unknown",
                 "action_status": action["status"], "tool_call_id": None, "odoo_request_seen": None,
                 "world_stale": None, "error_code": "unresolved_action", "likely_failure_layer": "unknown",
                 "next_action": "reconcile_without_replay" if action["status"] in {"sending", "executing", "needs_reconciliation"}
@@ -334,6 +379,8 @@ def summarize_run(directory: Path, session_file: Path, identity: dict, *, run_id
     items.sort(key=lambda item: 0 if item.get("next_action") == "reconcile_without_replay"
                else 1 if item.get("error_code") != "unresolved_action" else 2)
     result["items"] = items[:3]
+    result.update(total_items=len(items), returned_items=len(result["items"]), item_limit=3,
+                  truncated=len(items) > 3)
     if len(json.dumps(result, ensure_ascii=False).encode()) > 8192:
         return _diagnostic_error("diagnostic_size_limit")
     return result

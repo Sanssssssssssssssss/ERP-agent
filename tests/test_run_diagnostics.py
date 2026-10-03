@@ -522,3 +522,129 @@ def test_runtime_refusal_and_nested_task_failures_keep_their_causes(tmp_path):
                    {"success": True, "status": "succeeded", "result": {"success": True, "failures": {"default": failure}}}):
         item = record(result)
         assert item["error_code"] == "permission_denied" and item["next_action"] == "check_permissions"
+
+
+def test_actual_partner_batch_refusal_preserves_parameter_limit_without_dispatch(tmp_path):
+    from erp_harness.runtime.loop import _prepare_tool_call
+    from erp_harness.runtime.messages import AssistantMessage, ToolCall
+    from erp_harness.runtime.tools import AgentTool
+    from experiments.agent_regression.bench_recovery import definitions
+
+    registry = Path(__file__).resolve().parents[1] / (
+        "experiments/agent_regression/tool-self-debug-business-20261003/cases.json")
+    case = next(case for case in json.loads(registry.read_text(encoding="utf-8"))["cases"]
+                if case["id"] == "TFR2-2066-02")
+    definition = definitions()[case["tool"]]["function"]
+
+    async def forbidden_dispatch(*_args):
+        raise AssertionError("Invalid arguments must never reach a tool executor")
+
+    tool = AgentTool(name=case["tool"], label="read", description=definition["description"],
+                     parameters=definition["parameters"], execute_fn=forbidden_dispatch)
+    call = ToolCall(id=case["tool_call_id"], name=tool.name, arguments=case["failed_arguments"])
+    prepared = asyncio.run(_prepare_tool_call(0, None, AssistantMessage(), call,
+                                             {tool.name: tool}, None, None))
+    seed(tmp_path)
+    rows(tmp_path / "requests", "0001.meta.json", {
+        "run_id": "run", "session_id": "session", "request_id": case["frozen_causal"]["request_id"],
+        "tool_call_ids": [call.id]})
+    rows(tmp_path, "session.jsonl", {"message": {"role": "toolResult", "toolCallId": call.id,
+         "toolName": tool.name, "isError": True, "details": prepared.result.details}})
+    item = diagnose(tmp_path)["items"][0]
+    assert item["parameter_issues"] == [{"path": "record_ids", "rule": "maxItems", "expected": 20}]
+    assert item["recorded_parameter_issue_count"] == 1 and not item["parameter_issues_truncated"]
+    assert item["request_id"] == case["frozen_causal"]["request_id"]
+    assert item["tool_started"] is False and item["odoo_request_seen"] is False
+    assert item["stage"] == "before_dispatch" and item["next_action"] == "correct_arguments"
+    assert item["record_kind"] == "historical_tool_failure" and item["resolution_status"] == "unknown"
+    assert "record_ids" not in item.get("arguments", {})
+
+
+def test_schema_constraints_are_bounded_and_never_copy_rejected_values(tmp_path):
+    seed(tmp_path)
+    issues = [
+        {"path": "api_key", "rule": "type", "expected": "SECRET"},
+        {"path": "fields", "rule": [], "expected": "SECRET"},
+        {"path": "fields", "rule": {}, "expected": "SECRET"},
+        {"path": "record_ids", "rule": "maxItems", "expected": 10**400, "value": "SECRET"},
+        {"path": "amount", "rule": "maximum", "expected": float("inf")},
+        {"path": "name", "rule": "pattern", "expected": "SECRET-INSTRUCTIONS"},
+        {"path": "model", "rule": "enum", "expected": ["SECRET-ENUM"]},
+        {"path": "fields.0", "rule": "type", "expected": "string"},
+        {"path": "SECRET-TAIL", "rule": "maxLength", "expected": 100},
+    ]
+    payload = {"success": False, "reason_code": "tool_arguments_invalid", "parameter_issues": issues,
+        "failure": {"code": "tool_arguments_invalid", "stage": "before_dispatch", "odoo_request_seen": False}}
+    rows(tmp_path, "session.jsonl", {"message": {"role": "toolResult", "toolCallId": "call-a",
+         "details": payload}})
+    result = diagnose(tmp_path)
+    item = result["items"][0]
+    assert result["success"] and "SECRET" not in json.dumps(result)
+    assert item["parameter_issues"] == [
+        {"path": "record_ids", "rule": "maxItems"},
+        {"path": "amount", "rule": "maximum"}, {"path": "name", "rule": "pattern"}]
+    assert item["recorded_parameter_issue_count"] == 9 and item["parameter_issues_truncated"]
+    payload["parameter_issues"] = [
+        {"path": "values.name", "rule": "required", "expected": ["SECRET-FIELD"]},
+        {"path": "model", "rule": "enum", "expected": ["SECRET-ENUM"]},
+        {"path": "fields.0", "rule": "type", "expected": ["string", "null", "string"]}]
+    rows(tmp_path, "session.jsonl", {"message": {"role": "toolResult", "toolCallId": "call-a",
+         "details": payload}})
+    item = diagnose(tmp_path)["items"][0]
+    assert item["parameter_issues"] == [
+        {"path": "values.name", "rule": "required", "expected_count": 1},
+        {"path": "model", "rule": "enum", "expected_count": 1},
+        {"path": "fields.0", "rule": "type", "expected": ["string", "null"]}]
+    assert "SECRET" not in json.dumps(item) and not item["parameter_issues_truncated"]
+
+
+@pytest.mark.parametrize("guard", ["duplicate_request", "incomplete_rpc", "uncertain_write"])
+def test_schema_constraint_recovery_keeps_correlation_and_unknown_write_priority(tmp_path, guard):
+    seed(tmp_path)
+    payload = {"success": False, "reason_code": "tool_arguments_invalid",
+        "parameter_issues": [{"path": "record_ids", "rule": "maxItems", "expected": 20}],
+        "failure": {"code": "tool_arguments_invalid", "stage": "before_dispatch", "odoo_request_seen": False}}
+    actions = []
+    if guard == "duplicate_request":
+        rows(tmp_path / "requests", "0002.meta.json", {"run_id": "run", "session_id": "session",
+             "request_id": "duplicate", "tool_call_ids": ["call-a"]})
+    elif guard == "incomplete_rpc":
+        rows(tmp_path, "odoo-native-requests.jsonl", {"event": "start", "tool_call_id": "call-a",
+             "rpc_request_id": "incomplete", "dispatch_started": True})
+    else:
+        payload["action_id"] = "unknown-write"
+        actions = [{"action_id": "unknown-write", "run_id": "run", "session_id": "session",
+                    "identity": IDENTITY, "status": "needs_reconciliation"}]
+    rows(tmp_path, "session.jsonl", {"message": {"role": "toolResult", "toolCallId": "call-a", "details": payload}})
+    item = diagnose(tmp_path, actions)["items"][0]
+    assert "parameter_issues" not in item and "recovery_request" not in item
+    assert item["next_action"] == ("reconcile_without_replay" if guard == "uncertain_write"
+                                    else "inspect_execution_evidence")
+    if guard != "uncertain_write":
+        assert item["error_code"] == "correlation_conflict"
+
+
+def test_diagnostic_limit_reports_history_without_inventing_resolution(tmp_path):
+    seed(tmp_path)
+    calls = ["call-a", "call-b", "call-c", "call-d"]
+    rows(tmp_path / "requests", "0001.meta.json", {"run_id": "run", "session_id": "session",
+         "request_id": "request1", "tool_call_ids": calls})
+    rows(tmp_path, "session.jsonl", *[{
+        "message": {"role": "toolResult", "toolCallId": call, "details": {
+            "success": False, "reason_code": "query_invalid"}}} for call in calls])
+    actions = [{"action_id": "unsent-approval", "run_id": "run", "session_id": "session",
+                "identity": IDENTITY, "status": "approved"},
+               {"action_id": "unknown-write", "run_id": "run", "session_id": "session",
+                "identity": IDENTITY, "status": "sending"}]
+    result = diagnose(tmp_path, actions)
+    assert result["total_items"] == 6 and result["returned_items"] == result["item_limit"] == 3
+    assert result["truncated"] and result["items"][0]["action_id"] == "unknown-write"
+    assert result["items"][0]["record_kind"] == "action_ledger_status"
+    assert result["items"][0]["next_action"] == "reconcile_without_replay"
+    assert all(item["resolution_status"] == "unknown" for item in result["items"])
+    assert all(item["record_kind"] == "historical_tool_failure" for item in result["items"][1:])
+    rows(tmp_path, "session.jsonl")
+    rows(tmp_path, "tool-backends.jsonl", {"event": "start", "tool_call_id": "call-a"})
+    result = diagnose(tmp_path)
+    assert result["total_items"] == result["returned_items"] == 1 and not result["truncated"]
+    assert result["items"][0]["record_kind"] == "incomplete_tool_execution"
