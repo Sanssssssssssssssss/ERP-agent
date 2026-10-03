@@ -273,6 +273,34 @@ class WorkbenchHostTests(unittest.TestCase):
         self.assertFalse(worker.is_alive())
         self.assertEqual(business.get("readback_status"), "ready")
 
+    def test_readback_client_failure_keeps_classification_at_both_host_entries(self):
+        for automatic in (False, True):
+            for error, code, action in (
+                (TimeoutError("token=PRIVATE_TOKEN"), "connection_timeout", "check_connection"),
+                (PermissionError("api_key=PRIVATE_TOKEN"), "permission_denied", "check_permissions"),
+                (ConnectionRefusedError("password=PRIVATE_TOKEN"), "connection_refused", "check_service"),
+            ):
+                with self.subTest(automatic=automatic, code=code):
+                    business, run = self._run(f"client failure {automatic} {code}")
+                    run["status"] = "completed"
+                    run["documents"] = [{"model": "sale.order", "id": 7, "fields": {},
+                                         "observed_at": "2026-01-01T00:00:00Z"}]
+                    business["active_run_id"] = None
+                    self.host.store.data["sessions"][self.sid]["active_run_id"] = None
+                    business["readback"] = {"verification_status": "passed", "checks": [{"status": "passed"}]}
+                    with patch.object(self.host, "_native_reads", side_effect=error):
+                        if automatic:
+                            self.host._refresh_after_completed_run(self.sid, business["id"], run["id"])
+                        else:
+                            self.host.refresh_business(self.sid, business["id"])
+                    readback = business["readback"]
+                    self.assertNotEqual(readback["verification_status"], "passed")
+                    failures = ([readback.get("read_failure", {})] if automatic else
+                                [c.get("read_failure", {}) for c in readback["checks"] if c["name"].startswith("read_")])
+                    self.assertTrue(failures)
+                    self.assertTrue(all(f.get("reason_code") == code and f.get("next_action") == action for f in failures))
+                    self.assertNotIn("PRIVATE_TOKEN", json.dumps(readback))
+
     def test_late_completed_readback_cannot_overwrite_new_active_run(self):
         business, run = self._run("late completion readback")
         run["status"] = "completed"

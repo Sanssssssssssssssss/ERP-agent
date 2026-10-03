@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from .sale_view import business_detail, collect_documents, refresh_business as readback_business
+from .sale_view import _read_failure, business_detail, collect_documents, refresh_business as readback_business
 from .materials import MAX_BYTES, MAX_FILES_PER_SESSION, parse_material, read_material_text, validate_name
 from .storage import StateStore
 from .model_config import capability_router_config
@@ -1828,8 +1828,8 @@ class Workbench:
             reads = self._native_reads()
         except Exception as exc:
             # Record a failed readback rather than preserving an earlier green check.
-            error_type = type(exc).__name__
-            reads = lambda *_args: {"success": False, "error": error_type}
+            failure = _read_failure(exc)
+            reads = lambda *_args: {"success": False, **failure}
         detail = readback_business(self.store.data, business_id, reads)
         for approval in self.store.data["approvals"].values():
             if approval.get("business_id") == business_id and approval.get("status") == "pending_approval":
@@ -1880,7 +1880,7 @@ class Workbench:
             readback_business(snapshot, business_id, reads)
             readback = snapshot["businesses"][business_id].get("readback")
         except Exception as exc:
-            failure = type(exc).__name__
+            failure = _read_failure(exc)
         with self._lock:
             current = self.store.data["businesses"].get(business_id)
             if self._closing:
@@ -1913,13 +1913,15 @@ class Workbench:
             stale = copy.deepcopy(old)
             stale.update({"stale": True, "latest_run_id": run_id, "verification_status": "unknown",
                           "checks": [], "observed_at": now(),
+                          "read_failure": failure or _read_failure({"reason_code": "invalid_response"}),
                           "outcome": {"status": "unknown", "label": "当前状态未知",
                                        "detail": "独立回读不可用，不能确认完成状态。", "scope": "business_readback"}})
             current["readback"] = stale
             current["readback_status"] = "unavailable"
             current["readback_finished_at"] = now()
             self._event("business_refreshed", {"session_id": session_id, "business_id": business_id,
-                                                "run_id": run_id, "status": "unavailable", "error": failure or "malformed_readback"})
+                                                "run_id": run_id, "status": "unavailable",
+                                                "error": stale["read_failure"]["reason_code"]})
 
     def _record_artifact(self, session_id: str, business_id: str, path: str, name: str,
                          run_id: str | None = None, kind: str = "business_receipt",
