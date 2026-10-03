@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import re
 from typing import Any, Callable
+from erp_harness.erp.read_failures import tool_failure
 from .business import BUSINESS_LABELS, ENTERPRISE_TYPES, default_target
 from . import enterprise_view
 
@@ -119,9 +120,18 @@ def _origin_contains_exact(origin: Any, names: set[str]) -> bool:
     return bool(tokens & {name for name in names if isinstance(name, str) and name})
 
 
-def _read_result(payload: Any, expected_id: int) -> tuple[dict[str, Any] | None, str | None]:
+def _read_failure(error: Exception | dict | str) -> dict[str, Any]:
+    # Legacy read replies had only an error string. Classify it, never publish it.
+    if isinstance(error, str):
+        error = RuntimeError(error)
+    elif isinstance(error, dict) and not error.get("reason_code") and not error.get("failure"):
+        error = RuntimeError(str(error.get("error", "")))
+    return tool_failure(error)
+
+
+def _read_result(payload: Any, expected_id: int) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     if not isinstance(payload, dict):
-        return None, "native read returned a non-object response"
+        return None, _read_failure({"reason_code": "invalid_response"})
     current: Any = payload
     for _ in range(3):
         if isinstance(current, dict) and isinstance(current.get("details"), dict):
@@ -131,26 +141,28 @@ def _read_result(payload: Any, expected_id: int) -> tuple[dict[str, Any] | None,
         else:
             break
     if not isinstance(current, dict):
-        return None, "native read returned an invalid structured response"
+        return None, _read_failure({"reason_code": "invalid_response"})
     if current.get("success") is False or current.get("error"):
-        return None, str(current.get("error") or "native read failed")[:300]
+        return None, _read_failure(current)
     result = current.get("result")
-    if not isinstance(result, dict) or not isinstance(result.get("id"), int):
-        return None, "native read did not observe the requested record"
+    if result is None:
+        return None, _read_failure({"reason_code": "record_unavailable"})
+    if not isinstance(result, dict) or type(result.get("id")) is not int:
+        return None, _read_failure({"reason_code": "invalid_response"})
     if result["id"] != expected_id:
-        return None, f"native read returned id {result['id']} for requested {expected_id}"
+        return None, _read_failure({"reason_code": "invalid_response"})
     # A masked placeholder is not an observed business value.
     redacted = current.get("redacted_fields") or []
     return {key: value for key, value in result.items() if key not in redacted}, None
 
 
-def _read_one(reads: Callable[[str, dict[str, Any]], Any] | Any, model: str, record_id: int, fields=None) -> tuple[dict[str, Any] | None, str | None]:
+def _read_one(reads: Callable[[str, dict[str, Any]], Any] | Any, model: str, record_id: int, fields=None) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     arguments = {"model": model, "record_id": record_id, "fields": list(fields if fields is not None else READBACK_FIELDS[model])}
     try:
         call = reads if callable(reads) else getattr(reads, "call")
         return _read_result(call("read_record", arguments), record_id)
     except Exception as exc:  # noqa: BLE001 - readback must preserve stale state
-        return None, f"{type(exc).__name__}: {exc}"[:300]
+        return None, _read_failure(exc)
 
 
 def _run_sort_key(run: dict[str, Any]) -> tuple[str, str]:
@@ -896,7 +908,7 @@ def _outcome(checks: list[dict[str, Any]], business_type: str = "sale_invoice",
 
 
 def _finish_readback(state: dict[str, Any], business: dict[str, Any], runs: list[dict[str, Any]],
-                     observations: dict[tuple[str, int], dict[str, Any]], failures: dict[tuple[str, int], str],
+                     observations: dict[tuple[str, int], dict[str, Any]], failures: dict[tuple[str, int], dict | str],
                      checks: list[dict[str, Any]], business_type: str, target: str) -> dict[str, Any]:
     for index, reference in enumerate(business.get("references", [])):
         if reference.get("expected_state") == "cancel":
@@ -929,7 +941,10 @@ def _finish_readback(state: dict[str, Any], business: dict[str, Any], runs: list
         checks.append(_check(f"requested_reference_{index}", f"原始主体：{reference['quote']}", status,
                              "核对用户原始引用与本次回读关系；不代表自由文本的全部业务条件已验证。"))
     for (model, record_id), failure in failures.items():
-        checks.append(_check(f"read_{model}_{record_id}", f"读取 {model} {record_id}", "unknown", f"读取失败：{failure}"))
+        diagnostic = _read_failure(failure)
+        checks.append({**_check(f"read_{model}_{record_id}", f"读取 {model} {record_id}", "unknown",
+                              f"读取失败：{diagnostic['error']}"),
+                       "model": model, "record_id": record_id, "read_failure": diagnostic})
     outcome = _outcome(checks, business_type, target)
     business["readback"] = {
         "documents": list(observations.values()), "checks": checks, "observed_at": _now(),
@@ -1060,7 +1075,9 @@ def _refresh_invoice_delivery(state, business, runs, reads):
                              "收件地址、PDF 校验和及 SMTP 接受状态已核对；不代表已读。" if sent else "没有确认投递成功；禁止根据 PDF 或留言状态推断发送完成。"))
         business["delivery_receipts"] = receipts
     except Exception as exc:
-        checks.append(_check("invoice_recipient_verified", "发票发送核验", "unknown", str(exc)[:300]))
+        diagnostic = _read_failure(exc)
+        checks.append({**_check("invoice_recipient_verified", "发票发送核验", "unknown", diagnostic["error"]),
+                       "read_failure": diagnostic})
     return _finish_readback(state, business, runs, observations, failures, checks, "invoice_delivery", "sent")
 
 
@@ -1096,7 +1113,7 @@ def refresh_business(
                 observations[(model, record_id)] = {**projected[0], "source": "refresh_native_read", "observed_at": _now()}
         return _finish_readback(state, business, runs, observations, failures, checks, kind, target)
     observations: dict[tuple[str, int], dict[str, Any]] = {}
-    failures: dict[tuple[str, int], str] = {}
+    failures: dict[tuple[str, int], dict | str] = {}
     fresh: set[tuple[str, int]] = set()
     for run in runs:
         for document in run.get("documents", []):
