@@ -94,6 +94,17 @@ def conversation_environment(session_id: str, run_id: str) -> dict[str, str]:
     return env
 
 
+def configured_business_identity():
+    """Local scope only, using the business worker's explicit JSON-2 defaults."""
+    from erp_harness.erp.reads import configured_identity
+
+    required = ("ODOO_URL", "ODOO_DB", "ODOO_USERNAME", "ODOO_API_KEY")
+    if any(not os.environ.get(key) for key in required):
+        raise ValueError("explicit Odoo connection settings are required")
+    return configured_identity(url=os.environ["ODOO_URL"], db=os.environ["ODOO_DB"],
+                               username=os.environ["ODOO_USERNAME"], api_key=os.environ["ODOO_API_KEY"])
+
+
 def worker_source_revision():
     """Identify the host/worker boundary, including uncommitted local edits."""
     directory = Path(__file__).parent

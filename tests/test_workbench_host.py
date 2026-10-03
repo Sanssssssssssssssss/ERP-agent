@@ -1164,6 +1164,48 @@ class WorkbenchHostTests(unittest.TestCase):
         self.assertEqual(result["status"], "scope_mismatch")
         self.assertNotIn("state", result)
 
+    def test_chat_diagnostics_read_selected_run_offline_without_private_payloads(self):
+        business, run = self._run("explain the tool refusal")
+        run.update(status="completed", started_at="2026-10-03T00:00:00Z", phase="model_output",
+                   events=[{"type": "request_finished", "request_id": "request-1", "status": "completed",
+                            "http_status": 200, "error": "PRIVATE_ERROR"}])
+        business["active_run_id"] = None
+        # Conversation active pointers and insertion order must not select another run.
+        self.host.store.data["sessions"][self.sid]["active_run_id"] = "conversation-current"
+        self.host.store.data["runs"]["older-run"] = {**run, "id": "older-run", "started_at": "2026-10-02T00:00:00Z"}
+        directory = self.host.store.root / "runs" / run["id"]
+        (directory / "requests").mkdir(parents=True)
+        (directory / "requests/0001.meta.json").write_text(json.dumps({
+            "run_id": run["id"], "session_id": self.sid, "request_id": "request-1", "tool_call_ids": ["call-1"]}), encoding="utf-8")
+        for name in ("tool-backends.jsonl", "odoo-native-requests.jsonl", "world-observations.jsonl"):
+            (directory / name).write_text("", encoding="utf-8")
+        session_file = self.host._session_file_for_run(run)
+        session_file.parent.mkdir(parents=True, exist_ok=True)
+        session_file.write_text(json.dumps({"message": {"role": "toolResult", "toolCallId": "call-1",
+            "toolName": "mcp_odoo_read_record", "isError": True, "details": {
+                "success": False, "reason_code": "connection_timeout", "error": "PRIVATE_TOOL_BODY"}}}) + "\n", encoding="utf-8")
+        with patch.object(self.host, "_native_reads", side_effect=AssertionError("diagnostics must not connect")):
+            context = self.host._conversation_status_context({"session_id": self.sid, "context_business_id": business["id"]})
+        diagnostic = context["run_diagnostics"]
+        self.assertEqual(diagnostic["run_id"], run["id"])
+        self.assertTrue(diagnostic["snapshot"])
+        self.assertFalse(diagnostic["business_truth"])
+        self.assertIn("captured_at", diagnostic)
+        self.assertEqual(diagnostic["runtime"]["latest_request"]["http_status"], 200)
+        self.assertEqual(diagnostic["items"][0]["error_code"], "connection_timeout")
+        self.assertEqual(diagnostic["items"][0]["resolution_status"], "unknown")
+        for private in ("PRIVATE_", "credential_scope_sha256", str(directory), "test-only"):
+            self.assertNotIn(private, json.dumps(diagnostic))
+        self.assertEqual(self.host.store.data["sessions"][self.sid]["active_run_id"], "conversation-current")
+
+    def test_chat_diagnostics_reject_cross_scope_and_corrupt_paths_before_reading(self):
+        business, run = self._run("diagnostic scope")
+        query = {"session_id": self.sid, "context_business_id": business["id"]}
+        for altered in ({"session_id": "other"}, {"business_id": "other"}, {"id": "../../outside"}):
+            with self.subTest(altered=altered), patch.dict(run, altered), patch(
+                "erp_harness.tools.run_diagnostics.summarize_run", side_effect=AssertionError("scope must fail before reading")):
+                self.assertEqual(self.host._conversation_status_context(query)["run_diagnostics"]["error_code"], "scope_mismatch")
+
     def test_confirm_business_is_idempotent_but_cannot_reverse_a_decision(self):
         business = self._business("one workspace")
         proposal_id = self.host.store.data["messages"][self.sid][-1]["proposal"]["id"]

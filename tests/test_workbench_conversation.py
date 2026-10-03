@@ -210,10 +210,55 @@ class WorkbenchConversationTests(unittest.TestCase):
         self.assertEqual(len(requests), 1)
         self.assertEqual(
             [row["function"]["name"] for row in requests[0]["tools"]],
-            ["read_odoo_reference", "read_business_status", "read_invoice_eligibility", "check_odoo_connection", "propose_business"],
+            ["read_odoo_reference", "read_business_status", "read_invoice_eligibility", "check_odoo_connection", "read_run_diagnostics", "propose_business"],
         )
         self.assertEqual("".join(event.get("text", "") for event in events if event.get("type") == "message_delta"), "可以先回答问题，再在你确认后建立业务。")
         self.assertNotIn("mcp_odoo_read", json.dumps(requests[0]))
+
+    def test_run_diagnostics_reaches_real_chat_loop_without_connecting(self):
+        from erp_harness.app.worker import configured_business_identity
+
+        env = {"ODOO_URL": "https://offline.test", "ODOO_DB": "test", "ODOO_USERNAME": "tester",
+               "ODOO_API_KEY": "PRIVATE_KEY", "PI_AGENT_SESSION_ID": "session-1"}
+        with patch.dict(os.environ, env):
+            snapshot = {"success": True, "business_id": "business-1", "session_id": "session-1", "run_id": "business-run",
+                        "snapshot": True, "captured_at": "2026-10-03T00:00:00Z", "business_truth": False,
+                        "source": "local_execution_receipts", "items": [{"error_code": "connection_timeout", "resolution_status": "unknown"}]}
+            context = {"business_id": "business-1", "session_id": "session-1",
+                       "diagnostic_identity": configured_business_identity(), "run_diagnostics": snapshot}
+            with patch.object(conversation, "load_business_context", return_value=context), patch.object(
+                conversation, "_odoo_reads", side_effect=AssertionError("local diagnostics must not connect")):
+                requests, events = self._run([
+                    {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "diag-call", "type": "function",
+                        "function": {"name": "read_run_diagnostics", "arguments": "{}"}}]}, "finish_reason": "tool_calls"}],
+                     "usage": {"prompt_tokens": 4, "completion_tokens": 8, "total_tokens": 12}},
+                    {"choices": [{"delta": {"content": "记录中有一次超时；是否已恢复仍未知。"}, "finish_reason": "stop"}],
+                     "usage": {"prompt_tokens": 8, "completion_tokens": 8, "total_tokens": 16}},
+                ], "刚才这个业务的工具为什么失败？")
+        self.assertEqual(len(requests), 2)
+        replies = [m for m in requests[1]["messages"] if m.get("role") == "tool"]
+        self.assertEqual(json.loads(replies[-1]["content"]), snapshot)
+        self.assertNotIn("PRIVATE_KEY", json.dumps(requests))
+        self.assertNotIn("credential_scope_sha256", json.dumps(requests))
+        self.assertEqual("".join(e.get("text", "") for e in events if e.get("type") == "message_delta"), "记录中有一次超时；是否已恢复仍未知。")
+
+    def test_run_diagnostics_rejects_scope_changes_and_model_selected_paths(self):
+        from erp_harness.app.worker import configured_business_identity
+
+        env = {"ODOO_URL": "https://offline.test", "ODOO_DB": "test", "ODOO_USERNAME": "tester",
+               "ODOO_API_KEY": "key", "PI_AGENT_SESSION_ID": "session-1"}
+        with patch.dict(os.environ, env):
+            snapshot = {"success": True, "business_id": "business-1", "session_id": "session-1", "run_id": "business-run"}
+            context = {"business_id": "business-1", "session_id": "session-1",
+                       "diagnostic_identity": configured_business_identity(), "run_diagnostics": snapshot}
+            with patch.object(conversation, "_BUSINESS_CONTEXT", context):
+                for args in ({"path": "../other"}, {"run_id": "other"}, {"identity": {}}):
+                    self.assertEqual(asyncio.run(conversation._read_run_diagnostics("c", args)).details["error_code"], "no_arguments_allowed")
+                for changed in ({"ODOO_API_KEY": "rotated"}, {"PI_AGENT_SESSION_ID": "other"}, {"ODOO_DB": "other"}):
+                    with patch.dict(os.environ, changed):
+                        self.assertFalse(asyncio.run(conversation._read_run_diagnostics("c", {})).details["success"])
+                with patch.dict(snapshot, {"business_id": "other"}):
+                    self.assertFalse(asyncio.run(conversation._read_run_diagnostics("c", {})).details["success"])
 
     def test_real_coding_session_emits_server_checked_proposal_tool_result(self):
         requests, events = self._run(

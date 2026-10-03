@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import json
 import os
 import re
@@ -76,7 +77,11 @@ CONVERSATION_POLICY = (
     "goals require the original document, amount, currency and company; bank reconciliation "
     "requires matching journal entries, not merely an invoice marked paid. "
     "For the selected business's completion, document state or email delivery, use read_business_status. "
-    "It rechecks evidence with your current Odoo permissions; report unknown or denied reads explicitly. "
+    "For what happened during that business run, tool/runtime failures or approval waits, use read_run_diagnostics. "
+    "It reads a host-scoped local snapshot even when Odoo is offline. Report its captured_at time; "
+    "historical failures with unknown resolution are not proof of a currently blocked run. "
+    "Missing diagnostics never prove no write occurred. Never replay a write or infer ERP completion from local run status. "
+    "read_business_status rechecks evidence with your current Odoo permissions; report unknown or denied reads explicitly. "
     "If business_scope_required is returned, ask the user to select the business in the chat scope selector. "
     "Its execution and delivery remain unknown; conversation history or missing scope never proves it was not executed. "
     "smtp_accepted does not prove recipient delivery or reading. A status question never authorizes a resend. "
@@ -445,6 +450,40 @@ async def _read_invoice_eligibility(_call_id, arguments, _signal=None, _on_updat
     return AgentToolResult(content=json.dumps(payload, ensure_ascii=False), details=payload)
 
 
+async def _read_run_diagnostics(_call_id, arguments, _signal=None, _on_update=None):
+    from .worker import configured_business_identity
+
+    context = _BUSINESS_CONTEXT or {}
+    payload = {"success": False, "business_truth": False, "error_code": "identity_or_scope_unavailable",
+               "next_action": "inspect_execution_evidence"}
+    if arguments:
+        payload.update(error_code="no_arguments_allowed", next_action="correct_tool_arguments")
+    elif context.get("success") is False:
+        payload.update(error_code="business_context_unavailable")
+    elif not context.get("business_id"):
+        payload.update(error_code="business_scope_required", next_action="select_business")
+    else:
+        try:
+            snapshot = context.get("run_diagnostics")
+            if (context.get("session_id") == os.environ.get("PI_AGENT_SESSION_ID")
+                    and context.get("diagnostic_identity") == configured_business_identity()
+                    and isinstance(snapshot, dict)
+                    and snapshot.get("business_id") == context["business_id"]
+                    and snapshot.get("session_id") == context["session_id"]):
+                payload = copy.deepcopy(snapshot)
+        except (ValueError, TypeError):
+            pass
+    return AgentToolResult(content=json.dumps(payload, ensure_ascii=False), details=payload)
+
+
+READ_RUN_DIAGNOSTICS = AgentTool(
+    name="read_run_diagnostics", label="Read business run diagnostics",
+    description="Read the host-selected business run's local diagnostic snapshot: runtime/model-request status, historical tool failures and approval/uncertain-write records. Works without Odoo connectivity. No arguments, path/run selection, writes, retries or approvals. Report captured_at; unknown resolution and missing logs remain unknown. This is not current business verification.",
+    parameters={"type": "object", "properties": {}, "additionalProperties": False},
+    execute_fn=_read_run_diagnostics, execution_mode="sequential",
+)
+
+
 async def _check_odoo_connection(_call_id, arguments, _signal=None, _on_update=None):
     from .host import _public_endpoint
     payload = {"source": "native_odoo_connection", "observed_at": _observed_at(),
@@ -701,7 +740,7 @@ async def run(args: argparse.Namespace) -> None:
             model=model,
             storage=JsonlSessionStorage(args.session_file),
             cwd=Path.cwd(),
-            tools=[READ_ODOO_REFERENCE, READ_BUSINESS_STATUS, READ_INVOICE_ELIGIBILITY, CHECK_ODOO_CONNECTION, PROPOSE_BUSINESS],
+            tools=[READ_ODOO_REFERENCE, READ_BUSINESS_STATUS, READ_INVOICE_ELIGIBILITY, CHECK_ODOO_CONNECTION, READ_RUN_DIAGNOSTICS, PROPOSE_BUSINESS],
             max_turns=None,
             resource_paths=ResourcePaths(
                 root=args.receipt_dir / ".pi-agent",
@@ -721,7 +760,7 @@ async def run(args: argparse.Namespace) -> None:
     try:
         print(json.dumps({
             "type": "run_metadata", "kind": "conversation", "model": model,
-            "runtime": "HarnessSession", "toolNames": [READ_ODOO_REFERENCE.name, READ_BUSINESS_STATUS.name, READ_INVOICE_ELIGIBILITY.name, CHECK_ODOO_CONNECTION.name, PROPOSE_BUSINESS.name],
+            "runtime": "HarnessSession", "toolNames": [READ_ODOO_REFERENCE.name, READ_BUSINESS_STATUS.name, READ_INVOICE_ELIGIBILITY.name, CHECK_ODOO_CONNECTION.name, READ_RUN_DIAGNOSTICS.name, PROPOSE_BUSINESS.name],
             "toolMode": "proposal_plus_readonly", "odooToolCount": 4,
         }, ensure_ascii=False), flush=True)
         # Use append-only journal entries rather than session.messages.  A

@@ -740,9 +740,61 @@ class Workbench:
         business = self._business(run["session_id"], business_id)
         try:
             identity = self._ensure_business_connection(business, bind=False)
-            return build_status_context(self.store.data, business_id, run["session_id"], identity)
+            context = build_status_context(self.store.data, business_id, run["session_id"], identity)
         except (BusinessConnectionError, ValueError) as exc:
             return {"success": False, "status": "scope_mismatch", "error": str(exc)}
+        from .worker import configured_business_identity
+
+        try:
+            identity = configured_business_identity()
+        except (ValueError, TypeError):
+            context["run_diagnostics"] = {"success": False, "error_code": "identity_or_scope_unavailable",
+                                          "business_truth": False, "next_action": "inspect_execution_evidence"}
+            return context
+        context["diagnostic_identity"] = identity  # Private handoff; never part of the tool reply.
+        try:
+            context["run_diagnostics"] = self._conversation_run_diagnostics(business, identity)
+        except (OSError, ValueError, TypeError):
+            context["run_diagnostics"] = {"success": False, "error_code": "diagnostic_evidence_unavailable",
+                "business_id": business_id, "session_id": run["session_id"], "snapshot": True,
+                "captured_at": now(), "business_truth": False, "next_action": "inspect_execution_evidence"}
+        return context
+
+    def _conversation_run_diagnostics(self, business: dict[str, Any], identity: dict) -> dict:
+        from erp_harness.tools.run_diagnostics import _identifier, summarize_run
+
+        scope = {"source": "local_execution_receipts", "snapshot": True, "captured_at": now(),
+                 "business_truth": False, "business_id": business["id"], "session_id": business["session_id"]}
+        runs = [row for row in self.store.data["runs"].values() if row.get("business_id") == business["id"]]
+        selected = (self.store.data["runs"].get(business["active_run_id"]) if business.get("active_run_id") else
+                    max(runs, key=lambda row: (str(row.get("started_at") or ""), str(row.get("id") or "")), default=None))
+        if selected is None:
+            return {**scope, "success": False, "error_code": "business_run_unavailable",
+                    "next_action": "inspect_execution_evidence", "items": []}
+        if (selected.get("business_id") != business["id"] or selected.get("session_id") != business["session_id"]
+                or not _identifier(selected.get("id")) or not _identifier(business["id"])):
+            return {**scope, "success": False, "error_code": "scope_mismatch", "items": []}
+        directory = (self.store.root / "runs" / selected["id"]).resolve()
+        session_file = self._session_file_for_run(selected).resolve()
+        if not directory.is_relative_to((self.store.root / "runs").resolve()) or not session_file.is_relative_to((self.store.root / "sessions").resolve()):
+            return {**scope, "success": False, "error_code": "scope_mismatch", "items": []}
+        diagnostic = summarize_run(directory, session_file, identity, run_id=selected["id"], session_id=business["session_id"])
+        statuses = {"running", "awaiting_approval", "awaiting_input", "cancel_requested", "completed", "failed", "cancelled",
+                    "interrupted", "needs_reconciliation", "blocked"}
+        runtime = {"status": selected.get("status") if selected.get("status") in statuses else "unknown",
+                   "phase": selected.get("phase") if selected.get("phase") in {"waiting_for_model", "model_output", "retrying"} else "unknown",
+                   "pending_approvals": sum(row.get("run_id") == selected["id"] and row.get("status") == "pending_approval"
+                                            for row in self.store.data["approvals"].values())}
+        events = selected.get("events", [])
+        latest = next((row for row in reversed(events) if row.get("type") in {
+            "request_started", "request_headers", "request_finished", "request_linked"}), {})
+        runtime["latest_request"] = {
+            "request_id": _identifier(latest.get("request_id")),
+            "status": latest.get("status") if latest.get("status") in {"prepared", "running", "completed", "error", "aborted", "retry"} else "unknown",
+            "http_status": latest.get("http_status") if type(latest.get("http_status")) is int and 100 <= latest["http_status"] <= 599 else None,
+        }
+        runtime["receipt_warnings"] = sum(row.get("type") == "receipt_warning" for row in events)
+        return {**diagnostic, **scope, "scope": "selected_business_run", "run_id": selected["id"], "runtime": runtime}
 
     def _launch_conversation(self, run: dict[str, Any]) -> None:
         try:
