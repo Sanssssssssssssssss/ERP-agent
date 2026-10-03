@@ -237,7 +237,9 @@ class AnthropicProvider:
                         thinking_signature: str | None = None
                         tool_builders: dict[int, _AnthropicToolBuilder] = {}
                         finish_reason: str | None = None
+                        message_stopped = False
                         usage: Usage | None = None
+                        final_usage_reported = False
 
                         async for line in response.aiter_lines():
                             if signal is not None and signal.is_cancelled():
@@ -267,6 +269,12 @@ class AnthropicProvider:
                                     )
                                     builder.id = _string_or_empty(block.get("id"))
                                     builder.name = _string_or_empty(block.get("name"))
+                                    initial_arguments = block.get("input")
+                                    builder.initial_arguments = (
+                                        initial_arguments
+                                        if isinstance(initial_arguments, dict)
+                                        else None
+                                    )
                                     emitted_content = True
                             elif event_type == "content_block_delta":
                                 delta = chunk.get("delta")
@@ -306,7 +314,15 @@ class AnthropicProvider:
                                     finish_reason = (
                                         _string_or_empty(delta.get("stop_reason")) or finish_reason
                                     )
-                                usage = _apply_message_delta_usage(usage, chunk.get("usage"))
+                                delta_usage = chunk.get("usage")
+                                usage = _apply_message_delta_usage(usage, delta_usage)
+                                if isinstance(delta_usage, Mapping) and _int_or_none(
+                                    delta_usage.get("output_tokens")
+                                ) is not None:
+                                    final_usage_reported = True
+                            elif event_type == "message_stop":
+                                message_stopped = True
+                                break
                             elif event_type == "error":
                                 error_type, message = _anthropic_stream_error_details(chunk)
                                 if (
@@ -319,6 +335,7 @@ class AnthropicProvider:
                                 yield ProviderErrorEvent(
                                     message=message,
                                     data={"event": chunk, "attempts": attempt + 1},
+                                    usage=usage if final_usage_reported else None,
                                 )
                                 return
 
@@ -343,9 +360,33 @@ class AnthropicProvider:
                                 return
                             continue
 
-                        tool_calls = [
-                            builder.build(index) for index, builder in sorted(tool_builders.items())
-                        ]
+                        if not message_stopped:
+                            yield ProviderErrorEvent(
+                                message="Anthropic stream ended before message_stop",
+                                usage=usage if final_usage_reported else None,
+                            )
+                            return
+                        if finish_reason not in {
+                            None, "end_turn", "stop_sequence", "tool_use", "max_tokens",
+                        }:
+                            reason = finish_reason if finish_reason in {
+                                "refusal", "pause_turn", "model_context_window_exceeded",
+                            } else "unrecognized"
+                            yield ProviderErrorEvent(
+                                message=f"Anthropic response stopped with reason {reason}",
+                                usage=usage if final_usage_reported else None,
+                            )
+                            return
+                        try:
+                            tool_calls = [] if finish_reason == "max_tokens" else [
+                                builder.build(index)
+                                for index, builder in sorted(tool_builders.items())
+                            ]
+                        except ValueError as exc:
+                            yield ProviderErrorEvent(
+                                message=str(exc), usage=usage if final_usage_reported else None,
+                            )
+                            return
                         for tool_call in tool_calls:
                             yield ProviderToolCallEvent(tool_call=tool_call)
 
@@ -437,12 +478,15 @@ class _AnthropicToolBuilder:
         self.id = ""
         self.name = ""
         self.arguments_parts: list[str] = []
+        self.initial_arguments: dict[str, JSONValue] | None = None
 
     def build(self, index: int) -> ToolCall:
         arguments_text = "".join(self.arguments_parts)
-        arguments = _loads_object(arguments_text) if arguments_text else {}
+        arguments = (
+            _loads_object(arguments_text) if self.arguments_parts else self.initial_arguments
+        )
         if arguments is None:
-            arguments = {"_raw_arguments": arguments_text}
+            raise ValueError("Anthropic tool arguments must be a complete JSON object")
         return ToolCall(
             id=self.id or f"tool-call-{index}",
             name=self.name,
