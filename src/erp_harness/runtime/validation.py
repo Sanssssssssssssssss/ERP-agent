@@ -32,10 +32,10 @@ def validate_tool_arguments(tool: AgentTool, tool_call: ToolCall) -> dict[str, A
         key=lambda error: list(error.path),
     )
     if errors:
-        details = "\n".join(f"  - {_error_path(error)}: {error.message}" for error in errors)
         raise ToolArgumentsError(
-            f'Validation failed for tool "{tool_call.name}":\n{details}\n\n'
-            f"Received arguments:\n{tool_call.arguments}",
+            f'Validation failed for tool "{tool_call.name}": {len(errors)} schema constraint(s) failed. '
+            "Correct arguments using the published schema; parameter_issues contains up to "
+            "8 paths, rules and expected constraints. No call was executed.",
             [{"path": _error_path(error), "rule": error.validator, "expected": error.validator_value}
              for error in errors[:8]],
         )

@@ -413,6 +413,74 @@ async def test_tool_failure_guidance_reaches_next_provider_request(failure) -> N
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("kind", ["native_ids", "type", "required", "additional", "many"])
+async def test_large_argument_refusal_survives_compaction_input_without_repeating_values(kind):
+    from erp_harness.context.compaction import (
+        TOOL_RESULT_MAX_CHARS,
+        build_compaction_summary_prompt,
+        build_turn_prefix_summary_prompt,
+    )
+    from erp_harness.tools.router import native_tool_catalog
+
+    rejected = "SYNTHETIC_REJECTED_VALUE_" * 2000
+    schemas = {
+        "type": {"type": "object", "properties": {"amount": {"type": "integer"}}},
+        "required": {"type": "object", "required": ["needed"]},
+        "additional": {"type": "object", "properties": {"id": {"type": "integer"}},
+                       "additionalProperties": False},
+        "many": {"type": "object", "properties": {
+            f"field_{index:02}": {"type": "integer"} for index in range(16)}},
+    }
+    arguments = {
+        "native_ids": {"model": "res.partner", "record_ids": list(range(1, 5001)), "fields": ["id"]},
+        "type": {"amount": rejected}, "required": {"text": rejected},
+        "additional": {"id": 1, "extra": rejected},
+        "many": {f"field_{index:02}": rejected for index in range(16)},
+    }[kind]
+    observed = []
+
+    async def execute(*_args):
+        observed.append(True)
+        return AgentToolResult(content="unexpected execution")
+
+    if kind == "native_ids":
+        native = next(tool for tool in native_tool_catalog() if tool.name == "mcp_odoo_read_record")
+        name, schema = native.name, native.parameters
+    else:
+        name, schema = "check", schemas[kind]
+    tool = AgentTool(name=name, label="Check", description="Offline schema boundary",
+                     parameters=schema, execute_fn=execute)
+    call = ToolCall(id="large-refusal", name=name, arguments=arguments)
+    provider = FakeProvider([
+        [assistant_start(), tool_call_end(call), assistant_done(AssistantMessage(content=[call]), "toolUse")],
+        [assistant_start(), assistant_done(AssistantMessage(content="Correct the arguments."))],
+    ])
+    messages = [UserMessage(content="Check the published argument constraints.")]
+    await _collect(run_agent_loop(provider=provider, model="fake", system="ERP",
+                                  messages=messages, tools=[tool]))
+    reply = next(message for message in provider.calls[1][2] if isinstance(message, ToolResultMessage))
+    payload = reply.details["structuredContent"]
+    assert reply.is_error and observed == []
+    assert payload["reason_code"] == "tool_arguments_invalid"
+    assert payload["stage"] == "before_dispatch" and payload["odoo_request_seen"] is False
+    assert len(reply.text) <= TOOL_RESULT_MAX_CHARS
+    assert "SYNTHETIC_REJECTED_VALUE" not in reply.text and "Received arguments" not in reply.text
+    assert json.loads(reply.content[-1].text) == payload
+    assert next(message for message in messages if isinstance(message, AssistantMessage)).tool_calls[0].arguments == arguments
+    for prompt in (build_compaction_summary_prompt((reply,)), build_turn_prefix_summary_prompt((reply,))):
+        assert json.dumps(payload, ensure_ascii=False) in prompt
+        assert "more characters truncated" not in prompt
+    if kind == "native_ids":
+        assert payload["parameter_issues"] == [{"path": "record_ids", "rule": "maxItems", "expected": 20}]
+    elif kind == "many":
+        assert "16 schema constraint(s) failed" in reply.text
+        assert len(payload["parameter_issues"]) == 8
+    else:
+        assert payload["parameter_issues"][0]["rule"] == {
+            "type": "type", "required": "required", "additional": "additionalProperties"}[kind]
+
+
+@pytest.mark.anyio
 async def test_agent_loop_converts_provider_error_to_assistant_error_message() -> None:
     messages: list[AgentMessage] = [UserMessage(content="hello")]
     provider = FakeProvider([[assistant_error("provider failed")]])
