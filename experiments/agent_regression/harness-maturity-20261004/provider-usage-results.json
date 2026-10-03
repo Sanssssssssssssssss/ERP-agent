@@ -1,0 +1,222 @@
+{
+  "report_id": "PROVIDER-USAGE-20261004",
+  "kind": "synthetic_offline_and_existing_actual_receipt_roundtrip",
+  "model_case": false,
+  "status": "passed",
+  "source_commit": "a144cd289ead0c7b981d3fc92dbdcb0ef4235df5",
+  "baseline_commit": "6a702430fc47944084e31d180fc7319b2b8c4ef8",
+  "source_refs": [
+    {
+      "path": "src/erp_harness/providers/_provider_events.py",
+      "sha256": "cabb75a0874d04f951f05aca937430378a568c5fa6ed7131fd335a82c0d7773e"
+    },
+    {
+      "path": "src/erp_harness/providers/stream.py",
+      "sha256": "d8d07d2c5244c5a63b48187a2bea30094999ee334b9c28886857720f869f1914"
+    },
+    {
+      "path": "src/erp_harness/providers/google.py",
+      "sha256": "20b3fed27c7cef4460d7d325a838f656c9562189393668525f51520238c7c3b8"
+    },
+    {
+      "path": "src/erp_harness/providers/mistral.py",
+      "sha256": "6a51dab9665ccfb5af16f029c6b5d9b1d1de932d1ed74c614ababec0734a2dda"
+    },
+    {
+      "path": "src/erp_harness/providers/openai_compatible.py",
+      "sha256": "f8d7e0e1f4f8f4f599c67d4e33d0d0fdeafb5b3c0dd0498d7c9ad1d20cdc147e"
+    },
+    {
+      "path": "src/erp_harness/app/request_receipts.py",
+      "sha256": "f57bb4458406d9f324c01b8e734fde92ac5d4953d0a13f4b8d57d65038c7558a"
+    },
+    {
+      "path": "src/erp_harness/runtime/session.py",
+      "sha256": "d4c861c9178b2fb86aa0087426225b55161c111c904b8926a431afcbc01a7555"
+    },
+    {
+      "path": "src/erp_harness/runtime/storage/jsonl.py",
+      "sha256": "2f170b26b5ef317292d0f8fe7039708dace7cc19f3a285fc6fd86b19078667ce"
+    },
+    {
+      "path": "tests/test_request_receipts.py",
+      "sha256": "c2800f838cb3e36853855a2acacc2a62cb93ef5a81f0420ed670879a08426469"
+    },
+    {
+      "path": "tests/runtime/test_session.py",
+      "sha256": "4aef92427a73b2e4a4cd4eb990ac632be9a6f4652f25dff6f3a551017f8b6cd4"
+    }
+  ],
+  "root_causes": [
+    "Google/Mistral parsers discarded upstream metering and default Usage fields hid absent counters.",
+    "Mistral EOF and Google blocked/length responses could promote incomplete tools; argument shape coercion replaced bad or missing arguments with an empty object.",
+    "Canonical provider errors dropped already reported usage; JSONL defaults and compaction summing converted missing counters/cost into known zero."
+  ],
+  "changes": [
+    "Reuse shared usage parser with optional strict field presence; count cumulative usage once and subtract cached prompt only once.",
+    "Gate tool dispatch on protocol terminal/finish and complete object arguments; preserve concrete bounded finish reason and explicit legal empty objects.",
+    "Pass optional typed Usage through canonical error; preserve explicit zero and unknown per bucket.",
+    "Serialize sparse Usage/UsageCost at existing JSONL boundary; combine only jointly known compaction fields and distinguish unrequested history at its actual caller."
+  ],
+  "protocol_controls": {
+    "blocked_or_invalid_cases": 5,
+    "blocked_or_invalid_tool_dispatches": 0,
+    "valid_empty_arguments_dispatches": 1,
+    "known_error_usage_preserved": {
+      "fresh_input": 80,
+      "cache_reads": 20,
+      "output": 8,
+      "total_tokens": 108
+    },
+    "google_length_tool_dispatches": 0,
+    "unreported_buckets": "unknown"
+  },
+  "compaction_partial_combine": {
+    "input_expected": null,
+    "input_observed": null,
+    "output_expected": null,
+    "output_observed": null,
+    "total_expected": 18,
+    "total_observed": 18,
+    "fields_set": [
+      "total_tokens"
+    ]
+  },
+  "actual_deepseek_offline_control": {
+    "existing_requests": 23,
+    "actual_session_files": 2,
+    "actual_session_entries": 42,
+    "actual_assistant_entries": 14,
+    "original_bytes_unchanged": true,
+    "all_known_usage_equal": true,
+    "already_counted_existing_usage": {
+      "active": {
+        "existing_request_count": 14,
+        "usage": {
+          "input": 27791,
+          "cache_read": 107136,
+          "cache_write": 0,
+          "cache_write_1h": null,
+          "output": 5352,
+          "reasoning": 3088,
+          "total_tokens": 140279
+        }
+      },
+      "procurement": {
+        "existing_request_count": 9,
+        "usage": {
+          "input": 154058,
+          "cache_read": 1137408,
+          "cache_write": 0,
+          "cache_write_1h": null,
+          "output": 21598,
+          "reasoning": 19188,
+          "total_tokens": 1313064
+        }
+      },
+      "aggregate": {
+        "existing_request_count": 23,
+        "usage": {
+          "input": 181849,
+          "cache_read": 1244544,
+          "cache_write": 0,
+          "cache_write_1h": null,
+          "output": 26950,
+          "reasoning": 22276,
+          "total_tokens": 1453343
+        }
+      }
+    },
+    "new_requests": 0
+  },
+  "tests": {
+    "related": {
+      "passed": 329,
+      "subtests": 181
+    },
+    "full": {
+      "passed": 1816,
+      "skipped": 4,
+      "subtests": 576,
+      "seconds": 104.87
+    }
+  },
+  "references": {
+    "usage_before": {
+      "path": ".runtime/harness-maturity-20261004/provider-usage/before/manifest.json",
+      "sha256": "756dcbd4cf05f5b314c909e4130e53a35d9fde28ce4fd7d0157cad1a8e9264b2"
+    },
+    "usage_after": {
+      "path": ".runtime/harness-maturity-20261004/provider-usage/final/manifest.json",
+      "sha256": "be9936efbc9646690ad6fac90bc12cd1fae0c0da034cddbc7a4017bc46396b31"
+    },
+    "google_length_before": {
+      "path": ".runtime/harness-maturity-20261004/provider-usage/terminal-before/google_max_tokens_tool/result.json",
+      "sha256": "626b8e03df129de22c8f941a99116e5dd0e112d623a38317e05736994b2b0b2c"
+    },
+    "google_length_after": {
+      "path": ".runtime/harness-maturity-20261004/provider-usage/terminal-after/result.json",
+      "sha256": "6f2d5a50cd6573cdc7dace409f24df7f89cf1b0bfa4f1ec7706ecb9c74ef047a"
+    },
+    "terminal_and_argument_before": {
+      "path": ".runtime/harness-maturity-20261004/provider-usage-independent-review/attempt-2/probe-results.json",
+      "sha256": "f7fc988cd6380dc2059c6d61a2fae844be4cb4e92f9c4aab04fd11a75a69f135"
+    },
+    "terminal_and_argument_after": {
+      "path": ".runtime/harness-maturity-20261004/provider-usage/attempt-2/probe-results.json",
+      "sha256": "f9d879a8144b15f50fdcc71e910295a1e9979911377150ed3a8e1b15762ea304"
+    },
+    "partial_storage_before": {
+      "path": ".runtime/harness-maturity-20261004/provider-usage/partial-roundtrip-before.json",
+      "sha256": "b192945a2fbeec4e4d7430a02e674603369d344541bf22d0e8a91a15c82827ba"
+    },
+    "deepseek_existing_receipts_roundtrip": {
+      "path": ".runtime/harness-maturity-20261004/provider-usage/deepseek-roundtrip.json",
+      "sha256": "43d70289506058c8501b3f0664ab1e2870963c0e23aff7de7857b49e0e67f6ef"
+    },
+    "independent_review": {
+      "path": ".runtime/harness-maturity-20261004/provider-usage-independent-review/after-final/probe-results.json",
+      "sha256": "de14f811e420bcf29cb2d3a5555093701309417d86ac20488cfa82e6ddc0c75c"
+    },
+    "primary_sources": {
+      "path": ".runtime/harness-maturity-20261004/provider-usage/primary-sources.json",
+      "sha256": "ba2fbb748c59ae12af740f6ff76a2ec4c1d8aa74363babb02e45f3e849a894cc"
+    },
+    "related_tests": {
+      "path": ".runtime/harness-maturity-20261004/provider-usage/stable-related-tests.log",
+      "sha256": "e59726cbb8cb7c516e0a34e9c39affa821c7ed81bec5aef4d02d7ea902c4d216"
+    },
+    "full_tests": {
+      "path": ".runtime/harness-maturity-20261004/final-tests.log",
+      "sha256": "41fcae905d1c1645403f08fa64700964d66a275d5ee34a6329c0704dce97dd4d"
+    }
+  },
+  "primary_source_urls": [
+    "https://ai.google.dev/api/generate-content",
+    "https://docs.mistral.ai/api/endpoint/chat",
+    "https://docs.mistral.ai/studio/conversations/advanced/prompt-caching",
+    "https://docs.mistral.ai/resources/known-limitations",
+    "https://github.com/mistralai/client-python/blob/e8dfa1c8a2d0975cebfc0136b2d9060ff555494d/src/mistralai/client/models/usageinfo.py",
+    "https://github.com/mistralai/client-python/blob/e8dfa1c8a2d0975cebfc0136b2d9060ff555494d/src/mistralai/client/models/functioncall.py"
+  ],
+  "new_usage": {
+    "request_count": 0,
+    "fresh_input": 0,
+    "cache_reads": 0,
+    "output_including_reasoning": 0,
+    "reasoning_subset": 0,
+    "compaction": 0,
+    "total_tokens": 0,
+    "cost": null
+  },
+  "api_regression": null,
+  "business_score": null,
+  "boundaries": [
+    "No live Google/Mistral model API or new business execution. Mock transports verify mechanisms only.",
+    "The 23 actual DeepSeek requests were previously executed by root and are not counted again as new usage.",
+    "Missing/invalid upstream counters remain unknown; normal Mistral lacks a separately reported reasoning subset.",
+    "Existing legacy records that already persisted guessed zeros cannot retrospectively recover missing metering.",
+    "Length prevents tool dispatch; the existing agent loop may ask the model for a corrected response.",
+    "Caller hooks/custom extension providers do not become equivalent to built-in protocols through these parser controls."
+  ]
+}

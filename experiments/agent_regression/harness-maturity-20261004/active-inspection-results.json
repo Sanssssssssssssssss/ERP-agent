@@ -1,0 +1,698 @@
+{
+  "case_id": "HMC-ACTIVE-01",
+  "source_commit": "6a702430fc47944084e31d180fc7319b2b8c4ef8",
+  "normal_control": "Existing M11 SALE; only action_confirm[12], S00009 protected, no new order/invoice/actual delivery.",
+  "verdict": "accepted_with_explicit_experiment_interruption_and_recovery",
+  "checks": {
+    "business_readback": {
+      "qualifying_confirmed": true,
+      "excluded_unchanged": true,
+      "no_invoice": true,
+      "no_delivery": true,
+      "sales_count": true,
+      "amounts_unchanged": true
+    },
+    "session_and_run_binding": true,
+    "distinct_query_request_ids": true,
+    "side_query_one_readonly_tool": true,
+    "side_query_odoo_rpc": 0,
+    "side_query_writes": 0,
+    "inspection_messages_not_task_sources": true,
+    "exact_approval_during_query": true,
+    "business_write_dispatches": 1,
+    "final_business_status": "completed"
+  },
+  "stages": [
+    {
+      "stage": "initial_business",
+      "usage": {
+        "request_count": 4,
+        "fresh_input": 15823,
+        "cache_reads": 20480,
+        "output_including_reasoning": 1369,
+        "reasoning_subset": 873,
+        "compaction": 0,
+        "total": 37672,
+        "unknown_usage_requests": 0,
+        "cost": null
+      }
+    },
+    {
+      "stage": "explicit_business_continuation",
+      "usage": {
+        "request_count": 6,
+        "fresh_input": 8717,
+        "cache_reads": 82816,
+        "output_including_reasoning": 2318,
+        "reasoning_subset": 1353,
+        "compaction": 0,
+        "total": 93851,
+        "unknown_usage_requests": 0,
+        "cost": null
+      }
+    },
+    {
+      "stage": "running_query",
+      "usage": {
+        "request_count": 2,
+        "fresh_input": 1418,
+        "cache_reads": 768,
+        "output_including_reasoning": 510,
+        "reasoning_subset": 160,
+        "compaction": 0,
+        "total": 2696,
+        "unknown_usage_requests": 0,
+        "cost": null
+      }
+    },
+    {
+      "stage": "approval_query",
+      "usage": {
+        "request_count": 2,
+        "fresh_input": 1833,
+        "cache_reads": 3072,
+        "output_including_reasoning": 1155,
+        "reasoning_subset": 702,
+        "compaction": 0,
+        "total": 6060,
+        "unknown_usage_requests": 0,
+        "cost": null
+      }
+    }
+  ],
+  "aggregate_usage": {
+    "request_count": 14,
+    "fresh_input": 27791,
+    "cache_reads": 107136,
+    "output_including_reasoning": 5352,
+    "reasoning_subset": 3088,
+    "compaction": 0,
+    "total": 140279,
+    "unknown_usage_requests": 0,
+    "cost": null
+  },
+  "business_usage": {
+    "request_count": 10,
+    "fresh_input": 24540,
+    "cache_reads": 103296,
+    "output_including_reasoning": 3687,
+    "reasoning_subset": 2226,
+    "compaction": 0,
+    "total": 131523,
+    "unknown_usage_requests": 0,
+    "cost": null
+  },
+  "limits": [
+    "Actual unknown writes were not triggered; existing offline guards remain separate.",
+    "No real renderer click was tested; this exercises Workbench IPC methods, production workers/model/tools and isolated Odoo.",
+    "Running query snapshot was captured during the first model request: phase unknown, no specific business-step detail.",
+    "Diagnostic snapshot omits target document names; approval explanation is scoped to recorded statuses and before_send facts.",
+    "Provider raw SSE was not saved by RequestReceipts; complete wire requests/schemas, normalized output, metadata/headers and session/runtime events are bound.",
+    "Business acceptance uses the existing M11 readback verifier, not an ERP-Bench score."
+  ],
+  "experiment_error": {
+    "cause": "Private orchestrator used first peer snapshot immediately after registering second peer.",
+    "product_fault": false,
+    "legal_recovery": "Explicit host resume_run retained task/session/run/ledger and read fresh ERP state; no completed request resubmitted.",
+    "aborted_query_posts": 0
+  },
+  "private_audit": {
+    "path": ".runtime/harness-maturity-20261004/active-inspection/audit.json",
+    "sha256": "ff9659737ccaf5f47889d11d76eb6af2945b1b4e00093f218601e7dfa721b62b"
+  },
+  "requests": [
+    {
+      "run_id": "c_7145676313aa46f983801e1027e61ace",
+      "request_id": "req_d213df5bf85a44149b218a565b9a9e22",
+      "call_id": "call_577c147fe8dc4f2b83fb39370a1182cd",
+      "number": "0001",
+      "status": "completed",
+      "attempt": 1,
+      "usage": {
+        "request_count": 1,
+        "fresh_input": 579,
+        "cache_reads": 1280,
+        "output_including_reasoning": 137,
+        "reasoning_subset": 113,
+        "compaction": 0,
+        "total": 1996,
+        "unknown_usage_requests": 0,
+        "cost": null
+      },
+      "complete_context_and_schema": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/conversation-runs/c_7145676313aa46f983801e1027e61ace/requests/0001.request.json",
+        "sha256": "ca97d377deac979844810fa4e85980a9f3117728c13c16e8045fdc66afe37ffe"
+      },
+      "metadata": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/conversation-runs/c_7145676313aa46f983801e1027e61ace/requests/0001.meta.json",
+        "sha256": "c6e4b45f8a37dea37bfb9596f4320ee7d8cc29c7dca85f024e96ae6697dfd0c0"
+      },
+      "normalized_output": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/conversation-runs/c_7145676313aa46f983801e1027e61ace/requests/0001.output.json",
+        "sha256": "58cf69b36627310836bdbb03f1cda7e06ecbe68f0ce67a759718a9f578028f5d"
+      },
+      "response_headers": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/conversation-runs/c_7145676313aa46f983801e1027e61ace/requests/0001.response.json",
+        "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "raw_provider_sse": null
+    },
+    {
+      "run_id": "c_7145676313aa46f983801e1027e61ace",
+      "request_id": "req_75903ded5ccc4710baae1c4d2a8f0982",
+      "call_id": "call_002c9fcfca4243da829f33a2bc592bc0",
+      "number": "0002",
+      "status": "completed",
+      "attempt": 1,
+      "usage": {
+        "request_count": 1,
+        "fresh_input": 1254,
+        "cache_reads": 1792,
+        "output_including_reasoning": 1018,
+        "reasoning_subset": 589,
+        "compaction": 0,
+        "total": 4064,
+        "unknown_usage_requests": 0,
+        "cost": null
+      },
+      "complete_context_and_schema": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/conversation-runs/c_7145676313aa46f983801e1027e61ace/requests/0002.request.json",
+        "sha256": "3402ca4b98d64c9fd57afccdb5e300e2a0305b778e5c9ba5e5af79f2e7d06179"
+      },
+      "metadata": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/conversation-runs/c_7145676313aa46f983801e1027e61ace/requests/0002.meta.json",
+        "sha256": "8f34256ab5b188f053e1d8ff0247380844389dda3af339470165e764d8def2ad"
+      },
+      "normalized_output": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/conversation-runs/c_7145676313aa46f983801e1027e61ace/requests/0002.output.json",
+        "sha256": "0afdd66cfa5c0351ce3543c0d060670b6237cf3b2c2b19a0944e461ac2179d19"
+      },
+      "response_headers": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/conversation-runs/c_7145676313aa46f983801e1027e61ace/requests/0002.response.json",
+        "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "raw_provider_sse": null
+    },
+    {
+      "run_id": "c_f01ba1b7c3204024b36a44b77ec8344b",
+      "request_id": "req_29abbb04fd814759a11a2ec7273a80bf",
+      "call_id": "call_6cdf321f724f4637823515a59ca344f7",
+      "number": "0001",
+      "status": "completed",
+      "attempt": 1,
+      "usage": {
+        "request_count": 1,
+        "fresh_input": 872,
+        "cache_reads": 0,
+        "output_including_reasoning": 30,
+        "reasoning_subset": 6,
+        "compaction": 0,
+        "total": 902,
+        "unknown_usage_requests": 0,
+        "cost": null
+      },
+      "complete_context_and_schema": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/conversation-runs/c_f01ba1b7c3204024b36a44b77ec8344b/requests/0001.request.json",
+        "sha256": "35976cefb8b329d2d46b7ab0f9cd2632897b033add3529415dec7a571a17df84"
+      },
+      "metadata": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/conversation-runs/c_f01ba1b7c3204024b36a44b77ec8344b/requests/0001.meta.json",
+        "sha256": "6d753ee323a7e70bbd74bf3aa474184f67f03dfd8827d4b62c0f1ef2f875b248"
+      },
+      "normalized_output": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/conversation-runs/c_f01ba1b7c3204024b36a44b77ec8344b/requests/0001.output.json",
+        "sha256": "ae53a34c43b20c237b9e8740f54121e912d27bf18b641b735ca818ea3167c375"
+      },
+      "response_headers": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/conversation-runs/c_f01ba1b7c3204024b36a44b77ec8344b/requests/0001.response.json",
+        "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "raw_provider_sse": null
+    },
+    {
+      "run_id": "c_f01ba1b7c3204024b36a44b77ec8344b",
+      "request_id": "req_1b74db807b5047e68be18b70f5584c43",
+      "call_id": "call_bca9edfb0562446e92ac832727b7b313",
+      "number": "0002",
+      "status": "completed",
+      "attempt": 1,
+      "usage": {
+        "request_count": 1,
+        "fresh_input": 546,
+        "cache_reads": 768,
+        "output_including_reasoning": 480,
+        "reasoning_subset": 154,
+        "compaction": 0,
+        "total": 1794,
+        "unknown_usage_requests": 0,
+        "cost": null
+      },
+      "complete_context_and_schema": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/conversation-runs/c_f01ba1b7c3204024b36a44b77ec8344b/requests/0002.request.json",
+        "sha256": "3074fc80b8c3ad9bff4a219d92f7fbab90a0a4f50eb30a0b0b4b6467207182c0"
+      },
+      "metadata": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/conversation-runs/c_f01ba1b7c3204024b36a44b77ec8344b/requests/0002.meta.json",
+        "sha256": "d42543a4073845c5f0696cebb3a3d237391f6442b1c91c97731ad8e807b8e74f"
+      },
+      "normalized_output": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/conversation-runs/c_f01ba1b7c3204024b36a44b77ec8344b/requests/0002.output.json",
+        "sha256": "7029e82bfe8acbbcb270a9c05a36bc0eed3d225a4fa922ac7f0432c12ace086f"
+      },
+      "response_headers": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/conversation-runs/c_f01ba1b7c3204024b36a44b77ec8344b/requests/0002.response.json",
+        "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "raw_provider_sse": null
+    },
+    {
+      "run_id": "r_6c246d0edf7b476ab19a1f2864f07116",
+      "request_id": "req_78aa35c7b9ac46d3b148ba71f6a885e3",
+      "call_id": "call_078e69d3425a42b28c42edebe29d5002",
+      "number": "0001",
+      "status": "completed",
+      "attempt": 1,
+      "usage": {
+        "request_count": 1,
+        "fresh_input": 5288,
+        "cache_reads": 0,
+        "output_including_reasoning": 190,
+        "reasoning_subset": 118,
+        "compaction": 0,
+        "total": 5478,
+        "unknown_usage_requests": 0,
+        "cost": null
+      },
+      "complete_context_and_schema": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0001.request.json",
+        "sha256": "b47b7ab925b47bfe4fa76eb625e361571623bb1d54b3d749ff4c9953ca468594"
+      },
+      "metadata": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0001.meta.json",
+        "sha256": "534ad802c1d172490139adc89553c8fbd5bb70fbd0e49798f8ddde1180cb42e8"
+      },
+      "normalized_output": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0001.output.json",
+        "sha256": "ede01e295e581e3a1b36709431c9fb05dddc49b0ceb7d3aea5273e5381ef457f"
+      },
+      "response_headers": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0001.response.json",
+        "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "raw_provider_sse": null
+    },
+    {
+      "run_id": "r_6c246d0edf7b476ab19a1f2864f07116",
+      "request_id": "req_1ec52fb4b23a488eb9674f189c07d466",
+      "call_id": "call_7699dc89428e4b7da76cf4d99d7c0091",
+      "number": "0002",
+      "status": "completed",
+      "attempt": 1,
+      "usage": {
+        "request_count": 1,
+        "fresh_input": 2176,
+        "cache_reads": 5248,
+        "output_including_reasoning": 544,
+        "reasoning_subset": 372,
+        "compaction": 0,
+        "total": 7968,
+        "unknown_usage_requests": 0,
+        "cost": null
+      },
+      "complete_context_and_schema": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0002.request.json",
+        "sha256": "b04aa5bf693afadddafc55bd24ea62de54253fbc455a6eb916172609841cef52"
+      },
+      "metadata": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0002.meta.json",
+        "sha256": "44cbd64a365b61add71345fb19f10f9fc339ea5571939231be0a7e057f5d6ab3"
+      },
+      "normalized_output": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0002.output.json",
+        "sha256": "a5ca1b8a87d96b8f0bdfc583529f6c172845cda7b6d26b3f909b1a8f3a9bdd27"
+      },
+      "response_headers": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0002.response.json",
+        "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "raw_provider_sse": null
+    },
+    {
+      "run_id": "r_6c246d0edf7b476ab19a1f2864f07116",
+      "request_id": "req_a9eb13df3443412b990f699d8eb0a470",
+      "call_id": "call_809466d47b124ba49b291ee7bd142522",
+      "number": "0003",
+      "status": "completed",
+      "attempt": 1,
+      "usage": {
+        "request_count": 1,
+        "fresh_input": 6804,
+        "cache_reads": 4864,
+        "output_including_reasoning": 190,
+        "reasoning_subset": 62,
+        "compaction": 0,
+        "total": 11858,
+        "unknown_usage_requests": 0,
+        "cost": null
+      },
+      "complete_context_and_schema": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0003.request.json",
+        "sha256": "923489b217ccdd97903bae7787b8670c9cf840c429044e16f207cecff7bec35b"
+      },
+      "metadata": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0003.meta.json",
+        "sha256": "081e2871cfcea5e1317d60ce3dfc7a93514838508c4219740cc1aa1951002595"
+      },
+      "normalized_output": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0003.output.json",
+        "sha256": "1c079907ce44e587b2075cb54d33e3e18e62425ece1497b3947f5b3fda95252a"
+      },
+      "response_headers": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0003.response.json",
+        "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "raw_provider_sse": null
+    },
+    {
+      "run_id": "r_6c246d0edf7b476ab19a1f2864f07116",
+      "request_id": "req_a941509d9d4c4b58a7060e3127bab892",
+      "call_id": "call_43395848e65649e5bf63abac719a2201",
+      "number": "0004",
+      "status": "completed",
+      "attempt": 1,
+      "usage": {
+        "request_count": 1,
+        "fresh_input": 1555,
+        "cache_reads": 10368,
+        "output_including_reasoning": 445,
+        "reasoning_subset": 321,
+        "compaction": 0,
+        "total": 12368,
+        "unknown_usage_requests": 0,
+        "cost": null
+      },
+      "complete_context_and_schema": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0004.request.json",
+        "sha256": "636458d04f1e5c14044caeddab22514064b7dc0e278e5ab562f529a3bdeb9963"
+      },
+      "metadata": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0004.meta.json",
+        "sha256": "e7c97670aeb6ee096579acfef9089548eec4e50dfd02d2b6178a7a65db66dd70"
+      },
+      "normalized_output": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0004.output.json",
+        "sha256": "1ad428dfa470d1029e9ea61f49a7728cc8c0accf89bdc194967d14bad4e26461"
+      },
+      "response_headers": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0004.response.json",
+        "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "raw_provider_sse": null
+    },
+    {
+      "run_id": "r_6c246d0edf7b476ab19a1f2864f07116",
+      "request_id": "req_010d316989474e09a130271ce6dfc9df",
+      "call_id": "call_727c22fe5536493b996c92ec9885642c",
+      "number": "0005",
+      "status": "completed",
+      "attempt": 1,
+      "usage": {
+        "request_count": 1,
+        "fresh_input": 944,
+        "cache_reads": 11904,
+        "output_including_reasoning": 586,
+        "reasoning_subset": 264,
+        "compaction": 0,
+        "total": 13434,
+        "unknown_usage_requests": 0,
+        "cost": null
+      },
+      "complete_context_and_schema": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0005.request.json",
+        "sha256": "4aedcbaa6d33a1fe0b4be2d9ff046dd8194120e7f99bb53eb4488dbecd67318d"
+      },
+      "metadata": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0005.meta.json",
+        "sha256": "54d808c76923baeabe966feec58b7802eb43577691837d87b1a1e31e2884449f"
+      },
+      "normalized_output": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0005.output.json",
+        "sha256": "cafa7fed40a0c8f6a9357c56b63d0ee8ff0f379e2de2f7be2a7e1fff9c7ee04d"
+      },
+      "response_headers": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0005.response.json",
+        "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "raw_provider_sse": null
+    },
+    {
+      "run_id": "r_6c246d0edf7b476ab19a1f2864f07116",
+      "request_id": "req_61ba0c84b174424cbf2ffa1277ab780f",
+      "call_id": "call_3ebb4765e24d486b8d92f0c4787eee9b",
+      "number": "0006",
+      "status": "completed",
+      "attempt": 1,
+      "usage": {
+        "request_count": 1,
+        "fresh_input": 3912,
+        "cache_reads": 10368,
+        "output_including_reasoning": 807,
+        "reasoning_subset": 783,
+        "compaction": 0,
+        "total": 15087,
+        "unknown_usage_requests": 0,
+        "cost": null
+      },
+      "complete_context_and_schema": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0006.request.json",
+        "sha256": "d143d413b20948195c927f47b8567ea2b68e1c56ef90f6aa6f2243c3401f61a5"
+      },
+      "metadata": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0006.meta.json",
+        "sha256": "54fd1cb2a703d1536393681ba264dbf16e05404a3f47d3eb1b56bd9eafbd40e7"
+      },
+      "normalized_output": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0006.output.json",
+        "sha256": "46483a5c4cab6fe736f1c9e618d653e05b91564d2c7b86e487977f89a0b1b251"
+      },
+      "response_headers": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0006.response.json",
+        "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "raw_provider_sse": null
+    },
+    {
+      "run_id": "r_6c246d0edf7b476ab19a1f2864f07116",
+      "request_id": "req_45a76e2af8614256aec9defb8ba02810",
+      "call_id": "call_e0d50457deba4779828fb00ec28e0e76",
+      "number": "0007",
+      "status": "completed",
+      "attempt": 1,
+      "usage": {
+        "request_count": 1,
+        "fresh_input": 2233,
+        "cache_reads": 13184,
+        "output_including_reasoning": 252,
+        "reasoning_subset": 134,
+        "compaction": 0,
+        "total": 15669,
+        "unknown_usage_requests": 0,
+        "cost": null
+      },
+      "complete_context_and_schema": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0007.request.json",
+        "sha256": "5bc4a574183dc2645af58fe2075a7dd155458abf6609e22141ec9b255b80ef8a"
+      },
+      "metadata": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0007.meta.json",
+        "sha256": "0a1ad5087bd66ba72546764b61bb1c3cc378948fbe6491206bcc78618b678ba4"
+      },
+      "normalized_output": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0007.output.json",
+        "sha256": "c2146b349be89c0d16b986fcdcbae356fe717255a60ce85b9f51b8f89c1c50f2"
+      },
+      "response_headers": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0007.response.json",
+        "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "raw_provider_sse": null
+    },
+    {
+      "run_id": "r_6c246d0edf7b476ab19a1f2864f07116",
+      "request_id": "req_331cdd2746504600a5bd9054ae8054c1",
+      "call_id": "call_1426997a20cd47aabadc0e5708d2a9ec",
+      "number": "0008",
+      "status": "completed",
+      "attempt": 1,
+      "usage": {
+        "request_count": 1,
+        "fresh_input": 635,
+        "cache_reads": 15360,
+        "output_including_reasoning": 144,
+        "reasoning_subset": 50,
+        "compaction": 0,
+        "total": 16139,
+        "unknown_usage_requests": 0,
+        "cost": null
+      },
+      "complete_context_and_schema": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0008.request.json",
+        "sha256": "4457c0b98170123eba8c7d22dceafacaebe261b129f99c03c9a3984cf2fd8592"
+      },
+      "metadata": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0008.meta.json",
+        "sha256": "4d42e01656b14b79e69a6c63a8b4dc5f5db62f08912c4520d4fb66af9fd5451e"
+      },
+      "normalized_output": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0008.output.json",
+        "sha256": "f9b85407ff23b22b2231893fc0c375797a810c85a6aba9e541b3685b359fb8eb"
+      },
+      "response_headers": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0008.response.json",
+        "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "raw_provider_sse": null
+    },
+    {
+      "run_id": "r_6c246d0edf7b476ab19a1f2864f07116",
+      "request_id": "req_8fbebe4413b94623a2db20226815b34a",
+      "call_id": "call_04600d7dd45e4cce8c4eaeacfbbc8769",
+      "number": "0009",
+      "status": "completed",
+      "attempt": 1,
+      "usage": {
+        "request_count": 1,
+        "fresh_input": 373,
+        "cache_reads": 15872,
+        "output_including_reasoning": 268,
+        "reasoning_subset": 63,
+        "compaction": 0,
+        "total": 16513,
+        "unknown_usage_requests": 0,
+        "cost": null
+      },
+      "complete_context_and_schema": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0009.request.json",
+        "sha256": "7b5a5600903360d277c32637a84504e552691048606109975ad3d8c01d255197"
+      },
+      "metadata": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0009.meta.json",
+        "sha256": "38e58d168aa50107b4aac7264fb978a157eb5e683d8184bf41f376e168f4c88e"
+      },
+      "normalized_output": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0009.output.json",
+        "sha256": "811abac4e1d7abd28458662514e2bae78d9eb27455d48e707d8c327b27ed4537"
+      },
+      "response_headers": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0009.response.json",
+        "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "raw_provider_sse": null
+    },
+    {
+      "run_id": "r_6c246d0edf7b476ab19a1f2864f07116",
+      "request_id": "req_5c2696ae77244ec69513a38f041a15e3",
+      "call_id": "call_3c635640e17347a8b697e3d540caaf40",
+      "number": "0010",
+      "status": "completed",
+      "attempt": 1,
+      "usage": {
+        "request_count": 1,
+        "fresh_input": 620,
+        "cache_reads": 16128,
+        "output_including_reasoning": 261,
+        "reasoning_subset": 59,
+        "compaction": 0,
+        "total": 17009,
+        "unknown_usage_requests": 0,
+        "cost": null
+      },
+      "complete_context_and_schema": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0010.request.json",
+        "sha256": "9bbe3a5d5b62c7852bf23de5c159f74ac07ea8d7a94575635b37af478a04faac"
+      },
+      "metadata": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0010.meta.json",
+        "sha256": "cc0a33d87901d116894a7220ab0fbef21b5b8df6ae4c6ec4150962d330d9e1a7"
+      },
+      "normalized_output": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0010.output.json",
+        "sha256": "068f7175713556763e8c7a793bad24aa390d3478fe946e509f691b24c610f167"
+      },
+      "response_headers": {
+        "path": ".runtime/harness-maturity-20261004/active-inspection/profile/data/runs/r_6c246d0edf7b476ab19a1f2864f07116/requests/0010.response.json",
+        "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "raw_provider_sse": null
+    }
+  ],
+  "questions": [
+    {
+      "query_id": "c_f01ba1b7c3204024b36a44b77ec8344b",
+      "inspected_run_id": "r_6c246d0edf7b476ab19a1f2864f07116",
+      "captured_at": "2026-10-03T17:01:07.996641Z",
+      "runtime": {
+        "status": "running",
+        "phase": "unknown",
+        "pending_approvals": 0,
+        "latest_request": {
+          "request_id": "req_78aa35c7b9ac46d3b148ba71f6a885e3",
+          "status": "running",
+          "http_status": null
+        },
+        "receipt_warnings": 0
+      },
+      "ledger_count": 0,
+      "ledger_status_counts": {},
+      "tool_calls": 1,
+      "odoo_rpc": 0,
+      "writes": 0,
+      "usage": {
+        "request_count": 2,
+        "fresh_input": 1418,
+        "cache_reads": 768,
+        "output_including_reasoning": 510,
+        "reasoning_subset": 160,
+        "compaction": 0,
+        "total": 2696,
+        "unknown_usage_requests": 0,
+        "cost": null
+      }
+    },
+    {
+      "query_id": "c_7145676313aa46f983801e1027e61ace",
+      "inspected_run_id": "r_6c246d0edf7b476ab19a1f2864f07116",
+      "captured_at": "2026-10-03T17:08:47.147051Z",
+      "runtime": {
+        "status": "awaiting_approval",
+        "phase": "model_output",
+        "pending_approvals": 1,
+        "latest_request": {
+          "request_id": "req_45a76e2af8614256aec9defb8ba02810",
+          "status": "completed",
+          "http_status": 200
+        },
+        "receipt_warnings": 0
+      },
+      "ledger_count": 2,
+      "ledger_status_counts": {
+        "known_failed": 1,
+        "pending_approval": 1
+      },
+      "tool_calls": 1,
+      "odoo_rpc": 0,
+      "writes": 0,
+      "usage": {
+        "request_count": 2,
+        "fresh_input": 1833,
+        "cache_reads": 3072,
+        "output_including_reasoning": 1155,
+        "reasoning_subset": 702,
+        "compaction": 0,
+        "total": 6060,
+        "unknown_usage_requests": 0,
+        "cost": null
+      }
+    }
+  ]
+}

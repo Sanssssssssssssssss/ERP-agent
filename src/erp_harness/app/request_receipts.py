@@ -10,11 +10,13 @@ from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic
+from types import SimpleNamespace
 from uuid import uuid4
 
 from erp_harness.app.stream_events import public_events
-from erp_harness.runtime.provider import provider_request_kind
+from erp_harness.providers.provider import ProviderRequestRejected
 from erp_harness.runtime.messages import AssistantMessage
+from erp_harness.runtime.provider import provider_request_kind
 
 routing_decision_id = ContextVar("routing_decision_id", default=None)
 
@@ -31,19 +33,35 @@ def _sum_usage_bucket(usages: list[object], name: str, *, empty: int | None = No
     """
     if not usages:
         return empty
-    values = [getattr(usage, name, None) if usage is not None else None for usage in usages]
+    values = [_reported_usage_value(usage, name) for usage in usages]
     if any(value is None for value in values):
         return None
     return sum(values)
+
+
+def _reported_usage_value(usage, name):
+    supplied = getattr(usage, "model_fields_set", None)
+    return (getattr(usage, name, None) if supplied is None or name in supplied else None)
 
 
 def _message_usage(message: AssistantMessage) -> object | None:
     usage = getattr(message, "usage", None)
     if getattr(message, "stop_reason", None) in {"error", "aborted"}:
         fields = ("input", "cache_read", "cache_write", "output", "total_tokens", "reasoning")
-        if usage is None or not any(getattr(usage, field, None) not in (None, 0) for field in fields):
+        if usage is None or not getattr(usage, "model_fields_set", None) and not any(getattr(usage, field, None) not in (None, 0) for field in fields):
             return None
-    return usage
+    fields = ("input", "cache_read", "cache_write", "cache_write_1h", "output", "total_tokens", "reasoning")
+    return SimpleNamespace(**{field: _reported_usage_value(usage, field) for field in fields}) if usage is not None else None
+
+
+class ReceiptPersistenceError(ProviderRequestRejected):
+    """Request capture is required before a new model request may be sent."""
+
+    def __init__(self):
+        super().__init__(
+            "Request evidence could not be persisted; repair receipt storage before "
+            "starting another model request. No new request was sent."
+        )
 
 
 class RequestReceipts:
@@ -60,8 +78,9 @@ class RequestReceipts:
         self._round_id = None
         self._unwrapped = None
         self._warned = set()
+        self._persistence_failed = False
 
-    def _write(self, stem, suffix, value):
+    def _write(self, stem, suffix, value, *, strict=False):
         try:
             self.directory.mkdir(parents=True, exist_ok=True)
             path = self.directory / f"{stem}.{suffix}.json"
@@ -69,11 +88,14 @@ class RequestReceipts:
             temporary.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
             temporary.replace(path)
         except (OSError, TypeError, ValueError) as exc:
+            self._persistence_failed = True
             filename = f"{stem}.{suffix}.json"
             if filename not in self._warned:
                 self._warned.add(filename)
                 with suppress(OSError):
                     print(json.dumps({"type": "receipt_warning", "file": filename, "error_type": type(exc).__name__}), flush=True)
+            if strict:
+                raise ReceiptPersistenceError() from exc
 
     def _publish(self, event_type, row):
         with suppress(OSError, TypeError, ValueError):
@@ -82,6 +104,10 @@ class RequestReceipts:
             print(json.dumps({"type": event_type, **public}, ensure_ascii=False), flush=True)
 
     def _allocate(self, payload):
+        if self._persistence_failed:
+            raise ReceiptPersistenceError()
+        if self.max_model_requests is not None and self.number >= self.max_model_requests:
+            raise ProviderRequestRejected("max_model_requests exceeded; no new request was sent")
         self.number += 1
         scope = self._scope.get()
         row = {"schema_version": 1, "request_id": "req_" + uuid4().hex,
@@ -96,7 +122,8 @@ class RequestReceipts:
         else:
             self._unwrapped = row
         self._rows[row["request_id"]] = row
-        self._write(row["request_file"], "request", payload)
+        self._write(row["request_file"], "request", payload, strict=True)
+        self._write(row["request_file"], "meta", row, strict=True)
         return row
 
     def _current(self):
@@ -104,8 +131,6 @@ class RequestReceipts:
         return scope.get("row") if scope else self._unwrapped
 
     async def before_provider_request(self, payload):
-        if self.max_model_requests is not None and self.number >= self.max_model_requests:
-            raise RuntimeError(f"max_model_requests ({self.max_model_requests}) exceeded")
         self._allocate(payload)
         return payload
 
@@ -191,9 +216,9 @@ class RequestReceipts:
     def _usage(message):
         usage = message.usage
         fields = ("input", "cache_read", "cache_write", "cache_write_1h", "output", "reasoning", "total_tokens")
-        if usage is None or not usage.model_fields_set or message.stop_reason in {"error", "aborted"} and not any(getattr(usage, name, None) for name in fields):
+        if usage is None or not usage.model_fields_set:
             return {name: None for name in fields}
-        return {name: getattr(usage, name, None) for name in fields}
+        return {name: _reported_usage_value(usage, name) for name in fields}
 
     async def events(self, source):
         async def correlated():

@@ -78,10 +78,10 @@ def _copy_replay_metadata(target: AssistantMessage, source: AssistantMessage) ->
 
 
 def _finish_reason(value: str | None, *, has_tools: bool) -> str:
-    if has_tools or value in {"tool_calls", "tool_use", "toolUse"}:
-        return "toolUse"
     if value in {"length", "max_tokens", "MAX_TOKENS", "incomplete"}:
         return "length"
+    if has_tools or value in {"tool_calls", "tool_use", "toolUse"}:
+        return "toolUse"
     return "stop"
 
 
@@ -193,6 +193,8 @@ async def canonicalize_provider_stream(
             terminal = True
         elif isinstance(event, ProviderErrorEvent):
             error = partial.model_copy(deep=True)
+            if event.usage is not None:
+                error.usage = event.usage.model_copy(deep=True)
             error.response_provider = event.response_provider or partial.response_provider
             error.stop_reason = "error"
             error.error_message = event.message

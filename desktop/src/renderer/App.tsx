@@ -76,6 +76,7 @@ export default function App() {
     checkConnection,
     activeBusiness,
     hasActiveExecution,
+    inspectionMode,
     chooseSession,
     importMaterials,
     downloadDocument,
@@ -245,6 +246,7 @@ export default function App() {
           thinkingRun={thinkingRun}
           selectedBusinessId={selectedBusinessId}
           loading={loading}
+          inspectionMode={inspectionMode}
           pendingProposal={pendingProposal}
           proposalBusy={proposalBusy}
           proposalUnavailable={proposalUnavailable}

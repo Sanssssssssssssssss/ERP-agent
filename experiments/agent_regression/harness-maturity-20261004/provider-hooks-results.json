@@ -1,0 +1,462 @@
+{
+  "report_id": "PROVIDER-HOOKS-20261004",
+  "kind": "synthetic_offline_mechanism_regression",
+  "model_case": false,
+  "status": "passed_for_physical_attempt_budget_and_receipt_contract",
+  "source_commit": "6a702430fc47944084e31d180fc7319b2b8c4ef8",
+  "root_cause": "Four built-in compatibility adapters accepted public request hooks but omitted per-attempt gates and terminal stream receipt wrapping. A retry exceeded cap1 and overwrote one prepared receipt.",
+  "change": "Share the existing optional attempt and stream hook helpers; gate every retry and preserve authoritative typed rejection across Codex generic error handling.",
+  "protocol_controls": [
+    {
+      "protocol": "openai-completions",
+      "entrypoint": "providers.runtime.create_model_provider(provider_hooks=RequestReceipts)",
+      "before": [
+        {
+          "cap": 1,
+          "physical_mock_posts": 1,
+          "receipts": 1,
+          "statuses": [
+            "retry"
+          ],
+          "terminal": null
+        },
+        {
+          "cap": 2,
+          "physical_mock_posts": 2,
+          "receipts": 2,
+          "statuses": [
+            "retry",
+            "completed"
+          ],
+          "terminal": "done"
+        }
+      ],
+      "after": [
+        {
+          "cap": 1,
+          "physical_mock_posts": 1,
+          "receipts": 1,
+          "statuses": [
+            "retry"
+          ],
+          "terminal": null,
+          "typed_rejection": "ProviderRequestRejected"
+        },
+        {
+          "cap": 2,
+          "physical_mock_posts": 2,
+          "receipts": 2,
+          "statuses": [
+            "retry",
+            "completed"
+          ],
+          "terminal": "done",
+          "typed_rejection": null
+        }
+      ],
+      "known_usage_normal_control": true,
+      "new_paid_usage": {
+        "request_count": 0,
+        "fresh_input": 0,
+        "cache_reads": 0,
+        "output_including_reasoning": 0,
+        "reasoning_subset": 0,
+        "compaction": 0,
+        "total_tokens": 0,
+        "cost": null
+      }
+    },
+    {
+      "protocol": "openai-responses",
+      "entrypoint": "providers.runtime.create_model_provider(provider_hooks=RequestReceipts)",
+      "before": [
+        {
+          "cap": 1,
+          "physical_mock_posts": 1,
+          "receipts": 1,
+          "statuses": [
+            "retry"
+          ],
+          "terminal": null
+        },
+        {
+          "cap": 2,
+          "physical_mock_posts": 2,
+          "receipts": 2,
+          "statuses": [
+            "retry",
+            "completed"
+          ],
+          "terminal": "done"
+        }
+      ],
+      "after": [
+        {
+          "cap": 1,
+          "physical_mock_posts": 1,
+          "receipts": 1,
+          "statuses": [
+            "retry"
+          ],
+          "terminal": null,
+          "typed_rejection": "ProviderRequestRejected"
+        },
+        {
+          "cap": 2,
+          "physical_mock_posts": 2,
+          "receipts": 2,
+          "statuses": [
+            "retry",
+            "completed"
+          ],
+          "terminal": "done",
+          "typed_rejection": null
+        }
+      ],
+      "known_usage_normal_control": true,
+      "new_paid_usage": {
+        "request_count": 0,
+        "fresh_input": 0,
+        "cache_reads": 0,
+        "output_including_reasoning": 0,
+        "reasoning_subset": 0,
+        "compaction": 0,
+        "total_tokens": 0,
+        "cost": null
+      }
+    },
+    {
+      "protocol": "anthropic-messages",
+      "entrypoint": "providers.runtime.create_model_provider(provider_hooks=RequestReceipts)",
+      "before": [
+        {
+          "cap": 1,
+          "physical_mock_posts": 2,
+          "receipts": 1,
+          "statuses": [
+            "prepared"
+          ],
+          "terminal": "done"
+        },
+        {
+          "cap": 2,
+          "physical_mock_posts": 2,
+          "receipts": 1,
+          "statuses": [
+            "prepared"
+          ],
+          "terminal": "done"
+        }
+      ],
+      "after": [
+        {
+          "cap": 1,
+          "physical_mock_posts": 1,
+          "receipts": 1,
+          "statuses": [
+            "retry"
+          ],
+          "terminal": null,
+          "typed_rejection": "ProviderRequestRejected"
+        },
+        {
+          "cap": 2,
+          "physical_mock_posts": 2,
+          "receipts": 2,
+          "statuses": [
+            "retry",
+            "completed"
+          ],
+          "terminal": "done",
+          "typed_rejection": null
+        }
+      ],
+      "known_usage_normal_control": true,
+      "new_paid_usage": {
+        "request_count": 0,
+        "fresh_input": 0,
+        "cache_reads": 0,
+        "output_including_reasoning": 0,
+        "reasoning_subset": 0,
+        "compaction": 0,
+        "total_tokens": 0,
+        "cost": null
+      }
+    },
+    {
+      "protocol": "google-generative-ai",
+      "entrypoint": "providers.runtime.create_model_provider(provider_hooks=RequestReceipts)",
+      "before": [
+        {
+          "cap": 1,
+          "physical_mock_posts": 2,
+          "receipts": 1,
+          "statuses": [
+            "prepared"
+          ],
+          "terminal": "done"
+        },
+        {
+          "cap": 2,
+          "physical_mock_posts": 2,
+          "receipts": 1,
+          "statuses": [
+            "prepared"
+          ],
+          "terminal": "done"
+        }
+      ],
+      "after": [
+        {
+          "cap": 1,
+          "physical_mock_posts": 1,
+          "receipts": 1,
+          "statuses": [
+            "retry"
+          ],
+          "terminal": null,
+          "typed_rejection": "ProviderRequestRejected"
+        },
+        {
+          "cap": 2,
+          "physical_mock_posts": 2,
+          "receipts": 2,
+          "statuses": [
+            "retry",
+            "completed"
+          ],
+          "terminal": "done",
+          "typed_rejection": null
+        }
+      ],
+      "known_usage_normal_control": false,
+      "new_paid_usage": {
+        "request_count": 0,
+        "fresh_input": 0,
+        "cache_reads": 0,
+        "output_including_reasoning": 0,
+        "reasoning_subset": 0,
+        "compaction": 0,
+        "total_tokens": 0,
+        "cost": null
+      }
+    },
+    {
+      "protocol": "mistral-conversations",
+      "entrypoint": "providers.runtime.create_model_provider(provider_hooks=RequestReceipts)",
+      "before": [
+        {
+          "cap": 1,
+          "physical_mock_posts": 2,
+          "receipts": 1,
+          "statuses": [
+            "prepared"
+          ],
+          "terminal": "done"
+        },
+        {
+          "cap": 2,
+          "physical_mock_posts": 2,
+          "receipts": 1,
+          "statuses": [
+            "prepared"
+          ],
+          "terminal": "done"
+        }
+      ],
+      "after": [
+        {
+          "cap": 1,
+          "physical_mock_posts": 1,
+          "receipts": 1,
+          "statuses": [
+            "retry"
+          ],
+          "terminal": null,
+          "typed_rejection": "ProviderRequestRejected"
+        },
+        {
+          "cap": 2,
+          "physical_mock_posts": 2,
+          "receipts": 2,
+          "statuses": [
+            "retry",
+            "completed"
+          ],
+          "terminal": "done",
+          "typed_rejection": null
+        }
+      ],
+      "known_usage_normal_control": false,
+      "new_paid_usage": {
+        "request_count": 0,
+        "fresh_input": 0,
+        "cache_reads": 0,
+        "output_including_reasoning": 0,
+        "reasoning_subset": 0,
+        "compaction": 0,
+        "total_tokens": 0,
+        "cost": null
+      }
+    },
+    {
+      "protocol": "openai-codex-responses",
+      "entrypoint": "providers.runtime.create_model_provider(provider_hooks=RequestReceipts)",
+      "before": [
+        {
+          "cap": 1,
+          "physical_mock_posts": 2,
+          "receipts": 1,
+          "statuses": [
+            "prepared"
+          ],
+          "terminal": "done"
+        },
+        {
+          "cap": 2,
+          "physical_mock_posts": 2,
+          "receipts": 1,
+          "statuses": [
+            "prepared"
+          ],
+          "terminal": "done"
+        }
+      ],
+      "after": [
+        {
+          "cap": 1,
+          "physical_mock_posts": 1,
+          "receipts": 1,
+          "statuses": [
+            "retry"
+          ],
+          "terminal": null,
+          "typed_rejection": "ProviderRequestRejected"
+        },
+        {
+          "cap": 2,
+          "physical_mock_posts": 2,
+          "receipts": 2,
+          "statuses": [
+            "retry",
+            "completed"
+          ],
+          "terminal": "done",
+          "typed_rejection": null
+        }
+      ],
+      "known_usage_normal_control": true,
+      "new_paid_usage": {
+        "request_count": 0,
+        "fresh_input": 0,
+        "cache_reads": 0,
+        "output_including_reasoning": 0,
+        "reasoning_subset": 0,
+        "compaction": 0,
+        "total_tokens": 0,
+        "cost": null
+      }
+    }
+  ],
+  "verification": {
+    "related_tests": {
+      "passed": 172,
+      "subtests": 102
+    },
+    "full_suite": {
+      "passed": 1723,
+      "skipped": 4,
+      "subtests": 527
+    },
+    "independent_changed_hotspot_review": "passed without repeated tests or API"
+  },
+  "applicability": "Public factory/session provider hooks on built-in adapters. Desktop business and chat routes stay OpenAICompatible with transport retry0.",
+  "boundaries": [
+    "No live model API or Odoo business execution; mock POST counts are transport controls, not charged requests.",
+    "No ERP-Bench business score is produced.",
+    "Google/Mistral upstream usage fixture fields remain unparsed and null; usage extraction is a separate confirmed gap.",
+    "Compatibility EOF/parser contracts are not claimed equivalent to the default OpenAI strict terminal controls.",
+    "Prepared attempt allocation may count a request that is never sent.",
+    "Ordinary observer exceptions stay isolated; authoritative gate rejection prevents sending."
+  ],
+  "source_refs": [
+    {
+      "path": "src/erp_harness/providers/provider.py",
+      "sha256": "e316c2cd3c9f6224dfd3ba36d5cf54b152444e4c2ed1533be8bd273ebaeacd38",
+      "git_blob_sha256": "e316c2cd3c9f6224dfd3ba36d5cf54b152444e4c2ed1533be8bd273ebaeacd38",
+      "working_bytes_match_published_source": true
+    },
+    {
+      "path": "src/erp_harness/providers/openai_compatible.py",
+      "sha256": "638e12b8d17c8d1311c1dca843c105d2b2e7517c0a2fd5bc6740d44db6b56c3d",
+      "git_blob_sha256": "638e12b8d17c8d1311c1dca843c105d2b2e7517c0a2fd5bc6740d44db6b56c3d",
+      "working_bytes_match_published_source": true
+    },
+    {
+      "path": "src/erp_harness/providers/anthropic.py",
+      "sha256": "9c4486837b91cdb2edffda42f8bbe033f6f92fbcc93a2e19a12de3927d72b3d4",
+      "git_blob_sha256": "9c4486837b91cdb2edffda42f8bbe033f6f92fbcc93a2e19a12de3927d72b3d4",
+      "working_bytes_match_published_source": true
+    },
+    {
+      "path": "src/erp_harness/providers/google.py",
+      "sha256": "432840fe746093347eb31c4c74443634792be6f964ba10fd3bfa975026a135b9",
+      "git_blob_sha256": "432840fe746093347eb31c4c74443634792be6f964ba10fd3bfa975026a135b9",
+      "working_bytes_match_published_source": true
+    },
+    {
+      "path": "src/erp_harness/providers/mistral.py",
+      "sha256": "d999138c4cd9aedebb0a5c2a1db7bfa045b88e925476483ffdea012df42f0d71",
+      "git_blob_sha256": "d999138c4cd9aedebb0a5c2a1db7bfa045b88e925476483ffdea012df42f0d71",
+      "working_bytes_match_published_source": true
+    },
+    {
+      "path": "src/erp_harness/providers/openai_codex.py",
+      "sha256": "029e8c4ae1a778fc99d3506c3d88a5e799f6be11e0f7e3a72ef239e2c4f30d1d",
+      "git_blob_sha256": "029e8c4ae1a778fc99d3506c3d88a5e799f6be11e0f7e3a72ef239e2c4f30d1d",
+      "working_bytes_match_published_source": true
+    },
+    {
+      "path": "tests/test_request_receipts.py",
+      "sha256": "0806f033004523b0da1da25909d095e15901f0e1519fdcf03a1fcd309a5da3dd",
+      "git_blob_sha256": "0806f033004523b0da1da25909d095e15901f0e1519fdcf03a1fcd309a5da3dd",
+      "working_bytes_match_published_source": true
+    }
+  ],
+  "references": [
+    {
+      "path": ".runtime/harness-maturity-20261004/provider-hooks/before/manifest.json",
+      "sha256": "99a0e701c9ff34c526dd3a2c92590a6fad29260155cc768bf38242685d38ec49"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/provider-hooks/final/manifest.json",
+      "sha256": "c71bfaf7d2c4150e80a25c4c481a3922aac78a72b49208a7a64591d907c8366f"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/provider-hooks/patch-review.json",
+      "sha256": "515a9179d649dccca3b09d2c02c3da535d9bd60bc18fcbd7be6ac8d01e2ce75f"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/provider-hooks/independent-review.json",
+      "sha256": "9297c6e6d9eff966b0c26524c53d2066ea7356b6f20452e2cb6c46f30dd025eb"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/provider-hooks/related-tests.log",
+      "sha256": "762b6e4c50631efbd2fefe1c6df3429ee6136b339273939524376cfb5de9029f"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/provider-hooks/full-tests.log",
+      "sha256": "e47aa2a6069a133576fd9c209bde789537dd494b74553b72e777a652c181a218"
+    }
+  ],
+  "new_usage": {
+    "request_count": 0,
+    "fresh_input": 0,
+    "cache_reads": 0,
+    "output_including_reasoning": 0,
+    "reasoning_subset": 0,
+    "compaction": 0,
+    "total_tokens": 0,
+    "cost": null
+  }
+}

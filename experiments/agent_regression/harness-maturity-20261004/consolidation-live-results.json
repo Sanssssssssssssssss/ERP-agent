@@ -1,0 +1,253 @@
+{
+  "case_id": "BFR3-2279-01-live-continuation",
+  "kind": "executed_corrective_continuation",
+  "source_commit": "7afb2c27f2a26c7617c8a71798ac92aeff7f6080",
+  "status": "passed",
+  "official_reward": {
+    "before": {
+      "overall_score": 21.09,
+      "passed": false,
+      "constraint": {
+        "earned": 27,
+        "total": 32
+      },
+      "hygiene": {
+        "earned": 6,
+        "total": 6
+      }
+    },
+    "after": {
+      "overall_score": 100.0,
+      "passed": true,
+      "constraint": {
+        "earned": 32,
+        "total": 32
+      },
+      "hygiene": {
+        "earned": 6,
+        "total": 6
+      },
+      "optimality": {
+        "score": 100.0,
+        "total": 100.0
+      }
+    }
+  },
+  "model_natural_stop": true,
+  "actual_business": {
+    "original_failed_split": "Indigo PO1 quantity12 plus same-offer PO4 quantity4.",
+    "final": "Original PO1 quantity16 with origins S00001–S00004, delivery timestamp advanced two seconds; Sierra PO3 quantity15 retained; canceled duplicate PO4 removed; initial Cosmo PO2 remains canceled.",
+    "active_supplier_offer_purchase_orders": 2,
+    "actual_mutation_rpcs": 3,
+    "mutations": [
+      "purchase.order.button_cancel PO4",
+      "purchase.order.write PO1",
+      "purchase.order.unlink canceled new PO4"
+    ],
+    "original_sales_orders_unchanged": true,
+    "actual_inventory_quantity_unchanged": true,
+    "manufacturing_unchanged": true,
+    "incoming_receipts": "Odoo adjusted the pending PO1 receipt quantity/date and canceled the redundant PO4 receipt; no actual receipt validation or shipment."
+  },
+  "advisory": {
+    "actual_failed_clone_warning": true,
+    "candidate_purchase_ids": [
+      1,
+      4
+    ],
+    "decision": "Reused the already-paid real corrective decision, then executed through fresh native action approvals and exact-context followups.",
+    "final_allocation": "passed; no split candidates for active PO1 and PO3"
+  },
+  "action_ledger": {
+    "verified": 3,
+    "approved_unsent": 1,
+    "unknown": 0,
+    "original_unused_approval": "Initial quantity-only PO1 validation was replaced by a new date-aware validation; sent_at remained null, with no write RPC for the older payload."
+  },
+  "unknown_write_automatic_replay": false,
+  "execution_reviews": {
+    "original_task": "Full autonomy; no prohibition on deleting a newly-created canceled duplicate. Initial SOs and PO1/PO2 protected.",
+    "first_stop": "Experiment exact-values guard rejected a legitimate additional delivery timestamp; no new call dispatched at that boundary.",
+    "reviewed_scope": [
+      "Same PO1/line delivery timestamp",
+      "Two-phase unlink of only newly-created canceled PO4"
+    ],
+    "post_cap": "Eight POSTs completed, then explicit read-only extension allowed at most four more; one additional POST reached natural STOP.",
+    "paid_retry": false,
+    "earlier_post_or_mutation_replayed": false
+  },
+  "readonly_tail": {
+    "executed_tools": 2,
+    "new_model_posts": 1,
+    "new_mutations": 0,
+    "business_sql_and_ledger_unchanged": true
+  },
+  "usage": {
+    "requests": 9,
+    "fresh_input": 154058,
+    "cache_reads": 1137408,
+    "output_including_reasoning": 21598,
+    "reasoning_subset": 19188,
+    "compaction": 0,
+    "total_tokens": 1313064,
+    "cost": null
+  },
+  "per_request_usage": [
+    {
+      "number": 1,
+      "request_id": "req_868e004b9ebc4fd2ae21ef50f512c115",
+      "fresh_input": 128951,
+      "cache_reads": 0,
+      "output_including_reasoning": 9473,
+      "reasoning_subset": 9235,
+      "compaction": 0,
+      "total_tokens": 138424,
+      "http_status": 200,
+      "status": "completed"
+    },
+    {
+      "number": 2,
+      "request_id": "req_c4644298a2d241d2b7cbc387953bb531",
+      "fresh_input": 9833,
+      "cache_reads": 128896,
+      "output_including_reasoning": 205,
+      "reasoning_subset": 85,
+      "compaction": 0,
+      "total_tokens": 138934,
+      "http_status": 200,
+      "status": "completed"
+    },
+    {
+      "number": 3,
+      "request_id": "req_fae4211fd8c94f89ba23abfcb5cdcfd2",
+      "fresh_input": 405,
+      "cache_reads": 138624,
+      "output_including_reasoning": 711,
+      "reasoning_subset": 323,
+      "compaction": 0,
+      "total_tokens": 139740,
+      "http_status": 200,
+      "status": "completed"
+    },
+    {
+      "number": 4,
+      "request_id": "req_ee8ae5724034494c860da41da3fa17fb",
+      "fresh_input": 2311,
+      "cache_reads": 139008,
+      "output_including_reasoning": 3920,
+      "reasoning_subset": 3791,
+      "compaction": 0,
+      "total_tokens": 145239,
+      "http_status": 200,
+      "status": "completed"
+    },
+    {
+      "number": 5,
+      "request_id": "req_c5ff2202b3eb4128ae20bc284d2d1015",
+      "fresh_input": 4151,
+      "cache_reads": 141312,
+      "output_including_reasoning": 280,
+      "reasoning_subset": 159,
+      "compaction": 0,
+      "total_tokens": 145743,
+      "http_status": 200,
+      "status": "completed"
+    },
+    {
+      "number": 6,
+      "request_id": "req_4bef8310874f4a23b1652e0796fcc9a7",
+      "fresh_input": 425,
+      "cache_reads": 145408,
+      "output_including_reasoning": 533,
+      "reasoning_subset": 160,
+      "compaction": 0,
+      "total_tokens": 146366,
+      "http_status": 200,
+      "status": "completed"
+    },
+    {
+      "number": 7,
+      "request_id": "req_d4e159f9c604400b8859de2cef24a837",
+      "fresh_input": 1842,
+      "cache_reads": 145792,
+      "output_including_reasoning": 3115,
+      "reasoning_subset": 2982,
+      "compaction": 0,
+      "total_tokens": 150749,
+      "http_status": 200,
+      "status": "completed"
+    },
+    {
+      "number": 8,
+      "request_id": "req_76630ac7bbe54972858bc72d4653a572",
+      "fresh_input": 3316,
+      "cache_reads": 147584,
+      "output_including_reasoning": 2474,
+      "reasoning_subset": 2285,
+      "compaction": 0,
+      "total_tokens": 153374,
+      "http_status": 200,
+      "status": "completed"
+    },
+    {
+      "number": 9,
+      "request_id": "req_ff3de3208f1f49098d30513dec0e12b7",
+      "fresh_input": 2824,
+      "cache_reads": 150784,
+      "output_including_reasoning": 887,
+      "reasoning_subset": 168,
+      "compaction": 0,
+      "total_tokens": 154495,
+      "http_status": 200,
+      "status": "completed"
+    }
+  ],
+  "previous_paid_intent": {
+    "requests": 1,
+    "fresh_input": 1502,
+    "cache_reads": 106496,
+    "output_including_reasoning": 20240,
+    "reasoning_subset": 19960,
+    "compaction": 0,
+    "total_tokens": 128238,
+    "counted_again_in_new_usage": false,
+    "tools_executed_at_that_time": 0
+  },
+  "usage_semantics": "One normalized usage per physical POST; repeated SSE usage frames are retained as evidence and not added again. Reasoning is a subset of output. Cost is unknown.",
+  "boundary": "Executed frozen corrective decision on actual failed SQL clone, then exact-context native continuation; explicitly reviewed delivery timestamp/unlink scope and read-only tail cap extensions. Not a fresh independent business run or broad task acceptance.",
+  "checker_dependency": "Historical snapshot lacked repair_seeded_records sidecar; it was uniquely reconstructed from original initial SQL and original setup schema before restoring the original21.09 baseline. Original checker was unchanged.",
+  "private_receipts": [
+    {
+      "path": ".runtime/harness-maturity-20261004/consolidation-live/frozen.json",
+      "sha256": "18b3f35e7eb1002111d78fd881ec1e1ae6ffc5947ac97dba317a128bba7bed5b"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/consolidation-live/sidecar-provenance.json",
+      "sha256": "d37817a255cda9ae159076862b40e38b3ae9b844eee0bf701a86df82c167b784"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/consolidation-live/before-reward.json",
+      "sha256": "60eba18295e5b4805e5a23f01b6a01ed60b6d3c2302a9f5cbfc4f8bb5eddbf4f"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/consolidation-live/after-natural-stop-reward.json",
+      "sha256": "c80c46963e892960bea6c36b19850766acdc34b0d4dee64f491b0d15339baded"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/consolidation-live/final-natural-stop.sql.gz",
+      "sha256": "c1493c4b3910cf0f3199c3ca41dc5e9569a27203d3fbfe9613f1e010f79ea073"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/consolidation-live/new-usage-natural-stop.json",
+      "sha256": "7175769c767a3bd859a00818dd6818f792e65371a25a928af6bc4b03a44cf71d"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/consolidation-live/independent-audit-eight-post.json",
+      "sha256": "36ea9e0785fca2613b588411183f3656b1b8bbdb66372a727ea827b5a20b9c85"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/consolidation-live/independent-audit-natural-stop.json",
+      "sha256": "fbbda38206403859c5be8746161a2763c396e8261031564efe13292102733ecc"
+    }
+  ]
+}

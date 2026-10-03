@@ -207,7 +207,7 @@ const bridgeScript = String.raw`
         if (method === 'open_odoo') { if (Object.keys(params).length) throw new Error('INVALID_PARAMS'); if (window.__odooUnconfigured) throw new Error('ODOO_NOT_CONFIGURED'); return { opened: true } }
         if (method === 'reconcile_action') return details(b3)
         if (method === 'send_message') {
-          if (params.session_id === 'session-b') { sessionDetails['session-b'].conversation_runs[0].id = 'conversation-run-b'; sessionDetails['session-b'].conversation_runs[0].status = 'running' }
+          if (params.session_id === 'session-b') { sessionDetails['session-b'].conversation_runs[0].id = 'conversation-run-b'; sessionDetails['session-b'].conversation_runs[0].status = 'running'; sessionDetails['session-b'].conversation_runs[0].inspection = params.inspection === true; sessionDetails['session-b'].conversation_runs[0].context_business_id = params.context_business_id }
           if (params.text === 'delayed mutation' || params.text === 'thinking hold') await wait(180)
           if (params.text === 'snapshot public') {
             sessionDetails['session-b'].messages.push({ id: 'snapshot-public', role: 'assistant', text: '快照中的公开回答', run_id: 'conversation-run-b', created_at: '2026-09-08T09:02:00Z' })
@@ -325,6 +325,24 @@ const proposalButton = page.getByRole('button', { name: '创建业务工作区' 
 await proposalButton.waitFor()
 assert.equal(await page.locator('.proposal-card').count(), 1)
 assert.equal(await page.locator('.proposal-card h3').textContent(), '新业务意图')
+// Display-only fixture: even a short quoted fragment must show the full source.
+// Host whole-line validation and confirmation are covered by Python checks.
+await page.evaluate(() => {
+  window.__updateProposal('proposal-1', {
+    source_messages: [{ id: 'm-user', text: '制造单确认前填写开始日期和到期日期，不要用预计完成日期替代。' }],
+    resolved_release_fields: [{ model: 'mrp.production', method: 'action_confirm', fields: ['date_start', 'date_deadline'], quote: '填写开始日期和到期日期', source_message_id: 'm-user', source_sha256: 'offline-renderer-fixture', field_labels: { date_start: 'Start', date_deadline: 'Deadline' } }]
+  })
+  window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } })
+})
+const fieldRequirements = page.getByRole('group', { name: '执行前字段要求' })
+await fieldRequirements.waitFor()
+assert.match(await fieldRequirements.innerText(), /开始日期、到期日期/)
+assert.equal(await fieldRequirements.getByText('用户原话：制造单确认前填写开始日期和到期日期，不要用预计完成日期替代。', { exact: true }).isVisible(), true)
+assert.equal(await page.getByRole('button', { name: '创建业务并确认字段要求' }).count(), 1)
+await fieldRequirements.getByText('字段映射', { exact: true }).click()
+assert.match(await fieldRequirements.locator('code').innerText(), /mrp.production · action_confirm · date_start, date_deadline/)
+await page.evaluate(() => { window.__updateProposal('proposal-1', { source_messages: undefined, resolved_release_fields: undefined }); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
+await fieldRequirements.waitFor({ state: 'detached' })
 await page.evaluate(() => { window.__setRunState(false, 'running'); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
 await page.getByText('正在整理业务方案，回复完成后可确认。', { exact: true }).waitFor()
 assert.equal(await proposalButton.count(), 0)
@@ -492,6 +510,31 @@ assert.deepEqual(sentMessages.map(({ params }) => params), [
   { session_id: 'session-b', text: '继续处理当前业务', context_business_id: 'business-b2' },
   { session_id: 'session-b', text: '开始一个新的业务意图' }
 ])
+// An active business accepts scoped read-only questions, never another concurrent chat.
+await selectScope('business-b2')
+await page.evaluate(() => { window.__setRunState(true); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b2' } }) })
+await page.getByPlaceholder('询问当前进度或故障原因…').waitFor()
+assert.equal(await page.locator('.composer .material-picker input').isDisabled(), true)
+assert.equal(await page.locator('.material-reuse-tray').count(), 0)
+await composer.fill('现在卡在哪个工具？')
+await page.getByRole('button', { name: '询问', exact: true }).click()
+await page.waitForFunction(() => window.__bridgeCalls.some(({ method, params }) => method === 'send_message' && params.text === '现在卡在哪个工具？'))
+assert.deepEqual(await page.evaluate(() => window.__bridgeCalls.find(({ method, params }) => method === 'send_message' && params.text === '现在卡在哪个工具？').params),
+  { session_id: 'session-b', text: '现在卡在哪个工具？', context_business_id: 'business-b2', inspection: true })
+await composer.fill('第二次并行查询')
+await page.getByRole('button', { name: '询问', exact: true }).click()
+await page.getByRole('alertdialog', { name: '当前运行尚未结束' }).waitFor()
+assert.equal(await page.evaluate(() => window.__bridgeCalls.filter(({ method, params }) => method === 'send_message' && params.text === '第二次并行查询').length), 0)
+await page.getByRole('button', { name: '知道了' }).click()
+await page.evaluate(() => {
+  window.__persistConversationMessage({ id: 'inspection-reply', role: 'assistant', text: '本次查询基于业务 B2 的运行快照。', inspection: true, context_business_id: 'business-b2', created_at: '2026-09-08T09:00:30Z' })
+  window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } })
+})
+await page.getByText('运行查询 · Business B2', { exact: true }).waitFor()
+await page.getByRole('tab', { name: /Business B1/ }).click()
+assert.equal(await page.getByText('运行查询 · Business B2', { exact: true }).count(), 1)
+assert.equal(await page.getByText('运行查询 · Business B1', { exact: true }).count(), 0)
+await page.getByRole('tab', { name: /Business B2/ }).click()
 await selectScope('__conversation__')
 await readyComposer()
 await composer.fill('thinking hold')
@@ -541,7 +584,7 @@ assert.equal(await page.getByText('终态后不应追加', { exact: true }).coun
 await page.locator('.activity-card').getByText('业务流公开进度', { exact: true }).waitFor()
 await page.getByText('取消前已经收到的片段', { exact: true }).waitFor()
 await page.evaluate(() => {
-  window.__persistConversationMessage({ id: 'conversation-live-1', role: 'assistant', text: '最终回答：当前能力与业务范围已确认。\n\n| 项目 | 状态 |\n| --- | --- |\n| 能力 | 已确认 |', created_at: '2026-09-08T09:01:00Z', context_business_id: null })
+  window.__persistConversationMessage({ id: 'conversation-live-1', run_id: 'conversation-run-b', business_id: null, role: 'assistant', text: '最终回答：当前能力与业务范围已确认。\n\n| 项目 | 状态 |\n| --- | --- |\n| 能力 | 已确认 |', created_at: '2026-09-08T09:01:00Z', context_business_id: null })
   window.__persistConversationMessage({ id: 'long-markdown', role: 'assistant', text: '## 长摘要\n\n' + '公开业务内容 '.repeat(200), created_at: '2026-09-08T09:01:10Z', context_business_id: null })
   window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', status: 'completed' } })
 })
@@ -562,6 +605,25 @@ const visibleStreamText = await page.locator('.conversation-pane').textContent()
 assert.ok(!visibleStreamText?.includes('不能显示'))
 const streamRows = await page.locator('.conversation-pane .live-message').count()
 assert.ok(streamRows >= 2)
+// Persistence of another run's same message ID must not erase the active stream.
+await page.evaluate(() => {
+  window.__emitWorkbench({ event: 'message_delta', data: { session_id: 'session-b', business_id: null, run_id: 'conversation-run-b', message_id: 'shared-message-id', sequence: 0, text: '当前查询仍在输出' } })
+  window.__persistConversationMessage({ id: 'shared-message-id', role: 'assistant', run_id: 'older-conversation-run', business_id: null, text: '旧查询的同编号消息' })
+  window.__persistConversationMessage({ id: 'shared-message-id', role: 'assistant', run_id: 'business-b2-run', business_id: 'business-b2', text: '业务运行的同编号消息' })
+  window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } })
+})
+await page.locator('.conversation-pane').getByText('旧查询的同编号消息', { exact: true }).waitFor()
+assert.equal(await page.locator('.conversation-pane').getByText('当前查询仍在输出', { exact: true }).count(), 1)
+assert.equal(await page.locator('.conversation-pane').getByText('业务运行的同编号消息', { exact: true }).count(), 1)
+await page.evaluate(() => {
+  window.__emitWorkbench({ event: 'message_end', data: { session_id: 'session-b', business_id: null, run_id: 'conversation-run-b', message_id: 'shared-message-id', sequence: 1, text: '当前查询同编号最终回复' } })
+  window.__persistConversationMessage({ id: 'shared-message-id', role: 'assistant', run_id: 'conversation-run-b', business_id: null, text: '当前查询同编号最终回复' })
+  window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } })
+})
+await page.locator('.conversation-pane .message:not(.live-message)').getByText('当前查询同编号最终回复', { exact: true }).waitFor()
+assert.equal(await page.locator('.conversation-pane').getByText('当前查询同编号最终回复', { exact: true }).count(), 1)
+assert.equal(await page.locator('.conversation-pane').getByText('旧查询的同编号消息', { exact: true }).count(), 1)
+await page.evaluate(() => { window.__removeConversationMessage('shared-message-id'); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b' } }) })
 await page.getByRole('button', { name: /停止对话/ }).click()
 await page.getByRole('button', { name: /正在停止/ }).waitFor()
 assert.equal(await page.locator('.thinking-message').count(), 0)
@@ -1096,6 +1158,8 @@ await page.waitForTimeout(4600)
 await page.locator('.conversation-pane .approval-inbox-card').waitFor()
 assert.ok((await page.locator('.conversation-pane .approval-inbox-card').textContent())?.includes('等待模型响应'))
 assert.equal(await page.getByText('正在提交审批决定…', { exact: true }).count(), 0)
+assert.equal(await page.locator('.composer .material-picker input').isDisabled(), true)
+await page.evaluate(() => { window.__showAcceptedProjection(false); window.__setRunState(false); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b2' } }) })
 await page.locator('.material-reuse-tray summary').click()
 await page.getByText('沿用历史材料', { exact: true }).waitFor()
 assert.ok((await page.locator('.material-reuse-tray').textContent()).includes('订单材料.csv'))
@@ -1107,6 +1171,7 @@ await page.waitForTimeout(40)
 assert.equal(await page.locator('.material-chip').filter({ hasText: 'orders.csv' }).count(), 1)
 assert.ok((await page.locator('.material-reuse-tray').textContent()).includes('本轮不附'))
 await page.locator('.material-chip button').click()
+await page.evaluate(() => { window.__showAcceptedProjection(true); window.__setRunState(true); window.__emitWorkbench({ event: 'changed', data: { session_id: 'session-b', business_id: 'business-b2' } }) })
 await page.getByRole('tab', { name: /^单据/ }).click()
 await page.locator('.material-history').getByText('订单材料.csv', { exact: true }).waitFor()
 await page.locator('.material-history-row span').filter({ hasText: '4 条数据' }).waitFor()

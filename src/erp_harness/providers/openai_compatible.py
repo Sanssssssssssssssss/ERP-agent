@@ -65,6 +65,8 @@ from erp_harness.providers.provider import (
     apply_provider_headers,
     apply_provider_payload,
     emit_provider_response,
+    observe_provider_attempt,
+    wrap_provider_stream,
 )
 from erp_harness.providers.retry import provider_retry_event, retry_delay_seconds, wait_for_retry
 from erp_harness.providers.stream import canonicalize_provider_stream
@@ -139,8 +141,7 @@ class OpenAICompatibleProvider:
             provider=getattr(self._config, "provider_name", "openai-compatible"),
             model=model,
         )
-        observer = getattr(self._config.provider_hooks, "wrap_provider_stream", None)
-        return observer(stream, raw=raw) if callable(observer) else stream
+        return wrap_provider_stream(self._config.provider_hooks, stream, raw=raw)
 
     def _stream_provider_events(
         self,
@@ -416,10 +417,7 @@ class OpenAICompatibleProvider:
         return iterator()
 
     async def _observe_attempt(self, name: str, *args: object) -> None:
-        observer = getattr(self._config.provider_hooks, name, None)
-        if callable(observer):
-            with suppress(Exception):
-                await observer(*args)
+        await observe_provider_attempt(self._config.provider_hooks, name, *args)
 
     def _prompt_cache_key(self, affinity_id: str | None) -> str | None:
         supports = self._config.compat.get("supportsPromptCacheKey")
@@ -525,10 +523,12 @@ class _ChatStreamParser:
         self._tool_call_builders: dict[int, _ToolCallBuilder] = {}
         self._pending_reasoning_details: dict[str, str] = {}
         self._finish_reason: str | None = None
+        self._done = False
         self._usage: Usage | None = None
 
     def feed(self, event: str) -> tuple[list[ProviderEvent], bool]:
         if event == "[DONE]":
+            self._done = True
             return [], True
 
         chunk = _loads_object(event)
@@ -605,6 +605,8 @@ class _ChatStreamParser:
         return events, False
 
     def finalize(self) -> list[ProviderEvent]:
+        if not self._finish_reason and not self._done:
+            return [ProviderErrorEvent(message="Provider stream ended without a terminal event")]
         tool_calls = [
             builder.build(index) for index, builder in sorted(self._tool_call_builders.items())
         ]
@@ -714,13 +716,17 @@ class _ResponsesStreamParser:
             )
 
         elif chunk_type in ("response.completed", "response.incomplete"):
-            self._status = _responses_finish_reason(chunk)
+            self._status = "incomplete" if chunk_type == "response.incomplete" else _responses_finish_reason(chunk) or "completed"
             self._usage = _usage_from_responses_event(chunk) or self._usage
             return [], True
 
         elif chunk_type == "response.failed":
             self.fatal = True
             return [_responses_failure_event(chunk)], True
+
+        elif chunk_type == "response.cancelled":
+            self.fatal = True
+            return [ProviderErrorEvent(message="Provider response was cancelled")], True
 
         elif chunk_type == "error":
             self.fatal = True
@@ -731,6 +737,8 @@ class _ResponsesStreamParser:
         return [], False
 
     def finalize(self) -> list[ProviderEvent]:
+        if self._status not in {"completed", "incomplete"}:
+            return [ProviderErrorEvent(message="Provider stream ended without a terminal event")]
         tool_calls = [
             builder.build(index)
             for index, builder in enumerate(_ordered_builders(self._tool_call_builders))
@@ -1209,10 +1217,10 @@ def _responses_finish_reason(chunk: Mapping[str, Any]) -> str | None:
 
 def _normalize_finish_reason(status: str | None, *, has_tool_calls: bool) -> str:
     """Map a Responses-API status to chat-completions-style finish reasons."""
-    if has_tool_calls:
-        return "tool_calls"
     if status == "incomplete":
         return "length"
+    if has_tool_calls:
+        return "tool_calls"
     return "stop"
 
 
@@ -1426,7 +1434,7 @@ def _int_or_none(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def _parse_chunk_usage(raw: Mapping[str, Any]) -> Usage:
+def _parse_chunk_usage(raw: Mapping[str, Any], *, preserve_unknown: bool = False) -> Usage:
     """Parse an OpenAI-compatible ``usage`` payload into a Usage.
 
     Ports Pi's openai-completions.ts parseChunkUsage: ``cached_tokens`` are
@@ -1434,6 +1442,34 @@ def _parse_chunk_usage(raw: Mapping[str, Any]) -> Usage:
     and ``completion_tokens`` already includes reasoning tokens. Cost is left
     unset (None) because Pi has no per-model pricing table.
     """
+    if preserve_unknown:
+        reported: dict[str, int] = {}
+
+        def count(value: object) -> int | None:
+            parsed = _int_or_none(value)
+            return parsed if parsed is not None and parsed >= 0 else None
+
+        prompt = count(raw.get("prompt_tokens"))
+        details = raw.get("prompt_tokens_details")
+        cached = count(details.get("cached_tokens")) if isinstance(details, Mapping) else None
+        written = count(details.get("cache_write_tokens")) if isinstance(details, Mapping) else None
+        if cached is not None:
+            reported["cache_read"] = cached
+        if written is not None:
+            reported["cache_write"] = written
+        valid_write = not isinstance(details, Mapping) or "cache_write_tokens" not in details or written is not None
+        if prompt is not None and cached is not None and valid_write and cached + (written or 0) <= prompt:
+            reported["input"] = prompt - cached - (written or 0)
+        for field, key in (("output", "completion_tokens"), ("total_tokens", "total_tokens")):
+            value = count(raw.get(key))
+            if value is not None:
+                reported[field] = value
+        details = raw.get("completion_tokens_details")
+        reasoning = count(details.get("reasoning_tokens")) if isinstance(details, Mapping) else None
+        if reasoning is not None:
+            reported["reasoning"] = reasoning
+        return Usage(**reported)
+
     prompt_tokens = _int_or_zero(raw.get("prompt_tokens"))
     prompt_details = raw.get("prompt_tokens_details")
     cached_tokens: int | None = None

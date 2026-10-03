@@ -7,7 +7,8 @@ from typing import Any
 
 from pydantic import TypeAdapter, ValidationError
 
-from erp_harness.runtime.storage.entries import SessionEntry
+from erp_harness.runtime.messages import AssistantMessage, Usage
+from erp_harness.runtime.storage.entries import MessageEntry, SessionEntry
 
 _SESSION_ENTRY_ADAPTER: TypeAdapter[SessionEntry] = TypeAdapter(SessionEntry)
 
@@ -18,7 +19,19 @@ class SessionJsonlError(ValueError):
 
 def entry_to_json_line(entry: SessionEntry) -> str:
     """Serialize one session entry using only the canonical Pi wire shape."""
-    return _SESSION_ENTRY_ADAPTER.dump_json(entry, exclude_none=True).decode() + "\n"
+    excluded = {}
+    if isinstance(entry, MessageEntry) and isinstance(entry.message, AssistantMessage):
+        usage = entry.message.usage
+        excluded["message"] = {"usage": {name: True for name in set(Usage.model_fields) - usage.model_fields_set}}
+        if "cost" in usage.model_fields_set:
+            excluded["message"]["usage"]["cost"] = set(type(usage.cost).model_fields) - usage.cost.model_fields_set
+    else:
+        usage = getattr(entry, "usage", None)
+        if isinstance(usage, Usage):
+            excluded["usage"] = {name: True for name in set(Usage.model_fields) - usage.model_fields_set}
+            if "cost" in usage.model_fields_set:
+                excluded["usage"]["cost"] = set(type(usage.cost).model_fields) - usage.cost.model_fields_set
+    return _SESSION_ENTRY_ADAPTER.dump_json(entry, exclude_none=True, exclude=excluded).decode() + "\n"
 
 
 def entry_from_json_line(line: str, *, line_number: int | None = None) -> SessionEntry:
@@ -71,7 +84,7 @@ def _migrate_message(value: Any) -> Any:
 
     if role == "assistant":
         usage = message.get("usage")
-        if isinstance(usage, dict) and usage.get("cost") is None:
+        if isinstance(usage, dict) and "cost" in usage and usage["cost"] is None:
             usage = dict(usage)
             usage["cost"] = {}
             message["usage"] = usage

@@ -329,10 +329,15 @@ class PiAgentMcpBaseline(BaseInstalledAgent):  # type: ignore[misc,valid-type]
     async def _capture_bench_state(self, environment: BaseEnvironment, phase: str) -> None:
         if phase not in {"initial", "final"}:
             raise ValueError("invalid state capture phase")
+        await environment.upload_file(
+            Path(__file__).with_name("snapshot.py"), "/tmp/erp-harness-snapshot.py"
+        )
         await self.exec_as_root(
             environment,
             command=(
                 "set -euo pipefail; mkdir -p /logs/agent/state; "
+                "python3 /tmp/erp-harness-snapshot.py capture-repair-sidecar "
+                f"/logs/agent/state/{phase}-repair_seeded_records.json; "
                 "su postgres -s /bin/bash -c "
                 "'pg_dump -d bench --no-owner --exclude-table-data=res_users_apikeys' "
                 f"| gzip -n > /logs/agent/state/{phase}.sql.gz; "

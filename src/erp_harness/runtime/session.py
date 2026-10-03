@@ -350,32 +350,16 @@ class _EventCancellationToken:
 
 
 def _combine_usage(first: Usage, second: Usage) -> Usage:
-    reasoning = (
-        None
-        if first.reasoning is None and second.reasoning is None
-        else (first.reasoning or 0) + (second.reasoning or 0)
-    )
-    cache_write_1h = (
-        None
-        if first.cache_write_1h is None and second.cache_write_1h is None
-        else (first.cache_write_1h or 0) + (second.cache_write_1h or 0)
-    )
-    return Usage(
-        input=first.input + second.input,
-        output=first.output + second.output,
-        cache_read=first.cache_read + second.cache_read,
-        cache_write=first.cache_write + second.cache_write,
-        cache_write_1h=cache_write_1h,
-        reasoning=reasoning,
-        total_tokens=first.total_tokens + second.total_tokens,
-        cost=UsageCost(
-            input=first.cost.input + second.cost.input,
-            output=first.cost.output + second.cost.output,
-            cache_read=first.cost.cache_read + second.cost.cache_read,
-            cache_write=first.cost.cache_write + second.cost.cache_write,
-            total=first.cost.total + second.cost.total,
-        ),
-    )
+    shared = first.model_fields_set & second.model_fields_set
+    values = {name: getattr(first, name) + getattr(second, name)
+              for name in shared - {"cost"}
+              if getattr(first, name) is not None and getattr(second, name) is not None}
+    if "cost" in shared:
+        values["cost"] = UsageCost(**{
+            name: getattr(first.cost, name) + getattr(second.cost, name)
+            for name in first.cost.model_fields_set & second.cost.model_fields_set
+        })
+    return Usage(**values)
 
 
 def _merge_string_lists(current: Sequence[str], stored: JSONValue) -> list[str]:
@@ -4138,7 +4122,8 @@ class HarnessSession:
             )
         else:
             history = _SummaryResult(text="No prior history.", usage=Usage(), details={})
-            if plan.messages_to_summarize or plan.previous_summary is not None:
+            has_history = bool(plan.messages_to_summarize) or plan.previous_summary is not None
+            if has_history:
                 history = await self._generate_compaction_summary(
                     plan.messages_to_summarize,
                     custom_instructions=custom_instructions,
@@ -4154,7 +4139,7 @@ class HarnessSession:
                 text=(
                     f"{history.text}\n\n---\n\n**Turn Context (split turn):**\n\n{turn_prefix.text}"
                 ),
-                usage=_combine_usage(history.usage, turn_prefix.usage),
+                usage=_combine_usage(history.usage, turn_prefix.usage) if has_history else turn_prefix.usage,
                 details={},
             )
 

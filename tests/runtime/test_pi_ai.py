@@ -1,9 +1,10 @@
 from collections.abc import AsyncIterator, Mapping
-from json import loads
+from json import dumps, loads
 
 import httpx
 import pytest
 
+from erp_harness.app.request_receipts import RequestReceipts
 from erp_harness.runtime import (
     AgentTool,
     AgentToolResult,
@@ -42,6 +43,272 @@ from erp_harness.providers import (
 
 async def _collect(stream: AsyncIterator[object]) -> list[object]:
     return [event async for event in stream]
+
+
+def _terminal_control_body(
+    api: str, terminal: str | None, *, has_tools: bool, arguments: str | None = "{}",
+    unfinished_tool: bool = False,
+) -> str:
+    chunks = []
+    if api == "anthropic":
+        chunks.append({"type": "message_start", "message": {"usage": {
+            "input_tokens": 4, "output_tokens": 0,
+        }}})
+        chunks.append({"type": "content_block_delta", "index": 1, "delta": {
+            "type": "text_delta", "text": "partial answer",
+        }})
+        if has_tools:
+            chunks.append({"type": "content_block_start", "index": 0, "content_block": {
+                "type": "tool_use", "id": "call-guard", "name": "read", "input": {},
+            }})
+            if arguments is not None:
+                chunks.append({"type": "content_block_delta", "index": 0, "delta": {
+                    "type": "input_json_delta", "partial_json": arguments,
+                }})
+        if terminal != "stop_only" and terminal is not None:
+            reason = "end_turn" if terminal == "delta_only" else terminal
+            chunks.append({"type": "message_delta", "delta": {"stop_reason": reason},
+                           "usage": {"output_tokens": 2}})
+        if terminal not in {None, "delta_only"}:
+            chunks.append({"type": "message_stop"})
+    else:
+        chunks.append({"type": "response.output_text.delta", "delta": "partial answer"})
+        if has_tools:
+            item = {"type": "function_call", "id": "item-guard", "call_id": "call-guard",
+                    "name": "read", "arguments": arguments}
+            chunks.append({"type": "response.output_item.added", "output_index": 0,
+                           "item": item})
+            if not unfinished_tool:
+                chunks.append({"type": "response.output_item.done", "output_index": 0,
+                               "item": item})
+        if terminal is not None:
+            event_name = terminal
+            response = {"usage": {"input_tokens": 4, "output_tokens": 2, "total_tokens": 6}}
+            if terminal.endswith("_without_status"):
+                event_name = terminal.removesuffix("_without_status")
+            elif terminal == "done":
+                response["status"] = "completed"
+            elif terminal.startswith("completed_"):
+                event_name = "completed"
+                response["status"] = terminal.removeprefix("completed_")
+            else:
+                response["status"] = terminal
+            chunks.append({"type": "response." + event_name, "response": response})
+    return "".join("data: " + dumps(chunk) + "\n\n" for chunk in chunks)
+
+
+async def _terminal_control_observation(api: str, body: str) -> dict:
+    executed = []
+    requests = []
+
+    async def execute(call_id, arguments, signal=None, on_update=None):
+        executed.append({"call_id": call_id, "arguments": dict(arguments)})
+        return AgentToolResult(content="local read control")
+
+    tool = AgentTool("read", "read", "Local read control", {"type": "object"}, execute)
+
+    def handler(request):
+        requests.append(loads(request.content))
+        return httpx.Response(200, text=body, headers={"content-type": "text/event-stream"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        if api == "anthropic":
+            provider = AnthropicProvider(AnthropicConfig(
+                api_key="offline-test", base_url="https://example.test", max_retries=2,
+                max_retry_delay_seconds=0,
+            ), client=client)
+        else:
+            async def credentials():
+                return OpenAICodexCredentials(
+                    access_token="offline-token", account_id="offline-account",
+                )
+            provider = OpenAICodexProvider(OpenAICodexConfig(
+                credential_resolver=credentials, base_url="https://example.test",
+                max_retries=2, max_retry_delay_seconds=0,
+            ), client=client)
+        events = await _collect(run_agent_loop(
+            provider=provider, model="test-model", system="Pi",
+            messages=[UserMessage(content="inspect")], tools=[tool],
+            should_stop_after_turn=lambda turn: True,
+        ))
+    turn = next(event for event in events if event.type == "turn_end")
+    return {"executed": executed, "requests": requests,
+            "stop_reason": turn.message.stop_reason, "error": turn.message.error_message,
+            "usage": RequestReceipts._usage(turn.message)}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("has_tools", [False, True])
+@pytest.mark.parametrize(("api", "terminal", "reason", "error"), [
+    ("anthropic", None, "error", "message_stop"),
+    ("anthropic", "delta_only", "error", "message_stop"),
+    ("anthropic", "stop_only", "stop", None),
+    ("anthropic", "end_turn", "stop", None),
+    ("anthropic", "tool_use", "toolUse", None),
+    ("anthropic", "stop_sequence", "stop", None),
+    ("anthropic", "max_tokens", "length", None),
+    ("anthropic", "refusal", "error", "refusal"),
+    ("anthropic", "pause_turn", "error", "pause_turn"),
+    ("anthropic", "model_context_window_exceeded", "error", "model_context_window_exceeded"),
+    ("anthropic", "HTTP 503", "error", "unrecognized"),
+    ("codex", None, "error", "terminal event"),
+    ("codex", "completed", "stop", None),
+    ("codex", "completed_without_status", "stop", None),
+    ("codex", "done", "stop", None),
+    ("codex", "incomplete", "length", None),
+    ("codex", "incomplete_without_status", "length", None),
+    ("codex", "failed", "error", "failed"),
+    ("codex", "cancelled", "error", "cancelled"),
+    ("codex", "completed_incomplete", "length", None),
+    ("codex", "completed_failed", "error", "failed"),
+    ("codex", "completed_cancelled", "error", "cancelled"),
+    ("codex", "completed_in_progress", "error", "in_progress"),
+    ("codex", "completed_HTTP 503", "error", "unrecognized"),
+])
+async def test_anthropic_codex_terminal_signals_guard_actual_agent_loop(
+    api, terminal, reason, error, has_tools,
+) -> None:
+    observed = await _terminal_control_observation(api, _terminal_control_body(
+        api, terminal, has_tools=has_tools,
+    ))
+    safe = reason not in {"error", "length"}
+    assert observed["stop_reason"] == ("toolUse" if safe and has_tools else reason)
+    expected_id = "call-guard" if api == "anthropic" else "call-guard|item-guard"
+    assert observed["executed"] == ([{"call_id": expected_id, "arguments": {}}]
+                                     if safe and has_tools else [])
+    assert len(observed["requests"]) == 1
+    if error:
+        assert error in observed["error"]
+        expected_usage = None if terminal is None else 6
+        assert observed["usage"]["total_tokens"] == expected_usage
+    elif terminal != "stop_only":
+        assert observed["usage"]["total_tokens"] == 6
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("api", ["anthropic", "codex"])
+@pytest.mark.parametrize("arguments", ["{", "[]", "null", "", '"text"'])
+async def test_anthropic_codex_invalid_tool_arguments_never_dispatch(api, arguments) -> None:
+    terminal = "end_turn" if api == "anthropic" else "completed"
+    observed = await _terminal_control_observation(api, _terminal_control_body(
+        api, terminal, has_tools=True, arguments=arguments,
+    ))
+    assert observed["executed"] == []
+    assert observed["stop_reason"] == "error"
+    assert "tool arguments" in observed["error"]
+    assert observed["usage"]["total_tokens"] == (6 if api == "anthropic" else None)
+    assert len(observed["requests"]) == 1
+
+
+@pytest.mark.anyio
+async def test_codex_unfinished_tool_never_dispatch_or_complete() -> None:
+    observed = await _terminal_control_observation("codex", _terminal_control_body(
+        "codex", "completed", has_tools=True, unfinished_tool=True,
+    ))
+    assert observed["executed"] == []
+    assert observed["stop_reason"] == "error"
+    assert "unfinished tool call" in observed["error"]
+    assert observed["usage"]["total_tokens"] == 6
+    assert len(observed["requests"]) == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("initial", [None, [], "text", {}, {"value": 5}])
+async def test_anthropic_no_delta_tool_requires_explicit_object_input(initial) -> None:
+    body = _terminal_control_body("anthropic", "end_turn", has_tools=True, arguments=None)
+    chunks = [loads(line.removeprefix("data: ")) for line in body.splitlines() if line]
+    tool_start = next(chunk for chunk in chunks if chunk["type"] == "content_block_start")
+    tool_start["content_block"]["input"] = initial
+    body = "".join("data: " + dumps(chunk) + "\n\n" for chunk in chunks)
+    observed = await _terminal_control_observation("anthropic", body)
+    if isinstance(initial, dict):
+        assert observed["executed"] == [{"call_id": "call-guard", "arguments": initial}]
+        assert observed["stop_reason"] == "toolUse"
+    else:
+        assert observed["executed"] == []
+        assert observed["stop_reason"] == "error"
+        assert "tool arguments" in observed["error"]
+    assert observed["usage"]["total_tokens"] == 6
+    assert len(observed["requests"]) == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("api", ["anthropic", "codex"])
+async def test_anthropic_codex_empty_stream_keeps_usage_unknown_without_retry(api) -> None:
+    observed = await _terminal_control_observation(api, "")
+    assert observed["executed"] == []
+    assert observed["stop_reason"] == "error"
+    assert observed["usage"]["total_tokens"] is None
+    assert len(observed["requests"]) == 1
+
+
+@pytest.mark.anyio
+async def test_anthropic_bad_arguments_with_only_initial_usage_keeps_final_usage_unknown() -> None:
+    body = _terminal_control_body("anthropic", "stop_only", has_tools=True, arguments="{")
+    observed = await _terminal_control_observation("anthropic", body)
+    assert observed["executed"] == []
+    assert observed["stop_reason"] == "error"
+    assert "tool arguments" in observed["error"]
+    assert observed["usage"]["total_tokens"] is None
+    assert len(observed["requests"]) == 1
+
+
+@pytest.mark.anyio
+async def test_anthropic_max_tokens_precedes_unfinished_tool_arguments() -> None:
+    body = _terminal_control_body("anthropic", "max_tokens", has_tools=True, arguments="{")
+    observed = await _terminal_control_observation("anthropic", body)
+    assert observed["executed"] == []
+    assert observed["stop_reason"] == "length"
+    assert observed["usage"]["total_tokens"] == 6
+    assert len(observed["requests"]) == 1
+
+
+def _codex_final_arguments_body(event_type, final_arguments) -> str:
+    item = {"type": "function_call", "id": "item-guard", "call_id": "call-guard", "name": "read"}
+    chunks = [
+        {"type": "response.output_item.added", "output_index": 0, "item": item},
+        {"type": "response.function_call_arguments.delta", "item_id": "item-guard", "delta": "{}"},
+        {"type": "response.function_call_arguments.done", "item_id": "item-guard", "arguments": "{}"},
+    ]
+    if event_type == "response.function_call_arguments.done":
+        chunks[-1]["arguments"] = final_arguments
+    final_item = dict(item)
+    if event_type == "response.output_item.done":
+        final_item["arguments"] = final_arguments
+    chunks.extend([
+        {"type": "response.output_item.done", "output_index": 0, "item": final_item},
+        {"type": "response.completed", "response": {"status": "completed"}},
+    ])
+    return "".join("data: " + dumps(chunk) + "\n\n" for chunk in chunks)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("event_type", ["response.function_call_arguments.done", "response.output_item.done"])
+@pytest.mark.parametrize("final_arguments", [None, [], {}, 5])
+async def test_codex_bad_final_argument_shape_never_reuses_valid_prior_arguments(
+    event_type, final_arguments,
+) -> None:
+    observed = await _terminal_control_observation("codex", _codex_final_arguments_body(
+        event_type, final_arguments,
+    ))
+    assert observed["executed"] == []
+    assert observed["stop_reason"] == "error"
+    assert "tool arguments" in observed["error"]
+    assert len(observed["requests"]) == 1
+
+
+@pytest.mark.anyio
+async def test_codex_missing_item_arguments_reuses_only_completed_argument_event() -> None:
+    body = _codex_final_arguments_body("response.function_call_arguments.done", "{}")
+    observed = await _terminal_control_observation("codex", body)
+    assert observed["executed"] == [{"call_id": "call-guard|item-guard", "arguments": {}}]
+    assert observed["stop_reason"] == "toolUse"
+    body = "\n\n".join(block for block in body.split("\n\n")
+                         if '"type": "response.function_call_arguments.done"' not in block)
+    observed = await _terminal_control_observation("codex", body)
+    assert observed["executed"] == []
+    assert observed["stop_reason"] == "error"
+    assert "tool arguments" in observed["error"]
 
 
 def _provider_tool(
@@ -3393,6 +3660,87 @@ async def test_responses_api_maps_incomplete_status_to_length() -> None:
     assert isinstance(end, AssistantDoneEvent)
     assert end.message.text == "partial"
     assert end.reason == "length"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("has_tools", [False, True])
+@pytest.mark.parametrize(
+    ("api", "terminal", "expected_reason"),
+    [
+        ("openai-completions", None, "error"),
+        ("openai-completions", "done_only", "stop"),
+        ("openai-completions", "stop", "stop"),
+        ("openai-completions", "tool_calls", "toolUse"),
+        ("openai-completions", "length", "length"),
+        ("openai-responses", None, "error"),
+        ("openai-responses", "completed", "stop"),
+        ("openai-responses", "incomplete", "length"),
+        ("openai-responses", "failed", "error"),
+        ("openai-responses", "cancelled", "error"),
+    ],
+)
+async def test_openai_terminal_signals_guard_actual_agent_loop(
+    api: str, terminal: str | None, expected_reason: str, has_tools: bool,
+) -> None:
+    executed: list[str] = []
+    requests: list[httpx.Request] = []
+
+    async def execute(call_id, arguments, signal=None, on_update=None):
+        executed.append(call_id)
+        return AgentToolResult(content="local read control")
+
+    tool = AgentTool("read", "read", "Local read control", {"type": "object"}, execute)
+    if api == "openai-completions":
+        delta = {"content": "partial answer"}
+        if has_tools:
+            delta["tool_calls"] = [{"index": 0, "id": "call-guard", "type": "function",
+                                    "function": {"name": "read", "arguments": "{}"}}]
+        body = "data: " + dumps({"choices": [{"delta": delta,
+            "finish_reason": None if terminal == "done_only" else terminal}]}) + "\n\n"
+        if terminal is not None:
+            # Usage may arrive after the finish reason and before [DONE]/EOF.
+            body += 'data: {"choices":[],"usage":{"prompt_tokens":4,"completion_tokens":2,"total_tokens":6}}\n\n'
+        if terminal == "done_only":
+            body += "data: [DONE]\n\n"
+    else:
+        body = 'data: {"type":"response.output_text.delta","delta":"partial answer"}\n\n'
+        if has_tools:
+            body += 'data: {"type":"response.output_item.added","output_index":0,"item":{' \
+                    '"id":"item-guard","type":"function_call","call_id":"call-guard",' \
+                    '"name":"read","arguments":"{}"}}\n\n'
+        if terminal is not None:
+            body += "data: " + dumps({"type": "response." + terminal, "response": {
+                "status": terminal, "usage": {"input_tokens": 4, "output_tokens": 2, "total_tokens": 6},
+            }}) + "\n\n"
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, text=body, headers={"content-type": "text/event-stream"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleProvider(OpenAICompatibleConfig(
+            api_key="offline-test", base_url="https://example.test/v1", api=api,
+            infer_api_from_model=False, max_retries=2, max_retry_delay_seconds=0,
+        ), client=client)
+        events = await _collect(run_agent_loop(provider=provider, model="test-model", system="Pi",
+            messages=[UserMessage(content="inspect")], tools=[tool], should_stop_after_turn=lambda turn: True))
+
+    turn = next(event for event in events if event.type == "turn_end")
+    safe_terminal = expected_reason not in {"error", "length"}
+    if has_tools and safe_terminal:
+        expected_reason = "toolUse"
+    assert turn.message.stop_reason == expected_reason
+    assert executed == (["call-guard"] if has_tools and safe_terminal else [])
+    assert len(requests) == 1
+    if expected_reason == "error":
+        assert RequestReceipts._usage(turn.message)["total_tokens"] is None
+        assert turn.message.error_message
+    else:
+        assert turn.message.usage.total_tokens == 6
+    if has_tools and expected_reason == "length":
+        result = next(event for event in events if event.type == "tool_execution_end")
+        assert result.is_error
+        assert "was not executed" in result.result.text
 
 
 @pytest.mark.anyio

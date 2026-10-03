@@ -23,6 +23,8 @@ import type {
   WorkbenchEvent
 } from '../shared/protocol'
 
+export const liveMessageKey = (message: Pick<LiveMessage, 'id'> & Partial<Pick<LiveMessage, 'session_id' | 'business_id' | 'run_id'>>) => `${message.session_id ?? ''}:${message.business_id ?? '__conversation__'}:${message.run_id ?? ''}:${message.id}`
+
 export type {
   Approval,
   TraceRequest,

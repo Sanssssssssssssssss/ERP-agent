@@ -27,7 +27,7 @@ from functools import cache
 from pathlib import Path
 from typing import Any, get_type_hints
 
-from pydantic import StrictInt, create_model
+from pydantic import StrictInt, ValidationError, create_model
 
 from erp_harness.erp._odoo_core.audit import audit_posture
 from erp_harness.erp._odoo_core.field_policy import (
@@ -72,14 +72,14 @@ from erp_harness.erp._odoo_core.schemas import (
 from erp_harness.erp._odoo_core.tool_helpers import (
     SearchEmployeeResponse,
     SearchHolidaysResponse,
-    clamp_limit,
+    clamp_limit as _clamp_limit,
     formatted_read_group_missing,
     max_attachment_bytes,
     max_smart_fields,
-    normalize_domain_input,
+    normalize_domain_input as _normalize_domain_input,
     odoo_major_version,
-    parse_measure_spec,
-    validate_model_name,
+    parse_measure_spec as _parse_measure_spec,
+    validate_model_name as _validate_model_name,
 )
 from erp_harness.erp._odoo_core.write_policy import (
     allowed_side_effect_methods,
@@ -88,7 +88,32 @@ from erp_harness.erp._odoo_core.write_policy import (
     writes_enabled,
 )
 
-from .gateway import Json2ReadClient, read_context
+from .gateway import Json2ReadClient, normalize_read_scope, read_context, read_scope_fingerprint
+from .read_failures import InvalidReadResponseError, _LocalReadRefusal, tool_failure
+
+
+def _local_argument(helper, *args, **kwargs):
+    """Only these pinned pure argument helpers produce a local refusal."""
+    try:
+        return helper(*args, **kwargs)
+    except ValueError as exc:
+        raise _LocalReadRefusal(str(exc)) from None
+
+
+def clamp_limit(*args, **kwargs):
+    return _local_argument(_clamp_limit, *args, **kwargs)
+
+
+def normalize_domain_input(*args, **kwargs):
+    return _local_argument(_normalize_domain_input, *args, **kwargs)
+
+
+def parse_measure_spec(*args, **kwargs):
+    return _local_argument(_parse_measure_spec, *args, **kwargs)
+
+
+def validate_model_name(*args, **kwargs):
+    return _local_argument(_validate_model_name, *args, **kwargs)
 
 READ_RESPONSES = {
     "get_odoo_profile": GetOdooProfileResponse,
@@ -216,6 +241,47 @@ def normalize_read_arguments(name: str, arguments: dict[str, Any]) -> dict[str, 
         raise RuntimeError(f"Error executing tool {name}: {exc}") from exc
 
 
+def _read_identity(*, instance, url, db, username, lang, context, transport, fingerprint):
+    identity = {
+        "instance": instance, "url": url, "database": db, "username": username,
+        "lang": lang, "context": copy.deepcopy(context), "transport": transport,
+        "credential_scope_sha256": fingerprint,
+    }
+    identity["identity_id"] = hashlib.sha256(json.dumps([
+        instance, fingerprint,
+    ], sort_keys=True).encode()).hexdigest()[:20]
+    return identity
+
+
+def configured_identity(*, url: str, db: str, username: str, api_key: str,
+                        instance: str = "default", lang: str | None = None,
+                        context: dict | None = None, uid: int | None = None,
+                        json2_database_header: bool = True, verify_ssl: bool = True) -> dict[str, Any]:
+    """Scope explicit current JSON-2 configuration without RPC or authentication proof.
+
+    Defaults match the desktop worker's explicit configuration. This function never
+    reads environment/config files or authorizes an identity supplied by a receipt.
+    """
+    if any(not isinstance(value, str) or not value for value in (url, db, username, api_key)):
+        raise ValueError("Explicit URL, database, username and API key are required")
+    if not isinstance(instance, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", instance):
+        raise ValueError("Invalid instance name")
+    if lang is not None and not isinstance(lang, str):
+        raise ValueError("lang must be a string or None")
+    if uid is not None and (type(uid) is not int or uid < 1):
+        raise ValueError("uid must be a positive integer or None")
+    if type(json2_database_header) is not bool or type(verify_ssl) is not bool:
+        raise ValueError("Database header and SSL settings must be boolean")
+    url, lang, context = normalize_read_scope(url, lang, context)
+    fingerprint = read_scope_fingerprint(
+        url=url, db=db, username=username, api_key=api_key, uid=uid, lang=lang,
+        context=context, transport="json2", json2_database_header=json2_database_header,
+        verify_ssl=verify_ssl,
+    )
+    return _read_identity(instance=instance, url=url, db=db, username=username,
+                          lang=lang, context=context, transport="json2", fingerprint=fingerprint)
+
+
 class NativeReads:
     """One private client/cache per instance; call() is the policy/identity boundary."""
 
@@ -261,24 +327,34 @@ class NativeReads:
             runtime = self.instances[instance]
             with runtime._lock:
                 if name == "health_check":
-                    return runtime.health_check()
-                runtime._refresh_scope()
-                if name in {"search_records", "find_records", "read_record", "aggregate_records"}:
-                    refusal = check_rate(runtime.instance, name)
-                    if refusal is not None:
-                        from .read_failures import read_failure
-                        return {**refusal, **read_failure(refusal)}
-                result = getattr(runtime, name)(**args)
+                    result = runtime.health_check()
+                else:
+                    runtime._refresh_scope()
+                    if name in {"search_records", "find_records", "read_record", "aggregate_records"}:
+                        refusal = check_rate(runtime.instance, name)
+                        if refusal is not None:
+                            return {**refusal, **tool_failure(refusal)}
+                    result = getattr(runtime, name)(**args)
+                if not isinstance(result, dict):
+                    raise InvalidReadResponseError()
+                response = NATIVE_READ_RESPONSES.get(name, READ_RESPONSES.get(name))
+                try:
+                    response.model_validate(result, strict=True)
+                except ValidationError as exc:
+                    raise InvalidReadResponseError() from exc
                 if name in {"search_employee", "search_holidays"}:
                     result = READ_RESPONSES[name].model_validate(result).model_dump()
+                if result.get("success") is False:
+                    result = {**result, **tool_failure(result)}
         except Exception as exc:
-            from .read_failures import read_failure
-            failure = read_failure(exc)
+            failure = tool_failure(exc)
+            if type(exc) is UnknownFieldsError:
+                failure["error"] = str(exc)
             if name in {"get_odoo_profile", "schema_catalog", "list_instances", "read_attachment"}:
-                result = {"success": False, "tool": name, **failure, "detail": failure["error"], "error": str(exc)}
+                result = {"success": False, "tool": name, **failure, "detail": failure["error"]}
             else:
-                result = {"success": False, **failure, "detail": failure["error"], "error": str(exc)}
-            if isinstance(exc, UnknownFieldsError):
+                result = {"success": False, **failure, "detail": failure["error"]}
+            if type(exc) is UnknownFieldsError:
                 exc.recovery['arguments']['instance'] = instance
                 result["recovery_request"] = exc.recovery
         if name in {"search_employee", "search_holidays"}:
@@ -388,16 +464,11 @@ class NativeReads:
         if runtime is None:
             raise ValueError(f"Unknown Odoo instance {instance!r}")
         client = runtime.client
-        identity = {
-            "instance": runtime.instance, "url": client.url, "database": client.db,
-            "username": client.username, "lang": client.lang,
-            "context": copy.deepcopy(client.context), "transport": client.transport,
-            "credential_scope_sha256": client.scope_fingerprint(),
-        }
-        identity["identity_id"] = hashlib.sha256(json.dumps([
-            runtime.instance, identity["credential_scope_sha256"],
-        ], sort_keys=True).encode()).hexdigest()[:20]
-        return identity
+        return _read_identity(
+            instance=runtime.instance, url=client.url, db=client.db, username=client.username,
+            lang=client.lang, context=client.context, transport=client.transport,
+            fingerprint=client.scope_fingerprint(),
+        )
 
     def world_metadata(self, name: str, arguments: dict[str, Any]) -> dict[str, dict[str, Any]]:
         """Return only metadata already loaded by the read; observation adds no RPC."""
@@ -480,9 +551,14 @@ class NativeReads:
         self.cache_misses += 1
         fields = self.client.get_model_fields(model)
         if isinstance(fields, dict) and "error" not in fields:
+            if any(not isinstance(name, str) or not isinstance(metadata, dict) for name, metadata in fields.items()):
+                raise InvalidReadResponseError()
             self.cache[model] = copy.deepcopy(fields)
             return fields
-        raise ValueError(fields.get("error", "Invalid field metadata") if isinstance(fields, dict) else "Invalid field metadata")
+        if isinstance(fields, dict) and fields.get("error"):
+            # Compatibility clients may still return a legacy error envelope.
+            raise ValueError(fields["error"])
+        raise InvalidReadResponseError()
 
     def _fields(self, model: str, fields: list[str] | None) -> list[str] | None:
         if fields is None:
@@ -514,18 +590,18 @@ class NativeReads:
     def _require_fields(self, model: str, fields: list[str]) -> None:
         denied = self.policy.restricted_fields(self.instance, model, fields)
         if denied:
-            raise ValueError(f"Field policy denies access to {sorted(denied)} on {model}")
+            raise _LocalReadRefusal(f"Field policy denies access to {sorted(denied)} on {model}", "field_policy_denied")
 
     def _field_path(self, model: str, path: str) -> tuple[str, str]:
         if not isinstance(path, str) or not re.fullmatch(r"[a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*)*", path):
-            raise ValueError("Unsupported field path in native read")
+            raise _LocalReadRefusal("Unsupported field path in native read")
         parts = path.split(".")
         for index, field in enumerate(parts):
             self._require_fields(model, [field])
             if index < len(parts) - 1:
                 relation = self._metadata(model).get(field, {}).get("relation")
                 if not relation:
-                    raise ValueError(f"Cannot resolve policy for related field {path}")
+                    raise _LocalReadRefusal(f"Cannot resolve policy for related field {path}", "field_policy_denied")
                 model = relation
         return model, parts[-1]
 
@@ -540,13 +616,13 @@ class NativeReads:
                 if leaf[1] in {"any", "not any", "any!", "not any!"}:
                     relation = self._metadata(parent).get(field, {}).get("relation")
                     if not relation or "!" in leaf[1]:
-                        raise ValueError("Unsupported related-domain policy expression")
+                        raise _LocalReadRefusal("Unsupported related-domain policy expression", "field_policy_denied")
                     self._query_policy(relation, normalize_domain_input(leaf[2]))
         if order:
             for term in order.split(","):
                 field, *direction = term.strip().split()
                 if " ".join(direction).lower() not in {"", "asc", "desc", "asc nulls first", "asc nulls last", "desc nulls first", "desc nulls last"}:
-                    raise ValueError("Unsupported ordering under field policy")
+                    raise _LocalReadRefusal("Unsupported ordering under field policy")
                 self._field_path(model, field)
 
     def _marked_metadata(self, model: str) -> dict[str, Any]:
@@ -652,11 +728,11 @@ class NativeReads:
         query: str | None = None,
     ) -> dict[str, Any]:
         if not 1 <= max_fields <= DEFAULT_MAX_RELEVANT_FIELDS:
-            raise ValueError(
+            raise _LocalReadRefusal(
                 f"max_fields must be between 1 and {DEFAULT_MAX_RELEVANT_FIELDS}"
             )
         if relevance not in (None, "top"):
-            raise ValueError('relevance must be "top" when provided')
+            raise _LocalReadRefusal('relevance must be "top" when provided')
         validate_model_name(model)
         fields = self._metadata(model)
         if field_names:
@@ -741,10 +817,10 @@ class NativeReads:
         if rerank_query is not None:
             rerank_query = str(rerank_query).strip()
             if not rerank_query:
-                raise ValueError("rerank_query must be null or a non-empty string")
+                raise _LocalReadRefusal("rerank_query must be null or a non-empty string")
             top_k = clamp_limit(top_k)
         if offset < 0:
-            raise ValueError("offset must be greater than or equal to 0")
+            raise _LocalReadRefusal("offset must be greater than or equal to 0")
         domain = normalize_domain_input(domain)
         query_fields = None
         if query is not None and str(query).strip():
@@ -805,10 +881,10 @@ class NativeReads:
         """Locate a small, stable page of record identities from a precise domain."""
         normalized_domain = normalize_domain_input(domain)
         if not normalized_domain:
-            raise ValueError("find_records requires a non-empty domain")
+            raise _LocalReadRefusal("find_records requires a non-empty domain")
         limit = clamp_limit(limit, maximum=20)
         if offset < 0:
-            raise ValueError("offset must be greater than or equal to 0")
+            raise _LocalReadRefusal("offset must be greater than or equal to 0")
         validate_model_name(model)
         metadata = self._metadata(model)
         allowed, _ = self.policy.filter_fields(self.instance, model, metadata)
@@ -818,13 +894,13 @@ class NativeReads:
         wanted.extend(field for field in ("default_code", "ref") if field in metadata)
         fields = [field for field in wanted if field in allowed]
         if "id" not in fields:
-            raise ValueError(f"Field policy denies identity reads on {model}")
+            raise _LocalReadRefusal(f"Field policy denies identity reads on {model}", "field_policy_denied")
         page = self.search_records(
             model, domain=normalized_domain, fields=fields, limit=limit + 1,
             offset=offset, order="id",
         )
         if not page.get("success"):
-            return {"success": False, "tool": "find_records", "error": page.get("error", "record lookup failed")}
+            return {**page, "success": False, "tool": "find_records"}
         records = list(page.get("result") or [])
         has_more = len(records) > limit
         # 多读一行探测下一页；额外行不返回。稳定 id 排序便于继续读取。
@@ -848,16 +924,17 @@ class NativeReads:
         an absent quotation.
         """
         if not isinstance(product_ids, list) or not product_ids:
-            raise ValueError("product_ids must be a non-empty list of positive integers")
+            raise _LocalReadRefusal("product_ids must be a non-empty list of positive integers")
         if any(type(value) is not int or value < 1 for value in product_ids):
-            raise ValueError("product_ids must contain only positive integers")
+            raise _LocalReadRefusal("product_ids must contain only positive integers")
         if not isinstance(include_manufacturing, bool):
-            raise ValueError("include_manufacturing must be a boolean")
+            raise _LocalReadRefusal("include_manufacturing must be a boolean")
 
         ids = list(dict.fromkeys(product_ids))
         missing_fields: dict[str, list[str]] = {}
         restricted_fields: dict[str, list[str]] = {}
         read_failures: list[str] = []
+        read_failure_details: list[dict[str, Any]] = []
         warnings: list[str] = []
         completeness: dict[str, dict[str, Any]] = {}
         evidence: list[dict[str, Any]] = []
@@ -894,7 +971,9 @@ class NativeReads:
             try:
                 metadata = self._metadata(model)
             except Exception as exc:
-                reason = f"{model} metadata unavailable: {exc}"
+                failure = tool_failure(exc)
+                read_failure_details.append({"source": source, "model": model, **failure})
+                reason = f"{model} metadata unavailable: {failure['error']}"
                 state.update(complete=False, metadata="unavailable", read_fields=[])
                 state["failures"].append(reason)
                 read_failures.append(reason)
@@ -945,14 +1024,18 @@ class NativeReads:
                         model, domain=domain, fields=fields, limit=100, offset=offset, order="id",
                     )
                 except Exception as exc:
-                    message = f"{model} read failed: {exc}"
+                    failure = tool_failure(exc)
+                    read_failure_details.append({"source": source, "model": model, **failure})
+                    message = f"{model} read failed: {failure['error']}"
                     state.update(complete=False, status="failed")
                     state["failures"].append(message)
                     read_failures.append(message)
                     warnings.append(message)
                     break
                 if not page.get("success"):
-                    message = f"{model} read failed: {page.get('error', 'unknown error')}"
+                    failure = tool_failure(page)
+                    read_failure_details.append({"source": source, "model": model, **failure})
+                    message = f"{model} read failed: {failure['error']}"
                     state.update(complete=False, status="failed")
                     state["failures"].append(message)
                     read_failures.append(message)
@@ -1305,6 +1388,7 @@ class NativeReads:
             "missing_fields": {key: value for key, value in missing_fields.items() if value},
             "restricted_fields": {key: value for key, value in restricted_fields.items() if value},
             "read_failures": list(dict.fromkeys(read_failures)),
+            "read_failure_details": read_failure_details,
             "warnings": list(dict.fromkeys(warnings)),
             "visibility_scope": (
                 "All returned rows are readable under the current identity and record rules. "
@@ -1315,19 +1399,19 @@ class NativeReads:
 
     def read_attachment(self, attachment_id: int, include_data: bool = True) -> dict[str, Any]:
         if attachment_id < 1:
-            raise ValueError("attachment_id must be greater than 0")
+            raise _LocalReadRefusal("attachment_id must be greater than 0")
         model = "ir.attachment"
         fields = ["name", "mimetype", "file_size", "type", "url", "res_model", "res_id", "checksum", "create_date"]
         rows = self.client.execute_method(model, "read", [attachment_id], fields=fields)
         if not isinstance(rows, list) or not rows:
-            raise ValueError(f"Attachment not found: ir.attachment ID {attachment_id}")
+            raise _LocalReadRefusal(f"Attachment not found: ir.attachment ID {attachment_id}", "record_unavailable")
         attachment = dict(rows[0])
         warnings = []
         data = None
         cap = max_attachment_bytes()
         size = int(attachment.get("file_size") or 0)
         if size < 0:
-            raise ValueError("Invalid attachment file_size")
+            raise InvalidReadResponseError()
         binary = str(attachment.get("type") or "binary") == "binary"
         if include_data and self.policy.restricted_fields(self.instance, model, ["datas"]):
             warnings.append("Field policy denies attachment content; content omitted.")
@@ -1341,7 +1425,7 @@ class NativeReads:
                 # Read metadata + data in the same RPC so content cannot be paired with stale metadata.
                 rows = self.client.execute_method(model, "read", [attachment_id], fields=[*fields, "datas"], context={"bin_size": False})
                 if not isinstance(rows, list) or not rows:
-                    raise ValueError(f"Attachment not found: ir.attachment ID {attachment_id}")
+                    raise _LocalReadRefusal(f"Attachment not found: ir.attachment ID {attachment_id}", "record_unavailable")
                 attachment = dict(rows[0])
                 raw = attachment.pop("datas", None)
                 if str(attachment.get("type") or "binary") != "binary":
@@ -1354,9 +1438,9 @@ class NativeReads:
                         if len(decoded) > cap:
                             warnings.append("Attachment content exceeded the cap when fetched; content omitted.")
                         elif int(attachment.get("file_size") or 0) != len(decoded):
-                            raise ValueError("Attachment content size does not match metadata")
+                            raise InvalidReadResponseError()
                         elif attachment.get("checksum") and hashlib.sha1(decoded).hexdigest() != attachment["checksum"]:
-                            raise ValueError("Attachment content checksum does not match metadata")
+                            raise InvalidReadResponseError()
                         else:
                             data = raw
         elif include_data and not binary:
@@ -1377,9 +1461,9 @@ class NativeReads:
     ) -> dict[str, Any]:
         validate_model_name(model)
         if not isinstance(group_by, list) or (not group_by and not measures):
-            raise ValueError("aggregate requires group_by fields or measures")
+            raise _LocalReadRefusal("aggregate requires group_by fields or measures")
         if offset < 0:
-            raise ValueError("offset must be greater than or equal to 0")
+            raise _LocalReadRefusal("offset must be greater than or equal to 0")
         # No silent truncation when the caller omitted a limit.
         bounded_limit = clamp_limit(limit) if limit is not None else 101
         domain = normalize_domain_input(domain)
@@ -1390,7 +1474,7 @@ class NativeReads:
                        for entry in normalized]
         blocked = self.policy.check_aggregate(self.instance, model, referenced)
         if blocked:
-            return {"success": False, "error": blocked}
+            raise _LocalReadRefusal(blocked, "field_policy_denied")
         if self.policy.active():
             for field in referenced:
                 self._field_path(model, field)
@@ -1415,12 +1499,12 @@ class NativeReads:
                 if (not formatted_read_group_missing(exc) or getattr(exc, "status_code", None) in {401, 403}
                         or any(word in str(error).lower() + str(exc).lower() for word in ("accesserror", "access denied", "permission", "accessdenied"))):
                     raise
-                method, reason = "read_group", str(exc)
+                method, reason = "read_group", "formatted_read_group unavailable; used read_group"
                 rows = self.client.execute_method(model, method, **legacy)
         if not isinstance(rows, list):
-            raise ValueError("Invalid aggregate result")
+            raise InvalidReadResponseError()
         if limit is None and len(rows) > 100:
-            raise ValueError("More than 100 aggregate groups; narrow the domain or specify limit/offset")
+            raise _LocalReadRefusal("More than 100 aggregate groups; narrow the domain or specify limit/offset")
         return {
             "success": True, "method": method, "major_version": major, "fallback_reason": reason,
             "model": model, "group_by": group_by, "measures": normalized, "row_count": len(rows), "rows": rows,
@@ -1436,12 +1520,12 @@ class NativeReads:
             try:
                 datetime.strptime(value, "%Y-%m-%d")
             except ValueError:
-                return {"success": False, "error": f"Invalid {key} format. Use YYYY-MM-DD."}
+                raise _LocalReadRefusal(f"Invalid {key} format. Use YYYY-MM-DD.") from None
         start = datetime.strptime(start_date, "%Y-%m-%d")
         if start > datetime.strptime(end_date, "%Y-%m-%d"):
-            raise ValueError("start_date must not be after end_date")
+            raise _LocalReadRefusal("start_date must not be after end_date")
         if employee_id is not None and employee_id < 1:
-            raise ValueError("employee_id must be greater than 0")
+            raise _LocalReadRefusal("employee_id must be greater than 0")
         model = "hr.leave.report.calendar"
         fields = ["display_name", "start_datetime", "stop_datetime", "employee_id", "name", "state"]
         self._require_fields(model, fields)
@@ -1452,7 +1536,7 @@ class NativeReads:
             domain.append(["employee_id", "=", employee_id])
         rows = self.client.search_read(model_name=model, domain=domain, fields=fields, limit=101)
         if len(rows) > 100:
-            raise ValueError("More than 100 holidays; narrow the date range or select an employee")
+            raise _LocalReadRefusal("More than 100 holidays; narrow the date range or select an employee")
         return {"success": True, "result": rows}
 
     def read_record(
@@ -1461,10 +1545,10 @@ class NativeReads:
     ) -> dict[str, Any]:
         validate_model_name(model)
         if (record_id is None) == (record_ids is None):
-            raise ValueError("provide exactly one of record_id or record_ids")
+            raise _LocalReadRefusal("provide exactly one of record_id or record_ids")
         if record_ids is not None:
             if not 1 <= len(record_ids) <= 20 or any(type(i) is not int or i < 1 for i in record_ids):
-                raise ValueError("record_ids must contain 1 to 20 positive integer IDs")
+                raise _LocalReadRefusal("record_ids must contain 1 to 20 positive integer IDs")
             ids = list(dict.fromkeys(record_ids))
             resolved = self._fields(model, fields)
             records = self.client.read_records(model, ids, fields=resolved)
@@ -1474,12 +1558,12 @@ class NativeReads:
                     "smart_fields_applied": fields is None, "redacted_fields": redacted,
                     "missing_ids": [i for i in ids if i not in found]}
         if type(record_id) is not int or record_id < 1:
-            raise ValueError("record_id must be greater than 0")
+            raise _LocalReadRefusal("record_id must be greater than 0")
         resolved = self._fields(model, fields)
         self._single_reads.record(self.instance, model)
         records = self.client.read_records(model, [record_id], fields=resolved)
         if not records:
-            return {"success": False, "error": f"Record not found: {model} ID {record_id}"}
+            raise _LocalReadRefusal(f"Record not found: {model} ID {record_id}", "record_unavailable")
         record, redacted = self.policy.redact_record(self.instance, model, records[0])
         result = {
             "success": True, "result": record,

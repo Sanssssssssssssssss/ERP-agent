@@ -11,8 +11,13 @@ from unittest.mock import patch
 
 from erp_harness.tools.router import native_tool_catalog, route_tools
 from erp_harness.erp._odoo_core.field_policy import FieldPolicy, ModelFieldRule
+from erp_harness.erp._odoo_core.odoo_client import OdooJson2Error
 from erp_harness.erp.reads import NativeReads
 from erp_harness.context.world import WorldStore
+from erp_harness.context.compaction import build_compaction_summary_prompt, build_turn_prefix_summary_prompt
+from erp_harness.context.projection import project_read_history
+from erp_harness.runtime.messages import AssistantMessage, TextContent, ToolResultMessage
+from pydantic_core import to_json
 
 
 class SupplyClient:
@@ -214,6 +219,79 @@ class SupplyContextTest(unittest.TestCase):
         self.assertEqual(result["completeness"]["sources"]["internal_stock"]["pages"], 1)
         self.assertIn("pagination returned a full page without record IDs", " ".join(result["warnings"]))
 
+    def test_partial_related_failures_keep_typed_causes_in_the_model_reply(self):
+        class TypedPartialClient(SupplyClient):
+            def search_read(self, **kwargs):
+                if kwargs["model_name"] == "product.supplierinfo":
+                    raise OdooJson2Error("PRIVATE_BODY supplier failure", status_code=403)
+                if kwargs["model_name"] == "stock.quant":
+                    raise OdooJson2Error("PRIVATE_BODY stock failure", status_code=429)
+                return super().search_read(**kwargs)
+
+        with tempfile.TemporaryDirectory() as directory:
+            reads = NativeReads(TypedPartialClient())
+            tool = next(row for row in route_tools(native_tool_catalog(), Path(directory) / "backends.jsonl",
+                                                   native=reads, native_health=True)
+                        if row.name == "mcp_odoo_read_supply_context")
+            response = asyncio.run(tool.execute("offline-partial", {"product_ids": [2]}))
+        result = json.loads(response.text)
+        self.assertTrue(result["success"])
+        self.assertFalse(result["completeness"]["complete"])
+        failures = {row["model"]: row for row in result["read_failure_details"]}
+        self.assertEqual((failures["product.supplierinfo"]["reason_code"], failures["product.supplierinfo"]["http_status"]),
+                         ("permission_denied", 403))
+        self.assertEqual(failures["product.supplierinfo"]["next_action"], "check_permissions")
+        self.assertEqual((failures["stock.quant"]["reason_code"], failures["stock.quant"]["http_status"]),
+                         ("rate_limited", 429))
+        self.assertEqual(failures["stock.quant"]["next_action"], "wait_then_recheck")
+        self.assertFalse(result["completeness"]["sources"]["supplier_quotes"]["complete"])
+        self.assertFalse(result["completeness"]["sources"]["internal_stock"]["complete"])
+        self.assertNotIn("PRIVATE_BODY", response.text)
+        self.assertEqual(result["read_failure_details"], response.details["structuredContent"]["read_failure_details"])
+
+    def test_large_partial_reply_keeps_diagnostics_in_both_compaction_inputs(self):
+        class PartialClient(SupplyClient):
+            def search_read(self, **kwargs):
+                if kwargs["model_name"] == "product.supplierinfo":
+                    raise OdooJson2Error("PRIVATE_BODY", status_code=403)
+                return super().search_read(**kwargs)
+
+        args = {"product_ids": [2], "include_manufacturing": True}
+        expected = NativeReads(PartialClient()).call("read_supply_context", args)
+        expected.pop("_runtime_evidence")
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "ODOO_URL": "http://fixture", "ODOO_DB": "fixture", "ODOO_USERNAME": "reader",
+            "ODOO_PASSWORD": "test-only", "ODOO_TRANSPORT": "json2",
+        }, clear=True):
+            root = Path(directory)
+            world = WorldStore(root / "world.jsonl")
+            tool = next(row for row in route_tools(native_tool_catalog(), root / "backends.jsonl",
+                                                  native=NativeReads(PartialClient()), world=world, native_health=True)
+                        if row.name == "mcp_odoo_read_supply_context")
+            response = asyncio.run(tool.execute("partial-compaction", args))
+            self.assertGreater(len(response.text), 2000)
+            self.assertEqual(json.loads(response.text), expected)
+            message = ToolResultMessage(tool_call_id="partial-compaction", tool_name=tool.name,
+                                        content=[TextContent(text=response.text)])
+            # Partial reads retain their complete original message, even after consumption.
+            history = [message, *[AssistantMessage(content=[TextContent(text="Consumed.")]) for _ in range(3)]]
+            projected = project_read_history(world, history)
+            self.assertEqual(projected[0].text, response.text)
+            for prompt in (build_compaction_summary_prompt(tuple(projected)),
+                           build_turn_prefix_summary_prompt(tuple(projected))):
+                self.assertIn('"complete":false', prompt)
+                self.assertIn("supplier_quotes", prompt)
+                self.assertIn("permission_denied", prompt)
+                self.assertIn("check_permissions", prompt)
+                self.assertIn('"http_status":403', prompt)
+                self.assertNotIn("PRIVATE_BODY", prompt)
+            receipt = world.receipt_for_call("partial-compaction")
+            self.assertEqual(receipt["visible_payload"], expected)
+            recalled = world.read_observation(receipt["identity"], receipt["receipt_id"],
+                                             path="$.read_failure_details")
+            self.assertEqual(recalled["integrity"], "verified")
+            self.assertIn("permission_denied", json.dumps(recalled))
+
     def test_final_short_page_duplicate_is_not_exposed_twice(self):
         class DuplicateFinalPage(SupplyClient):
             def search_read(self, **kwargs):
@@ -237,6 +315,10 @@ class SupplyContextTest(unittest.TestCase):
                 native_health=True,
             ) if item.name == "mcp_odoo_read_supply_context")
             result = await tool.execute("supply-route", {"product_ids": [2]})
+            expected = NativeReads(SupplyClient()).call("read_supply_context", {"product_ids": [2]})
+            expected.pop("_runtime_evidence")
+            self.assertTrue(expected["completeness"]["complete"])
+            self.assertEqual(result.text, to_json(expected).decode())
             return result, world
 
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {

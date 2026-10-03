@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from erp_harness.runtime.messages import AssistantMessage
+from erp_harness.runtime.messages import AssistantMessage, Usage
 from erp_harness.runtime.tools import ToolCall
 from erp_harness.runtime.types import JSONValue
 
@@ -80,6 +80,7 @@ class ProviderErrorEvent(BaseModel):
     message: str
     data: dict[str, JSONValue] | None = None
     response_provider: str | None = None
+    usage: Usage | None = None
 
 
 type ProviderEvent = (

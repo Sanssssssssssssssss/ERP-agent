@@ -71,6 +71,7 @@ def test_all_observed_unknown_fields_refuse_before_data_rpc_and_offer_discovery(
                'model': row['failed_arguments']['model']}
               for row in read(INDEX.parent / 'tool-self-debug-20261003/fresh-fixed-cases.json')['cases']
               if row['tool'] == 'mcp_odoo_read_record']
+    fresh += read(INDEX.parent / 'tool-self-debug-business-20261003/cases.json')['cases']
     for case in [*read(INDEX), *fresh]:
         if case.get('failure_layer', case.get('failure_kind')) not in {'unknown_field', 'invalid_query_field'}:
             continue
@@ -116,6 +117,7 @@ def test_actual_sop_and_empty_domain_arguments():
 
 def test_actual_schema_argument_calls_are_invalid():
     fresh = read(INDEX.parent / 'self-debug-fresh-20261003/cases.json')['cases']
+    fresh += read(INDEX.parent / 'tool-self-debug-business-20261003/cases.json')['cases']
     for case in [*read(INDEX), *fresh]:
         if case.get('failure_layer', case.get('failure_kind')) not in {'schema_argument', 'schema_argument_limit'}:
             continue
@@ -188,8 +190,9 @@ async def test_actual_observation_paths_and_new_read_replay(tmp_path):
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize('status', ['passed', 'failed'])
-async def test_model_stop_cannot_skip_host_final_verification(tmp_path, status):
+@pytest.mark.parametrize('status,release_status', [
+    ('passed', 'passed'), ('failed', 'passed'), ('passed', 'failed'), ('passed', 'unknown'), ('failed', 'failed')])
+async def test_model_stop_cannot_skip_host_final_verification(tmp_path, status, release_status):
     from types import SimpleNamespace
     from unittest.mock import patch
 
@@ -211,23 +214,27 @@ async def test_model_stop_cannot_skip_host_final_verification(tmp_path, status):
         return httpx.Response(200, text='data: ' + json.dumps(body) + '\n\ndata: [DONE]\n\n',
                               headers={'content-type': 'text/event-stream'})
     verification = {'status': status, 'enforced': True, 'retry_safe': False}
+    release_verification = {'check': 'release_fields_presence', 'status': release_status, 'enforced': True, 'retry_safe': False}
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         with (patch.object(runner.NativeReads, 'from_environment', return_value=actions.reads),
               patch('erp_harness.erp.actions._writer_from_reader', return_value=writer),
               patch('erp_harness.memory.attach', return_value=None),
               patch('erp_harness.erp.purchase_allocation.final_purchase_verification', return_value=verification) as check,
+              patch('erp_harness.erp.task_evidence.final_release_verification', return_value=release_verification) as release_check,
               patch.object(runner, 'OpenAICompatibleProvider', side_effect=lambda config: OpenAICompatibleProvider(config, client=client)),
               patch.dict('os.environ', {'LLM_API_KEY': 'test-only', 'LLM_BASE_URL': 'https://unused.invalid/v1',
                                        'LLM_MODEL': 'deepseek/test', 'LLM_PROVIDER': 'openai-compatible',
                                        'ODOO_TASK_EVIDENCE_FILE': ''})):
-            if status == 'failed':
-                with pytest.raises(RuntimeError, match='final purchase allocation'):
+            if status == 'failed' or release_status != 'passed':
+                with pytest.raises(RuntimeError, match='final purchase allocation' if status == 'failed' else 'release fields'):
                     await runner.run(args)
             else:
                 await runner.run(args)
             check.assert_called_once()
+            release_check.assert_called_once()
     assert len(requests) == 1 and not writer.calls
     assert read(args.receipt_dir / 'purchase-final-verification.json') == verification
+    assert read(args.receipt_dir / 'task-final-verification.json') == release_verification
     assert read(args.usage_file)['modelCalls'] == 1
 
 

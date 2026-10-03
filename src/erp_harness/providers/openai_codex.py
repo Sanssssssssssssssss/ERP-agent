@@ -51,9 +51,12 @@ from erp_harness.providers.openai_cache import openai_prompt_cache_key
 from erp_harness.providers.provider import (
     CancellationToken,
     ProviderHooks,
+    ProviderRequestRejected,
     apply_provider_headers,
     apply_provider_payload,
     emit_provider_response,
+    observe_provider_attempt,
+    wrap_provider_stream,
 )
 from erp_harness.providers.retry import provider_retry_event, retry_delay_seconds, wait_for_retry
 from erp_harness.providers.stream import canonicalize_provider_stream
@@ -160,9 +163,10 @@ class OpenAICodexProvider:
             signal=signal,
             session_id=session_id,
         )
-        return canonicalize_provider_stream(
+        stream = canonicalize_provider_stream(
             raw, api="openai-codex-responses", provider="openai-codex", model=model
         )
+        return wrap_provider_stream(self._config.provider_hooks, stream, raw=raw)
 
     def _stream_provider_events(
         self,
@@ -196,6 +200,9 @@ class OpenAICodexProvider:
             while True:
                 emitted_content = False
                 emitted_thinking = False
+                await observe_provider_attempt(
+                    self._config.provider_hooks, "before_provider_attempt", request_payload, attempt + 1
+                )
                 try:
                     credentials = await self._config.credential_resolver()
                     headers = _build_codex_headers(
@@ -228,6 +235,9 @@ class OpenAICodexProvider:
                                 delay = retry_delay_seconds(
                                     attempt,
                                     max_delay_seconds=self._config.max_retry_delay_seconds,
+                                )
+                                await observe_provider_attempt(
+                                    self._config.provider_hooks, "after_provider_attempt", "retry"
                                 )
                                 yield provider_retry_event(
                                     attempt=attempt,
@@ -285,6 +295,9 @@ class OpenAICodexProvider:
                             attempt,
                             max_delay_seconds=self._config.max_retry_delay_seconds,
                         )
+                        await observe_provider_attempt(
+                            self._config.provider_hooks, "after_provider_attempt", "retry"
+                        )
                         yield provider_retry_event(
                             attempt=attempt,
                             max_retries=self._config.max_retries,
@@ -301,6 +314,9 @@ class OpenAICodexProvider:
                         delay = retry_delay_seconds(
                             attempt,
                             max_delay_seconds=self._config.max_retry_delay_seconds,
+                        )
+                        await observe_provider_attempt(
+                            self._config.provider_hooks, "after_provider_attempt", "retry"
                         )
                         yield provider_retry_event(
                             attempt=attempt,
@@ -321,6 +337,8 @@ class OpenAICodexProvider:
                         data={"attempts": attempt + 1},
                     )
                     return
+                except ProviderRequestRejected:
+                    raise
                 except Exception as exc:  # noqa: BLE001 - provider errors are surfaced as events
                     yield ProviderErrorEvent(message=str(exc), data={"attempts": attempt + 1})
                     return
@@ -350,6 +368,7 @@ class _ToolCallBuilder:
         self.item_id = item_id
         self.name = name
         self.arguments_parts: list[str] = []
+        self.arguments_completed = False
 
     def add_delta(self, delta: str) -> None:
         """Append a streamed tool-argument fragment."""
@@ -358,6 +377,7 @@ class _ToolCallBuilder:
     def set_arguments(self, arguments: str) -> None:
         """Replace streamed tool arguments with final provider arguments."""
         self.arguments_parts = [arguments]
+        self.arguments_completed = True
 
     def update_from_item(self, item: Mapping[str, Any]) -> None:
         """Fill in metadata from a completed function-call item."""
@@ -374,9 +394,9 @@ class _ToolCallBuilder:
     def build(self) -> ToolCall:
         """Build a complete Pi tool call."""
         arguments_text = "".join(self.arguments_parts)
-        arguments = _loads_object(arguments_text) if arguments_text else {}
-        if arguments is None:
-            arguments = {"_raw_arguments": arguments_text}
+        arguments = _loads_object(arguments_text)
+        if arguments is None or not self.arguments_completed:
+            raise ValueError("OpenAI Codex tool arguments must be a complete JSON object")
         item_id = self.item_id or f"fc_{self.call_id}"
         return ToolCall(
             id=f"{self.call_id}|{item_id}",
@@ -580,6 +600,7 @@ async def _codex_provider_events(
     tools_by_call_id: dict[str, _ToolCallBuilder] = {}
     tools_by_output_index: dict[int, _ToolCallBuilder] = {}
     finish_reason: str | None = None
+    terminal_seen = False
     usage: Usage | None = None
 
     async for event in _iter_sse_objects(response):
@@ -597,10 +618,17 @@ async def _codex_provider_events(
             return
 
         if event_type == "response.failed":
+            usage = _usage_from_response(event) or usage
             yield ProviderErrorEvent(
                 message=_response_error_message(event),
                 data={"event": event},
+                usage=usage,
             )
+            return
+
+        if event_type == "response.cancelled":
+            usage = _usage_from_response(event) or usage
+            yield ProviderErrorEvent(message="OpenAI Codex response cancelled", usage=usage)
             return
 
         if event_type == "response.output_item.added":
@@ -640,7 +668,13 @@ async def _codex_provider_events(
                 by_call_id=tools_by_call_id,
                 by_output_index=tools_by_output_index,
             )
-            if tool_builder is not None and isinstance(arguments, str):
+            if tool_builder is not None:
+                if not isinstance(arguments, str):
+                    yield ProviderErrorEvent(
+                        message="OpenAI Codex final tool arguments must be a JSON object string",
+                        usage=usage,
+                    )
+                    return
                 tool_builder.set_arguments(arguments)
 
         elif event_type == "response.output_text.delta":
@@ -695,9 +729,19 @@ async def _codex_provider_events(
                 else:
                     tool_builder.update_from_item(item)
                 arguments = item.get("arguments")
+                if "arguments" in item and not isinstance(arguments, str):
+                    yield ProviderErrorEvent(
+                        message="OpenAI Codex final tool arguments must be a JSON object string",
+                        usage=usage,
+                    )
+                    return
                 if isinstance(arguments, str):
                     tool_builder.set_arguments(arguments)
-                tool_call = tool_builder.build()
+                try:
+                    tool_call = tool_builder.build()
+                except ValueError as exc:
+                    yield ProviderErrorEvent(message=str(exc), usage=usage)
+                    return
                 tool_calls.append(tool_call)
                 _untrack_tool_builder(
                     tool_builder,
@@ -718,9 +762,31 @@ async def _codex_provider_events(
             "response.completed",
             "response.incomplete",
         }:
-            finish_reason = _finish_reason_from_response(event)
+            status = _finish_reason_from_response(event)
             usage = _usage_from_response(event) or usage
+            if event_type == "response.incomplete" or status == "incomplete":
+                finish_reason = "incomplete"
+            elif status in {None, "completed"}:
+                finish_reason = status
+            else:
+                reason = status if status in {"failed", "cancelled", "in_progress", "queued"} else "unrecognized"
+                yield ProviderErrorEvent(
+                    message=f"OpenAI Codex response ended with status {reason}", usage=usage,
+                )
+                return
+            terminal_seen = True
             break
+
+    if not terminal_seen:
+        yield ProviderErrorEvent(
+            message="OpenAI Codex stream ended before a terminal event", usage=usage,
+        )
+        return
+    if active_tools and finish_reason != "incomplete":
+        yield ProviderErrorEvent(
+            message="OpenAI Codex response contains an unfinished tool call", usage=usage,
+        )
+        return
 
     content = assistant_content("".join(content_parts), tool_calls)
     if thinking_parts:

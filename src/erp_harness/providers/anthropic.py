@@ -53,6 +53,8 @@ from erp_harness.providers.provider import (
     apply_provider_headers,
     apply_provider_payload,
     emit_provider_response,
+    observe_provider_attempt,
+    wrap_provider_stream,
 )
 from erp_harness.providers.retry import provider_retry_event, retry_delay_seconds, wait_for_retry
 from erp_harness.providers.stream import canonicalize_provider_stream
@@ -110,9 +112,10 @@ class AnthropicProvider:
         raw = self._stream_provider_events(
             model=model, system=system, messages=messages, tools=tools, signal=signal
         )
-        return canonicalize_provider_stream(
+        stream = canonicalize_provider_stream(
             raw, api="anthropic-messages", provider="anthropic", model=model
         )
+        return wrap_provider_stream(self._config.provider_hooks, stream, raw=raw)
 
     def _stream_provider_events(
         self,
@@ -175,6 +178,9 @@ class AnthropicProvider:
             attempt = 0
             while True:
                 emitted_content = False
+                await observe_provider_attempt(
+                    self._config.provider_hooks, "before_provider_attempt", request_payload, attempt + 1
+                )
                 try:
                     async with client.stream(
                         "POST", url, json=request_payload, headers=headers
@@ -191,6 +197,9 @@ class AnthropicProvider:
                                 delay = retry_delay_seconds(
                                     attempt,
                                     max_delay_seconds=self._config.max_retry_delay_seconds,
+                                )
+                                await observe_provider_attempt(
+                                    self._config.provider_hooks, "after_provider_attempt", "retry"
                                 )
                                 yield provider_retry_event(
                                     attempt=attempt,
@@ -228,7 +237,9 @@ class AnthropicProvider:
                         thinking_signature: str | None = None
                         tool_builders: dict[int, _AnthropicToolBuilder] = {}
                         finish_reason: str | None = None
+                        message_stopped = False
                         usage: Usage | None = None
+                        final_usage_reported = False
 
                         async for line in response.aiter_lines():
                             if signal is not None and signal.is_cancelled():
@@ -258,6 +269,12 @@ class AnthropicProvider:
                                     )
                                     builder.id = _string_or_empty(block.get("id"))
                                     builder.name = _string_or_empty(block.get("name"))
+                                    initial_arguments = block.get("input")
+                                    builder.initial_arguments = (
+                                        initial_arguments
+                                        if isinstance(initial_arguments, dict)
+                                        else None
+                                    )
                                     emitted_content = True
                             elif event_type == "content_block_delta":
                                 delta = chunk.get("delta")
@@ -297,7 +314,15 @@ class AnthropicProvider:
                                     finish_reason = (
                                         _string_or_empty(delta.get("stop_reason")) or finish_reason
                                     )
-                                usage = _apply_message_delta_usage(usage, chunk.get("usage"))
+                                delta_usage = chunk.get("usage")
+                                usage = _apply_message_delta_usage(usage, delta_usage)
+                                if isinstance(delta_usage, Mapping) and _int_or_none(
+                                    delta_usage.get("output_tokens")
+                                ) is not None:
+                                    final_usage_reported = True
+                            elif event_type == "message_stop":
+                                message_stopped = True
+                                break
                             elif event_type == "error":
                                 error_type, message = _anthropic_stream_error_details(chunk)
                                 if (
@@ -310,6 +335,7 @@ class AnthropicProvider:
                                 yield ProviderErrorEvent(
                                     message=message,
                                     data={"event": chunk, "attempts": attempt + 1},
+                                    usage=usage if final_usage_reported else None,
                                 )
                                 return
 
@@ -318,6 +344,9 @@ class AnthropicProvider:
                             delay = retry_delay_seconds(
                                 attempt,
                                 max_delay_seconds=self._config.max_retry_delay_seconds,
+                            )
+                            await observe_provider_attempt(
+                                self._config.provider_hooks, "after_provider_attempt", "retry"
                             )
                             yield provider_retry_event(
                                 attempt=attempt,
@@ -331,9 +360,33 @@ class AnthropicProvider:
                                 return
                             continue
 
-                        tool_calls = [
-                            builder.build(index) for index, builder in sorted(tool_builders.items())
-                        ]
+                        if not message_stopped:
+                            yield ProviderErrorEvent(
+                                message="Anthropic stream ended before message_stop",
+                                usage=usage if final_usage_reported else None,
+                            )
+                            return
+                        if finish_reason not in {
+                            None, "end_turn", "stop_sequence", "tool_use", "max_tokens",
+                        }:
+                            reason = finish_reason if finish_reason in {
+                                "refusal", "pause_turn", "model_context_window_exceeded",
+                            } else "unrecognized"
+                            yield ProviderErrorEvent(
+                                message=f"Anthropic response stopped with reason {reason}",
+                                usage=usage if final_usage_reported else None,
+                            )
+                            return
+                        try:
+                            tool_calls = [] if finish_reason == "max_tokens" else [
+                                builder.build(index)
+                                for index, builder in sorted(tool_builders.items())
+                            ]
+                        except ValueError as exc:
+                            yield ProviderErrorEvent(
+                                message=str(exc), usage=usage if final_usage_reported else None,
+                            )
+                            return
                         for tool_call in tool_calls:
                             yield ProviderToolCallEvent(tool_call=tool_call)
 
@@ -359,6 +412,9 @@ class AnthropicProvider:
                         delay = retry_delay_seconds(
                             attempt,
                             max_delay_seconds=self._config.max_retry_delay_seconds,
+                        )
+                        await observe_provider_attempt(
+                            self._config.provider_hooks, "after_provider_attempt", "retry"
                         )
                         yield provider_retry_event(
                             attempt=attempt,
@@ -422,12 +478,15 @@ class _AnthropicToolBuilder:
         self.id = ""
         self.name = ""
         self.arguments_parts: list[str] = []
+        self.initial_arguments: dict[str, JSONValue] | None = None
 
     def build(self, index: int) -> ToolCall:
         arguments_text = "".join(self.arguments_parts)
-        arguments = _loads_object(arguments_text) if arguments_text else {}
+        arguments = (
+            _loads_object(arguments_text) if self.arguments_parts else self.initial_arguments
+        )
         if arguments is None:
-            arguments = {"_raw_arguments": arguments_text}
+            raise ValueError("Anthropic tool arguments must be a complete JSON object")
         return ToolCall(
             id=self.id or f"tool-call-{index}",
             name=self.name,

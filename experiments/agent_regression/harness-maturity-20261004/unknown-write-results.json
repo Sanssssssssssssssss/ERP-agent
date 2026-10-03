@@ -1,0 +1,143 @@
+{
+  "case_id": "REAL-ODOO-UNKNOWN-WRITE-20261004",
+  "kind": "isolated_offline_fault_integration",
+  "source_commit": "7afb2c27f2a26c7617c8a71798ac92aeff7f6080",
+  "status": "passed",
+  "model_case": false,
+  "result": {
+    "fault_arms": [
+      {
+        "arm": "drop_response",
+        "write_rpc_count": 1,
+        "restart_status": "needs_reconciliation",
+        "blocked_new_payload": "resource_busy",
+        "reconciled": "verified"
+      },
+      {
+        "arm": "kill_after_commit",
+        "write_rpc_count": 1,
+        "restart_status": "needs_reconciliation",
+        "blocked_new_payload": "resource_busy",
+        "reconciled": "verified"
+      }
+    ],
+    "total_actual_write_rpcs": 2,
+    "read_only_reconciliation_with_writes_disabled": true,
+    "ledger": {
+      "verified": 2,
+      "approved_unsent": 2,
+      "unknown_final": 0
+    },
+    "unknown_write_automatic_replay": false,
+    "cached_result_contract": "verified_repeat.replayed=true means a cached verified response; physical write count remains one per arm."
+  },
+  "verification": {
+    "real_odoo": true,
+    "physical_rpc": {
+      "starts": 36,
+      "ends": 35,
+      "end_http_status": {
+        "200": 32,
+        "None": 1,
+        "503": 2
+      },
+      "missing_end": [
+        {
+          "rpc_request_id": "rpc_108eb344c9c4405b9d540ff406f9274e",
+          "model": "res.partner",
+          "method": "write",
+          "backend": "native",
+          "tool_call_id": null,
+          "dispatch_started": true,
+          "event": "start",
+          "at": 1791045684.6473775
+        }
+      ],
+      "missing_end_reason": "Killed our executing child after proxy observed successful ERP commit before delivering response.",
+      "backend_forwarded": 34,
+      "injected_read_blocks": 2,
+      "writes": 2
+    },
+    "offline_controls_passed": 3,
+    "offline_controls": [
+      "tests/test_actions.py::NativeActionCheckpointTests::test_response_loss_reconciles_poststate_without_a_second_send",
+      "tests/test_actions.py::NativeActionCheckpointTests::test_restart_before_send_reclaims_but_after_send_never_resends",
+      "tests/test_interrupted_recovery.py::test_uncertain_write_remains_blocked_and_is_never_replayed"
+    ],
+    "approvals": "Explicit local host approval for each exact fixture write. Two alternative approved payloads remained unsent after resource_busy."
+  },
+  "reproduction": {
+    "entry": ".runtime/harness-maturity-20261004/unknown-write-integration/probe.py",
+    "prepare": ".venv/Scripts/python.exe <fresh-isolated-directory>/probe.py --prepare",
+    "run_once": ".venv/Scripts/python.exe <fresh-isolated-directory>/probe.py --run",
+    "requirements": "Cached erpbench-dynamic-base image, Ubuntu WSL Docker, persistent WSL process, fresh unique output/container/network/database/localhost port and regenerated frozen manifest.",
+    "reuse_gate": "Existing started.json refuses another run. Retain completed receipts; create fresh isolation to repeat."
+  },
+  "usage": {
+    "requests": 0,
+    "fresh_input": 0,
+    "cache_reads": 0,
+    "output_including_reasoning": 0,
+    "reasoning_subset": 0,
+    "compaction": 0,
+    "total_tokens": 0,
+    "cost": null
+  },
+  "official_business_score": null,
+  "limitations": "Two fixed res.partner field writes with synthetic response-loss/process-kill/readback faults. No paid model request, mail delivery, purchase/method task acceptance or ERP-Bench score.",
+  "environment": {
+    "container_retained": "erp-harness-unknownwrite-20261004-7afb",
+    "port": 18241,
+    "later_wsl_idle_exit": "Occurred after successful experiment completion; PostgreSQL only restarted for independent read-only SQL audit."
+  },
+  "private_receipts": [
+    {
+      "path": ".runtime/harness-maturity-20261004/unknown-write-integration/manifest.json",
+      "sha256": "31280421c5d8504e1dd5a9fabafa7f277079893241d66d484ea94891b3978046"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/unknown-write-integration/probe.py",
+      "sha256": "a5fc61579602e8e37e0d7ed33043882a1d58628b8b8d8b651b0265ef95bb5e0d"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/unknown-write-integration/init.sh",
+      "sha256": "46924c7a3a723acb804c2c6a12c7ccb316c305abb00dd0720519d945466d29fa"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/unknown-write-integration/result.json",
+      "sha256": "36f6d3e950b8f2b6352fc029bb5502657af9f18c1e064d8aef8b9dc03f1bb8c3"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/unknown-write-integration/independent-audit.json",
+      "sha256": "0a4803fc08613bb0ac31d271e1e94688af7f358ae40c9395bb51218d6c1792ce"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/unknown-write-integration/proxy-receipts.json",
+      "sha256": "5a2ba6af3ddecda3c2b4a58f80e77b00a0c3891a85d56af88451dc17ad0d9393"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/unknown-write-integration/native-rpc.jsonl",
+      "sha256": "bb24ffb8c4db6a40456bb48186e9f7ee78b7ed11e2f3af9b209d7bbf04434473"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/unknown-write-integration/native-action-audit.jsonl",
+      "sha256": "43c89c235950c7a019434246102e4d2f212d56700ce27d8d9d7cc1cb69943879"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/unknown-write-integration/final-readonly-sql.json",
+      "sha256": "475d9521d737aee7869b141147fdb02f929427889eaea239db88ddffe507b738"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/unknown-write-integration/independent-ledgers.json",
+      "sha256": "48adc6f8ccdf1d4b5423bc78b63cbe230d703d8975d5dff321dfcc8a27ad02b4"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/unknown-write-integration/host-idle-interruption.json",
+      "sha256": "80185cf7b4380c6dd3cb39f92aaed1cb3313471376e87b3ee5fbe642d8887882"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261004/unknown-write-integration/offline-controls.log",
+      "sha256": "54e86496963e504c98e834c33aa83549d3a7b6708607f277fcd7038f88829f7a"
+    }
+  ]
+}

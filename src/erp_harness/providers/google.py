@@ -14,6 +14,7 @@ from erp_harness.runtime.messages import (
     TextContent,
     ThinkingContent,
     ToolResultMessage,
+    Usage,
     UserMessage,
     assistant_content,
     message_to_user,
@@ -39,11 +40,14 @@ from erp_harness.providers.env import OpenAICompatibleConfig
 from erp_harness.providers.events import AssistantMessageEvent
 from erp_harness.providers.http import create_async_client
 from erp_harness.providers.http_errors import provider_http_error_message
+from erp_harness.providers.openai_compatible import _parse_chunk_usage
 from erp_harness.providers.provider import (
     CancellationToken,
     apply_provider_headers,
     apply_provider_payload,
     emit_provider_response,
+    observe_provider_attempt,
+    wrap_provider_stream,
 )
 from erp_harness.providers.retry import provider_retry_event, retry_delay_seconds, wait_for_retry
 from erp_harness.providers.stream import canonicalize_provider_stream
@@ -84,9 +88,10 @@ class GoogleGenerativeAIProvider:
         raw = self._stream_provider_events(
             model=model, system=system, messages=messages, tools=tools, signal=signal
         )
-        return canonicalize_provider_stream(
+        stream = canonicalize_provider_stream(
             raw, api="google-generative-ai", provider="google", model=model
         )
+        return wrap_provider_stream(self._config.provider_hooks, stream, raw=raw)
 
     def _stream_provider_events(
         self,
@@ -125,6 +130,9 @@ class GoogleGenerativeAIProvider:
             parser = _GoogleStreamParser()
             while True:
                 parser = _GoogleStreamParser()
+                await observe_provider_attempt(
+                    self._config.provider_hooks, "before_provider_attempt", request_payload, attempt + 1
+                )
                 try:
                     async with client.stream(
                         "POST", url, json=request_payload, headers=headers
@@ -141,6 +149,9 @@ class GoogleGenerativeAIProvider:
                                 delay = retry_delay_seconds(
                                     attempt,
                                     max_delay_seconds=self._config.max_retry_delay_seconds,
+                                )
+                                await observe_provider_attempt(
+                                    self._config.provider_hooks, "after_provider_attempt", "retry"
                                 )
                                 yield provider_retry_event(
                                     attempt=attempt,
@@ -184,6 +195,9 @@ class GoogleGenerativeAIProvider:
                                 attempt,
                                 max_delay_seconds=self._config.max_retry_delay_seconds,
                             )
+                            await observe_provider_attempt(
+                                self._config.provider_hooks, "after_provider_attempt", "retry"
+                            )
                             yield provider_retry_event(
                                 attempt=attempt,
                                 max_retries=self._config.max_retries,
@@ -202,6 +216,9 @@ class GoogleGenerativeAIProvider:
                         delay = retry_delay_seconds(
                             attempt,
                             max_delay_seconds=self._config.max_retry_delay_seconds,
+                        )
+                        await observe_provider_attempt(
+                            self._config.provider_hooks, "after_provider_attempt", "retry"
                         )
                         yield provider_retry_event(
                             attempt=attempt,
@@ -238,6 +255,8 @@ class _GoogleStreamParser:
         self._thinking_parts: list[str] = []
         self._tool_calls: list[ToolCall] = []
         self._finish_reason: str | None = None
+        self._usage = Usage()
+        self._invalid_tool_arguments = False
 
     @property
     def has_finish_reason(self) -> bool:
@@ -248,6 +267,21 @@ class _GoogleStreamParser:
         if chunk is None:
             self.fatal = True
             return [ProviderErrorEvent(message="Google returned an invalid JSON stream chunk")]
+        raw_usage = chunk.get("usageMetadata")
+        if isinstance(raw_usage, Mapping):
+            candidate_tokens = raw_usage.get("candidatesTokenCount")
+            thoughts = raw_usage.get("thoughtsTokenCount")
+            complete_output = (candidate_tokens + thoughts
+                               if all(isinstance(value, int) and not isinstance(value, bool) and value >= 0
+                                      for value in (candidate_tokens, thoughts)) else None)
+            reported_usage = _parse_chunk_usage({
+                "prompt_tokens": raw_usage.get("promptTokenCount"),
+                "prompt_tokens_details": {"cached_tokens": raw_usage.get("cachedContentTokenCount")},
+                "completion_tokens": complete_output,
+                "completion_tokens_details": {"reasoning_tokens": thoughts},
+                "total_tokens": raw_usage.get("totalTokenCount"),
+            }, preserve_unknown=True)
+            self._usage = self._usage.model_copy(update=reported_usage.model_dump(exclude_unset=True, by_alias=False))
         events: list[ProviderEvent] = []
         candidates = chunk.get("candidates")
         if not isinstance(candidates, list) or not candidates:
@@ -279,6 +313,9 @@ class _GoogleStreamParser:
             function_call = part.get("functionCall")
             if isinstance(function_call, Mapping):
                 self.emitted_content = True
+                if "args" in function_call and not isinstance(function_call["args"], Mapping):
+                    self._invalid_tool_arguments = True
+                    continue
                 default_id = f"tool-call-{len(self._tool_calls)}"
                 thought_signature = part.get("thoughtSignature")
                 tool_call = ToolCall(
@@ -295,13 +332,17 @@ class _GoogleStreamParser:
 
     def finalize(self) -> list[ProviderEvent]:
         if self._finish_reason is None:
-            return [ProviderErrorEvent(message="Google stream ended without finishReason")]
+            return [ProviderErrorEvent(message="Google stream ended without finishReason", usage=self._usage)]
+        if self._finish_reason not in {"STOP", "MAX_TOKENS"}:
+            return [ProviderErrorEvent(message=f"Google rejected response with finishReason={self._finish_reason[:80]}", usage=self._usage)]
+        if self._invalid_tool_arguments:
+            return [ProviderErrorEvent(message="Google returned non-object functionCall.args", usage=self._usage)]
         content = assistant_content("".join(self._content_parts), self._tool_calls)
         if self._thinking_parts:
             content.insert(0, ThinkingContent(thinking="".join(self._thinking_parts)))
         return [
             ProviderResponseEndEvent(
-                message=AssistantMessage(content=content),
+                message=AssistantMessage(content=content, usage=self._usage),
                 finish_reason=_normalize_finish_reason(
                     self._finish_reason, has_tool_calls=bool(self._tool_calls)
                 ),
@@ -536,8 +577,8 @@ def _object_or_empty(value: object) -> dict[str, JSONValue]:
 
 
 def _normalize_finish_reason(reason: str | None, *, has_tool_calls: bool) -> str:
-    if has_tool_calls:
-        return "tool_calls"
     if reason in {"MAX_TOKENS", "MODEL_ARMOR", "RECITATION"}:
         return "length"
+    if has_tool_calls and reason == "STOP":
+        return "tool_calls"
     return "stop"

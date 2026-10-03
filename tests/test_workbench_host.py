@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import copy
+import hashlib
 import io
 import os
 import sqlite3
@@ -13,6 +14,7 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 
@@ -112,6 +114,21 @@ class WorkbenchHostTests(unittest.TestCase):
         with patch("erp_harness.app.host.threading.Thread", wraps=threading.Thread) as threads:
             self.host._consume_worker(run["id"], _EventProcess([]), Path(self.tmp.name) / "missing-usage.json")
         self.assertNotIn("watchdog", [call.kwargs["target"].__name__ for call in threads.call_args_list])
+
+    def test_final_verification_events_keep_distinct_receipts(self):
+        _, run = self._run()
+        purchase = {'status': 'passed', 'enforced': True}
+        release = {'check': 'release_fields_presence', 'status': 'failed', 'enforced': True}
+        process = _EventProcess([
+            {'type': 'business_verification', 'verification': purchase},
+            {'type': 'task_verification', 'verification': release},
+        ])
+        process.returncode = 1
+        self.host._processes[run['id']] = process
+        self.host._consume_worker(run['id'], process, Path(self.tmp.name) / 'missing-usage.json')
+        self.assertEqual(run['business_verification'], purchase)
+        self.assertEqual(run['task_verification'], release)
+        self.assertEqual(run['status'], 'failed')
 
     def test_business_connection_binds_new_business_and_accepts_same_identity(self):
         business = self._business("connection binding")
@@ -257,6 +274,34 @@ class WorkbenchHostTests(unittest.TestCase):
         worker.join(2)
         self.assertFalse(worker.is_alive())
         self.assertEqual(business.get("readback_status"), "ready")
+
+    def test_readback_client_failure_keeps_classification_at_both_host_entries(self):
+        for automatic in (False, True):
+            for error, code, action in (
+                (TimeoutError("token=PRIVATE_TOKEN"), "connection_timeout", "check_connection"),
+                (PermissionError("api_key=PRIVATE_TOKEN"), "permission_denied", "check_permissions"),
+                (ConnectionRefusedError("password=PRIVATE_TOKEN"), "connection_refused", "check_service"),
+            ):
+                with self.subTest(automatic=automatic, code=code):
+                    business, run = self._run(f"client failure {automatic} {code}")
+                    run["status"] = "completed"
+                    run["documents"] = [{"model": "sale.order", "id": 7, "fields": {},
+                                         "observed_at": "2026-01-01T00:00:00Z"}]
+                    business["active_run_id"] = None
+                    self.host.store.data["sessions"][self.sid]["active_run_id"] = None
+                    business["readback"] = {"verification_status": "passed", "checks": [{"status": "passed"}]}
+                    with patch.object(self.host, "_native_reads", side_effect=error):
+                        if automatic:
+                            self.host._refresh_after_completed_run(self.sid, business["id"], run["id"])
+                        else:
+                            self.host.refresh_business(self.sid, business["id"])
+                    readback = business["readback"]
+                    self.assertNotEqual(readback["verification_status"], "passed")
+                    failures = ([readback.get("read_failure", {})] if automatic else
+                                [c.get("read_failure", {}) for c in readback["checks"] if c["name"].startswith("read_")])
+                    self.assertTrue(failures)
+                    self.assertTrue(all(f.get("reason_code") == code and f.get("next_action") == action for f in failures))
+                    self.assertNotIn("PRIVATE_TOKEN", json.dumps(readback))
 
     def test_late_completed_readback_cannot_overwrite_new_active_run(self):
         business, run = self._run("late completion readback")
@@ -1121,6 +1166,113 @@ class WorkbenchHostTests(unittest.TestCase):
         self.assertEqual(result["status"], "scope_mismatch")
         self.assertNotIn("state", result)
 
+    def test_chat_diagnostics_read_selected_run_offline_without_private_payloads(self):
+        business, run = self._run("explain the tool refusal")
+        run.update(status="completed", started_at="2026-10-03T00:00:00Z", phase="model_output",
+                   events=[{"type": "request_finished", "request_id": "request-1", "status": "completed",
+                            "http_status": 200, "error": "PRIVATE_ERROR"}])
+        business["active_run_id"] = None
+        # Conversation active pointers and insertion order must not select another run.
+        self.host.store.data["sessions"][self.sid]["active_run_id"] = "conversation-current"
+        self.host.store.data["runs"]["older-run"] = {**run, "id": "older-run", "started_at": "2026-10-02T00:00:00Z"}
+        directory = self.host.store.root / "runs" / run["id"]
+        (directory / "requests").mkdir(parents=True)
+        (directory / "requests/0001.meta.json").write_text(json.dumps({
+            "run_id": run["id"], "session_id": self.sid, "request_id": "request-1", "tool_call_ids": ["call-1"]}), encoding="utf-8")
+        for name in ("tool-backends.jsonl", "odoo-native-requests.jsonl", "world-observations.jsonl"):
+            (directory / name).write_text("", encoding="utf-8")
+        session_file = self.host._session_file_for_run(run)
+        session_file.parent.mkdir(parents=True, exist_ok=True)
+        session_file.write_text(json.dumps({"message": {"role": "toolResult", "toolCallId": "call-1",
+            "toolName": "mcp_odoo_read_record", "isError": True, "details": {
+                "success": False, "reason_code": "connection_timeout", "error": "PRIVATE_TOOL_BODY"}}}) + "\n", encoding="utf-8")
+        with patch.object(self.host, "_native_reads", side_effect=AssertionError("diagnostics must not connect")):
+            context = self.host._conversation_status_context({"session_id": self.sid, "context_business_id": business["id"]})
+        diagnostic = context["run_diagnostics"]
+        self.assertEqual(diagnostic["run_id"], run["id"])
+        self.assertTrue(diagnostic["snapshot"])
+        self.assertFalse(diagnostic["business_truth"])
+        self.assertIn("captured_at", diagnostic)
+        self.assertEqual(diagnostic["runtime"]["latest_request"]["http_status"], 200)
+        self.assertEqual(diagnostic["items"][0]["error_code"], "connection_timeout")
+        self.assertEqual(diagnostic["items"][0]["resolution_status"], "unknown")
+        for private in ("PRIVATE_", "credential_scope_sha256", str(directory), "test-only"):
+            self.assertNotIn(private, json.dumps(diagnostic))
+        self.assertEqual(self.host.store.data["sessions"][self.sid]["active_run_id"], "conversation-current")
+
+    def test_chat_diagnostics_reject_cross_scope_and_corrupt_paths_before_reading(self):
+        business, run = self._run("diagnostic scope")
+        query = {"session_id": self.sid, "context_business_id": business["id"]}
+        for altered in ({"session_id": "other"}, {"business_id": "other"}, {"id": "../../outside"}):
+            with self.subTest(altered=altered), patch.dict(run, altered), patch(
+                "erp_harness.tools.run_diagnostics.summarize_run", side_effect=AssertionError("scope must fail before reading")):
+                self.assertEqual(self.host._conversation_status_context(query)["run_diagnostics"]["error_code"], "scope_mismatch")
+
+    def test_chat_diagnostics_legacy_headers_do_not_infer_completion_or_read_private_bodies(self):
+        business, run = self._run("legacy model failure")
+        run.update(status="failed", phase="model_output", events=[])
+        directory = self.host.store.root / "runs" / run["id"] / "requests"
+        directory.mkdir(parents=True)
+        # Selecting a numeric request file must not parse its body or an orphan response.
+        (directory / "0057.request.json").write_text("PRIVATE_INVALID_REQUEST", encoding="utf-8")
+        (directory / "9999.response.json").write_text('{"status": 401}', encoding="utf-8")
+        before = copy.deepcopy(self.host.store.data)
+        for status in (520, 200):
+            with self.subTest(status=status):
+                (directory / "0057.response.json").write_text(json.dumps({
+                    "status": status, "request_ids": {}, "private": "PRIVATE_RESPONSE_BODY"}), encoding="utf-8")
+                with patch.object(self.host, "_native_reads", side_effect=AssertionError("must not connect")):
+                    diagnostic = self.host._conversation_status_context({
+                        "session_id": self.sid, "context_business_id": business["id"]})["run_diagnostics"]
+                self.assertEqual(diagnostic["runtime"]["latest_request"], {
+                    "request_id": None, "status": "unknown", "http_status": status,
+                    "request_file": "0057", "source": "legacy_response_headers", "association": "unlinked"})
+                self.assertEqual(diagnostic["runtime"]["status"], "failed")
+                self.assertTrue(diagnostic["snapshot"])
+                self.assertFalse(diagnostic["business_truth"])
+                self.assertNotIn("PRIVATE_", json.dumps(diagnostic))
+                self.assertEqual(self.host.store.data, before)
+
+    def test_chat_diagnostics_legacy_fallback_rejects_damaged_headers_and_current_metadata(self):
+        business, run = self._run("damaged model receipt")
+        run.update(status="failed", events=[])
+        directory = self.host.store.root / "runs" / run["id"] / "requests"
+        directory.mkdir(parents=True)
+        (directory / "0001.request.json").write_text("PRIVATE_REQUEST", encoding="utf-8")
+        response = directory / "0001.response.json"
+        bad = [json.dumps({"status": value}) for value in (True, "520", 99, 600, None, [])]
+        bad += ["[]", "{", " " * 256_001]
+        for content in bad:
+            with self.subTest(content=content[:50]):
+                response.write_text(content, encoding="utf-8")
+                diagnostic = self.host._conversation_status_context({
+                    "session_id": self.sid, "context_business_id": business["id"]})["run_diagnostics"]
+                self.assertEqual(diagnostic["runtime"]["latest_request"], {
+                    "request_id": None, "status": "unknown", "http_status": None})
+        response.write_text('{"status": 520}', encoding="utf-8")
+        # A present new-format receipt is authoritative even when it is damaged.
+        (directory / "0001.meta.json").write_text("{", encoding="utf-8")
+        diagnostic = self.host._conversation_status_context({
+            "session_id": self.sid, "context_business_id": business["id"]})["run_diagnostics"]
+        self.assertIsNone(diagnostic["runtime"]["latest_request"]["http_status"])
+
+    def test_chat_diagnostics_current_events_take_precedence_over_legacy_headers(self):
+        business, run = self._run("current request")
+        directory = self.host.store.root / "runs" / run["id"] / "requests"
+        directory.mkdir(parents=True)
+        (directory / "0057.request.json").write_text("{}", encoding="utf-8")
+        (directory / "0057.response.json").write_text('{"status": 520}', encoding="utf-8")
+        for event in ({"type": "request_started", "request_id": "current-1", "status": "running"},
+                      {"type": "request_finished", "request_id": "current-1", "status": "completed", "http_status": 200}):
+            with self.subTest(event=event):
+                run["events"] = [event]
+                diagnostic = self.host._conversation_status_context({
+                    "session_id": self.sid, "context_business_id": business["id"]})["run_diagnostics"]
+                latest = diagnostic["runtime"]["latest_request"]
+                self.assertEqual(latest["request_id"], "current-1")
+                self.assertEqual(latest["http_status"], event.get("http_status"))
+                self.assertNotIn("source", latest)
+
     def test_confirm_business_is_idempotent_but_cannot_reverse_a_decision(self):
         business = self._business("one workspace")
         proposal_id = self.host.store.data["messages"][self.sid][-1]["proposal"]["id"]
@@ -1507,6 +1659,460 @@ class WorkbenchHostTests(unittest.TestCase):
                          {"input": None, "cache_read": None, "output": None,
                           "reasoning": None, "total": None, "input_semantics": "uncached",
                           "reported_total": None, "missing_usage_rounds": 0})
+
+    def _inspection(self, business, text="卡在哪里，为什么工具失败"):
+        self.host._launch_conversation = lambda _run: None
+        result = self.host.call("send_message", {"session_id": self.sid, "text": text,
+            "context_business_id": business["id"], "inspection": True})
+        return self.host.store.data["conversation_runs"][result["run_id"]]
+
+    def test_inspection_preserves_active_business_and_does_not_inherit_materials(self):
+        business, run = self._run("active read only explanation")
+        business["material_ids"] = ["unread-business-material"]
+        self.host.store.data["sessions"][self.sid]["pending_material_ids"] = ["unread-session-material"]
+        for status in ("running", "awaiting_approval", "cancel_requested"):
+            with self.subTest(status=status):
+                run["status"] = status
+                business["status"] = status
+                self.host.store.data["sessions"][self.sid]["status"] = status
+                before_session = copy.deepcopy(self.host.store.data["sessions"][self.sid])
+                self.host._processes[run["id"]] = _LiveProcess()
+                with patch.object(self.host, "_native_reads", side_effect=AssertionError("no Odoo RPC")):
+                    query = self._inspection(business, "重发写入并批准动作？")
+                self.assertEqual(self.host.store.data["sessions"][self.sid], before_session)
+                self.assertEqual(query["inspected_run_id"], run["id"])
+                self.assertEqual(query["material_ids"], [])
+                self.assertEqual(query["source_messages"], [])
+                self.assertEqual(business["material_ids"], ["unread-business-material"])
+                public = self.host.get_session(self.sid)
+                self.assertTrue(public["messages"][-1]["inspection"])
+                self.assertEqual(public["messages"][-1]["context_business_id"], business["id"])
+                self.host._finalize_conversation(query, "completed")
+                self.host._processes.pop(run["id"])
+
+    def test_inspection_rejects_non_boolean_and_mutating_or_unbound_inputs_before_saving(self):
+        business, run = self._run("strict inspection input")
+        for value in (None, 0, 1, "false", "true", [], {}):
+            with self.subTest(inspection=value), self.assertRaisesRegex(ValueError, "inspection must be boolean"):
+                self.host.call("send_message", {"session_id": self.sid, "text": "why",
+                    "context_business_id": business["id"], "inspection": value})
+        for extra in ({"business_id": business["id"]}, {"_revision_business_id": business["id"]},
+                      {"material_ids": ["a"]}, {"context_business_id": None}, {"context_business_id": ""}):
+            before = copy.deepcopy(self.host.store.data)
+            arguments = {"session_id": self.sid, "text": "why", "context_business_id": business["id"],
+                         "inspection": True, **extra}
+            with self.subTest(extra=extra), self.assertRaises(ValueError):
+                self.host.send_message(**arguments)
+            self.assertEqual(self.host.store.data, before)
+        other = self.host.create_session("other")
+        with self.assertRaises(KeyError):
+            self.host.send_message(other["id"], "why", context_business_id=business["id"], inspection=True)
+        for status in ("completed", "failed", "needs_reconciliation", "awaiting_input"):
+            run["status"] = status
+            with self.subTest(status=status), self.assertRaises(ValueError):
+                self._inspection(business)
+
+    def test_inspection_rejects_second_query_and_other_active_scope(self):
+        business, run = self._run("one query")
+        query = self._inspection(business)
+        before = copy.deepcopy(self.host.store.data)
+        with self.assertRaises(RuntimeError):
+            self._inspection(business)
+        self.assertEqual(self.host.store.data, before)
+        self.host._finalize_conversation(query, "completed")
+        for blocker in ("process", "business", "session", "closing"):
+            with self.subTest(blocker=blocker):
+                if blocker == "process":
+                    self.host._processes["unrelated"] = _LiveProcess()
+                elif blocker == "business":
+                    self.host.store.data["runs"]["unrelated"] = {**run, "id": "unrelated"}
+                elif blocker == "session":
+                    other = self.host.create_session("other")
+                    self.host.store.data["sessions"][other["id"]]["active_run_id"] = "unrelated"
+                else:
+                    self.host._closing = True
+                with self.assertRaises(RuntimeError):
+                    self._inspection(business)
+                self.host._processes.pop("unrelated", None)
+                self.host.store.data["runs"].pop("unrelated", None)
+                if blocker == "session":
+                    self.host.store.data["sessions"][other["id"]]["active_run_id"] = None
+                self.host._closing = False
+
+    def test_inspection_launch_uses_local_snapshot_without_connection_preflight(self):
+        business, run = self._run("offline Odoo failure explanation")
+        query = self._inspection(business)
+        business_process = _LiveProcess()
+        self.host._processes[run["id"]] = business_process
+        self.host._odoo_health = {"connected": False}
+        opened = []
+        query_process = _LiveProcess()
+        with patch.dict(os.environ, {"LLM_API_KEY": "model-test", "LLM_BASE_URL": "https://model.test", "LLM_MODEL": "test"}), \
+             patch.object(self.host, "check_connection", side_effect=AssertionError("inspection preflight must be local")), \
+             patch.object(self.host, "_native_reads", side_effect=AssertionError("inspection must not authenticate")), \
+             patch.object(self.host, "_open_worker", side_effect=lambda *args: opened.append(args) or query_process), \
+             patch("erp_harness.app.host.threading.Thread"):
+            Workbench._launch_conversation(self.host, query)
+        self.assertEqual(query["status"], "running")
+        self.assertIs(self.host._processes[run["id"]], business_process)
+        self.assertIs(self.host._processes[query["id"]], query_process)
+        self.assertEqual(opened[0][3]["ERP_CONVERSATION_MODE"], "inspection")
+        self.assertEqual(opened[0][3]["ERP_CONVERSATION_BUSINESS_ID"], business["id"])
+        context_file = Path(opened[0][3]["ERP_CONVERSATION_BUSINESS"])
+        context = json.loads(context_file.read_text(encoding="utf-8"))
+        self.assertEqual(context["run_diagnostics"]["run_id"], run["id"])
+        self.assertTrue(context["run_diagnostics"]["snapshot"])
+        self.assertIn("captured_at", context["run_diagnostics"])
+        self.assertFalse(context["run_diagnostics"]["business_truth"])
+        self.assertEqual(json.loads(Path(opened[0][3]["ERP_CONVERSATION_SOURCES"]).read_text(encoding="utf-8")), [])
+        normal = {**query, "inspection": False}
+        self.assertNotEqual(self.host._session_file_for_run(query), self.host._session_file_for_run(normal))
+        self.assertNotEqual(self.host._session_file_for_run(query), self.host._session_file_for_run(run))
+        self.assertNotEqual(self.host._session_file_for_run(query), self.host._session_file_for_run({**query, "context_business_id": "other"}))
+        self.assertNotEqual(self.host._session_file_for_run(query), self.host._session_file_for_run({**query, "conversation_scope": "0" * 16}))
+
+    def test_inspection_snapshot_never_switches_to_a_new_active_business_run(self):
+        business, run = self._run("fixed snapshot target")
+        query = self._inspection(business)
+        replacement = {**run, "id": "replacement-run"}
+        self.host.store.data["runs"][replacement["id"]] = replacement
+        business["active_run_id"] = replacement["id"]
+        with patch.object(self.host, "_native_reads", side_effect=AssertionError("must stay offline")):
+            snapshot = self.host._conversation_status_context(query)["run_diagnostics"]
+        self.assertEqual(snapshot["run_id"], run["id"])
+        with patch.object(self.host, "_open_worker", side_effect=AssertionError("stale query must not launch")):
+            Workbench._launch_conversation(self.host, query)
+        self.assertEqual(query["status"], "failed")
+        self.assertEqual(self.host.store.data["sessions"][self.sid]["active_run_id"], run["id"])
+
+    def test_inspection_events_and_final_message_keep_the_captured_business_scope(self):
+        business, run = self._run("stream scopes")
+        query = self._inspection(business)
+        events = []
+        self.host._event_sink = events.append
+        for current, text in ((run, "business"), (query, "query")):
+            self.host._message_delta(current, {"message_id": "same-id", "text": text, "sequence": 1})
+            self.assertEqual(current["live_messages"][0]["run_id"], current["id"])
+            if current is query:
+                self.assertEqual(current["live_messages"][0]["inspected_run_id"], run["id"])
+            self.host._message_end(current, {"message_id": "same-id", "text": text, "sequence": 2})
+            self.host._message_end(current, {"message_id": "same-id", "text": text, "sequence": 2})
+        rows = [m for m in self.host.get_session(self.sid)["messages"] if m.get("id") == "same-id"]
+        self.assertEqual(len(rows), 2)
+        query_message = next(row for row in rows if row["run_id"] == query["id"])
+        self.assertTrue(query_message["inspection"])
+        self.assertEqual(query_message["context_business_id"], business["id"])
+        self.assertEqual(query_message["inspected_run_id"], run["id"])
+        query_events = [e for e in events if e["data"].get("run_id") == query["id"]]
+        self.assertTrue(all(e["data"]["inspection"] and e["data"]["inspected_run_id"] == run["id"] for e in query_events))
+
+    def test_inspection_worker_completion_keeps_business_process_pointer_and_usage(self):
+        business, run = self._run("independent worker completion")
+        query = self._inspection(business)
+        run["usage"] = {"total": 91}
+        business_process = _LiveProcess()
+        self.host._processes[run["id"]] = business_process
+        process = _EventProcess([
+            {"type": "turn_end", "message": {"role": "assistant", "content": [{"type": "text", "text": "快照显示正在等待模型"}],
+             "stop_reason": "stop", "usage": {"input": 1, "cacheRead": 0, "output": 2, "reasoning": 0, "totalTokens": 3}}},
+            {"type": "message_end", "message_id": "inspection-answer", "text": "快照显示正在等待模型", "sequence": 1},
+        ])
+        self.host._processes[query["id"]] = process
+        self.host._consume_worker(query["id"], process, Path(self.tmp.name) / "inspection-usage.json")
+        self.assertEqual(query["status"], "completed")
+        self.assertEqual(query["usage"]["total"], 3)
+        self.assertEqual(run["usage"], {"total": 91})
+        self.assertIs(self.host._processes[run["id"]], business_process)
+        self.assertNotIn(query["id"], self.host._processes)
+        self.assertEqual(self.host.store.data["sessions"][self.sid]["active_run_id"], run["id"])
+
+    def test_inspection_cancel_is_independent_of_business_cancel_and_unknown_write(self):
+        business, run = self._run("unknown write stays unresolved")
+        query = self._inspection(business)
+        business_process, query_process = _LiveProcess(), _LiveProcess()
+        self.host._processes.update({run["id"]: business_process, query["id"]: query_process})
+        self.host.cancel_conversation(self.sid, query["id"])
+        self.assertTrue(query_process.terminated)
+        self.assertFalse(business_process.terminated)
+        self.assertEqual(run["status"], "running")
+        self.host._processes.pop(query["id"])
+        self.host._finalize_conversation(query, "cancelled")
+        self.assertEqual(self.host.store.data["sessions"][self.sid]["active_run_id"], run["id"])
+        next_query = self._inspection(business)
+        next_process = _LiveProcess()
+        self.host._processes[next_query["id"]] = next_process
+        self.host.cancel_run(self.sid, business["id"], run["id"])
+        self.assertTrue(business_process.terminated)
+        self.assertFalse(next_process.terminated)
+        self.host._processes.pop(run["id"])
+        with patch.object(self.host, "_ledger_statuses", return_value={"action-unknown": "sending"}):
+            self.host._finalize_run(run, "cancelled")
+        self.assertEqual(run["status"], "needs_reconciliation")
+        self.host._finalize_conversation(next_query, "completed")
+        self.assertEqual(run["status"], "needs_reconciliation")
+
+    def test_last_approval_continues_same_business_while_inspection_is_running(self):
+        business, run = self._run("approval concurrent with explanation")
+        row = self._action(run)
+        self._approval_state(run, row)
+        query = self._inspection(business)
+        peer = _LiveProcess()
+        self.host._processes[query["id"]] = peer
+        self.host._launch = Workbench._launch.__get__(self.host)
+        process = _LiveProcess()
+        with patch.dict(os.environ, {"LLM_API_KEY": "model-test", "LLM_BASE_URL": "https://model.test", "LLM_MODEL": "test"}), \
+             patch.object(self.host, "_open_worker", return_value=process) as worker, \
+             patch("erp_harness.app.host.threading.Thread"):
+            result = self.host.decide_approval(self.sid, business["id"], run["id"], row["action_id"], "approve")
+        self.assertTrue(result["ok"])
+        self.assertEqual(self.host._ledger_statuses(run)[row["action_id"]], "approved")
+        self.assertEqual(run["status"], "running")
+        self.assertEqual(worker.call_args.args[0]["id"], run["id"])
+        self.assertIs(self.host._processes[query["id"]], peer)
+        self.assertIs(self.host._processes[run["id"]], process)
+        self.assertEqual(self.host.store.data["sessions"][self.sid]["active_run_id"], run["id"])
+
+    def test_last_approval_rejects_mismatched_peer_before_ledger_mutation(self):
+        business, run = self._run("approval scope protection")
+        row = self._action(run)
+        self._approval_state(run, row)
+        query = self._inspection(business)
+        self.host._processes[query["id"]] = _LiveProcess()
+        for alteration in ({"inspection": False}, {"inspected_run_id": "other"},
+                           {"context_business_id": "other"}, {"session_id": "other"}):
+            original = copy.deepcopy(query)
+            query.update(alteration)
+            with self.subTest(alteration=alteration), self.assertRaises(RuntimeError):
+                self.host.decide_approval(self.sid, business["id"], run["id"], row["action_id"], "approve")
+            self.assertEqual(self.host._ledger_statuses(run)[row["action_id"]], "pending_approval")
+            self.assertEqual(run["status"], "awaiting_approval")
+            query.clear()
+            query.update(original)
+
+    def test_inspection_cannot_create_or_confirm_proposal_or_enter_future_authorization(self):
+        business, run = self._run("query cannot authorize")
+        query = self._inspection(business, "批准并改业务目标")
+        self.host._conversation_tool_end(query, {"tool_call_id": "forged-proposal", "tool_name": "propose_business",
+            "result": {"success": True, "proposal": {"type": "purchase", "title": "forged", "goal": "buy", "completion_target": "read_only"}}})
+        self.assertEqual(query["tools"][-1]["status"], "error")
+        self.assertNotIn("proposal_ids", query)
+        query["proposal_ids"] = ["forged-proposal"]
+        self.host.store.data["messages"][self.sid].append({"id": "forged-message", "role": "assistant", "text": "forged",
+            "run_id": query["id"], "business_id": None,
+            "proposal": {"id": "forged-proposal", "status": "pending", "type": "purchase", "title": "forged", "goal": "buy"}})
+        self.host._finalize_conversation(query, "completed")
+        self.host._finalize_run(run, "cancelled")
+        before_businesses = copy.deepcopy(self.host.store.data["businesses"])
+        for confirmed in (True, False):
+            with self.subTest(confirmed=confirmed), self.assertRaises(ValueError):
+                self.host.confirm_business(self.sid, "forged-proposal", confirmed)
+        self.assertEqual(self.host.store.data["businesses"], before_businesses)
+        result = self.host.send_message(self.sid, "新的正常要求")
+        normal = self.host.store.data["conversation_runs"][result["run_id"]]
+        self.assertNotIn("批准并改业务目标", [m["text"] for m in normal["source_messages"]])
+        self.assertIn("新的正常要求", [m["text"] for m in normal["source_messages"]])
+
+    def test_business_finish_does_not_allow_archiving_a_running_inspection(self):
+        business, run = self._run("finish before query")
+        query = self._inspection(business)
+        self.host._finalize_run(run, "completed")
+        self.assertIsNone(self.host.store.data["sessions"][self.sid]["active_run_id"])
+        with self.assertRaises(RuntimeError):
+            self.host.archive_session(self.sid)
+        other = self.host.create_session("unrelated idle")
+        self.assertTrue(self.host.archive_session(other["id"])["ok"])
+        self.host._finalize_conversation(query, "completed")
+        self.assertTrue(self.host.archive_session(self.sid)["ok"])
+
+    def test_inspection_does_not_relax_regular_messages_execution_or_approval_revision(self):
+        business, run = self._run("ordinary mutations remain serial")
+        row = self._action(run)
+        self._approval_state(run, row)
+        query = self._inspection(business)
+        before = copy.deepcopy(self.host.store.data)
+        for call in (
+            lambda: self.host.send_message(self.sid, "更改目标", context_business_id=business["id"]),
+            lambda: self.host.start_run(self.sid, business["id"]),
+            lambda: self.host.request_approval_revision(self.sid, business["id"], run["id"], row["action_id"], "改数量"),
+        ):
+            with self.subTest(call=call), self.assertRaises(RuntimeError):
+                call()
+            self.assertEqual(self.host.store.data, before)
+        self.host._finalize_run(run, "cancelled")
+        with self.assertRaises(RuntimeError):
+            self.host.send_message(self.sid, "业务结束后普通聊天仍须等待查询完成")
+        self.host._finalize_conversation(query, "completed")
+        self.assertTrue(self.host.send_message(self.sid, "现在正常聊天")["ok"])
+
+    def test_inspection_question_does_not_invalidate_an_existing_normal_proposal_source(self):
+        business, run = self._run("normal proposal provenance")
+        self.host._finalize_run(run, "cancelled")
+        self.host._launch_conversation = lambda _run: None
+        normal_id = self.host.send_message(self.sid, "只查看采购草稿")["run_id"]
+        normal = self.host.store.data["conversation_runs"][normal_id]
+        self.host._conversation_tool_end(normal, {"tool_call_id": "normal-proposal", "tool_name": "propose_business",
+            "result": {"success": True, "proposal": {"type": "purchase", "title": "采购查询", "goal": "只查看采购草稿", "completion_target": "read_only"}}})
+        self.host._finalize_conversation(normal, "completed")
+        self.host.start_run(self.sid, business["id"])
+        query = self._inspection(business, "查询旧运行有没有工具错误")
+        self.host._finalize_run(self.host.store.data["runs"][query["inspected_run_id"]], "cancelled")
+        self.host._finalize_conversation(query, "completed")
+        result = self.host.confirm_business(self.sid, normal["proposal_ids"][0], True)
+        self.assertEqual(result["goal"], "只查看采购草稿")
+        self.assertNotIn("查询旧运行有没有工具错误", [m["text"] for m in result["source_messages"]])
+
+
+class ReleaseFieldHostTests(unittest.TestCase):
+    setUp = WorkbenchHostTests.setUp
+    tearDown = WorkbenchHostTests.tearDown
+    source_text = "供应商甲\n确认采购单前计划日期不得为空。"
+    rule: ClassVar[dict] = {"model": "purchase.order", "method": "button_confirm", "fields": ["date_planned"],
+            "quote": "确认采购单前计划日期不得为空。"}
+
+    def _candidate(self, *, existing=None, rules=None, include_rules=True, text=None, metadata=None):
+        self.metadata_calls = []
+        def call(name, arguments):
+            if name == "get_model_fields":
+                self.metadata_calls.append(copy.deepcopy(arguments))
+                return metadata if metadata is not None else {"success": True, "result": {
+                    "date_planned": {"readonly": False, "type": "datetime", "string": "计划日期"}}}
+            self.assertEqual(name, "search_records")
+            return {"success": True, "result": [{"id": 5, "name": "供应商甲"}]}
+        self.host._native_reads = lambda: SimpleNamespace(call=call)
+        self.host._launch_conversation = lambda _run: None
+        run = self.host.store.data["conversation_runs"][self.host.send_message(
+            self.sid, text or self.source_text, context_business_id=existing)["run_id"]]
+        proposal = {"type": "purchase", "title": "采购确认", "goal": "确认采购单并保留计划日期", "completion_target": "confirmed",
+                    "references": [{"resource": "contact", "id": 5, "quote": "供应商甲"}]}
+        if include_rules:
+            proposal["release_fields"] = copy.deepcopy([self.rule] if rules is None else rules)
+        if existing:
+            proposal["existing_business_id"] = existing
+        # A worker's projection never supplies source binding or field authorization.
+        proposal["resolved_release_fields"] = [{"model": "purchase.order", "method": "button_confirm", "fields": ["forged"],
+                                               "source_message_id": "forged", "field_labels": {"date_planned": "forged"}}]
+        self.host._conversation_tool_end(run, {"tool_call_id": "proposal", "tool_name": "propose_business",
+                                             "result": {"success": True, "proposal": proposal}})
+        self.host._finalize_conversation(run, "completed")
+        row = next((m["proposal"] for m in self.host.store.data["messages"][self.sid] if m.get("proposal", {}).get("id") in run.get("proposal_ids", [])), None)
+        return run, row
+
+    def test_candidate_confirm_contract_and_before_send_guard_share_the_confirmed_fields(self):
+        from erp_harness.app.host import build_task_contract
+        from erp_harness.erp.task_evidence import TaskEvidence
+        from tests.test_actions import _actions
+
+        run, proposal = self._candidate()
+        self.assertEqual(len(self.metadata_calls), 1)
+        projected = proposal["resolved_release_fields"][0]
+        self.assertEqual(projected["fields"], ["date_planned"])
+        self.assertEqual(projected["field_labels"], {"date_planned": "计划日期"})
+        self.assertEqual(projected["source_message_id"], run["source_message_id"])
+        self.assertEqual(self.host.store.data["businesses"], {})
+        business = self.host.confirm_business(self.sid, proposal["id"], True)
+        self.assertEqual(len(self.metadata_calls), 2)
+        path = self.host._instruction(business, "field-contract-run")
+        contract = json.loads(path.with_name("task-sources.json").read_text(encoding="utf-8"))
+        self.assertEqual(contract["release_fields"], [{"model": "purchase.order", "method": "button_confirm", "fields": ["date_planned"]}])
+        self.assertNotIn("quote", contract["release_fields"][0])
+        self.assertIn("Confirmed release field presence", path.read_text(encoding="utf-8"))
+        self.assertEqual(contract["release_fields"], build_task_contract(business, path.read_text(encoding="utf-8"))["release_fields"])
+        self.assertEqual(contract["instruction_sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
+        actions, writer, runtime = _actions(path=Path(self.tmp.name) / "guard.sqlite3")
+        with closing(actions.store):
+            runtime.client.metadata["date_planned"] = {"type": "datetime", "readonly": False}
+            runtime.client.records["purchase.order"][8].update(date_planned=False, partner_id=5)
+            runtime.client.records.setdefault("res.partner", {})[5] = {"id": 5, "name": "供应商甲"}
+            actions.task_evidence = TaskEvidence(actions.reads, contract, Path(self.tmp.name) / "field-evidence.json")
+            with patch.dict(os.environ, {"ODOO_MCP_ENABLE_WRITES": "1", "ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS": "purchase.order.button_confirm"}):
+                result = actions.execute_method("purchase.order", "button_confirm", kwargs={"ids": [8]})
+            self.assertFalse(result["success"], result)
+            self.assertIn("date_planned", result["error"])
+            self.assertEqual(writer.calls, [])
+
+    def test_confirm_rechecks_metadata_and_reports_distinct_deduplicated_host_feedback(self):
+        from erp_harness.app.conversation import ReleaseFieldError
+        _, proposal = self._candidate()
+        for reply, code in [({"success": False, "reason_code": "permission_denied", "http_status": 403, "error": "PRIVATE"}, "permission_denied"),
+                            ({"success": True, "result": {"date_planned": {"readonly": True}}}, "release_field_readonly")]:
+            self.host._native_reads = lambda reply=reply: SimpleNamespace(call=lambda *_args: reply)
+            for _ in range(2):
+                with self.assertRaises(ReleaseFieldError) as error:
+                    self.host.confirm_business(self.sid, proposal["id"], True)
+                self.assertEqual(error.exception.failure["reason_code"], code)
+            self.assertEqual(proposal["status"], "pending")
+            self.assertEqual(self.host.store.data["businesses"], {})
+        feedback = [m for m in self.host.store.data["messages"][self.sid] if m.get("host_feedback_key")]
+        self.assertEqual(len(feedback), 2)
+        self.assertTrue(all("提案未确认" in m["text"] and m["reason_code"] not in m["text"] for m in feedback))
+        prompt = self.host._conversation_prompt(self.sid, "为什么没有确认", None)
+        self.assertIn("Previous host feedback", prompt)
+        self.assertIn("只读", prompt)
+        self.assertNotIn("PRIVATE", prompt)
+
+    def test_host_rejection_creates_safe_feedback_without_saving_a_candidate(self):
+        run, proposal = self._candidate(metadata={"success": False, "reason_code": "connection_timeout", "error": "PRIVATE"})
+        self.assertIsNone(proposal)
+        self.assertEqual(run["tools"][-1]["result"]["next_action"], "check_connection")
+        feedback = [m for m in self.host.store.data["messages"][self.sid] if m.get("host_feedback_key")]
+        self.assertEqual(len(feedback), 1)
+        self.assertIn("提案未保存", feedback[0]["text"])
+        self.assertNotIn("PRIVATE", json.dumps(feedback))
+        self.assertEqual(self.host.store.data["businesses"], {})
+
+    def test_goal_update_retains_confirmed_rule_and_original_source_when_model_omits_it(self):
+        _, proposal = self._candidate()
+        business = self.host.confirm_business(self.sid, proposal["id"], True)
+        original = copy.deepcopy(business["resolved_release_fields"])
+        _, amendment = self._candidate(existing=business["id"], include_rules=False, text="供应商甲\n同时检查采购单状态。")
+        self.assertEqual(amendment["release_fields"], [self.rule])
+        self.assertEqual(amendment["resolved_release_fields"], original)
+        self.assertIn(self.source_text, [m["text"] for m in amendment["source_messages"]])
+        updated = self.host.confirm_business(self.sid, amendment["id"], True)
+        self.assertEqual(updated["resolved_release_fields"], original)
+        self.assertEqual(updated["release_fields"], [self.rule])
+
+    def test_existing_rule_cannot_be_changed_or_cleared_and_unresolved_business_cannot_confirm(self):
+        from erp_harness.app.conversation import ReleaseFieldError
+        _, proposal = self._candidate()
+        business = self.host.confirm_business(self.sid, proposal["id"], True)
+        for rules in ([], [{**self.rule, "fields": ["other"]}]):
+            with self.subTest(rules=rules):
+                _, amendment = self._candidate(existing=business["id"], rules=rules)
+                self.assertIsNone(amendment)
+                self.assertEqual(self.metadata_calls, [])
+                self.assertEqual(business["release_fields"], [self.rule])
+        _, amendment = self._candidate(existing=business["id"], include_rules=False, text="供应商甲\n增加查看采购单状态。")
+        before = copy.deepcopy(business)
+        business["status"] = "needs_reconciliation"
+        self.host._native_reads = lambda: self.fail("unknown writes must be reconciled before field validation")
+        with self.assertRaises(RuntimeError):
+            self.host.confirm_business(self.sid, amendment["id"], True)
+        self.assertEqual(business["goal"], before["goal"])
+        self.assertEqual(amendment["status"], "pending")
+        with self.assertRaises(ReleaseFieldError) as error:
+            self.host._proposal_release_fields(self.sid, {**amendment, "completion_target": "read_only"}, amendment["source_messages"])
+        self.assertEqual(error.exception.failure["reason_code"], "release_fields_read_only")
+
+    def test_source_binding_rejects_other_session_and_inspection_and_changed_source(self):
+        from erp_harness.app.conversation import ReleaseFieldError
+        _, proposal = self._candidate()
+        source = proposal["source_messages"][0]
+        for change in ("foreign", "inspection"):
+            original = next(m for m in self.host.store.data["messages"][self.sid] if m["id"] == source["id"])
+            original["inspection"] = change == "inspection"
+            invalid = {**source, "id": "other-session"} if change == "foreign" else source
+            with self.subTest(change=change), self.assertRaises(ReleaseFieldError):
+                self.host._proposal_release_fields(self.sid, proposal, [invalid])
+            original.pop("inspection", None)
+        original["text"] += "需求已变更"
+        self.host._native_reads = lambda: self.fail("changed source must not authenticate")
+        with self.assertRaises(ValueError):
+            self.host.confirm_business(self.sid, proposal["id"], True)
+        feedback = [m for m in self.host.store.data["messages"][self.sid] if m.get("host_feedback_key")]
+        self.assertEqual(feedback[-1]["reason_code"], "release_source_invalid")
+        self.assertEqual(proposal["status"], "pending")
+        self.assertEqual(self.host.store.data["businesses"], {})
 
 
 if __name__ == "__main__":

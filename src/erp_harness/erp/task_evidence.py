@@ -32,6 +32,10 @@ class TaskHandoff(ValueError):
         self.code, self.next_action = code, next_action
 
 
+class MissingReleaseFields(ValueError):
+    """A current read proved that host-required release fields are empty."""
+
+
 def failure_result(error: Exception | dict, *, code: str | None = None,
                    stage: str = "unknown", next_action: str | None = None,
                    write_dispatch_started: bool | None = None) -> dict:
@@ -73,7 +77,7 @@ def failure_result(error: Exception | dict, *, code: str | None = None,
     elif isinstance(error, dict) and error.get("error"):
         # Existing action refusals are local, public contract text, not transport bodies.
         result["error"] = error["error"]
-    elif type(error) is ValueError and error.__cause__ is None and error.__context__ is None:
+    elif type(error) in {ValueError, MissingReleaseFields} and error.__cause__ is None and error.__context__ is None:
         # Local preconditions explain what must change; Odoo exceptions are subclasses.
         result["error"] = str(error)
         if cause["reason_code"] == "tool_failed_unknown":
@@ -287,7 +291,8 @@ class TaskEvidence:
             peers = self._search(scope["purchases"], ["id"]) if scope.get("purchases") else orders
             report = inspect_purchase_allocation(self.reads.instances[self.instance],
                 sorted({*ids, *(r["id"] for r in peers)}), [r["id"] for r in allowed],
-                minimum=scope.get("minimum_per_origin", 1e-6), product_id=scope["product_id"])
+                minimum=scope.get("minimum_per_origin", 1e-6), product_id=scope["product_id"],
+                include_split_diagnostic=False)
             if report["status"] != "passed":
                 self._event("rejected", reason="purchase_demand_allocation", report=report)
                 raise PurchaseAllocationError({**report, "instance": self.instance})
@@ -342,7 +347,7 @@ class TaskEvidence:
         missing = {record_id: names for record_id, names in missing.items() if names}
         if missing:
             self._event("rejected", model=model, reason="missing_release_fields", missing=missing)
-            raise ValueError(f"{model}.{payload['method']} requires the host-requested fields before release; missing by record: {missing}. Set these fields explicitly; a different computed field does not satisfy this requirement.")
+            raise MissingReleaseFields(f"{model}.{payload['method']} requires the host-requested fields before release; missing by record: {missing}. Set these fields explicitly; a different computed field does not satisfy this requirement.")
         self._event("release_fields_checked", model=model, fields=fields, record_ids=ids)
         return [["release_fields", model, rows]]
 
@@ -522,3 +527,60 @@ class TaskEvidence:
                     if all((row[k][0] if isinstance(row.get(k), list) and row[k] else row.get(k)) == v for k, v in bound.items()):
                         found[record_id] = {"id": record_id, "action_id": action["action_id"], "fields": row}
         return list(found.values())
+
+
+def final_release_verification(actions):
+    """Recheck fields of released records; this does not prove the whole task complete."""
+    task = getattr(actions, "task_evidence", None)
+    result = {"check": "release_fields_presence", "status": "not_applicable",
+              "enforced": False, "retry_safe": False}
+    if not task or not task.release_fields:
+        return result
+    result["spec_sha256"] = task.digest
+    relevant = {(r["model"], r["method"]) for r in task.release_fields}
+    try:
+        rows = [row for path in dict.fromkeys([*task.ledger_paths, actions.store.path])
+                for row in ActionStore.read_receipts(path)]
+        if any(row.get("status") in {"sending", "executing", "needs_reconciliation", "unknown"} for row in rows):
+            return {**result, "status": "unknown", "enforced": True, "reason": "unresolved_write",
+                    "next_action": "reconcile_without_replay"}
+        releases = []
+        for row in rows:
+            payload = row.get("payload") or {}
+            # Check before filtering: a damaged method/model must not hide a release.
+            if row.get("status") == "verified" and row.get("payload_sha256") != ActionStore.digest(payload):
+                return {**result, "status": "unknown", "enforced": True,
+                        "reason": "receipt_integrity_unverified", "next_action": "inspect_action_receipt"}
+            if (row.get("status") != "verified" or row.get("kind") != "method"
+                    or (payload.get("model"), payload.get("method")) not in relevant):
+                continue
+            if (row.get("session_id") != (task.session_id or os.environ.get("PI_AGENT_SESSION_ID", "local"))
+                    or row.get("identity") != task.identity
+                    or row.get("identity_sha256") != ActionStore.digest(task.identity)):
+                return {**result, "status": "unknown", "enforced": True,
+                        "reason": "release_scope_mismatch", "next_action": "verify_identity_and_task_scope"}
+            try:
+                task._identity_check(payload["instance"], (payload.get("kwargs") or {}).get("context"))
+            except ValueError:
+                return {**result, "status": "unknown", "enforced": True,
+                        "reason": "release_identity_or_context_changed", "next_action": "verify_identity_and_task_scope"}
+            releases.append(row)
+        if not releases:
+            # A conditional release rule does not require a draft to be released.
+            return {**result, "reason": "no_observed_release"}
+        result.update(enforced=True, action_ids=[row["action_id"] for row in releases])
+        sources, checked = [], set()
+        for row in releases:
+            key = ActionStore.digest(row["payload"])
+            if key not in checked:
+                sources.extend(task.release_check(row["payload"]))
+                checked.add(key)
+        return {**result, "status": "passed", "sources": sources}
+    except MissingReleaseFields as exc:
+        return {**result, "status": "failed", "enforced": True, "reason": "missing_release_fields",
+                "error": str(exc), "next_action": "inspect_host_required_fields"}
+    except Exception as exc:  # noqa: BLE001 - readback cannot authorize a retry
+        cause = tool_failure(exc)
+        return {**result, "status": "unknown", "enforced": True,
+                "reason": "release_evidence_unavailable", "read_failure": cause,
+                "next_action": cause["next_action"]}
