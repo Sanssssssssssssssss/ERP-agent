@@ -387,13 +387,136 @@
     "new_paid_failure_cases": 0,
     "business_control": {
       "case": "2279",
-      "status": "running",
+      "status": "failed_original_consolidation_rule",
       "source_commit": "1238985301bcecebc0ae942914b5ee1ac6ea815d",
       "frozen": {
         "path": ".runtime/harness-maturity-20261003/business-patchset5-2279/frozen.json",
         "sha256": "19a0224b70814b42261e34f3e93592fb0df036abedf7ef02d76206bfe0887a2a"
       },
-      "scope": "Original task, verifier and null task-evidence scope; single run, no automatic paid retry."
+      "scope": "Original task, verifier and null task-evidence scope; single run, no automatic paid retry.",
+      "result": {
+        "overall_score": 21.09,
+        "passed": false,
+        "constraint": {
+          "earned": 27,
+          "total": 32
+        },
+        "hygiene": {
+          "earned": 6,
+          "total": 6
+        },
+        "optimality": {
+          "score": 100.0,
+          "total": 100.0
+        }
+      },
+      "usage": {
+        "request_count": 29,
+        "fresh_input": 225989,
+        "cache_reads": 1632128,
+        "output_including_reasoning": 78010,
+        "reasoning_subset": 69581,
+        "compaction": 0,
+        "total_tokens": 1936127,
+        "cost": null
+      },
+      "causal_request": "0022",
+      "first_corrective_request": null,
+      "independent_audit": {
+        "path": ".runtime/harness-maturity-20261003/business-patchset5-2279/private/independent-audit-2279.json",
+        "sha256": "766f96d0b12e6702b2f3b8fa5c0ed7bd6ae202c42242b2a54c7350e26671baea"
+      }
     }
+  },
+  "sixth_patchset": {
+    "commits": [
+      "520bf61",
+      "a46523b",
+      "00d340e",
+      "638bf44"
+    ],
+    "verification": {
+      "path": ".runtime/harness-maturity-20261003/patchset6-verification.json",
+      "sha256": "50c1ee7717a9eaaf091db858b4cfbd2426922ca290093197f86d3e9a54ea2da2"
+    },
+    "bindings": [
+      {
+        "category": "provider_terminal_and_truncation",
+        "origin": "offline_real_parser_to_loop_fault_controls",
+        "case_id": null,
+        "fix_commit": "520bf61",
+        "before": {
+          "path": ".runtime/harness-maturity-20261003/provider-terminal/before-manifest.json",
+          "sha256": "5b95b1f212b464b3d382d27f9dc87f960c038c2b08f7260f6ed3f8fd42a60668"
+        },
+        "after": {
+          "path": ".runtime/harness-maturity-20261003/provider-terminal/after-manifest.json",
+          "sha256": "af51564ef0b66130bb989a037e3b0f408b8dd5f577e4aab73e7f0f7cc0fa0757"
+        },
+        "offline_tests": [
+          "tests/runtime/test_pi_ai.py",
+          "tests/runtime/test_agent_loop.py",
+          "tests/test_request_receipts.py",
+          "tests/test_runner_budget.py"
+        ],
+        "boundary": "20 offline terminal controls; no incomplete tools dispatched, valid finishes preserved. No new paid failure case invented."
+      },
+      {
+        "category": "partial_capability_and_group_diagnostics",
+        "origin": "offline_native_transport_and_metadata_controls",
+        "case_id": null,
+        "fix_commit": "00d340e",
+        "before": {
+          "path": ".runtime/harness-maturity-20261003/capability-partial-review/before.json",
+          "sha256": "20135a1d3a6f91f834431070747a2635040144cf8795d234a3f6d7a693e5986f"
+        },
+        "review": {
+          "path": ".runtime/harness-maturity-20261003/acl-m2m/review.json",
+          "sha256": "f2e84fbdfe04472e9ed438f637f774fc0129ee39dc347e3fd27a9c8b8e56bcba"
+        },
+        "offline_tests": [
+          "tests/test_capability_failures.py",
+          "bench/reference/tests/test_capabilities.py"
+        ],
+        "boundary": "Native shared adapter keeps typed failures and bounded partial causes; malformed group relations stay unknown. Diagnostic groups do not authorize writes."
+      },
+      {
+        "category": "typed_argument_error_priority",
+        "origin": "comparison_test_failure_and_actual_normalization_producer",
+        "case_id": null,
+        "fix_commit": "a46523b",
+        "before": {
+          "path": ".runtime/harness-maturity-20261003/typed-validation/before.json",
+          "sha256": "348c0aabc25cdb3f615bef3ceaaeff1af56e75365dcb6fec6a5716f583870b56"
+        },
+        "after": {
+          "path": ".runtime/harness-maturity-20261003/typed-validation/after.json",
+          "sha256": "6767bf357725b955dbd2060cfc0abc8c23629ad4941a031e29d48e888c454fe8"
+        },
+        "independent_review": {
+          "path": ".runtime/harness-maturity-20261003/reference-contract/review.json",
+          "sha256": "144582efe31b6efb21f9fba3559855cae76215b1ec671fd8493f6a215b6598dd"
+        },
+        "offline_tests": [
+          "tests/test_connection_awareness.py"
+        ],
+        "boundary": "Pydantic extra_forbidden is a parameter error, not text-derived permission denial. HTTP/authentication and typed bad-output causes retain precedence."
+      },
+      {
+        "category": "reference_compatibility_contract",
+        "origin": "CI37115952913",
+        "case_id": null,
+        "fix_commit": "638bf44",
+        "independent_review": {
+          "path": ".runtime/harness-maturity-20261003/reference-contract/review.json",
+          "sha256": "144582efe31b6efb21f9fba3559855cae76215b1ec671fd8493f6a215b6598dd"
+        },
+        "offline_tests": [
+          "bench/reference/tests/test_native_reads.py"
+        ],
+        "boundary": "Legacy fields and RPCs still compared; diagnostic additions explicitly asserted. Normal instance listing must actually succeed."
+      }
+    ],
+    "paid_requests": 0
   }
 }

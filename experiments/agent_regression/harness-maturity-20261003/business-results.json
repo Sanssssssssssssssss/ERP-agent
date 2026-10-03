@@ -4,7 +4,7 @@
     "path": ".runtime/harness-maturity-20261003/business-patchset1/business-review.json",
     "sha256": "5c813b36849570e7ce5f5f03d33886628eec0471eda8759c15e304a5ee4ba91f"
   },
-  "boundary": "Three original ERP-Bench scorers with unchanged task/scope, one fresh attempt per case. 2010/2066 use source7153a79, 2279 uses c55f8ee; fourth-patch classifier/active-inspection changes are not included in these business runs.",
+  "boundary": "Four original ERP-Bench executions with unchanged task/scorer and per-run frozen source. First three passed; the 1238985 control of 2279 failed purchase consolidation. Source-specific mechanisms and business constraints are reported separately.",
   "model": "deepseek/deepseek-v4.1-flash",
   "reasoning_effort": "high",
   "baseline_tag": "harness-maturity-baseline-20261003",
@@ -379,30 +379,207 @@
         "enforced": false,
         "retry_safe": false
       }
+    },
+    {
+      "case": "2279",
+      "source_commit": "1238985301bcecebc0ae942914b5ee1ac6ea815d",
+      "source_tree_sha256": "cc3c3434328d0171ded22ca0404ccc3560aa880f06dca3f8913bbc012b83b980",
+      "wheel_sha256": "e472552759b85ae508e4ae9bf119120275bfd98d60e68c6f9b4dd052dc44a64d",
+      "config_sha256": "0b99f4521702ebe4e78524661717115a42fa7b579d9f508cec337304f3d10e9d",
+      "task_hashes": {
+        "instruction.md": "d7167e55c093f3a3ebb90a6f91cfe91ab081db914049378aaf6bebe082c0a20e",
+        "task.toml": "4954bf2715283a787748e8884a6775721e80eb634047f4c766eb3eb5ede310ef",
+        "environment/Dockerfile": "67a64f460f9aa70678a95812ee7f1c30d85450ab9b4cc30fa6ce6ce69bb4e2c8",
+        "environment/entrypoint.sh": "17081066295528704b6c9af5c66864884ea682640bcc9a154b03e862fe8ccbc5",
+        "environment/odoo.conf": "30a5cd6cdc5f0e10926ad5d3a9f424e0826fe6bcbbb785d4ef0aeedc7628a6c8",
+        "environment/scenario_data.json": "3eb90fc0f287cbf93d56d98d326e38077455ff4901370203aafa0cd937da9769",
+        "environment/setup_scenario.py": "1a532a2f1c1cb68fb965e4ca5d072528b4b4a992327685de71ffa0000ac94714",
+        "solution/optimal_plan.json": "63bb64143b5567cdb115abcbdc917e26f0e37e2c701480195ab7c01f39ffc625",
+        "solution/solve.sh": "6636bbbf181b0f746e988eef95de06c52dd33e32b60d8b213aee49ce140a5f06",
+        "solution/solver.py": "9f11be45e75129efe262b3571d1aacc8817d0a85de6b162a726b47a038bfa7ec",
+        "tests/checks.py": "51d0b02cfb91297747f54b645dcb1710e77929d226d2edccd332d9c54f208fc6",
+        "tests/test.sh": "6ab8f3f3cbc14afc31593614fc3467c0fda6209b79e6eef30c1efad17d234cb2"
+      },
+      "task_scope_sha256": null,
+      "official_reward": {
+        "overall_score": 21.09,
+        "passed": false,
+        "constraint": {
+          "earned": 27,
+          "total": 32
+        },
+        "hygiene": {
+          "earned": 6,
+          "total": 6
+        },
+        "optimality": {
+          "score": 100.0,
+          "total": 100.0
+        }
+      },
+      "official_failed_rules": [
+        {
+          "dimension": "constraint",
+          "rule": "po_consolidation_compliance",
+          "args": [],
+          "expr": "po_consolidation_compliance",
+          "status": "FAIL",
+          "passed": false,
+          "applicable": true
+        }
+      ],
+      "official_reward_path": ".runtime/harness-maturity-20261003/business-patchset5-2279/jobs/2279/harness-maturity-patchset5-2279-20261003/2279_easy_repair_plan_easy__iXt7nmr/verifier/reward.json",
+      "official_reward_sha256": "34fa968bc55cdba0ac9f49c3d590fadf659c618630a4f795d41f6522b0102197",
+      "runner_stop_reason": "stop",
+      "harbor_exception_type": "ValidationError",
+      "harbor_nested_reward_parser_only": true,
+      "derived_report": ".runtime/harness-maturity-20261003/business-patchset5-2279/reports/2279/index.html",
+      "iteration": "patchset5",
+      "usage": {
+        "request_count": 29,
+        "fresh_input": 225989,
+        "cache_reads": 1632128,
+        "output_including_reasoning": 78010,
+        "reasoning_subset": 69581,
+        "compaction": 0,
+        "total_tokens": 1936127,
+        "cost": null
+      },
+      "usage_complete": true,
+      "action_status_counts": {
+        "verified": 4
+      },
+      "final_purchase_verification": {
+        "status": "passed",
+        "scope": {
+          "purchase_ids": [
+            2,
+            3,
+            4
+          ],
+          "sale_order_ids": [
+            3,
+            4
+          ],
+          "coverage": "selected documents only; include every competing PO in this business",
+          "surplus_policy": "direct sales demand; surplus stock and BOM components require separate evidence"
+        },
+        "checks": [
+          {
+            "purchase_id": 3,
+            "quantity": 15.0,
+            "source_capacity": 19.0,
+            "origins": [
+              "S00003",
+              "S00004"
+            ],
+            "status": "passed"
+          },
+          {
+            "purchase_id": 4,
+            "quantity": 4.0,
+            "source_capacity": 19.0,
+            "origins": [
+              "S00003",
+              "S00004"
+            ],
+            "status": "passed"
+          },
+          {
+            "company_id": 1,
+            "product_id": 2,
+            "unit_id": 1,
+            "status": "passed",
+            "reason": "shared_demand_capacity"
+          }
+        ],
+        "feasible_allocation": [
+          {
+            "purchase_id": 3,
+            "sale_order_id": 3,
+            "quantity": 10.999999,
+            "product_id": 2,
+            "unit_id": 1
+          },
+          {
+            "purchase_id": 3,
+            "sale_order_id": 4,
+            "quantity": 4.000000999999998,
+            "product_id": 2,
+            "unit_id": 1
+          },
+          {
+            "purchase_id": 4,
+            "sale_order_id": 3,
+            "quantity": 1e-06,
+            "product_id": 2,
+            "unit_id": 1
+          },
+          {
+            "purchase_id": 4,
+            "sale_order_id": 4,
+            "quantity": 3.9999990000000003,
+            "product_id": 2,
+            "unit_id": 1
+          }
+        ],
+        "notice": "Feasibility evidence, not an actual reservation, write approval or ERP-Bench score.",
+        "enforced": false,
+        "policy_notice": "Observed direct sales links only. Stock surplus/BOM policy needs a host-confirmed contract.",
+        "retry_safe": false
+      },
+      "limitations": [
+        "Original null task-evidence scope; four verified actions do not establish complete business acceptance.",
+        "Selected-source quantity feasibility does not check purchase consolidation.",
+        "No automatic paid retry."
+      ],
+      "causal_request": "0022",
+      "first_corrective_request": null,
+      "independent_audit": {
+        "path": ".runtime/harness-maturity-20261003/business-patchset5-2279/private/independent-audit-2279.json",
+        "sha256": "766f96d0b12e6702b2f3b8fa5c0ed7bd6ae202c42242b2a54c7350e26671baea"
+      },
+      "tool_calls": 88,
+      "tool_refusals": 3,
+      "unknown_write": {
+        "observed": false,
+        "automatic_replay_observed": false
+      },
+      "failure": {
+        "kind": "actual_business_constraint_false",
+        "rule": "po_consolidation_compliance",
+        "model_root": "0022 explicitly preserves existing Indigo PO12 while proposing separate Indigo PO4 on the same supplier offer; capacity/cost reasoning omitted consolidation",
+        "tool_contract_root": "read_purchase_allocation checks origin membership and shared demand capacity, not vendor-offer consolidation; the complete [1,3,4] read also passed",
+        "runtime_root": "No host-bound consolidation rule; null task scope keeps auto final capacity verification observational and only selects ledger-touched POs",
+        "final_verification_root": "STOP check excludes untouched PO1 and proves only selected allocation; scope expansion alone cannot cover an absent constraint",
+        "scorer_root": "No scorer exception for this rule; original checker deterministically rejects two PO IDs resolving to the same offer",
+        "harbor_parser_boundary": "Nested reward parser ValidationError is separate and does not cause the business score",
+        "score_formula": "constraints below 100% => (27/32*100)*0.25 = 21.09; optimality100 does not rescue a failed constraint"
+      }
     }
   ],
   "aggregate_usage": {
-    "request_count": 96,
-    "fresh_input": 507935,
-    "cache_reads": 4998528,
-    "output_including_reasoning": 144611,
-    "reasoning_subset": 118566,
+    "request_count": 125,
+    "fresh_input": 733924,
+    "cache_reads": 6630656,
+    "output_including_reasoning": 222621,
+    "reasoning_subset": 188147,
     "compaction": 0,
-    "total_tokens": 5651074,
+    "total_tokens": 7587201,
     "cost": null
   },
   "current_goal_usage_including_local_api": {
-    "request_count": 98,
-    "fresh_input": 513040,
-    "cache_reads": 5092736,
-    "output_including_reasoning": 145729,
-    "reasoning_subset": 119141,
+    "request_count": 127,
+    "fresh_input": 739029,
+    "cache_reads": 6724864,
+    "output_including_reasoning": 223739,
+    "reasoning_subset": 188722,
     "compaction": 0,
-    "total_tokens": 5751505,
+    "total_tokens": 7687632,
     "cost": null
   },
   "goal_token_budget": 100000000,
-  "remaining_known_token_budget": 94248495,
+  "remaining_known_token_budget": 92312368,
   "historical_baseline_tokens_excluded_from_current_goal": 3680054,
   "sources": [
     {
@@ -412,6 +589,10 @@
     {
       "path": ".runtime/harness-maturity-20261003/business-patchset2-2279/business-review.json",
       "sha256": "df0bac1475d94054cf4051e8b00dc72ea6edd2834ca7fd64fc62dc0d52ace887"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261003/business-patchset5-2279/business-review.json",
+      "sha256": "3919405ad86b473015c2e31f232003c17a3b3c35eb35aa3418a3a0c19eeaa58c"
     }
   ],
   "local_api_results": [
