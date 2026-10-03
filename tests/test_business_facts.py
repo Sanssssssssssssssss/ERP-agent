@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import unittest
 
-from erp_harness.erp.business_facts import BusinessFacts
+from erp_harness.erp.business_facts import BusinessFacts, attach_business_facts
 
 
 class _Client:
@@ -103,7 +103,89 @@ class BusinessFactsTests(unittest.TestCase):
                     values["bom_id"] = bom_id
                 report = _facts(self.data).inspect({"model": "mrp.production", "operation": "create", "values": values})
                 self.assertEqual(report["facts"][0]["diagnostic_status"], status)
-                self.assertEqual(bool(report["issues"]), status == "violated")
+                self.assertEqual(any(issue["severity"] == "error" for issue in report["issues"]), status == "violated")
+                if status == "unavailable":
+                    self.assertEqual(report["issues"][0]["severity"], "warning")
+                    self.assertEqual(report["issues"][0]["status"], "unavailable")
+
+    def test_incomplete_schedule_reports_exact_fields_without_rejecting_a_draft(self):
+        for field in ("bom_id", "date_start", "date_deadline"):
+            for value in (None, False, "", "invalid"):
+                with self.subTest(field=field, value=value):
+                    values = {"bom_id": 1, "date_start": "2026-09-12", "date_deadline": "2026-09-14"}
+                    values[field] = value
+                    report = _facts(self.data).inspect({
+                        "model": "mrp.production", "operation": "create", "instance": "factory",
+                        "values": values,
+                    })
+                    fact, issue = report["facts"][0], report["issues"][0]
+                    self.assertEqual(fact["diagnostic_status"], "unavailable")
+                    self.assertEqual(fact["unavailable_fields"], [field])
+                    self.assertEqual(issue["unavailable_fields"], [field])
+                    self.assertEqual((issue["code"], issue["severity"], issue["status"]),
+                                     ("manufacturing_schedule_unavailable", "warning", "unavailable"))
+                    self.assertEqual(issue["recovery_request"], {
+                        "tool": "mcp_odoo_get_model_fields", "arguments": {
+                            "model": "mrp.production", "instance": "factory", "field_names": [field, "date_finished"],
+                        },
+                    })
+                    self.assertIn("host-confirmed task", issue["message"])
+                    self.assertIn("unfinished drafts", issue["message"])
+                    result = attach_business_facts({"success": True, "approval_status": {"status": "pending"}}, report)
+                    self.assertTrue(result["success"])
+                    self.assertEqual(result["approval_status"], {"status": "pending"})
+                    self.assertEqual(result["business_issues"], report["issues"])
+
+    def test_computed_finish_does_not_hide_missing_deadline(self):
+        report = _facts(self.data).inspect({
+            "model": "mrp.production", "operation": "create", "values": {
+                "bom_id": 1, "date_start": "2026-09-12", "date_finished": "2026-09-14",
+            },
+        })
+        self.assertEqual(report["facts"][0]["unavailable_fields"], ["date_deadline"])
+        self.assertEqual(report["facts"][0]["lead_based_earliest_finish"], "2026-09-14 00:00:00")
+        self.assertIn("date_finished does not replace date_deadline", report["issues"][0]["message"])
+
+    def test_incomplete_warning_and_actual_timing_conflict_remain_separate(self):
+        cases = (
+            ({"origin": "S00001", "date_start": "2026-09-12", "date_deadline": "2026-09-17"},
+             "bom_id", "deadline_after_linked_demand_need"),
+            ({"bom_id": 1, "origin": "S00001", "date_start": "2026-09-15"},
+             "date_deadline", "linked_demand_before_supply_available"),
+        )
+        for values, field, code in cases:
+            with self.subTest(field=field):
+                report = _facts(self.data).inspect({"model": "mrp.production", "operation": "create", "values": values})
+                self.assertEqual(report["facts"][0]["diagnostic_status"], "violated")
+                warning, error = report["issues"]
+                self.assertEqual((warning["severity"], warning["status"], warning["unavailable_fields"]),
+                                 ("warning", "unavailable", [field]))
+                self.assertEqual((error["code"], error["severity"], error["status"]), (code, "error", "violated"))
+
+    def test_batch_incomplete_proposals_are_located_without_marking_valid_rows(self):
+        report = _facts(self.data).inspect({
+            "model": "mrp.production", "operation": "create", "values_list": [
+                {"bom_id": 1, "date_start": "2026-09-12", "date_deadline": "2026-09-14"},
+                {"bom_id": 1, "date_start": "2026-09-13"},
+                {"date_deadline": "2026-09-14"},
+            ],
+        })
+        self.assertEqual([fact["diagnostic_status"] for fact in report["facts"]], ["pass", "unavailable", "unavailable"])
+        self.assertEqual([issue["proposal_index"] for issue in report["issues"]], [1, 2])
+        self.assertEqual([issue["unavailable_fields"] for issue in report["issues"]],
+                         [["date_deadline"], ["bom_id", "date_start"]])
+
+    def test_incomplete_update_identifies_actual_record(self):
+        self.data["mrp.production"][6] = {
+            "id": 6, "name": "WH/MO/00006", "bom_id": 1, "date_start": "2026-09-12",
+            "date_deadline": False, "origin": "",
+        }
+        report = _facts(self.data).inspect({
+            "model": "mrp.production", "operation": "write", "record_ids": [6], "values": {"date_start": "2026-09-13"},
+        })
+        self.assertEqual(report["issues"][0]["record_id"], 6)
+        self.assertNotIn("proposal_index", report["issues"][0])
+        self.assertEqual(report["issues"][0]["unavailable_fields"], ["date_deadline"])
 
     def test_planned_deadline_after_linked_demand_is_separate_from_lead_estimate(self):
         report = _facts(self.data).inspect({

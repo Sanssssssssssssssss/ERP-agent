@@ -143,14 +143,37 @@ class BusinessFacts:
             parents = {row.get("name"): row for row in self._search(instance, "mrp.production", origin_names, ["id", "name", "date_start"])}
         if origin_names:
             demands = {row.get("name"): row for row in self._search(instance, "sale.order", origin_names, _SO_FIELDS)}
-        for row in rows:
+        for index, row in enumerate(rows):
             if model == "mrp.production":
                 fact, row_issues = self._manufacturing(row, boms, parents, demands)
+                unavailable = fact.get("unavailable_fields")
+                if unavailable:
+                    warning = {
+                        "code": "manufacturing_schedule_unavailable", "severity": "warning", "status": "unavailable",
+                        "record_id": row.get("id"), "unavailable_fields": list(unavailable),
+                        "message": (
+                            f"Manufacturing schedule is not fully verified; unavailable fields: {', '.join(unavailable)}. "
+                            "Read the field definitions, inspect the current manufacturing order and selected BOM, "
+                            "and check the host-confirmed task requirements before confirmation or completion. "
+                            "Set the required fields explicitly; date_finished does not replace date_deadline. "
+                            "This warning allows unfinished drafts and tasks that do not require a deadline."
+                        ),
+                        "next_action": "inspect_manufacturing_requirements",
+                        "recovery_request": {"tool": "mcp_odoo_get_model_fields", "arguments": {
+                            "model": model, "instance": instance,
+                            "field_names": [*unavailable, "date_finished"],
+                        }},
+                        "sources": fact["sources"],
+                    }
+                    if row.get("id") is None:
+                        warning["proposal_index"] = index
+                    row_issues.insert(0, warning)
             else:
                 fact, row_issues = self._purchase(row, demands)
-            if row_issues:
+            errors = [issue for issue in row_issues if issue.get("severity") == "error"]
+            if errors:
                 fact["diagnostic_status"] = "violated"
-                for issue in row_issues:
+                for issue in errors:
                     issue["status"] = "violated"
             facts.append(fact)
             issues.extend(row_issues)
@@ -158,11 +181,14 @@ class BusinessFacts:
 
     def _manufacturing(self, row: dict, boms: dict[int, dict], parents: dict[str, dict], demands: dict[str, dict]) -> tuple[dict, list[dict]]:
         bom_id = _id(row.get("bom_id"))
+        unavailable = (["bom_id"] if bom_id is None else []) + [
+            field for field in ("date_start", "date_deadline") if _when(row.get(field)) is None
+        ]
         if bom_id is None:
             sources = [{"model": "mrp.production", "id": row.get("id"), "fields": ["bom_id", "date_start", "date_deadline", "origin"]}]
             fact = {
                 "record_id": row.get("id"), "model": "mrp.production", "bom_id": None,
-                "diagnostic_status": "unavailable", "unavailable_fields": ["bom_id"], "date_start": row.get("date_start"),
+                "diagnostic_status": "unavailable", "unavailable_fields": unavailable, "date_start": row.get("date_start"),
                 "date_deadline": row.get("date_deadline"), "sources": sources,
             }
             issues: list[dict] = []
@@ -191,6 +217,8 @@ class BusinessFacts:
             "diagnostic_status": "pass" if start is not None and deadline is not None else "unavailable",
             "sources": sources,
         }
+        if unavailable:
+            fact["unavailable_fields"] = unavailable
         issues: list[dict] = []
         if earliest and deadline and _before(deadline, earliest, row.get("date_deadline"), row.get("date_start")):
             issues.append({
