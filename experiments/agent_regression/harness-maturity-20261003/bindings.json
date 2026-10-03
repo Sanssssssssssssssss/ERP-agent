@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "baseline_tag": "harness-maturity-baseline-20261003",
+  "baseline_commit": "374277821e71aa12e5bf23728998fee758799165",
+  "reviewed_patchset_commit": "7153a79f88df97f48f104e06550c0a3ad1a5feba",
+  "immutable_source": "experiments/agent_regression/tool-self-debug-business-20261003/cases.json",
+  "immutable_source_sha256": "d6e056cf3ee2d64f8065614a5bbb0afa2bfaea5fcff6b2f8890e3e843dace9b1",
+  "bindings": [
+    {
+      "case_id": null,
+      "origin": "synthetic_offline_boundary",
+      "fix_commit": "07a280c",
+      "finding": "Boolean numeric coercion can select record 1; reject before dispatch.",
+      "producer": "src/erp_harness/runtime/validation.py",
+      "producer_git_blob_sha256": "c12447a6b33195bd0926e75dfb3f3e9a86f54fe8fe171f591a6b18916fc9ea99",
+      "offline_tests": [
+        "tests/runtime/test_pi_loop_parity.py::test_native_record_ids_reject_booleans_before_dispatch"
+      ],
+      "api_case": null,
+      "api_boundary": "No observed model failure; synthetic cases remain offline."
+    },
+    {
+      "case_id": "BFR2-2066-01",
+      "origin": "observed_business_failure",
+      "fix_commit": "59479b3",
+      "finding": "Incomplete manufacturing dates previously produced unavailable facts with no issue or corrective guidance.",
+      "producer": "src/erp_harness/erp/business_facts.py",
+      "producer_git_blob_sha256": "702e95528196b357029b8f010157fef7b90cdc81273aba70c04f7ffba09a4879",
+      "causal_request": "0018",
+      "first_actual_corrective_request": null,
+      "offline_tests": [
+        "tests/test_business_facts.py",
+        "tests/test_minimal_write_guards.py",
+        "tests/test_task_evidence.py"
+      ],
+      "api_candidate_provenance": ".runtime/harness-maturity-20261003/manufacturing-warning-candidate/provenance.json",
+      "api_candidate_sha256": "004105a5a6fc25ecba214148e27383bb27b8c047a9de1cd2703515d32ee7095a",
+      "api_status": "corrective_discovery_intent_observed",
+      "api_result": "experiments/agent_regression/harness-maturity-20261003/api-results.json",
+      "business_result": null,
+      "boundary": "Warning delivery and first corrective discovery intent observed. Returned tools not executed. Corrected proposals, host scope binding and final business acceptance remain unverified."
+    },
+    {
+      "case_id": "TFR2-2066-02",
+      "origin": "historical_tool_failure_reprojected_offline",
+      "fix_commit": "7153a79",
+      "finding": "Historical diagnostics dropped record_ids maxItems 20 and did not distinguish truncated historical failures from unresolved current faults.",
+      "producer": "src/erp_harness/tools/run_diagnostics.py",
+      "producer_git_blob_sha256": "b4e9dc2b967fc1b3bf40610346d9478621cad84d03b08d78d066af6356ee1b08",
+      "causal_request": "0010",
+      "first_actual_corrective_request": "0011",
+      "offline_tests": [
+        "tests/test_run_diagnostics.py",
+        "tests/test_bench_tool_regression.py"
+      ],
+      "offline_evidence": ".runtime/harness-maturity-20261003/observability-diagnostics-after.json",
+      "api_case": null,
+      "boundary": "The original model corrected the direct schema reply. It did not consume this historical diagnostic projection; no new paid incident is invented."
+    }
+  ],
+  "verification": {
+    "pytest": {
+      "passed": 1503,
+      "skipped": 4,
+      "subtests_passed": 242
+    },
+    "log": ".runtime/harness-maturity-20261003/full-tests.log",
+    "test_index_check": "passed",
+    "independent_review": "three_patches_no_blockers"
+  },
+  "new_usage": {
+    "request_count": 1,
+    "fresh_input": 3216,
+    "cache_reads": 63488,
+    "output_including_reasoning": 459,
+    "reasoning_subset": 344,
+    "compaction": 0,
+    "total_tokens": 67163,
+    "cost": null
+  },
+  "second_patchset": {
+    "commit": "98e8c35cce66ba724150a758886d5c3387bc9e7a",
+    "verification": {
+      "passed": 1539,
+      "skipped": 4,
+      "subtests_passed": 252,
+      "log": ".runtime/harness-maturity-20261003/patchset2-full-tests.log",
+      "independent_review": "passed_after_receipt_integrity_correction",
+      "ruff_new_findings": 0
+    },
+    "bindings": [
+      {
+        "category": "input_validation_and_recovery_context",
+        "case_id": null,
+        "origin": "synthetic_offline_pressure",
+        "fix_commit": "7b98da1",
+        "producer": "src/erp_harness/runtime/validation.py",
+        "offline_test": "tests/runtime/test_agent_loop.py",
+        "evidence": ".runtime/harness-maturity-20261003/compaction-refusal/after-review.json",
+        "boundary": "Five schema refusal forms reach compaction input. No summary model or compressed business run tested; no paid case invented.",
+        "producer_git_blob_sha256": "e08ca563fed1e916bc43fba946f2f5eb3fd08d3c486a677325b5f0ecd10c0aed"
+      },
+      {
+        "category": "tool_failure_propagation",
+        "case_id": null,
+        "origin": "offline_actual_producer",
+        "fix_commit": "f70a930",
+        "producer": "src/erp_harness/app/business_status.py",
+        "offline_test": "tests/test_business_status.py",
+        "evidence": ".runtime/harness-maturity-20261003/business-status-refresh-after.json",
+        "boundary": "Current native timeout and malformed responses survive related-record refresh. No observed paid model consumption of this diagnostic.",
+        "producer_git_blob_sha256": "9aa305ec6c06f255e7bf05eac93bfb1a086e8ff6b34ce7c2dc132e258e4da9dd"
+      },
+      {
+        "category": "termination_and_authoritative_readback",
+        "case_id": "BFR2-2066-01",
+        "origin": "observed_failure_motivates_conditional_host_check",
+        "fix_commit": "98e8c35",
+        "producer": "src/erp_harness/erp/task_evidence.py",
+        "offline_tests": [
+          "tests/test_task_evidence.py",
+          "tests/test_bench_tool_regression.py::test_model_stop_cannot_skip_host_final_verification",
+          "tests/test_workbench_host.py::WorkbenchHostTests::test_final_verification_events_keep_distinct_receipts"
+        ],
+        "evidence": ".runtime/harness-maturity-20261003/final-release-independent-review.json",
+        "boundary": "Only already host-bound release rules and observed release actions are rechecked. The original 2066 had no task binding; this check alone cannot close that failure or prove complete task acceptance.",
+        "producer_git_blob_sha256": "d526d5837fa6e9a17b04b85129481ba344ec94af83b53724e7ea5c6770048c25"
+      }
+    ]
+  }
+}
