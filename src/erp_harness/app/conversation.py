@@ -39,6 +39,14 @@ from erp_harness.erp.read_failures import read_failure, tool_failure
 READ_MAX_ROWS = 5
 READ_PAGE_MAX = 20
 READ_MAX_BYTES = 16_384
+DIAGNOSTIC_REPORTING_POLICY = (
+    "When answering from run diagnostics, report recorded local action counts by status, or say they are unknown; "
+    "these records do not establish current ERP completion. "
+    "Report historical call coverage and its limits: incomplete evidence or an empty failure-only list cannot establish "
+    "that no earlier tool or business-rule failure occurred. "
+    "Explain the latest runtime/model interruption separately from historical tool/action failures; "
+    "it neither rules out earlier refusals nor authorizes repeating writes. "
+)
 CONVERSATION_POLICY = (
     "You are the ordinary conversation assistant for an ERP erp_harness.app. "
     "The erp_harness.app supports sales and invoicing (sale_invoice), purchasing "
@@ -82,6 +90,7 @@ CONVERSATION_POLICY = (
     "It reads a host-scoped local snapshot even when Odoo is offline. Report its captured_at time; "
     "historical failures with unknown resolution are not proof of a currently blocked run. "
     "Missing diagnostics never prove no write occurred. Never replay a write or infer ERP completion from local run status. "
+    f"{DIAGNOSTIC_REPORTING_POLICY}"
     "read_business_status rechecks evidence with your current Odoo permissions; report unknown or denied reads explicitly. "
     "If business_scope_required is returned, ask the user to select the business in the chat scope selector. "
     "Its execution and delivery remain unknown; conversation history or missing scope never proves it was not executed. "
@@ -938,6 +947,7 @@ async def run(args: argparse.Namespace) -> None:
             "Its snapshot was captured for this question, not refreshed on each tool call. Report captured_at. "
             "Distinguish captured runtime status from historical errors; unknown resolution does not prove a current blockage. "
             "Missing logs never prove no write occurred, and local completion never proves business completion. "
+            f"{DIAGNOSTIC_REPORTING_POLICY}"
             "Use recorded failure categories and corrective guidance; do not invent causes or facts. "
             "Do not create or revise proposals, approve, execute, cancel or replay actions. "
             "Direct requested changes to the existing approval/workspace controls; uncertain writes require read-only reconciliation. "
