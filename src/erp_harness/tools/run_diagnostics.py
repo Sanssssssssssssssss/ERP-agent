@@ -207,13 +207,19 @@ def _auxiliary_recovery(payload, call):
 def summarize_run(directory: Path, session_file: Path, identity: dict, *, run_id: str, session_id: str):
     """Only explicit IDs join artifacts; missing evidence never proves no dispatch."""
     result = {"success": True, "scope": "current_run", "business_truth": False,
-              "note": "Tool failure items are historical receipts, not proof of a current unresolved failure. "
-                      "Action ledger items report recorded local status. Verify business facts using current-permission Odoo reads.",
+              "items_scope": "historical_failures_and_unresolved_actions",
+              "note": "Items include associated historical failures/incomplete calls and unresolved actions, not all calls or writes. "
+                      "Empty items do not prove no tool failures or write receipts. Action counts are recorded local ledger statuses, "
+                      "not current ERP truth. Missing request metadata leaves call association unknown. "
+                      "Verify business facts using current-permission Odoo reads.",
               "items": [], "evidence_complete": True}
     calls, ambiguous_calls = {}, set()
+    metadata_paths = sorted((directory / "requests").glob("*.meta.json"))
+    metadata_complete = True
     # ponytail: scan local receipt metadata; index only if measured run size warrants it.
-    for path in sorted((directory / "requests").glob("*.meta.json")):
+    for path in metadata_paths:
         rows, complete = _rows(path)
+        metadata_complete &= complete and bool(rows)
         result["evidence_complete"] &= complete
         for row in rows:
             if row.get("run_id") != run_id or row.get("session_id") != session_id:
@@ -223,21 +229,39 @@ def summarize_run(directory: Path, session_file: Path, identity: dict, *, run_id
                     if call in calls and calls[call] != row.get("request_id"):
                         ambiguous_calls.add(call)
                     calls[call] = row.get("request_id")
+    request_paths = list((directory / "requests").glob("*.request.json"))
+    metadata_names = {path.name for path in metadata_paths}
+    missing_metadata = sum(path.name.removesuffix(".request.json") + ".meta.json" not in metadata_names
+                           for path in request_paths)
+    result["evidence_complete"] &= metadata_complete and not missing_metadata
+    result["request_metadata_coverage"] = {
+        "request_files": len(request_paths), "metadata_files": len(metadata_paths),
+        "requests_missing_metadata": missing_metadata,
+        "status": "incomplete" if missing_metadata or not metadata_complete else "recorded_metadata"
+                  if metadata_paths else "unknown",
+    }
     events, events_ok = _rows(directory / "tool-backends.jsonl")
     rpc, rpc_ok = _rows(directory / "odoo-native-requests.jsonl")
     world, world_ok = _rows(directory / "world-observations.jsonl")
     messages, session_ok = _rows(session_file)
     result["evidence_complete"] &= events_ok and rpc_ok and world_ok and session_ok
+    ledger_read = True
     try:
         actions = ActionStore.read_receipts(directory / "odoo-actions.sqlite3")
     except (OSError, sqlite3.Error, ValueError):
         actions = []
+        ledger_read = False
         result["evidence_complete"] = False
     if any(row.get("run_id") != run_id or row.get("session_id") != session_id
            or row.get("identity") != identity for row in actions):
         return _diagnostic_error("scope_mismatch")
     if any(row.get("identity") != identity for row in world if row.get("type") == "world_observation"):
         return _diagnostic_error("identity_mismatch")
+    counts = {}
+    for action in actions:
+        status = _action_status(action)
+        counts[status] = counts.get(status, 0) + 1
+    result.update(action_receipt_count=len(actions) if ledger_read else None, action_receipt_status_counts=counts)
     by_action = {a["action_id"]: a for a in actions}
     by_call, requested = {}, {}
     for row in messages:

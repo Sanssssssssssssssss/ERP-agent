@@ -648,3 +648,64 @@ def test_diagnostic_limit_reports_history_without_inventing_resolution(tmp_path)
     result = diagnose(tmp_path)
     assert result["total_items"] == result["returned_items"] == 1 and not result["truncated"]
     assert result["items"][0]["record_kind"] == "incomplete_tool_execution"
+
+
+def test_empty_legacy_diagnostics_keep_verified_receipts_and_unknown_call_coverage(tmp_path):
+    seed(tmp_path)
+    (tmp_path / "requests/0001.meta.json").unlink()
+    # Body parsing or positional joins would wrongly expose another run's tool result.
+    (tmp_path / "requests/0001.request.json").write_text("PRIVATE_REQUEST_BODY", encoding="utf8")
+    rows(tmp_path, "session.jsonl", {"message": {"role": "toolResult", "toolCallId": "other-run-call",
+        "toolName": "mcp_odoo_read_record", "details": {"success": False, "reason_code": "permission_denied"}}})
+    actions = [{"action_id": f"action-{index}", "run_id": "run", "session_id": "session",
+                "identity": IDENTITY, "status": "verified", "payload": {"secret": "PRIVATE_LEDGER"}}
+               for index in range(8)]
+    before = {p.name: p.read_bytes() for p in tmp_path.glob("*.jsonl")}
+    result = diagnose(tmp_path, actions)
+    assert result["items"] == [] and not result["evidence_complete"]
+    assert result["items_scope"] == "historical_failures_and_unresolved_actions"
+    assert result["action_receipt_count"] == 8 and result["action_receipt_status_counts"] == {"verified": 8}
+    assert result["request_metadata_coverage"] == {
+        "request_files": 1, "metadata_files": 0, "requests_missing_metadata": 1, "status": "incomplete"}
+    assert result["business_truth"] is False and "PRIVATE_" not in json.dumps(result)
+    assert before == {p.name: p.read_bytes() for p in tmp_path.glob("*.jsonl")}
+
+
+@pytest.mark.parametrize("metadata", ["", "{", "[]", "null"])
+def test_missing_or_bad_metadata_does_not_claim_complete_call_coverage(tmp_path, metadata):
+    seed(tmp_path)
+    (tmp_path / "requests/0001.request.json").write_text("{}", encoding="utf8")
+    (tmp_path / "requests/0001.meta.json").write_text(metadata, encoding="utf8")
+    result = diagnose(tmp_path)
+    assert not result["evidence_complete"] and result["request_metadata_coverage"]["status"] == "incomplete"
+    assert result["request_metadata_coverage"]["requests_missing_metadata"] == 0
+
+
+def test_metadata_coverage_tracks_partial_history_and_never_leaks_cross_scope_counts(tmp_path):
+    seed(tmp_path)
+    (tmp_path / "requests/0001.request.json").write_text("{}", encoding="utf8")
+    result = diagnose(tmp_path)
+    assert result["evidence_complete"] and result["request_metadata_coverage"]["status"] == "recorded_metadata"
+    (tmp_path / "requests/0002.request.json").write_text("{}", encoding="utf8")
+    action = {"action_id": "uncertain-write", "run_id": "run", "session_id": "session",
+              "identity": IDENTITY, "status": "needs_reconciliation"}
+    result = diagnose(tmp_path, [action])
+    assert not result["evidence_complete"] and result["request_metadata_coverage"]["requests_missing_metadata"] == 1
+    assert result["action_receipt_status_counts"] == {"needs_reconciliation": 1}
+    assert result["items"][0]["next_action"] == "reconcile_without_replay"
+    for change in ({"run_id": "other"}, {"identity": {"identity_id": "other"}}):
+        rejected = diagnose(tmp_path, [{**action, **change}])
+        assert rejected["success"] is False and "action_receipt_count" not in rejected
+        assert "action_receipt_status_counts" not in rejected
+
+
+def test_unreadable_ledger_keeps_receipt_count_unknown_and_status_keys_are_fixed(tmp_path):
+    seed(tmp_path)
+    result = summarize_run(tmp_path, tmp_path / "session.jsonl", IDENTITY, run_id="run", session_id="session")
+    assert not result["evidence_complete"] and result["action_receipt_count"] is None
+    assert result["action_receipt_status_counts"] == {}
+    action = {"action_id": "action", "run_id": "run", "session_id": "session",
+              "identity": IDENTITY, "status": "PRIVATE_STATUS"}
+    result = diagnose(tmp_path, [action])
+    assert result["action_receipt_count"] == 1 and result["action_receipt_status_counts"] == {"unknown": 1}
+    assert "PRIVATE_STATUS" not in json.dumps(result)
