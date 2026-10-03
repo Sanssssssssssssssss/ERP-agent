@@ -73,6 +73,24 @@ def _world_failed(world: WorldStore, operation: str, error: BaseException) -> No
     print(f"World {operation} failed open: {type(error).__name__}", file=sys.stderr)
 
 
+def _native_result_json(payload: object) -> str:
+    """Keep partial-read diagnostics ahead of bulk rows in compaction input."""
+    if isinstance(payload, dict):
+        completeness = payload.get("completeness")
+        summary = payload.get("summary")
+        partial = (
+            bool(payload.get("read_failure_details") or payload.get("metadata_errors"))
+            or isinstance(completeness, dict) and completeness.get("complete") is False
+            or isinstance(summary, dict) and summary.get("clean") is False
+        )
+        if partial:
+            priority = ("success", "tool", "status", "reason_code", "failure_layer", "next_action",
+                        "read_failure_details", "metadata_errors", "completeness", "summary",
+                        "read_failure_count", "read_failures_truncated")
+            payload = {**{key: payload[key] for key in priority if key in payload}, **payload}
+    return to_json(payload, fallback=str).decode()
+
+
 def _model_visible_native_read(name: str, arguments: dict, raw: object) -> object:
     """Keep schema exploration compact while preserving exact explicit reads."""
     if name != "get_model_fields" or not isinstance(raw, dict):
@@ -202,7 +220,7 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                     if name == "read_record" and "missing_ids" not in visible_raw:
                         structured.pop("missing_ids", None)
                     result = AgentToolResult(
-                        content=to_json(visible_raw, fallback=str).decode(),
+                        content=_native_result_json(visible_raw),
                         details={"structuredContent": structured, "meta": None},
                     )
                 elif direct_action:
@@ -240,7 +258,7 @@ def route_tools(tools, log_path: Path, native: NativeReads | None = None,
                         capabilities.call, name, dict(arguments)
                     )
                     result = AgentToolResult(
-                        content=to_json(raw, fallback=str).decode(),
+                        content=_native_result_json(raw),
                         details={"structuredContent": raw, "meta": None},
                     )
                 else:

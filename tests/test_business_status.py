@@ -245,3 +245,153 @@ def test_worker_environment_keeps_field_policy_without_expanding_write_methods(t
             assert "sale.order.unlink" not in allowed_side_effect_methods()
         assert payload["success"] and payload["redacted_fields"] == ["email"], payload
         assert "email" not in payload["result"]
+
+
+def _sale_status_fixture():
+    state = _state()
+    state["businesses"]["b1"].update(odoo_connection=CONNECTION, completion_target="posted",
+        references=[{"model": "sale.order", "id": 7, "fields": {"id": 7}}])
+    return state, build_status_context(state, "b1", "s1", CONNECTION), NativeReadFixture(copy.deepcopy(RECORDS))
+
+
+@pytest.mark.parametrize("where", ["reference_refresh", "linked_invoice"])
+@pytest.mark.parametrize("failure,expected", [
+    (TimeoutError("SECRET-EXCEPTION"), "connection_timeout"),
+    ({"success": False, "reason_code": "connection_refused", "error": "SECRET",
+      "next_action": "retry_write", "failure_layer": "SECRET"}, "connection_refused"),
+    ({"details": {"structuredContent": {"success": False, "reason_code": "permission_denied",
+      "error": "SECRET", "next_action": "retry_write"}}}, "permission_denied"),
+    ({"success": False, "error": "AccessError: permission denied SECRET"}, "permission_denied"),
+    ({"success": False, "reason_code": "query_invalid", "error": "SECRET",
+      "next_action": "retry_write"}, "query_invalid"),
+    ({"success": False, "reason_code": "SECRET-CODE", "error": "SECRET",
+      "next_action": "retry_write"}, "tool_failed_unknown"),
+    ({"success": True, "result": None}, "record_unavailable"),
+    ({"success": True, "result": {"id": True}}, "invalid_response"),
+])
+def test_associated_read_failure_keeps_fixed_diagnostics_and_never_old_green(where, failure, expected):
+    from erp_harness.erp.read_failures import FAILURE_GUIDANCE
+
+    _state_value, context, native = _sale_status_fixture()
+    count = 0
+
+    def failing_read(name, args):
+        nonlocal count
+        key = (args["model"], args["record_id"])
+        if key == ("sale.order", 7):
+            count += 1
+        failed = key == ("sale.order", 7) and count > 1 if where == "reference_refresh" else key == ("account.move", 31)
+        if failed:
+            if isinstance(failure, Exception):
+                raise failure
+            return copy.deepcopy(failure)
+        return native(name, args)
+
+    result = read(context, SimpleNamespace(call=failing_read))
+    assert not result["success"] and result["verification_status"] == "unknown"
+    assert result["documents"] == result["checks"] == result["delivery_receipts"] == []
+    assert result["reason_code"] == expected
+    assert (result["failure_layer"], result["next_action"]) == FAILURE_GUIDANCE[expected]
+    assert result["status"] == ("permission_denied" if expected == "permission_denied" else "unavailable")
+    assert result["read_failure_count"] == 1 and not result["read_failures_truncated"]
+    failed_read = result["read_failures"][0]
+    assert (failed_read["model"], failed_read["record_id"]) == (
+        ("sale.order", 7) if where == "reference_refresh" else ("account.move", 31))
+    assert "SECRET" not in json.dumps(result) and "retry_write" not in json.dumps(result)
+    assert context["state"]["businesses"]["b1"].get("readback") is None
+    recovered = read(context, SimpleNamespace(call=native))
+    assert recovered["success"] and recovered["verification_status"] == "passed"
+    assert "read_failures" not in recovered
+
+
+def test_mixed_read_failures_are_bounded_and_permission_failure_remains_visible():
+    _state_value, context, native = _sale_status_fixture()
+
+    def failures(name, args):
+        if args["model"] == "sale.order":
+            return native(name, args)
+        return {"success": False, "reason_code": "permission_denied" if args["model"] == "stock.picking"
+                else "connection_timeout", "error": "SECRET", "next_action": "retry_write"}
+
+    result = read(context, SimpleNamespace(call=failures))
+    assert not result["success"] and result["status"] == "permission_denied"
+    assert result["reason_code"] == "permission_denied" and result["next_action"] == "check_permissions"
+    assert result["model"] == "stock.picking" and result["record_id"] == 51
+    assert result["read_failure_count"] == 4 and len(result["read_failures"]) == 3
+    assert result["read_failures_truncated"] and "SECRET" not in json.dumps(result)
+    assert result["documents"] == result["checks"] == []
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_readback_failure_cannot_hide_unknown_write_reconciliation(failure):
+    state, _context, native = _sale_status_fixture()
+    state["runs"]["r1"]["status"] = "failed"
+    state["runs"]["r2"]["status"] = "needs_reconciliation"
+    context = build_status_context(state, "b1", "s1", CONNECTION)
+
+    def reads(name, args):
+        assert name == "read_record"
+        if failure and args["model"] == "account.move":
+            return {"success": False, "reason_code": "connection_timeout"}
+        return native(name, args)
+
+    before = copy.deepcopy(context)
+    result = read(context, SimpleNamespace(call=reads))
+    assert result["success"] is not failure
+    assert result["recovery"]["retry_safe"] is False
+    assert result["recovery"]["next_action"] == "reconcile_in_business_workspace"
+    assert context == before and all(name == "read_record" for name, _args in native.calls)
+
+
+def test_invoice_parties_refresh_failure_keeps_typed_cause_without_raw_exception():
+    state, reads = mail_state()
+    context = build_status_context(state, "b1", "s1", CONNECTION)
+    with patch.object(invoice_mail, "parties", side_effect=PermissionError("SECRET-PARTIES")):
+        result = read(context, reads)
+    assert not result["success"] and result["status"] == "permission_denied"
+    assert result["reason_code"] == "permission_denied" and result["failure_layer"] == "authorization"
+    assert result["next_action"] == "check_permissions" and "SECRET" not in json.dumps(result)
+    assert result["read_failure_count"] == 1 and result["read_failures"][0]["reason_code"] == "permission_denied"
+
+
+def test_enterprise_related_read_uses_same_typed_failure_projection():
+    from tests.test_enterprise_workbench import payment_fixture
+
+    records, runs, _row = payment_fixture()
+    state = {"businesses": {"b1": {"id": "b1", "session_id": "s1", "type": "payment",
+        "completion_target": "reconciled", "odoo_connection": CONNECTION}},
+        "runs": {"r1": {**runs[0], "business_id": "b1"}}}
+    context = build_status_context(state, "b1", "s1", CONNECTION)
+
+    def reads(name, args):
+        assert name == "read_record"
+        if args["model"] == "account.move" and args["record_id"] == 11:
+            return {"success": False, "reason_code": "field_policy_denied", "error": "SECRET"}
+        return {"success": True, "result": records[(args["model"], args["record_id"])]}
+
+    result = read(context, SimpleNamespace(call=reads))
+    assert not result["success"] and result["status"] == "permission_denied"
+    assert result["reason_code"] == "field_policy_denied" and result["next_action"] == "check_field_policy"
+    assert result["model"] == "account.move" and result["record_id"] == 11
+    assert result["verification_status"] == "unknown" and "SECRET" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("payload", [None, [], {"success": True, "result": {"id": 99}}])
+def test_invalid_reference_response_is_classified_before_relation_refresh(payload):
+    _state_value, context, _native = _sale_status_fixture()
+    result = read(context, SimpleNamespace(call=lambda _name, _args: payload))
+    assert not result["success"] and result["status"] == "unavailable"
+    assert result["reason_code"] == "invalid_response" and result["failure_layer"] == "odoo_response"
+    assert result["next_action"] == "check_service_logs"
+    assert result["verification_status"] == "unknown" and not result["documents"]
+
+
+def test_failed_mail_recovery_has_priority_over_unknown_write_and_normal_failure():
+    state, reads = mail_state()
+    state["runs"]["r1"]["status"] = "needs_reconciliation"
+    state["runs"]["r0"] = {"id": "r0", "business_id": "b1", "status": "failed"}
+    reads.client.records["mail.notification"][301]["notification_status"] = "exception"
+    result = read(build_status_context(state, "b1", "s1", CONNECTION), reads)
+    assert result["recovery"]["reason"] == "mail_delivery_failed"
+    assert result["recovery"]["next_action"] == "inspect_mail_failure_then_reconcile_existing_message"
+    assert result["recovery"]["retry_safe"] is False

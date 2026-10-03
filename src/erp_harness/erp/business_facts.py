@@ -12,6 +12,15 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from .read_failures import InvalidReadResponseError, tool_failure
+
+
+class _FactReadFailure(ValueError):
+    def __init__(self, error, model, fields):
+        self.failure = tool_failure(error)
+        self.source = {"model": model, "fields": fields}
+        super().__init__(self.failure["error"])
+
 
 _MO_FIELDS = ["id", "name", "bom_id", "date_start", "date_deadline", "origin"]
 _BOM_FIELDS = ["id", "produce_delay"]
@@ -88,16 +97,18 @@ class BusinessFacts:
             "instance": instance, "model": model, "domain": domain,
             "fields": fields, "limit": max(1, min(limit, 100)),
         })
+        if not isinstance(response, dict):
+            raise _FactReadFailure(InvalidReadResponseError(), model, fields)
         if not response.get("success"):
-            raise ValueError(response.get("error") or f"business facts read failed for {model}")
+            raise _FactReadFailure(response, model, fields)
         if response.get("redacted_fields"):
-            raise ValueError(f"business facts redacted for {model}: {response['redacted_fields']}")
+            raise _FactReadFailure({"reason_code": "field_policy_denied"}, model, fields)
         rows = response.get("result")
-        if not isinstance(rows, list):
-            raise ValueError(f"business facts read returned no records for {model}")
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise _FactReadFailure(InvalidReadResponseError(), model, fields)
         missing = sorted({field for field in fields if any(field not in row for row in rows)})
         if missing:
-            raise ValueError(f"business facts unavailable for {model}: {missing}")
+            raise _FactReadFailure(InvalidReadResponseError(), model, missing)
         return rows
 
     def inspect(self, payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -110,11 +121,14 @@ class BusinessFacts:
             rows = self._rows(payload, instance)
             return self._check_rows(model, rows, instance)
         except Exception as exc:
+            failure = exc.failure if isinstance(exc, _FactReadFailure) else tool_failure(exc)
             return {
                 "facts": [],
                 "issues": [{
+                    **failure,
                     "code": "business_facts_unavailable", "severity": "warning", "status": "unavailable",
-                    "message": str(exc), "sources": [],
+                    "message": failure["error"],
+                    "sources": [exc.source] if isinstance(exc, _FactReadFailure) else [],
                 }],
             }
 
@@ -127,7 +141,7 @@ class BusinessFacts:
         fields = _MO_FIELDS if payload["model"] == "mrp.production" else _PO_FIELDS
         existing = {row["id"]: row for row in self._read(instance, payload["model"], ids, fields)}
         if len(existing) != len(ids):
-            raise ValueError("target record unavailable for business fact merge")
+            raise _FactReadFailure({"reason_code": "record_unavailable"}, payload["model"], fields)
         return [{**existing[record_id], **values} for record_id in ids]
 
     def _check_rows(self, model: str, rows: list[dict], instance: str) -> dict[str, Any]:
@@ -143,14 +157,37 @@ class BusinessFacts:
             parents = {row.get("name"): row for row in self._search(instance, "mrp.production", origin_names, ["id", "name", "date_start"])}
         if origin_names:
             demands = {row.get("name"): row for row in self._search(instance, "sale.order", origin_names, _SO_FIELDS)}
-        for row in rows:
+        for index, row in enumerate(rows):
             if model == "mrp.production":
                 fact, row_issues = self._manufacturing(row, boms, parents, demands)
+                unavailable = fact.get("unavailable_fields")
+                if unavailable:
+                    warning = {
+                        "code": "manufacturing_schedule_unavailable", "severity": "warning", "status": "unavailable",
+                        "record_id": row.get("id"), "unavailable_fields": list(unavailable),
+                        "message": (
+                            f"Manufacturing schedule is not fully verified; unavailable fields: {', '.join(unavailable)}. "
+                            "Read the field definitions, inspect the current manufacturing order and selected BOM, "
+                            "and check the host-confirmed task requirements before confirmation or completion. "
+                            "Set the required fields explicitly; date_finished does not replace date_deadline. "
+                            "This warning allows unfinished drafts and tasks that do not require a deadline."
+                        ),
+                        "next_action": "inspect_manufacturing_requirements",
+                        "recovery_request": {"tool": "mcp_odoo_get_model_fields", "arguments": {
+                            "model": model, "instance": instance,
+                            "field_names": [*unavailable, "date_finished"],
+                        }},
+                        "sources": fact["sources"],
+                    }
+                    if row.get("id") is None:
+                        warning["proposal_index"] = index
+                    row_issues.insert(0, warning)
             else:
                 fact, row_issues = self._purchase(row, demands)
-            if row_issues:
+            errors = [issue for issue in row_issues if issue.get("severity") == "error"]
+            if errors:
                 fact["diagnostic_status"] = "violated"
-                for issue in row_issues:
+                for issue in errors:
                     issue["status"] = "violated"
             facts.append(fact)
             issues.extend(row_issues)
@@ -158,11 +195,14 @@ class BusinessFacts:
 
     def _manufacturing(self, row: dict, boms: dict[int, dict], parents: dict[str, dict], demands: dict[str, dict]) -> tuple[dict, list[dict]]:
         bom_id = _id(row.get("bom_id"))
+        unavailable = (["bom_id"] if bom_id is None else []) + [
+            field for field in ("date_start", "date_deadline") if _when(row.get(field)) is None
+        ]
         if bom_id is None:
             sources = [{"model": "mrp.production", "id": row.get("id"), "fields": ["bom_id", "date_start", "date_deadline", "origin"]}]
             fact = {
                 "record_id": row.get("id"), "model": "mrp.production", "bom_id": None,
-                "diagnostic_status": "unavailable", "unavailable_fields": ["bom_id"], "date_start": row.get("date_start"),
+                "diagnostic_status": "unavailable", "unavailable_fields": unavailable, "date_start": row.get("date_start"),
                 "date_deadline": row.get("date_deadline"), "sources": sources,
             }
             issues: list[dict] = []
@@ -191,6 +231,8 @@ class BusinessFacts:
             "diagnostic_status": "pass" if start is not None and deadline is not None else "unavailable",
             "sources": sources,
         }
+        if unavailable:
+            fact["unavailable_fields"] = unavailable
         issues: list[dict] = []
         if earliest and deadline and _before(deadline, earliest, row.get("date_deadline"), row.get("date_start")):
             issues.append({

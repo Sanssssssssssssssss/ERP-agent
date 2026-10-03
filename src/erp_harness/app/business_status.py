@@ -75,9 +75,12 @@ def build_status_context(state, business_id, session_id, connection):
             "state": {"businesses": {business_id: selected}, "runs": runs, "approvals": approvals}}
 
 
-def _failure(text):
-    return "permission_denied" if any(word in str(text).lower() for word in
-        ("accesserror", "access denied", "permission", "forbidden", "无权", "权限", "restricted")) else "unavailable"
+def _failure(error):
+    diagnostic = sale_view._read_failure(error)
+    code = diagnostic["reason_code"]
+    status = "permission_denied" if code in {"authentication_failed", "permission_denied", "field_policy_denied"} else (
+        "unconfigured" if code == "connection_unconfigured" else "unavailable")
+    return {**diagnostic, "status": status}
 
 
 def read_business_status(context, reads, *, session_id, connection):
@@ -93,6 +96,10 @@ def read_business_status(context, reads, *, session_id, connection):
             or business.get("odoo_connection") != connection):
         return {**result, "status": "scope_mismatch"}
     result.update(business_id=business_id, business_type=business.get("type"), completion_target=business.get("completion_target"))
+    if any(r.get("status") in {"needs_reconciliation", "blocked"} for r in state.get("runs", {}).values()):
+        # Read failures cannot hide the existing prohibition on repeating an unknown write.
+        result["recovery"] = {"next_action": "reconcile_in_business_workspace", "retry_safe": False,
+            "message": "在业务执行台点击‘核对当前状态’。核对通过后可继续剩余步骤；历史审批不能批准新写入。"}
     changed_bindings = {}
     try:
         # Refresh before invoice_mail.requested: that helper validates reference fields.
@@ -104,12 +111,11 @@ def read_business_status(context, reads, *, session_id, connection):
                 fields.update({"account.move": invoice_mail.INVOICE_FIELDS,
                                "res.partner": invoice_mail.CONTACT_FIELDS}.get(reference["model"], ()))
             payload = reads.call("read_record", {"model": reference["model"], "record_id": reference["id"], "fields": sorted(fields)})
-            if fields.intersection(payload.get("redacted_fields", [])):
-                return {**result, "status": "permission_denied"}
+            if isinstance(payload, dict) and fields.intersection(payload.get("redacted_fields", [])):
+                return {**result, **_failure({"reason_code": "permission_denied"})}
             row, error = sale_view._read_result(payload, reference["id"])
             if error or not fields.issubset(row or {}):
-                from erp_harness.erp.read_failures import read_failure
-                return {**result, **read_failure(payload if error else {"error": "required fields unavailable"})}
+                return {**result, **_failure(error or {"reason_code": "invalid_response"})}
             changed = [key for key, ids in reference.get("expected_relations", {}).items()
                        if ids != sale_view._relation_ids(row.get(key))]
             if changed and reference.get("purpose") != "source":
@@ -117,8 +123,7 @@ def read_business_status(context, reads, *, session_id, connection):
             reference["fields"] = row
         sale_view.refresh_business(state, business_id, reads)
     except Exception as exc:  # noqa: BLE001 - the read boundary fails closed for every backend error.
-        from erp_harness.erp.read_failures import read_failure
-        return {**result, **read_failure(exc)}
+        return {**result, **_failure(exc)}
     readback = business.get("readback") or {}
     checks = readback.get("checks", [])
     # Fresh facts and the original request binding are separate checks. Updating
@@ -133,8 +138,12 @@ def read_business_status(context, reads, *, session_id, connection):
     if business.get("type") == "invoice_delivery":
         errors.extend(c for c in checks if c.get("name") == "invoice_recipient_verified" and c.get("status") != "passed")
     if errors or readback.get("stale"):
-        status = "permission_denied" if any(_failure(c.get("detail", "")) == "permission_denied" for c in errors) else "unavailable"
-        return {**result, "status": status}
+        failures = [{**_failure(c.get("read_failure") or c.get("detail", "")),
+                     **_pick(c, ("model", "record_id"))} for c in errors]
+        primary = next((f for f in failures if f["status"] == "permission_denied"),
+                       failures[0] if failures else _failure({}))
+        return {**result, **primary, "read_failures": failures[:3],
+                "read_failure_count": len(failures), "read_failures_truncated": len(failures) > 3}
     result.update(success=True, status="ok", verification_status=readback.get("verification_status", "unknown"),
                   observed_at=readback.get("observed_at", result["observed_at"]), outcome=readback.get("outcome"),
                   latest_run_id=readback.get("latest_run_id"))
@@ -153,10 +162,7 @@ def read_business_status(context, reads, *, session_id, connection):
         result["recovery"] = {"reason": "mail_delivery_failed", "retry_safe": False,
             "next_action": "inspect_mail_failure_then_reconcile_existing_message",
             "message": "消息已创建，邮件通知报错。请检查邮件队列和 SMTP 配置；在业务执行台点击‘核对当前状态’。不得重复创建消息或擅自重发。"}
-    elif any(r.get("status") in {"needs_reconciliation", "blocked"} for r in state.get("runs", {}).values()):
-        result["recovery"] = {"next_action": "reconcile_in_business_workspace", "retry_safe": False,
-            "message": "在业务执行台点击‘核对当前状态’。核对通过后可继续剩余步骤；历史审批不能批准新写入。"}
-    elif any(r.get("status") in {"interrupted", "failed", "cancelled"} for r in state.get("runs", {}).values()):
+    elif "recovery" not in result and any(r.get("status") in {"interrupted", "failed", "cancelled"} for r in state.get("runs", {}).values()):
         result["recovery"] = {"next_action": "review_remaining_business", "retry_safe": False,
             "message": "当前状态已回读。可在原业务执行台继续剩余工作；宿主会先检查账本，已完成的动作不会重新执行，新写入仍需审批。"}
     result["next_read"] = "read_odoo_reference for exact document fields; this status query never authorizes a write or resend"

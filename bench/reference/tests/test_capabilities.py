@@ -184,6 +184,8 @@ class NativeCapabilitiesTest(unittest.TestCase):
             capabilities.close()
         self.assertFalse(denied["success"])
         self.assertIn("amount_residual", denied["error"])
+        self.assertEqual(denied["restricted_fields"], ["amount_residual"])
+        self.assertEqual(denied["model"], "account.move.line")
         self.assertFalse(any(row[1] == "search_read" for row in client.requests))
         self.assertEqual(built["domain"], [["name", "=", "A"]])
         self.assertFalse(invalid["success"])

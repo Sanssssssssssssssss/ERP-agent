@@ -1,0 +1,264 @@
+{
+  "schema_version": 1,
+  "id": "BFR3-2279-01",
+  "categories": [
+    "采购与业务状态",
+    "授权、证据与写入安全"
+  ],
+  "task": "2279_easy_repair_plan_easy",
+  "origin": "observed_full_business_constraint_failure",
+  "failure_layer": "business_constraint",
+  "tool": "mcp_odoo_read_purchase_allocation",
+  "causal_request": "0022",
+  "causal_request_id": "req_a46d9471601d4276b1034a1ca9207663",
+  "tool_call_id": "call_02_vdrn0hz8k1xi8k1uvht1xium",
+  "first_mutation_request": "0023",
+  "confirmation_request": "0024",
+  "first_corrective_request": null,
+  "first_corrective_boundary": "No consolidation-specific correction was observed; requests 0023/0024 execute the causal choice.",
+  "source_commit": "1238985301bcecebc0ae942914b5ee1ac6ea815d",
+  "source_tree_sha256": "cc3c3434328d0171ded22ca0404ccc3560aa880f06dca3f8913bbc012b83b980",
+  "wheel_sha256": "e472552759b85ae508e4ae9bf119120275bfd98d60e68c6f9b4dd052dc44a64d",
+  "local_frozen_context": ".runtime/harness-maturity-20261003/business-patchset5-2279/private/regression-frozen/2279-consolidation/requests",
+  "private_manifest": {
+    "path": ".runtime/harness-maturity-20261003/business-patchset5-2279/private/regression-frozen/2279-consolidation/manifest.json",
+    "sha256": "6353820a744fc7d7d492f460718451e1bbd508f4a094af7c0fdefde56170b4f7"
+  },
+  "context_sha256": {
+    "0022.meta.json": "2349ed306718533a7a50ce5dd7a97d225b12f3d6ba46388a0e4514b00d5ae392",
+    "0022.output.json": "39216ff5e6e42889594e7cd9481eb9aacf226727dde30c0bc21bff6fd8143264",
+    "0022.request.json": "0a197c010e8e7e5f56ff4fa3f5035d5bd0f76e75bdf7df5c48587632cb24c76e",
+    "0022.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+    "0023.meta.json": "7ca2f768f486a7538c385d48a20778720080b395a9147f55133a7c6dface736d",
+    "0023.output.json": "7a133e4d8ff62db069969b3f595842a265ae0e590e0f1513cee36efa99df37a9",
+    "0023.request.json": "b23e8f5c4984304d4f662e43519ee08d51e7098d2dacd3cce1df998cfa1891d1",
+    "0023.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+    "0026.meta.json": "d5ce19904bb46c4199651d4cc228d858f54ffa57b584750c345606e2518ed874",
+    "0026.output.json": "36870fca0db7bab25b3398798cd42b1b94d3bc23ff5ce1c39638b28d66e10bce",
+    "0026.request.json": "ff887a923b0d1e2bb93f595b3fa52710d6739d2024109ec69e1e77fbd033b079",
+    "0026.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+    "0027.meta.json": "8f549d9effed50603fa99a4fc47a5138181b7410380d058bd8e0beeb550ee2c8",
+    "0027.output.json": "b741a9a692d71c890ff299ed6d15cfe980dad67d6bbb2523841dd379b4eebf81",
+    "0027.request.json": "c896dc4cfd4b2b5a9be0ea60e74e14684261aa85c037d257e0fe5d1470cc10db",
+    "0027.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+    "0029.meta.json": "f95c9694935103108b55bbb6096dcfd319ab72c92c1263f8a9fcac7815aba40f",
+    "0029.output.json": "8e4afaa7bad929530b28d1204b0199cfbafc71ffc3988fa7698af61fb08f175f",
+    "0029.request.json": "2170ef13ce14c56284e37c5c3e899eaece17494e6442fa3a8b929aa155ba50e6",
+    "0029.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+  },
+  "private_audit": {
+    "path": ".runtime/harness-maturity-20261003/business-patchset5-2279/private/independent-audit-2279.json",
+    "sha256": "766f96d0b12e6702b2f3b8fa5c0ed7bd6ae202c42242b2a54c7350e26671baea"
+  },
+  "task_requirement": {
+    "text": "Use one consolidated PO per supplier offer (do not split a single offer across multiple POs).",
+    "instruction_evidence": {
+      "path": ".runtime/harness-maturity-20261003/business-patchset5-2279/tasks/2279_easy_repair_plan_easy/instruction.md",
+      "sha256": "d7167e55c093f3a3ebb90a6f91cfe91ab081db914049378aaf6bebe082c0a20e"
+    },
+    "present_in_causal_model_context": true
+  },
+  "expected_business_constraints": [
+    "One consolidated PO per actual supplier offer across prior and new commitments",
+    "Reuse all confirmed SOs; cancel failed Cosmo supplier path",
+    "Respect quantities, delivery times, origins and portfolio minimum margin",
+    "Lineage/capacity passed is not proof of supplier-offer consolidation",
+    "Unknown writes must remain uncertain; never automatically replay"
+  ],
+  "cause": {
+    "earliest_choice": "0022 retains Indigo PO1 quantity12 and creates a separate Indigo PO4 quantity4 for the same actual supplier offer.",
+    "failed_rule": "po_consolidation_compliance",
+    "final_split": {
+      "purchase_ids": [
+        1,
+        4
+      ],
+      "company_id": 1,
+      "supplier_id": 9,
+      "product_id": 2,
+      "unit_id": 1,
+      "currency_id": 1,
+      "unit_price": 195.63,
+      "quantities": [
+        12,
+        4
+      ],
+      "total_quantity": 16
+    },
+    "model": "0022 explicitly preserves existing Indigo PO12 while proposing separate Indigo PO4 on the same supplier offer; capacity/cost reasoning omitted consolidation",
+    "tool_contract": "read_purchase_allocation checks origin membership and shared demand capacity, not vendor-offer consolidation; the complete [1,3,4] read also passed",
+    "runtime": "No host-bound consolidation rule; null task scope keeps auto final capacity verification observational and only selects ledger-touched POs",
+    "final_verification": "STOP check excludes untouched PO1 and proves only selected allocation; scope expansion alone cannot cover an absent constraint",
+    "scorer": "No scorer exception for this rule; original checker deterministically rejects two PO IDs resolving to the same offer",
+    "score_formula": "constraints below 100% => (27/32*100)*0.25 = 21.09; optimality100 does not rescue a failed constraint",
+    "harbor_parser_boundary": "Nested reward parser ValidationError is separate and does not cause the business score"
+  },
+  "allocation_reply_misinterpretation": {
+    "request": "0026",
+    "reply_consumed_by": "0027",
+    "tool_call_id": "call_00_m7rdyotclrsn0ce82d7dwlwl",
+    "purchase_ids": [
+      1,
+      3,
+      4
+    ],
+    "sale_order_ids": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "actual_status": "passed",
+    "actual_checks": [
+      "origin membership",
+      "same company/product/unit",
+      "shared sales-demand capacity"
+    ],
+    "not_checked": [
+      "supplier-offer identity",
+      "one PO per supplier offer",
+      "complete business acceptance"
+    ],
+    "boundary": "All competing active POs were already included in this model-selected call; widening STOP scope alone cannot cover the absent consolidation constraint."
+  },
+  "final_runtime_check": {
+    "status": "passed",
+    "enforced": false,
+    "purchase_ids": [
+      2,
+      3,
+      4
+    ],
+    "sale_order_ids": [
+      3,
+      4
+    ],
+    "untouched_purchase_id_omitted": 1,
+    "release_field_status": "not_applicable",
+    "host_scope": null
+  },
+  "expected_business_result": {
+    "one_active_po_per_actual_offer": true,
+    "existing_sales_preserved": true,
+    "failed_cosmo_po_cancelled": true,
+    "quantities_dates_sources_margin_valid": true,
+    "observed_successful_control": "Retain/expand Indigo PO1 to16 with real SO1..4 origins; one Sierra PO15; cancel Cosmo. This is a case-specific observed control, not a global supplier policy.",
+    "fresh_per_action_approval_required": true,
+    "unknown_write_replay_allowed": false
+  },
+  "execution_constraints": {
+    "task_scope": null,
+    "model": "deepseek/deepseek-v4.1-flash",
+    "reasoning_effort": "high",
+    "max_output_tokens": null,
+    "max_model_requests": null,
+    "max_turns": null,
+    "runtime_seconds": 1200,
+    "harbor_seconds": 1800,
+    "attempts": 1,
+    "harbor_retries": 0,
+    "paid_retry_permitted": false
+  },
+  "original_full_business_result": {
+    "reward": {
+      "overall_score": 21.09,
+      "passed": false,
+      "constraint": {
+        "earned": 27,
+        "total": 32
+      },
+      "hygiene": {
+        "earned": 6,
+        "total": 6
+      },
+      "optimality": {
+        "score": 100.0,
+        "total": 100.0
+      }
+    },
+    "usage": {
+      "request_count": 29,
+      "fresh_input_tokens": 225989,
+      "cache_read_tokens": 1632128,
+      "output_including_reasoning_tokens": 78010,
+      "reasoning_subset_tokens": 69581,
+      "total_tokens": 1936127,
+      "compaction_request_count": 0,
+      "compaction_total_tokens": 0,
+      "usage_complete": true,
+      "cost": null,
+      "currency": null
+    },
+    "action_status_counts": {
+      "verified": 4
+    },
+    "unknown_write_observed": false,
+    "automatic_replay_observed": false
+  },
+  "normal_control": {
+    "trial": "2279_easy_repair_plan_easy__cCvjDW5",
+    "source_commit": "c55f8ee64444a4ae27b5852d022310c3b1afe241",
+    "reward": {
+      "overall_score": 100.0,
+      "passed": true,
+      "constraint": {
+        "earned": 32,
+        "total": 32
+      },
+      "hygiene": {
+        "earned": 6,
+        "total": 6
+      },
+      "optimality": {
+        "score": 100.0,
+        "total": 100.0
+      }
+    },
+    "reward_evidence": {
+      "path": ".runtime/harness-maturity-20261003/business-patchset2-2279/jobs/2279/harness-maturity-patchset2-2279-20261003/2279_easy_repair_plan_easy__cCvjDW5/verifier/reward.json",
+      "sha256": "a3b327c3bac5d00350b8a14ffe61e657bb5762e90a513dca158eb321b3682d8b"
+    },
+    "usage": {
+      "request_count": 19,
+      "fresh_input_tokens": 120719,
+      "cache_read_tokens": 529024,
+      "output_including_reasoning_tokens": 30109,
+      "reasoning_subset_tokens": 23992,
+      "total_tokens": 679852,
+      "compaction_request_count": 0,
+      "compaction_total_tokens": 0,
+      "usage_complete": true,
+      "cost": null,
+      "currency": null
+    },
+    "original_task_files_identical": true,
+    "purchase_allocation_code_identical": true,
+    "same_terms_multiple_purchase_groups": []
+  },
+  "offline_status": "passed_112_tests_47_subtests",
+  "api_status": "not_run",
+  "new_api_requests": 0,
+  "applicable_local_api": {
+    "cut_request": "0027",
+    "producer": "current NativeReads.read_purchase_allocation over the actual frozen final PO/SO/line records",
+    "mutation": "replace only the same call ID tool content with actual new producer output; preserve all messages, tool schemas, model settings and business state",
+    "oracle": "recognize possible repeated-offer splitting, compare the explicit task rule, and propose a legal repair with fresh approval instead of claiming full acceptance or replaying old approval tokens",
+    "max_posts": 1,
+    "returned_tools_executed": false,
+    "max_output_tokens": null,
+    "boundary": "A local model response can prove corrective intent only; executed repair and official acceptance require a separately authorized complete business run."
+  },
+  "context_retained": "Complete original messages, schemas, IDs, ledger, SQL, original task/checker and hashes are retained privately. This file contains incident facts and references only.",
+  "offline_checks": [
+    "tests/test_purchase_allocation.py::test_actual_split_warns_before_details_without_changing_capacity_or_authorizing_writes",
+    "tests/test_purchase_allocation.py::test_successful_consolidation_control_and_single_po_need_no_extra_rpc",
+    "tests/test_purchase_allocation.py::test_distinct_commercial_dimensions_and_inactive_orders_do_not_imply_a_split",
+    "tests/test_purchase_allocation.py::test_optional_split_evidence_failure_stays_typed_unknown_and_preserves_capacity",
+    "tests/test_purchase_allocation.py::test_candidate_display_bound_is_explicit_and_done_orders_remain_active",
+    "tests/test_purchase_allocation.py::test_optional_commercial_evidence_never_changes_host_capacity_approval_prestate"
+  ],
+  "offline_review": {
+    "path": ".runtime/harness-maturity-20261003/consolidation-advisory-review/related-tests.log",
+    "sha256": "0607e76fbf2852038cd3b787f56cda66f0f7d14cd86b4639c719953725b788e8"
+  }
+}

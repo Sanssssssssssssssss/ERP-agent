@@ -1,0 +1,1080 @@
+{
+  "schema_version": 1,
+  "baseline_tag": "harness-maturity-baseline-20261003",
+  "baseline_commit": "374277821e71aa12e5bf23728998fee758799165",
+  "reviewed_patchset_commit": "7153a79f88df97f48f104e06550c0a3ad1a5feba",
+  "immutable_source": "experiments/agent_regression/tool-self-debug-business-20261003/cases.json",
+  "immutable_source_sha256": "d6e056cf3ee2d64f8065614a5bbb0afa2bfaea5fcff6b2f8890e3e843dace9b1",
+  "bindings": [
+    {
+      "case_id": null,
+      "origin": "synthetic_offline_boundary",
+      "fix_commit": "07a280c",
+      "finding": "Boolean numeric coercion can select record 1; reject before dispatch.",
+      "producer": "src/erp_harness/runtime/validation.py",
+      "producer_git_blob_sha256": "c12447a6b33195bd0926e75dfb3f3e9a86f54fe8fe171f591a6b18916fc9ea99",
+      "offline_tests": [
+        "tests/runtime/test_pi_loop_parity.py::test_native_record_ids_reject_booleans_before_dispatch"
+      ],
+      "api_case": null,
+      "api_boundary": "No observed model failure; synthetic cases remain offline."
+    },
+    {
+      "case_id": "BFR2-2066-01",
+      "origin": "observed_business_failure",
+      "fix_commit": "59479b3",
+      "finding": "Incomplete manufacturing dates previously produced unavailable facts with no issue or corrective guidance.",
+      "producer": "src/erp_harness/erp/business_facts.py",
+      "producer_git_blob_sha256": "702e95528196b357029b8f010157fef7b90cdc81273aba70c04f7ffba09a4879",
+      "causal_request": "0018",
+      "first_actual_corrective_request": null,
+      "offline_tests": [
+        "tests/test_business_facts.py",
+        "tests/test_minimal_write_guards.py",
+        "tests/test_task_evidence.py"
+      ],
+      "api_candidate_provenance": ".runtime/harness-maturity-20261003/manufacturing-warning-candidate/provenance.json",
+      "api_candidate_sha256": "004105a5a6fc25ecba214148e27383bb27b8c047a9de1cd2703515d32ee7095a",
+      "api_status": "corrective_discovery_intent_observed",
+      "api_result": "experiments/agent_regression/harness-maturity-20261003/api-results.json",
+      "business_result": "experiments/agent_regression/harness-maturity-20261003/business-results.json",
+      "boundary": "Full 2066 now scores100, but it supplied complete dates before validation, so the unavailable warning was not triggered. Local API proves first corrective intent; no causal claim that the warning alone produced the score improvement."
+    },
+    {
+      "case_id": "TFR2-2066-02",
+      "origin": "historical_tool_failure_reprojected_offline",
+      "fix_commit": "7153a79",
+      "finding": "Historical diagnostics dropped record_ids maxItems 20 and did not distinguish truncated historical failures from unresolved current faults.",
+      "producer": "src/erp_harness/tools/run_diagnostics.py",
+      "producer_git_blob_sha256": "b4e9dc2b967fc1b3bf40610346d9478621cad84d03b08d78d066af6356ee1b08",
+      "causal_request": "0010",
+      "first_actual_corrective_request": "0011",
+      "offline_tests": [
+        "tests/test_run_diagnostics.py",
+        "tests/test_bench_tool_regression.py"
+      ],
+      "offline_evidence": ".runtime/harness-maturity-20261003/observability-diagnostics-after.json",
+      "api_case": null,
+      "boundary": "The original model corrected the direct schema reply. It did not consume this historical diagnostic projection; no new paid incident is invented."
+    }
+  ],
+  "verification": {
+    "pytest": {
+      "passed": 1503,
+      "skipped": 4,
+      "subtests_passed": 242
+    },
+    "log": ".runtime/harness-maturity-20261003/full-tests.log",
+    "test_index_check": "passed",
+    "independent_review": "three_patches_no_blockers"
+  },
+  "new_usage": {
+    "request_count": 1,
+    "fresh_input": 3216,
+    "cache_reads": 63488,
+    "output_including_reasoning": 459,
+    "reasoning_subset": 344,
+    "compaction": 0,
+    "total_tokens": 67163,
+    "cost": null
+  },
+  "second_patchset": {
+    "commit": "98e8c35cce66ba724150a758886d5c3387bc9e7a",
+    "verification": {
+      "passed": 1539,
+      "skipped": 4,
+      "subtests_passed": 252,
+      "log": ".runtime/harness-maturity-20261003/patchset2-full-tests.log",
+      "independent_review": "passed_after_receipt_integrity_correction",
+      "ruff_new_findings": 0
+    },
+    "bindings": [
+      {
+        "category": "input_validation_and_recovery_context",
+        "case_id": null,
+        "origin": "synthetic_offline_pressure",
+        "fix_commit": "7b98da1",
+        "producer": "src/erp_harness/runtime/validation.py",
+        "offline_test": "tests/runtime/test_agent_loop.py",
+        "evidence": ".runtime/harness-maturity-20261003/compaction-refusal/after-review.json",
+        "boundary": "Five schema refusal forms reach compaction input. No summary model or compressed business run tested; no paid case invented.",
+        "producer_git_blob_sha256": "e08ca563fed1e916bc43fba946f2f5eb3fd08d3c486a677325b5f0ecd10c0aed"
+      },
+      {
+        "category": "tool_failure_propagation",
+        "case_id": null,
+        "origin": "offline_actual_producer",
+        "fix_commit": "f70a930",
+        "producer": "src/erp_harness/app/business_status.py",
+        "offline_test": "tests/test_business_status.py",
+        "evidence": ".runtime/harness-maturity-20261003/business-status-refresh-after.json",
+        "boundary": "Current native timeout and malformed responses survive related-record refresh. No observed paid model consumption of this diagnostic.",
+        "producer_git_blob_sha256": "9aa305ec6c06f255e7bf05eac93bfb1a086e8ff6b34ce7c2dc132e258e4da9dd"
+      },
+      {
+        "category": "termination_and_authoritative_readback",
+        "case_id": "BFR2-2066-01",
+        "origin": "observed_failure_motivates_conditional_host_check",
+        "fix_commit": "98e8c35",
+        "producer": "src/erp_harness/erp/task_evidence.py",
+        "offline_tests": [
+          "tests/test_task_evidence.py",
+          "tests/test_bench_tool_regression.py::test_model_stop_cannot_skip_host_final_verification",
+          "tests/test_workbench_host.py::WorkbenchHostTests::test_final_verification_events_keep_distinct_receipts"
+        ],
+        "evidence": ".runtime/harness-maturity-20261003/final-release-independent-review.json",
+        "boundary": "Only already host-bound release rules and observed release actions are rechecked. The original 2066 had no task binding; this check alone cannot close that failure or prove complete task acceptance.",
+        "producer_git_blob_sha256": "d526d5837fa6e9a17b04b85129481ba344ec94af83b53724e7ea5c6770048c25"
+      }
+    ]
+  },
+  "third_patchset": {
+    "commit": "b561f64",
+    "verification": {
+      "passed": 1554,
+      "skipped": 4,
+      "subtests_passed": 310,
+      "log": ".runtime/harness-maturity-20261003/patchset3-full-tests.log",
+      "test_index_check": "passed",
+      "desktop_typecheck": "passed",
+      "desktop_trace_check": "passed",
+      "independent_review": "passed",
+      "ruff_new_findings": 0
+    },
+    "bindings": [
+      {
+        "origin": "offline_actual_host_entry",
+        "fix_commit": "1def8af",
+        "category": "connection_failure_classification",
+        "producer": "src/erp_harness/app/host.py",
+        "offline_tests": [
+          "tests/test_workbench_host.py"
+        ],
+        "evidence": {
+          "path": ".runtime/harness-maturity-20261003/host-readback-client-failure/before-source.json",
+          "sha256": "e865d586746ffe4d4da7845ebcd9d74e3ed3725d7ef702035230dd77ede73636"
+        },
+        "boundary": "Manual/background client-construction failures preserve the typed reason. No paid model failure invented."
+      },
+      {
+        "origin": "synthetic_offline_io_and_retry_pressure",
+        "fix_commits": [
+          "7d9ed22",
+          "0ea60ea"
+        ],
+        "category": "request_receipts_and_budget",
+        "producer": "src/erp_harness/app/request_receipts.py",
+        "offline_tests": [
+          "tests/test_request_receipts.py",
+          "tests/runtime/test_pi_session_retry.py"
+        ],
+        "evidence": {
+          "path": ".runtime/harness-maturity-20261003/request-receipt-audit/retry/patch-review.json",
+          "sha256": "ab6a45238ee282c75fd640cd4a9945170c79a5fdf631d5b83970e0af7a2ba016"
+        },
+        "boundary": "Initial/retry request and prepared metadata must persist before POST. Observation failure preserves current result and blocks later requests. Counts are allocated requests; failed-attempt billing may be unknown."
+      },
+      {
+        "origin": "offline_original_identity_equivalence",
+        "fix_commit": "b853d77",
+        "category": "identity_scope",
+        "producer": "src/erp_harness/erp/reads.py",
+        "offline_tests": [
+          "tests/test_connection_awareness.py"
+        ],
+        "evidence": {
+          "path": ".runtime/harness-maturity-20261003/configured-identity/after-comparison.json",
+          "sha256": "faa3a79c80c90e3a6f078b1698786afe6bc87b8d062b5bc1fded4fc322cc9628"
+        },
+        "boundary": "Pure configuration fingerprint matches original scope; not a remote authentication or ACL claim. Native client still authenticates."
+      },
+      {
+        "origin": "observed_ui_capability_gap_without_model_request",
+        "fix_commit": "b561f64",
+        "category": "conversation_run_diagnostics",
+        "producer": "src/erp_harness/app/conversation.py",
+        "offline_tests": [
+          "tests/test_workbench_conversation.py",
+          "tests/test_workbench_host.py"
+        ],
+        "evidence": {
+          "path": ".runtime/harness-maturity-20261003/chat-diagnostics-independent-review/review.json",
+          "sha256": "8d26a34c45955986bfb81f6248895fabe70ac32dd73868801924802082cf21b4"
+        },
+        "boundary": "Host-selected idle-chat diagnostic snapshot reaches mock API loop, no RPC in diagnostic tool. Existing startup connectivity probe is separate; running-business chat still blocked. Actual model tool selection untested."
+      }
+    ]
+  },
+  "usage_results": "experiments/agent_regression/harness-maturity-20261003/business-results.json",
+  "fourth_patchset": {
+    "commits": [
+      "ff91738",
+      "5fcac07"
+    ],
+    "verification": {
+      "passed": 1573,
+      "skipped": 4,
+      "subtests_passed": 363,
+      "log": {
+        "path": ".runtime/harness-maturity-20261003/patchset4-full-tests.log",
+        "sha256": "3321541a2289ebc0e07dab42fdfac19d0c87d8030da3c72b14039fc83d932540"
+      },
+      "test_index_check": "passed",
+      "desktop_typecheck": "passed",
+      "desktop_build": {
+        "path": ".runtime/harness-maturity-20261003/active-chat-inspection/desktop-build-final.log",
+        "sha256": "09b888a876346bb76438fa9b2822abca4c5849d29e7f508358e2ee3d7a8b467c"
+      },
+      "renderer_check": {
+        "path": ".runtime/harness-maturity-20261003/active-chat-inspection/renderer-check-final.log",
+        "sha256": "5b97696420554263b9a6b2b6f2ff482db9b1ffd5024ca683a83db8146d782e86"
+      },
+      "independent_host_review": {
+        "path": ".runtime/harness-maturity-20261003/active-chat-diagnostics/independent-host-review.json",
+        "sha256": "a058e341e35482a2d0ad2ddc8361b8448664858b7b7a1e9c8dd341981ea24624"
+      }
+    },
+    "bindings": [
+      {
+        "case_id": "TFR3-2066-01",
+        "origin": "observed_tool_classification_failure_recovered",
+        "fix_commit": "ff91738",
+        "producer": "src/erp_harness/erp/read_failures.py",
+        "case": "experiments/agent_regression/harness-maturity-20261003/malformed-domain-case.json",
+        "api_result": "experiments/agent_regression/harness-maturity-20261003/malformed-domain-api-results.json",
+        "boundary": "One actual corrective request; tools not executed. Original full business already passed."
+      },
+      {
+        "case_id": null,
+        "origin": "observed_ui_capability_gap_and_offline_concurrency_probes",
+        "fix_commit": "5fcac07",
+        "producer": "src/erp_harness/app/host.py",
+        "offline_tests": [
+          "tests/test_workbench_host.py",
+          "tests/test_workbench_conversation.py",
+          "desktop/scripts/renderer-check.mjs"
+        ],
+        "before_after": {
+          "path": ".runtime/harness-maturity-20261003/active-chat-diagnostics/after-comparison.json",
+          "sha256": "fb9ce989764bf37b057b988de585270165ea7f266a95a7df888c9fb6d68692bf"
+        },
+        "boundary": "Running business accepts one same-scope read-only question. Authorization sources, materials, cancellations and approval continuation are covered offline. Tool explains a startup snapshot; live model answer and active-process timing are not full business acceptance. No synthetic paid failure case."
+      }
+    ]
+  },
+  "fifth_patchset": {
+    "commits": [
+      "e981256",
+      "05d8481",
+      "1238985"
+    ],
+    "verification": {
+      "passed": 1596,
+      "skipped": 4,
+      "subtests_passed": 460,
+      "log": {
+        "path": ".runtime/harness-maturity-20261003/patchset5-full-tests.log",
+        "sha256": "c177745fa0f6221768d98ea83440c2063d76e5d9cc9081384b03e08be462122b"
+      },
+      "source_and_desktop_checks": {
+        "path": ".runtime/harness-maturity-20261003/patchset5-verification.json",
+        "sha256": "1bebc3259078736f654b551e7ef8d869385199aa66a74667d878f8cee1e82d70"
+      },
+      "test_index_check": "passed"
+    },
+    "bindings": [
+      {
+        "case_id": null,
+        "origin": "offline_actual_native_rpc_route_fault_injection",
+        "fix_commit": "e981256",
+        "category": "native_read_input_output_and_error_contracts",
+        "producers": [
+          "src/erp_harness/erp/gateway.py",
+          "src/erp_harness/erp/reads.py",
+          "src/erp_harness/erp/read_failures.py",
+          "src/erp_harness/erp/_odoo_core/odoo_client.py"
+        ],
+        "before": {
+          "path": ".runtime/harness-maturity-20261003/input-output-review/probe-results.json",
+          "sha256": "8e95881edc5ac14308363ea580c6faca48ee7ee34cc206aeea5702819d5805ff"
+        },
+        "after": {
+          "path": ".runtime/harness-maturity-20261003/input-output-review/stable.json",
+          "sha256": "f061e6d730dac901447f10e0acac4a852950eefdebb37426326b1c9ae731f977"
+        },
+        "offline_tests": [
+          "tests/test_connection_awareness.py",
+          "tests/test_supply_context.py"
+        ],
+        "boundary": "Mocked HTTP at the actual native/router/runtime boundary. Legacy default helper envelopes retained; typed native causes and output shape validated. No synthetic paid failure case."
+      },
+      {
+        "case_id": null,
+        "origin": "offline_business_diagnostic_failed_read_probe",
+        "fix_commit": "05d8481",
+        "category": "business_diagnostic_cause_preservation",
+        "producer": "src/erp_harness/erp/business_facts.py",
+        "before": {
+          "path": ".runtime/harness-maturity-20261003/business-facts-errors/before.json",
+          "sha256": "0eef7e05c7387e3b41531842935a65a1bdc17befefe3491ed7f9958f0fae1c64"
+        },
+        "after": {
+          "path": ".runtime/harness-maturity-20261003/business-facts-errors/final.json",
+          "sha256": "12796aa9afbf46981198d0468a3872e4b24b5143e8b1cf80653ed6ebfd82940c"
+        },
+        "independent_review": {
+          "path": ".runtime/harness-maturity-20261003/business-facts-errors/independent-review.json",
+          "sha256": "27d9378c7a40f2e557157a1396cc626359155280d36b98399a7b6583f0af45a9"
+        },
+        "offline_tests": [
+          "tests/test_business_facts.py",
+          "tests/test_run_diagnostics.py",
+          "tests/test_bench_tool_regression.py"
+        ],
+        "boundary": "Warning/unavailable and existing approvals retained. Safe failure reason/layer/action and HTTP status survive partial diagnostics; no business acceptance claimed."
+      },
+      {
+        "case_id": "BFR2-2066-01",
+        "origin": "observed_missing_task_requirement_binding_and_offline_desktop_contract_checks",
+        "fix_commit": "1238985",
+        "category": "confirmed_release_field_binding",
+        "producers": [
+          "src/erp_harness/app/conversation.py",
+          "src/erp_harness/app/host.py",
+          "src/erp_harness/app/worker.py"
+        ],
+        "before": {
+          "path": ".runtime/harness-maturity-20261003/release-field-binding/before-manifest.json",
+          "sha256": "242e0cba9c8c96686157cb0214476504f41c351024590367a2589d7de94db2b8"
+        },
+        "after": {
+          "path": ".runtime/harness-maturity-20261003/release-field-binding/after-manifest.json",
+          "sha256": "ad677b5346fc8d60c68115599bf25a4a34c07a68fad488be0c78c295af094b78"
+        },
+        "independent_review": {
+          "path": ".runtime/harness-maturity-20261003/release-field-binding/independent-review.json",
+          "sha256": "5de4a1e53bb17ba76430f883bfdfdb815bde9630e47f33ac97de3298315f027a"
+        },
+        "offline_tests": [
+          "tests/test_workbench_conversation.py",
+          "tests/test_workbench_host.py",
+          "tests/test_task_evidence.py",
+          "tests/test_stage_contract.py",
+          "desktop/scripts/renderer-check.mjs"
+        ],
+        "related_local_api": "experiments/agent_regression/harness-maturity-20261003/api-results.json",
+        "boundary": "Prior local API proves native manufacturing-warning correction intent only. New desktop metadata discovery/proposal/confirmation/contract chain is verified offline; quotes prove provenance and human confirmation installs explicit presence rules. Five release methods supported, no value/date relationship verification. Existing confirmed requirements cannot yet be edited or cleared. Original null-scope benchmark not silently changed."
+      },
+      {
+        "case_id": null,
+        "origin": "offline_concurrent_message_identity_collision",
+        "fix_commit": "1238985",
+        "category": "session_business_run_message_scope",
+        "before": {
+          "path": ".runtime/harness-maturity-20261003/pr-review/stream-identity-proof.json",
+          "sha256": "d62e28f8323b3d1855263d62aea4103ad3878ed420e087a2aefbd953b455c230"
+        },
+        "after": {
+          "path": ".runtime/harness-maturity-20261003/pr-review/stream-identity-after.json",
+          "sha256": "ef0b72cb2c62fff3e24323cafbedc0cfebfa7f09e81293578cb0822f89042f19"
+        },
+        "offline_tests": [
+          "desktop/scripts/renderer-check.mjs"
+        ],
+        "boundary": "Persisted and live messages use full scope; matching final replaces live once. No invented model request for a UI-only failure."
+      }
+    ],
+    "new_paid_failure_cases": 0,
+    "business_control": {
+      "case": "2279",
+      "status": "failed_original_consolidation_rule",
+      "source_commit": "1238985301bcecebc0ae942914b5ee1ac6ea815d",
+      "frozen": {
+        "path": ".runtime/harness-maturity-20261003/business-patchset5-2279/frozen.json",
+        "sha256": "19a0224b70814b42261e34f3e93592fb0df036abedf7ef02d76206bfe0887a2a"
+      },
+      "scope": "Original task, verifier and null task-evidence scope; single run, no automatic paid retry.",
+      "result": {
+        "overall_score": 21.09,
+        "passed": false,
+        "constraint": {
+          "earned": 27,
+          "total": 32
+        },
+        "hygiene": {
+          "earned": 6,
+          "total": 6
+        },
+        "optimality": {
+          "score": 100.0,
+          "total": 100.0
+        }
+      },
+      "usage": {
+        "request_count": 29,
+        "fresh_input": 225989,
+        "cache_reads": 1632128,
+        "output_including_reasoning": 78010,
+        "reasoning_subset": 69581,
+        "compaction": 0,
+        "total_tokens": 1936127,
+        "cost": null
+      },
+      "causal_request": "0022",
+      "first_corrective_request": null,
+      "independent_audit": {
+        "path": ".runtime/harness-maturity-20261003/business-patchset5-2279/private/independent-audit-2279.json",
+        "sha256": "766f96d0b12e6702b2f3b8fa5c0ed7bd6ae202c42242b2a54c7350e26671baea"
+      }
+    }
+  },
+  "sixth_patchset": {
+    "commits": [
+      "520bf61",
+      "a46523b",
+      "00d340e",
+      "638bf44"
+    ],
+    "verification": {
+      "path": ".runtime/harness-maturity-20261003/patchset6-verification.json",
+      "sha256": "50c1ee7717a9eaaf091db858b4cfbd2426922ca290093197f86d3e9a54ea2da2"
+    },
+    "bindings": [
+      {
+        "category": "provider_terminal_and_truncation",
+        "origin": "offline_real_parser_to_loop_fault_controls",
+        "case_id": null,
+        "fix_commit": "520bf61",
+        "before": {
+          "path": ".runtime/harness-maturity-20261003/provider-terminal/before-manifest.json",
+          "sha256": "5b95b1f212b464b3d382d27f9dc87f960c038c2b08f7260f6ed3f8fd42a60668"
+        },
+        "after": {
+          "path": ".runtime/harness-maturity-20261003/provider-terminal/after-manifest.json",
+          "sha256": "af51564ef0b66130bb989a037e3b0f408b8dd5f577e4aab73e7f0f7cc0fa0757"
+        },
+        "offline_tests": [
+          "tests/runtime/test_pi_ai.py",
+          "tests/runtime/test_agent_loop.py",
+          "tests/test_request_receipts.py",
+          "tests/test_runner_budget.py"
+        ],
+        "boundary": "20 offline terminal controls; no incomplete tools dispatched, valid finishes preserved. No new paid failure case invented."
+      },
+      {
+        "category": "partial_capability_and_group_diagnostics",
+        "origin": "offline_native_transport_and_metadata_controls",
+        "case_id": null,
+        "fix_commit": "00d340e",
+        "before": {
+          "path": ".runtime/harness-maturity-20261003/capability-partial-review/before.json",
+          "sha256": "20135a1d3a6f91f834431070747a2635040144cf8795d234a3f6d7a693e5986f"
+        },
+        "review": {
+          "path": ".runtime/harness-maturity-20261003/acl-m2m/review.json",
+          "sha256": "f2e84fbdfe04472e9ed438f637f774fc0129ee39dc347e3fd27a9c8b8e56bcba"
+        },
+        "offline_tests": [
+          "tests/test_capability_failures.py",
+          "bench/reference/tests/test_capabilities.py"
+        ],
+        "boundary": "Native shared adapter keeps typed failures and bounded partial causes; malformed group relations stay unknown. Diagnostic groups do not authorize writes."
+      },
+      {
+        "category": "typed_argument_error_priority",
+        "origin": "comparison_test_failure_and_actual_normalization_producer",
+        "case_id": null,
+        "fix_commit": "a46523b",
+        "before": {
+          "path": ".runtime/harness-maturity-20261003/typed-validation/before.json",
+          "sha256": "348c0aabc25cdb3f615bef3ceaaeff1af56e75365dcb6fec6a5716f583870b56"
+        },
+        "after": {
+          "path": ".runtime/harness-maturity-20261003/typed-validation/after.json",
+          "sha256": "6767bf357725b955dbd2060cfc0abc8c23629ad4941a031e29d48e888c454fe8"
+        },
+        "independent_review": {
+          "path": ".runtime/harness-maturity-20261003/reference-contract/review.json",
+          "sha256": "144582efe31b6efb21f9fba3559855cae76215b1ec671fd8493f6a215b6598dd"
+        },
+        "offline_tests": [
+          "tests/test_connection_awareness.py"
+        ],
+        "boundary": "Pydantic extra_forbidden is a parameter error, not text-derived permission denial. HTTP/authentication and typed bad-output causes retain precedence."
+      },
+      {
+        "category": "reference_compatibility_contract",
+        "origin": "CI37115952913",
+        "case_id": null,
+        "fix_commit": "638bf44",
+        "independent_review": {
+          "path": ".runtime/harness-maturity-20261003/reference-contract/review.json",
+          "sha256": "144582efe31b6efb21f9fba3559855cae76215b1ec671fd8493f6a215b6598dd"
+        },
+        "offline_tests": [
+          "bench/reference/tests/test_native_reads.py"
+        ],
+        "boundary": "Legacy fields and RPCs still compared; diagnostic additions explicitly asserted. Normal instance listing must actually succeed."
+      }
+    ],
+    "paid_requests": 0
+  },
+  "seventh_patchset": {
+    "source_commit": "e95810ee7a703e107fb0df4be63e6cbfe27a977e",
+    "status": "partial",
+    "status_detail": "Source and offline checks passed; complete 2279 official score100 and independent audit completed. Diagnostic-reporting API failed partially; later policy correction is not included.",
+    "commits": [
+      "3d2ceea",
+      "ac9d8ee",
+      "a70f9ce",
+      "a24a7a2",
+      "e95810e"
+    ],
+    "verification": {
+      "receipt": {
+        "path": ".runtime/harness-maturity-20261003/patchset7b-verification.json",
+        "sha256": "74414d9a4b2aff80454d6186ceaa8d5adb73eb1800998cd293c1e883c5f8d579"
+      },
+      "full_suite": {
+        "passed": 1716,
+        "skipped": 4,
+        "subtests": 473,
+        "seconds": 89.64,
+        "log": {
+          "path": ".runtime/harness-maturity-20261003/patchset7b-full-tests.log",
+          "sha256": "df9e35a0e03d06c2b5b1cd4978dae0363ff3bdb7c566089f4eeb5f2173b4f5d7"
+        }
+      },
+      "ci": {
+        "run_id": 37120114028,
+        "url": "https://github.com/Sanssssssssssssssss/ERP-agent/actions/runs/37120114028",
+        "head_sha": "e95810ee7a703e107fb0df4be63e6cbfe27a977e",
+        "conclusion": "success",
+        "job_count": 5,
+        "jobs": [
+          {
+            "name": "Historical MCP comparison",
+            "conclusion": "success"
+          },
+          {
+            "name": "Python checks",
+            "conclusion": "success"
+          },
+          {
+            "name": "Linux wheel smoke",
+            "conclusion": "success"
+          },
+          {
+            "name": "Desktop checks",
+            "conclusion": "success"
+          },
+          {
+            "name": "Sidecar and packaged desktop checks",
+            "conclusion": "success"
+          }
+        ],
+        "receipt": {
+          "path": ".runtime/harness-maturity-20261003/ci-patchset7b.json",
+          "sha256": "49d2a6b036037eb00aa5240402864fecfe0d23d7234b0860c77c2411c33d6736"
+        }
+      }
+    },
+    "bindings": [
+      {
+        "category": "legacy_runtime_metadata",
+        "origin": "actual_historical_user_question_and_HTTP520_business_failure",
+        "case_id": "HMC-CHAT-01",
+        "fix_commit": "3d2ceeae70d19e2c24ffac9df49e40110b7b3277",
+        "before": {
+          "path": ".runtime/harness-maturity-20261003/legacy-diagnostic-headers/before-manifest.json",
+          "sha256": "9b2bdc88eba57ea15bbdf03ce6827cac74c9a05e3548cd574b8ef046ac95bf4a"
+        },
+        "after": {
+          "path": ".runtime/harness-maturity-20261003/legacy-diagnostic-headers/after-manifest.json",
+          "sha256": "3589b4a0fa1153825008b07b23091e89af91ffab2aa7663781c0da61f5b48d5a"
+        },
+        "full_original_context": {
+          "path": ".runtime/harness-maturity-20261003/inspection-evidence-search/actual-failure-chat/manifest.json",
+          "sha256": "8ebe71598007cf07676cd5a44dcdcb74646971a37aea18a469489ad378f07036"
+        },
+        "source": [
+          {
+            "path": "src/erp_harness/app/host.py",
+            "sha256": "c5b6b91933dd0ea8fa808bef9de5280ee53841f2aee87cfe8012b307d71ce982"
+          },
+          {
+            "path": "src/erp_harness/app/trace_inspector.py",
+            "sha256": "52fd01debddef6dee775c841b29c7319d4c38bd6768873f8351b02e72cf11672"
+          }
+        ],
+        "offline_tests": [
+          {
+            "path": "tests/test_trace_inspector.py",
+            "sha256": "1e9fcd373963544a331b0b9d09507ec8420830dbb52f85d19a99e4cdb289937d"
+          },
+          {
+            "path": "tests/test_workbench_host.py",
+            "sha256": "7fc20e69f8db47cd6760524e1577f45afa35fcff63c6d2921f9a1b299223d1ad"
+          }
+        ],
+        "related_log": {
+          "path": ".runtime/harness-maturity-20261003/legacy-diagnostic-headers/related-tests.log",
+          "sha256": "a2825bcf6e2bab308c3595f52aeeff0a3d73f5c941aa07b213ec5687ba0bc2a1"
+        },
+        "independent_review": {
+          "path": ".runtime/harness-maturity-20261003/final-core-review/last-increments-review.json",
+          "sha256": "7528d527d5a89be5eefccec0bf09df78773e21401e5f1e2903a949f4ecd2231b"
+        },
+        "local_api_regression": {
+          "actual_chat_stages": [
+            {
+              "case": "actual_question_tool_selection",
+              "usage": {
+                "request_count": 1,
+                "fresh_input": 17851,
+                "cache_reads": 0,
+                "output_including_reasoning": 75,
+                "reasoning_subset": 37,
+                "compaction": 0,
+                "total_tokens": 17926,
+                "cost": null
+              },
+              "output": {
+                "path": ".runtime/harness-maturity-20261003/actual-chat-prepare/candidate-current/api/decision/output.json",
+                "sha256": "d62ddc673bc38617178be2120b30bc54525310dd7ba404d0481488e45c40981b",
+                "bytes": 1536
+              }
+            },
+            {
+              "case": "actual_question_read_continuation",
+              "usage": {
+                "request_count": 1,
+                "fresh_input": 465,
+                "cache_reads": 17792,
+                "output_including_reasoning": 390,
+                "reasoning_subset": 364,
+                "compaction": 0,
+                "total_tokens": 18647,
+                "cost": null
+              },
+              "output": {
+                "path": ".runtime/harness-maturity-20261003/actual-chat-prepare/continuation/api/answer/output.json",
+                "sha256": "4a1eb35c74e1da4d577a950b508e69fe3331fbd2018daa6631725bdf43e66336",
+                "bytes": 2975
+              }
+            },
+            {
+              "case": "actual_question_final_answer",
+              "usage": {
+                "request_count": 1,
+                "fresh_input": 589,
+                "cache_reads": 18176,
+                "output_including_reasoning": 307,
+                "reasoning_subset": 0,
+                "compaction": 0,
+                "total_tokens": 19072,
+                "cost": null
+              },
+              "output": {
+                "path": ".runtime/harness-maturity-20261003/actual-chat-prepare/final-continuation/api/answer/output.json",
+                "sha256": "3f353cf56d3f88246ec81373dc148750760ca4863767bbf1de68597cc80d7c5a",
+                "bytes": 2466
+              }
+            }
+          ],
+          "boundary": "Actual user question and tool/read continuation were exercised; final diagnostic reporting error is separately frozen below. Legacy HTTP status is historical/unlinked and does not prove response completion, current ERP truth or write recovery."
+        }
+      },
+      {
+        "category": "purchase_consolidation_advisory",
+        "origin": "actual_2279_business_constraint_failure",
+        "case_id": "BFR3-2279-01",
+        "fix_commit": "ac9d8ee826fcc3f7eaa45b8bbf50f113fc47e692",
+        "frozen_case": {
+          "path": "experiments/agent_regression/harness-maturity-20261003/consolidation-case.json",
+          "sha256": "6d56a0d821f18e626bd173950802e40d2dcdba118ccdfab98dc1cfa1c7e93818"
+        },
+        "frozen_context": {
+          "path": ".runtime/harness-maturity-20261003/business-patchset5-2279/private/regression-frozen/2279-consolidation/manifest.json",
+          "sha256": "6353820a744fc7d7d492f460718451e1bbd508f4a094af7c0fdefde56170b4f7"
+        },
+        "source": [
+          {
+            "path": "src/erp_harness/erp/purchase_allocation.py",
+            "sha256": "683b1b29322a834b2e477bbb5b6d09984b3e373cc89c673844e336b1ccde0ea3"
+          },
+          {
+            "path": "src/erp_harness/erp/task_evidence.py",
+            "sha256": "c38a77624d55a1cf20f5ebcd0cf27fb427320b04ba20550ca01207af3ddea748"
+          }
+        ],
+        "offline_tests": [
+          {
+            "path": "tests/test_purchase_allocation.py",
+            "sha256": "7a1c40cdbb1ea1d61fba74e5a2a0d586b64db0bcdb1ffaa731b0c75d47ca8bbd"
+          }
+        ],
+        "related_log": {
+          "path": ".runtime/harness-maturity-20261003/consolidation-advisory-review/related-tests.log",
+          "sha256": "0607e76fbf2852038cd3b787f56cda66f0f7d14cd86b4639c719953725b788e8"
+        },
+        "independent_review": {
+          "path": ".runtime/harness-maturity-20261003/final-core-review/last-increments-review.json",
+          "sha256": "7528d527d5a89be5eefccec0bf09df78773e21401e5f1e2903a949f4ecd2231b"
+        },
+        "local_api_regression": {
+          "result": {
+            "path": "experiments/agent_regression/harness-maturity-20261003/consolidation-api-results.json",
+            "sha256": "e6a4edf7e09eaadf82d6c3910bb0d88b31305eec0a75074569e0676d74b98ce2"
+          },
+          "independent_verdict": {
+            "path": ".runtime/harness-maturity-20261003/consolidation-advisory-api/independent-verdict.json",
+            "sha256": "fa9c4a83d2a8c45feb176937f79ad6182be1c2857d1ca6d0a15fde7d082221e9"
+          },
+          "candidate": {
+            "path": ".runtime/harness-maturity-20261003/consolidation-advisory-candidate/candidate.request.json",
+            "sha256": "6c455961d53c7e1d3f696fbb992e3fb672c66aa455589e6e41b1a5eb49819b9d"
+          },
+          "provenance": {
+            "path": ".runtime/harness-maturity-20261003/consolidation-advisory-candidate/provenance.json",
+            "sha256": "fece5b0f28f68bcd019044e5a04c4c6a5ad64296897c09f018b1d8272ed3195e"
+          },
+          "status": "corrective_consolidation_intent_observed",
+          "business_verified": false,
+          "returned_tools_executed": 0,
+          "usage": {
+            "request_count": 1,
+            "fresh_input": 1502,
+            "cache_reads": 106496,
+            "output_including_reasoning": 20240,
+            "reasoning_subset": 19960,
+            "compaction": 0,
+            "total_tokens": 128238,
+            "cost": null
+          }
+        },
+        "boundary": "Groups are purchase split candidates, not verified supplier-offer identity, delivery terms or consolidation policy. Original capacity status is retained; optional diagnostics are excluded from TaskEvidence approval prestate. API intent is separate from the original 21.09 and new complete-run score."
+      },
+      {
+        "category": "partial_diagnostic_compaction_visibility",
+        "origin": "synthetic_offline_actual_native_producer_route_world_and_compaction_controls",
+        "case_id": null,
+        "fix_commit": "a70f9ce71f945fe84750638e3b5529fc951c0fad",
+        "before": {
+          "path": ".runtime/harness-maturity-20261003/compaction-partial/before-manifest.json",
+          "sha256": "033f543b6cbb61811d8dfade19dd15224e00255125b585a099d7812440fb829a"
+        },
+        "after": {
+          "path": ".runtime/harness-maturity-20261003/compaction-partial/after/after-manifest.json",
+          "sha256": "d22c99ca89d0a1f55d1007cd6b0bfa0411f0408510853561c882ea8f7c6dfb2f"
+        },
+        "source": [
+          {
+            "path": "src/erp_harness/tools/router.py",
+            "sha256": "ca0829b503cbfc53cc9ccfd9f368c6c26a56e6c1821e8915413afc988fa14600"
+          }
+        ],
+        "offline_tests": [
+          {
+            "path": "tests/test_supply_context.py",
+            "sha256": "a3c66889b54b9fef56888b0716c75a950bf0bd6717fcc122639a4cf82ddfc4da"
+          },
+          {
+            "path": "tests/test_capability_failures.py",
+            "sha256": "41d25952705eec24b8a8ccb9550ee36fd51ba5abafe314cb7228c0de3348a133"
+          }
+        ],
+        "related_log": {
+          "path": ".runtime/harness-maturity-20261003/compaction-partial/related-tests.log",
+          "sha256": "76a653fb1e296b74be5b1e2b1fececa379b1900f19ac652f55188014dd2f6bae"
+        },
+        "review": {
+          "path": ".runtime/harness-maturity-20261003/compaction-partial/patch-review.json",
+          "sha256": "d36c909804c758ae14d1a6f58b29fb352f22e605387375b41e754c22cb92cc7c"
+        },
+        "local_api_regression": null,
+        "boundary": "No new paid case is invented from synthetic fault injection. Partial JSON values and World evidence are preserved; normal reply byte order is unchanged. Reasons and next_action now appear in both existing 2000-character summary inputs; larger diagnostics and summary-model retention remain unproved. Capability tools have no new World hook."
+      },
+      {
+        "category": "approved_prestate_compatibility",
+        "origin": "offline_existing_approved_receipt_upgrade_control",
+        "case_id": null,
+        "fix_commit": "a24a7a299fcc90bb09edd51e45ac78a60b3fb935",
+        "before": {
+          "path": ".runtime/harness-maturity-20261003/final-core-review/consolidation-old-prestate-shape.json",
+          "sha256": "ba8b0a4306522fc623ed4143d751f3e5633310d1e853d490b6cd9875fd317bcf"
+        },
+        "source": [
+          {
+            "path": "src/erp_harness/erp/purchase_allocation.py",
+            "sha256": "683b1b29322a834b2e477bbb5b6d09984b3e373cc89c673844e336b1ccde0ea3"
+          }
+        ],
+        "offline_tests": [
+          {
+            "path": "tests/test_purchase_allocation.py",
+            "sha256": "7a1c40cdbb1ea1d61fba74e5a2a0d586b64db0bcdb1ffaa731b0c75d47ca8bbd",
+            "test": "test_existing_approved_capacity_receipt_keeps_the_legacy_report_shape_after_upgrade"
+          }
+        ],
+        "related_log": {
+          "path": ".runtime/harness-maturity-20261003/consolidation-advisory-review/legacy-shape-tests.log",
+          "sha256": "5a85379c20f30cd2c2d07ab419e7f5f5ceab4cb58085820ddc86bf7aa57b26f1"
+        },
+        "independent_review": {
+          "path": ".runtime/harness-maturity-20261003/final-core-review/last-increments-review.json",
+          "sha256": "7528d527d5a89be5eefccec0bf09df78773e21401e5f1e2903a949f4ecd2231b"
+        },
+        "local_api_regression": null,
+        "boundary": "include_split_diagnostic=False preserves old normal/failed/unknown report shapes so unchanged approvals retain exact prestate equality. No generic approval hash normalization or new paid case is added."
+      },
+      {
+        "category": "diagnostic_coverage_interpretation",
+        "origin": "actual_model_answer_misreads_empty_failure_list_despite_existing_verified_ledger",
+        "case_id": "HMC-CHAT-01",
+        "fix_commit": "e95810ee7a703e107fb0df4be63e6cbfe27a977e",
+        "before": {
+          "path": ".runtime/harness-maturity-20261003/diagnostic-coverage-failure/before-manifest.json",
+          "sha256": "62c2c38383c97662edc48ef23e507d8dd8a0a46c67614af6f036069753b8c32d"
+        },
+        "after": {
+          "path": ".runtime/harness-maturity-20261003/diagnostic-coverage-failure/after-manifest.json",
+          "sha256": "52545873b685c0653d50ce86e5f239cad84b27ff0d46ca6833d39a48a520ce51"
+        },
+        "source": [
+          {
+            "path": "src/erp_harness/tools/run_diagnostics.py",
+            "sha256": "20948b99838a127511a250a2e8afd82cdbe6e484ce519b0232051f61ac70b941"
+          }
+        ],
+        "offline_tests": [
+          {
+            "path": "tests/test_run_diagnostics.py",
+            "sha256": "238345f75d782b1216086645d67b5449a272c2a1a3d55917726d65f5fc81c5a4"
+          }
+        ],
+        "related_log": {
+          "path": ".runtime/harness-maturity-20261003/diagnostic-coverage-failure/related-tests.log",
+          "sha256": "722a402f810a5203785c2c8192c65cf25be5f903867d976e1bef4f9a2a6de6e1"
+        },
+        "independent_review": {
+          "path": ".runtime/harness-maturity-20261003/diagnostic-coverage-failure/independent-review.json",
+          "sha256": "dcbf33bbc932f1125e3e18c27429ddea672959fc9d5846c05d43f975c10cfc5f"
+        },
+        "offline_status": "passed; actual producer returns eight verified receipts and 57 missing metadata files with evidence_complete=false",
+        "local_api_regression": {
+          "status": "failed_partial",
+          "request_id": "req_0892c22091b446f19a20ea6d2138ba5c",
+          "http_status": 200,
+          "candidate": {
+            "path": ".runtime/harness-maturity-20261003/diagnostic-coverage-candidate/candidate.json",
+            "sha256": "9f1951e0f34a04da0beb4f5179eaf4be6c825b7117e238ba892fab1473da4988"
+          },
+          "candidate_manifest": {
+            "path": ".runtime/harness-maturity-20261003/diagnostic-coverage-candidate/manifest.json",
+            "sha256": "eab2019f93f199f488b548039e979fe63718a438feb0946506f748370a20c38b"
+          },
+          "wire_request": {
+            "path": ".runtime/harness-maturity-20261003/diagnostic-coverage-candidate/api/wire.request.json",
+            "sha256": "9f1951e0f34a04da0beb4f5179eaf4be6c825b7117e238ba892fab1473da4988"
+          },
+          "metadata": {
+            "path": ".runtime/harness-maturity-20261003/diagnostic-coverage-candidate/api/requests/0001.meta.json",
+            "sha256": "aa6626d30b613aa4444cf6f426f516638478c2213f071930c58cbd822e6f19fd"
+          },
+          "output": {
+            "path": ".runtime/harness-maturity-20261003/diagnostic-coverage-candidate/api/output.json",
+            "sha256": "c5e9fa5d0113f5124e51cf83393ddefeeb06f5851f6bf05e9148b89220e38184"
+          },
+          "runner_verdict": {
+            "path": ".runtime/harness-maturity-20261003/diagnostic-coverage-candidate/api/verdict.json",
+            "sha256": "fff588d7d948d8ae7dea2e9431d887d22dd7648bd18642632ff66e82f54cb5da"
+          },
+          "next_failure_freeze": {
+            "path": ".runtime/harness-maturity-20261003/diagnostic-reporting-guidance/before-manifest.json",
+            "sha256": "24303ce7af5f325f459616b91d6421cc5046da1fec9578c08f6aeeeb7736aca7"
+          },
+          "actual_next_corrective_request": null,
+          "failure": "The answer omitted the eight verified receipts and 57 requests missing metadata, and incorrectly excluded business rejection. The full 1293-byte diagnostic reply was present, so this was not truncation.",
+          "business_verified": false,
+          "returned_tools_executed": 0,
+          "new_odoo_requests": 0,
+          "usage": {
+            "request_count": 1,
+            "fresh_input": 1067,
+            "cache_reads": 17792,
+            "output_including_reasoning": 520,
+            "reasoning_subset": 223,
+            "compaction": 0,
+            "total_tokens": 19379,
+            "cost": null
+          }
+        },
+        "boundary": "Local counts describe recorded history, not current ERP truth. Empty failure items do not prove no writes or no business refusals. Source mechanism passes offline; actual answer quality remains partial and requires the separately frozen policy correction. No claim of a successful self-debug loop."
+      }
+    ],
+    "business_control": {
+      "case": "2279",
+      "source_commit": "e95810ee7a703e107fb0df4be63e6cbfe27a977e",
+      "source_tree_sha256": "70927674236da6947df82e74f1fb661fc955e13e1fedd0d5315bb584f02f4f07",
+      "wheel_sha256": "f4be7e29fd2c345399641d2a707282cdc34ee9e93e5b87211769e734d82222c5",
+      "config_sha256": "28d0d86d6208a8201df52c326baea83a47e817585320a5a31354227b10afd6b6",
+      "task_scope_sha256": null,
+      "frozen": {
+        "path": ".runtime/harness-maturity-20261003/business-patchset7b-2279/frozen.json",
+        "sha256": "fde69e61157a61b7d00f6d94ee15d93130a14d387c86c93dba2d2ca0cb01ff26"
+      },
+      "review": {
+        "path": ".runtime/harness-maturity-20261003/business-patchset7b-2279/business-review.json",
+        "sha256": "9df081081092ed2a92e7d628f834658d7c34c3e35955f38e6d028f3768fd8c6d"
+      },
+      "official_reward": {
+        "overall_score": 100.0,
+        "passed": true,
+        "constraint": {
+          "earned": 32,
+          "total": 32
+        },
+        "hygiene": {
+          "earned": 6,
+          "total": 6
+        },
+        "optimality": {
+          "score": 100.0,
+          "total": 100.0
+        }
+      },
+      "official_reward_ref": {
+        "path": ".runtime/harness-maturity-20261003/business-patchset7b-2279/jobs/2279/harness-maturity-patchset7b-2279-20261003/2279_easy_repair_plan_easy__GTNg4bm/verifier/reward.json",
+        "sha256": "a3b327c3bac5d00350b8a14ffe61e657bb5762e90a513dca158eb321b3682d8b"
+      },
+      "independent_audit_status": "completed",
+      "usage": {
+        "request_count": 28,
+        "fresh_input": 106798,
+        "cache_reads": 1078272,
+        "output_including_reasoning": 32656,
+        "reasoning_subset": 26320,
+        "compaction": 0,
+        "total_tokens": 1217726,
+        "cost": null
+      },
+      "usage_complete": true,
+      "boundary": "Original verifier score is separate from readback and Harbor nested reward parsing; this single normal complete run does not exercise unknown-write recovery or prove causality/efficiency.",
+      "independent_audit": {
+        "path": ".runtime/harness-maturity-20261003/business-patchset7b-2279/private/independent-audit-2279.json",
+        "sha256": "e11b66c8433d116f34ec7fa5a1663dfd01fa257317a871b385d61671145f3fd4"
+      },
+      "action_status_counts": {
+        "verified": 4,
+        "approved": 1
+      },
+      "approved_receipt_boundary": "One approved receipt was never claimed/sent; it is not an executed write.",
+      "unknown_write_observed": false,
+      "automatic_write_replay_observed": false,
+      "advisory_boundary": "The normal complete run recorded warning0/no_candidates; no evidence that the warning caused the score improvement."
+    },
+    "associated_checks_usage": {
+      "request_count": 33,
+      "fresh_input": 128272,
+      "cache_reads": 1238528,
+      "output_including_reasoning": 54188,
+      "reasoning_subset": 46904,
+      "compaction": 0,
+      "total_tokens": 1420988,
+      "cost": null
+    },
+    "usage_boundary": "Associated API/business receipts are enumerated once within this section; some appeared in previous goal ledgers. Do not add this subtotal again to goal totals. Output includes reasoning; reasoning is a subset; absent cost remains unknown.",
+    "material_limits": [
+      "Default OpenAICompatible Chat/Responses per-attempt behavior is covered; other provider attempt hooks are not equivalent.",
+      "Real active-inspection concurrent races and unknown-write fault paths were not exercised by these business samples.",
+      "Field presence, selected quantity feasibility, a model STOP or a verified action are not complete business acceptance.",
+      "Original 1238985 consolidation score21.09 remains immutable; corrected intent and new complete business100 are separate results."
+    ],
+    "documentation_update_usage": {
+      "request_count": 0,
+      "fresh_input": 0,
+      "cache_reads": 0,
+      "output_including_reasoning": 0,
+      "reasoning_subset": 0,
+      "compaction": 0,
+      "total_tokens": 0,
+      "cost": null
+    }
+  },
+  "diagnostic_reporting_followup": {
+    "source_commit": "4c28225663db879ea04d2ccaba531d7486b3184d",
+    "case_id": "HMC-CHAT-01",
+    "status": "bounded_diagnostic_reporting_accepted_with_wording_limit",
+    "finding": "A complete diagnostic reply still led to missing recorded action counts and an unsupported exclusion of historical business failures.",
+    "fix": "Three shared reporting sentences in the existing normal/inspection policy; tools, replies, permissions and execution unchanged.",
+    "source": {
+      "path": "src/erp_harness/app/conversation.py",
+      "sha256": "94e956d0dd3833a07662d4ceee334c249573c287b2a0c95fbd2ac96e9d9f4d88"
+    },
+    "causal_request": "req_0892c22091b446f19a20ea6d2138ba5c",
+    "first_local_api_corrective_request": "req_1ab17ca809f24539954c091d15ec9364",
+    "original_historical_corrective_request": null,
+    "frozen": {
+      "path": ".runtime/harness-maturity-20261003/diagnostic-reporting-guidance/before-manifest.json",
+      "sha256": "24303ce7af5f325f459616b91d6421cc5046da1fec9578c08f6aeeeb7736aca7"
+    },
+    "offline_tests": [
+      "tests/test_workbench_conversation.py"
+    ],
+    "related_checks": {
+      "passed": 21,
+      "subtests_passed": 33,
+      "new_model_requests": 0
+    },
+    "offline_propagation": {
+      "path": ".runtime/harness-maturity-20261003/diagnostic-reporting-guidance/offline-loop-probe.json",
+      "sha256": "ba47d869850f7d93ef651c02a3a886299019b774c2784f60d801577e208bad02"
+    },
+    "source_review": {
+      "path": ".runtime/harness-maturity-20261003/diagnostic-reporting-guidance/independent-review.json",
+      "sha256": "7539eb372f171bb43408b6ccf5569017a1920c5c568468d86166dd4857ac7f8f"
+    },
+    "api_binding": {
+      "path": ".runtime/harness-maturity-20261003/diagnostic-reporting-guidance/after-api-manifest.json",
+      "sha256": "4c225bb2a543c70b927d8c173520dc2f9c3cd48f0d530e24a2888efc39dc893a"
+    },
+    "api_independent_verdict": {
+      "path": ".runtime/harness-maturity-20261003/diagnostic-policy-candidate/api/independent-verdict.json",
+      "sha256": "6eaf6c224bbeb75acd1670196fb355ed1aa207ccf184b2f44d832670407cc68b"
+    },
+    "public_case": {
+      "path": "experiments/agent_regression/harness-maturity-20261003/actual-chat-case.json",
+      "sha256": "88c797cacd2b586a1f5b3229869b5bc518606549f4fdf11843f7553054ccee3e"
+    },
+    "public_results": {
+      "path": "experiments/agent_regression/harness-maturity-20261003/actual-chat-api-results.json",
+      "sha256": "5919f3dd7a6b8ee8a93c389274307c1177fafb3ca015f2da5be8aa97632296c2"
+    },
+    "ci": {
+      "url": "https://github.com/Sanssssssssssssssss/ERP-agent/actions/runs/37120986068",
+      "conclusion": "success",
+      "jobs": 5,
+      "receipt": {
+        "path": ".runtime/harness-maturity-20261003/ci-diagnostic-policy.json",
+        "sha256": "79c696d715933286bc4d646d43793888735ba20ed98446ca8bd68d9af8ba59d5"
+      }
+    },
+    "boundary": "Latest interruption and earlier historical failures are distinct. Quoted first-sentence wording remains too absolute without its following coverage caveat. No business recovery or active concurrent inspection was executed; the e95810e business run excludes this later reporting-only patch."
+  },
+  "delivery_usage_source": {
+    "path": "experiments/agent_regression/harness-maturity-20261003/business-results.json",
+    "sha256": "965288ea45ac9a303f8f4b1eeea623559d1495402bc3a73e9bfce0c198be2472"
+  },
+  "published_report_encoding": {
+    "encoding": "UTF-8 LF",
+    "note": "Public report references use committed LF bytes. Private frozen originals retain their exact bytes; JSON values and usage are unchanged.",
+    "prior_working_crlf_to_published_lf_sha256": {
+      "f5fbe6e7a3283efd56abe8d92cff21d5408e726b121b3d3934350354cb3f6f85": "e6a4edf7e09eaadf82d6c3910bb0d88b31305eec0a75074569e0676d74b98ce2",
+      "b3b55930e6d14774cd94fccd4bf1cec5835725079d36d0968d65be94aef800e1": "6d56a0d821f18e626bd173950802e40d2dcdba118ccdfab98dc1cfa1c7e93818",
+      "c07301649734fecefe66f1b8809d5c9d91c9ef7c88451f750a4b1fc5e1da553a": "fffcb1b7996b1af91ec42b00da867e1b51d121f266f8dd608ab0a1bd4651222c",
+      "5152092b2f99b83b6fb0d38f58a6f9bc4dea7cc4bb80e64aece5ba925f305866": "8bc8b52320a96161bed489549a3539000cdfac82c125b91076d4f46e180619d4"
+    },
+    "usage_report_before_reference_normalization_sha256": "4876f5f41b48b201d8e34d8581c4c2062dcd442de0df4f8856fdfcc9daa383e0"
+  }
+}

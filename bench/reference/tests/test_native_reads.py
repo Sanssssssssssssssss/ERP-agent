@@ -120,9 +120,9 @@ class FakeOdoo:
 class NativeReadsTest(unittest.TestCase):
     @staticmethod
     def _legacy_error_envelope(value):
-        # Native diagnostics extend failed reads; legacy success/error and RPCs still match.
+        # Compare legacy fields separately from the explicitly checked native diagnostics.
         if isinstance(value, dict) and value.get("success") is False and value.get("reason_code"):
-            return {k: v for k, v in value.items() if k not in {"status", "reason_code", "next_action", "http_status", "detail"}}
+            return {k: v for k, v in value.items() if k not in {"status", "reason_code", "failure_layer", "next_action", "http_status", "detail"}}
         return value
 
     @classmethod
@@ -480,11 +480,24 @@ print('MCP_FREE_CORE_IMPORT_OK')
                         expected = getattr(tools_read, name)(None, **arguments)
                     actual = NativeReads(actual_client, policy=policy).call(name, arguments)
                     comparable_actual = copy.deepcopy(self._legacy_error_envelope(actual))
-                    if actual.get("reason_code"):
+                    if expected.get("success") is False:
                         self.assertFalse(actual["success"])
                         self.assertTrue(actual["status"])
                         self.assertTrue(actual["next_action"])
                         self.assertTrue(actual["detail"])
+                        code, layer, next_action = (
+                            ("permission_denied", "authorization", "check_permissions")
+                            if arguments.get("model") == "secret.model" else
+                            ("record_unavailable", "business_reference", "resolve_reference")
+                            if arguments.get("record_id") == 999 else
+                            ("query_invalid", "tool_arguments", "correct_query")
+                        )
+                        self.assertEqual((actual["reason_code"], actual["failure_layer"], actual["next_action"]),
+                                         (code, layer, next_action))
+                    if arguments.get("model") == "secret.model":
+                        self.assertEqual(expected, {"success": False, "error": "AccessError: not allowed"})
+                        self.assertEqual(actual["error"], "当前账号或字段策略不允许这项调用。")
+                        expected = {**expected, "error": actual["error"]}
                     if name == "get_model_fields" and not arguments.get("field_names") and arguments.get("relevance", "top") is not None:
                         comparable_actual.pop("summary", None)
                     self.assertEqual(comparable_actual, expected)
@@ -679,6 +692,7 @@ print('MCP_FREE_CORE_IMPORT_OK')
                     left = self._canonical_result_dump((await old.execute(name, args[name])).model_dump(), schema_extensions=name == "get_model_fields")
                     right = self._canonical_result_dump((await new.execute(name, args[name])).model_dump(), schema_extensions=name == "get_model_fields")
                     self.assertEqual(left, right)
+                    self.assertTrue(json.loads(right["content"][0]["text"])["success"], name)
             a_by_name, b_by_name = {t.name: t for t in a}, {t.name: t for t in b}
             for name, arguments in (
                 ("read_record", {"model": "res.partner", "record_id": 1, "extra": "ignored"}),
@@ -698,7 +712,10 @@ print('MCP_FREE_CORE_IMPORT_OK')
             starts = [json.loads(line) for line in (directory / "b.jsonl").read_text().splitlines() if json.loads(line)["event"] == "start"]
             self.assertEqual(len(starts), len(READ_RESPONSES) + 4)
             self.assertTrue(all(event["backend"] == "native" for event in starts))
-        with tempfile.TemporaryDirectory() as directory:
+        instances = {"default": {"url": "http://fixture", "db": "bench", "transport": "json2", "is_default": True}}
+        with (tempfile.TemporaryDirectory() as directory,
+              patch.object(tools_read, "list_configured_instances", return_value=instances),
+              patch("erp_harness.erp.reads.list_configured_instances", return_value=instances)):
             asyncio.run(check(Path(directory)))
 
     def test_health_projection_keeps_policy_and_original_telemetry(self):

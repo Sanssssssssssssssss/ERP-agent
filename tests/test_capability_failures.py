@@ -1,13 +1,38 @@
 """Background and partial-result failures through real local execution boundaries."""
+import asyncio
+import io
 import json
 import threading
+import urllib.error
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
+from pydantic_core import to_json
 
+from erp_harness.context.compaction import (
+    build_compaction_summary_prompt,
+    build_turn_prefix_summary_prompt,
+)
+from erp_harness.erp._odoo_core.access_helpers import (
+    _acl_row_applies,
+    _m2m_ids,
+    _m2o_id,
+    _rule_applies,
+)
 from erp_harness.erp._odoo_core.cross_instance import Selection
-from erp_harness.erp.capabilities import NativeCapabilities, _TaskStore
+from erp_harness.erp._odoo_core.field_policy import FieldPolicy
+from erp_harness.erp.capabilities import (
+    NativeCapabilities,
+    _CapabilityReadFailure,
+    _PolicyReadClient,
+    _TaskStore,
+)
+from erp_harness.erp.gateway import Json2ReadClient
+from erp_harness.erp.reads import NativeReads
+from erp_harness.runtime.loop import AgentContext, _execute_and_finalize, _PreparedToolCall
+from erp_harness.runtime.messages import AssistantMessage, TextContent, ToolCall, ToolResultMessage
+from erp_harness.tools.router import native_tool_catalog, route_tools
 
 
 @pytest.mark.parametrize("error,reason", [
@@ -272,3 +297,318 @@ def test_policy_adapter_failure_never_becomes_empty_success(tmp_path, response, 
         reads.search_records.assert_called_once()
     finally:
         capabilities.close()
+
+
+def _native_diagnostics():
+    with patch.object(Json2ReadClient, "_json2_call_once", return_value={}):
+        client = Json2ReadClient(url="http://offline.fixture", db="fixture", username="reader", api_key="fixture")
+    reads = NativeReads(client, policy=FieldPolicy({}))
+    capabilities = NativeCapabilities.__new__(NativeCapabilities)
+    capabilities.reads = reads
+    return reads, capabilities
+
+
+def _diagnostic_model_reply(tmp_path, reads, capabilities, name, arguments):
+    tool = next(row for row in route_tools(native_tool_catalog(), tmp_path / "backends.jsonl",
+                                           native=reads, capabilities=capabilities, native_health=True)
+                if row.name == "mcp_odoo_" + name)
+    call = ToolCall(id="offline-" + name, name=tool.name, arguments=arguments)
+    final = asyncio.run(_execute_and_finalize(
+        AgentContext("", [], [tool]), AssistantMessage(model="offline", content=[call]),
+        _PreparedToolCall(0, call, tool, arguments), None, None, lambda _: None))
+    payload = json.loads(final.result.text)
+    assert final.result.details["structuredContent"] == payload
+    return payload, final.result.text
+
+
+def _http_diagnostic_failure(status):
+    # HTTP status must beat unrelated words in external exception bodies.
+    body = {"name": "odoo.exceptions.AccessError",
+            "message": "PRIVATE_EXTERNAL_MESSAGE timed out permission denied",
+            "debug": "PRIVATE_TRACE", "context": {"token": "PRIVATE_TOKEN"}}
+    return urllib.error.HTTPError("http://offline.fixture", status, "backend", {},
+                                  io.BytesIO(json.dumps(body).encode()))
+
+
+@pytest.mark.parametrize("name", ["inspect_model_relationships", "diagnose_access", "data_quality_report"])
+@pytest.mark.parametrize("status,reason,action", [(403, "permission_denied", "check_permissions"),
+                                                (429, "rate_limited", "wait_then_recheck")])
+def test_native_partial_diagnostics_retain_http_causes_in_model_reply(tmp_path, name, status, reason, action):
+    reads, capabilities = _native_diagnostics()
+    arguments = {"model": "sale.order"}
+    if name == "data_quality_report":
+        reads.cache["sale.order"] = {"id": {"type": "integer"}, "name": {"type": "char"}}
+        arguments.update(checks=["duplicates", "missing_required"], key_fields=["name"])
+    with patch("urllib.request.urlopen", side_effect=lambda *_args, **_kwargs: (_ for _ in ()).throw(_http_diagnostic_failure(status))) as sender:
+        result, text = _diagnostic_model_reply(tmp_path, reads, capabilities, name, arguments)
+    assert "PRIVATE" not in text
+    if name == "inspect_model_relationships":
+        assert result["success"] is False
+        assert result["metadata_used"]["fields_get"] is False
+        failures = [result]
+    elif name == "diagnose_access":
+        assert result["success"] is True
+        assert result["model_metadata"]["record"] is None and result["actual_count"] is None
+        assert any(code["code"] == "metadata_access_unavailable" and code["severity"] == "warning"
+                   for code in result["diagnosis"]["codes"])
+        failures = result["metadata_errors"]
+        assert {row["stage"] for row in failures} == {"ir.model", "res.users.context_get"}
+    else:
+        assert result["success"] is True and result["summary"]["clean"] is False
+        assert result["summary"]["checks_errored"] == ["duplicates"]
+        assert result["results"][1]["ok"] is True
+        assert result["read_failure_count"] == 1 and not result["read_failures_truncated"]
+        failures = result["read_failure_details"]
+    assert failures
+    for failure in failures:
+        assert failure["reason_code"] == reason and failure["next_action"] == action
+        assert failure["http_status"] == status
+    # Diagnostics remain read only; no RPC retries or extra metadata correction is automatic.
+    assert all("/json/2/" in call.args[0].full_url for call in sender.call_args_list)
+    assert not any(call.args[0].full_url.endswith(("/create", "/write", "/unlink")) for call in sender.call_args_list)
+
+
+@pytest.mark.parametrize("group,grants,invalid", [(False, 1, False), (None, 1, False), (True, 0, True),
+                                                ([True, "Bad"], 0, True), ([], 0, True),
+                                                ({}, 0, True), ("invalid", 0, True), ([7, "Group"], 0, False)])
+def test_native_access_partial_failure_preserves_successful_metadata_and_unknown_count(tmp_path, group, grants, invalid):
+    reads, capabilities = _native_diagnostics()
+    reads.cache["ir.model"] = {name: {"type": "char"} for name in ["id", "name", "model"]}
+    acl_fields = ["id", "name", "model_id", "group_id", "perm_read", "perm_write", "perm_create", "perm_unlink"]
+    reads.cache["ir.model.access"] = {name: {"type": "char"} for name in acl_fields}
+    model = {"id": 12, "name": "Sales order", "model": "sale.order"}
+    acl = {"id": 1, "name": "Reader", "model_id": [12, "sale.order"], "group_id": group,
+           "perm_read": True, "perm_write": False, "perm_create": False, "perm_unlink": False}
+
+    def response(request, **kwargs):
+        if request.full_url.endswith("/sale.order/search_count"):
+            raise _http_diagnostic_failure(429)
+        value = [model] if request.full_url.endswith("/ir.model/search_read") else [acl] \
+            if request.full_url.endswith("/ir.model.access/search_read") else {}
+        return io.BytesIO(json.dumps(value).encode())
+
+    with patch("urllib.request.urlopen", side_effect=response) as sender:
+        result, text = _diagnostic_model_reply(tmp_path, reads, capabilities, "diagnose_access",
+                                              {"model": "sale.order", "expected_count": 1, "include_rules": False})
+    assert result["success"] is True and result["model_metadata"]["record"] == model
+    assert result["access"]["rows"] == [acl] and result["access"]["granting_count"] == grants
+    assert result["actual_count"] is None
+    failures = {row["stage"]: row for row in result["metadata_errors"]}
+    assert failures["sale.order.search_count"]["reason_code"] == "rate_limited"
+    if invalid:
+        assert failures["ir.model.access.group_id"]["reason_code"] == "invalid_response"
+    else:
+        assert "ir.model.access.group_id" not in failures
+    assert result["metadata_used"]["rules"] is False and result["rules"]["included"] is False
+    assert any(row["code"] == "metadata_access_unavailable" for row in result["diagnosis"]["codes"])
+    assert "PRIVATE" not in text and sender.call_count == 4
+
+
+@pytest.mark.parametrize("group,parsed,applies", [(False, None, True), (None, None, True),
+                                               (True, None, False), (0, None, False), (-1, None, False),
+                                               ([], None, False), ({}, None, False), ("invalid", None, False),
+                                               ([True, "Bad"], None, False), ([7, "Group", "extra"], None, False),
+                                               ([7, False], None, False), (7, 7, True),
+                                               ([7, "Group"], 7, True), ((7, "Group"), 7, True), (8, 8, False)])
+def test_access_acl_groups_distinguish_global_empty_values_from_unknown_shapes(group, parsed, applies):
+    assert _m2o_id(group) == parsed
+    assert _acl_row_applies({"group_id": group}, {7}) is applies
+    if parsed:
+        assert not _acl_row_applies({"group_id": group}, None)
+
+
+@pytest.mark.parametrize("state,read", [("uncalled", False), ("failed", False), ("empty", True)])
+def test_native_access_rules_metadata_reports_actual_read_not_requested_configuration(tmp_path, state, read):
+    reads, capabilities = _native_diagnostics()
+    for model, fields in {
+        "ir.model": ["id", "name", "model"],
+        "ir.model.access": ["id", "name", "model_id", "group_id", "perm_read", "perm_write", "perm_create", "perm_unlink"],
+        "ir.rule": ["id", "name", "model_id", "domain_force", "groups", "active", "perm_read", "perm_write", "perm_create", "perm_unlink"],
+    }.items():
+        reads.cache[model] = {field: {"type": "char"} for field in fields}
+
+    def response(request, **kwargs):
+        if state == "uncalled" and request.full_url.endswith("/ir.model/search_read") \
+                or state == "failed" and request.full_url.endswith("/ir.rule/search_read"):
+            raise _http_diagnostic_failure(403)
+        value = [{"id": 12, "name": "Sales order", "model": "sale.order"}] \
+            if request.full_url.endswith("/ir.model/search_read") else {} \
+            if request.full_url.endswith("/res.users/context_get") else []
+        return io.BytesIO(json.dumps(value).encode())
+
+    with patch("urllib.request.urlopen", side_effect=response) as sender:
+        result, text = _diagnostic_model_reply(tmp_path, reads, capabilities, "diagnose_access", {"model": "sale.order"})
+    assert result["success"] is True and result["rules"]["included"] is True
+    assert result["metadata_used"]["rules"] is read
+    rule_calls = [call for call in sender.call_args_list if call.args[0].full_url.endswith("/ir.rule/search_read")]
+    assert len(rule_calls) == (0 if state == "uncalled" else 1)
+    assert "PRIVATE" not in text
+
+
+@pytest.mark.parametrize("name", ["inspect_model_relationships", "diagnose_access", "data_quality_report"])
+def test_native_diagnostics_bad_backend_shapes_are_unknown_reads_not_empty_success(tmp_path, name):
+    reads, capabilities = _native_diagnostics()
+    arguments = {"model": "sale.order"}
+    body = []
+    if name == "data_quality_report":
+        reads.cache["sale.order"] = {"id": {"type": "integer"}, "name": {"type": "char"}}
+        arguments.update(checks=["duplicates"], key_fields=["name"])
+        body = {"invalid": "shape"}
+    with patch("urllib.request.urlopen", side_effect=lambda *_args, **_kwargs: io.BytesIO(json.dumps(body).encode())):
+        result, _text = _diagnostic_model_reply(tmp_path, reads, capabilities, name, arguments)
+    failures = [result] if name == "inspect_model_relationships" else result["metadata_errors"] \
+        if name == "diagnose_access" else result["read_failure_details"]
+    assert failures and all(row["reason_code"] == "invalid_response" for row in failures)
+    assert all(row["next_action"] == "check_service_logs" for row in failures)
+    if name == "data_quality_report":
+        assert result["summary"]["clean"] is False and result["summary"]["checks_errored"] == ["duplicates"]
+
+
+def test_native_data_quality_failure_details_are_bounded_without_hiding_failed_checks(tmp_path):
+    reads, capabilities = _native_diagnostics()
+    reads.cache["sale.order"] = {"id": {"type": "integer"}, "name": {"type": "char"}}
+    with patch("urllib.request.urlopen", side_effect=lambda *_args, **_kwargs: (_ for _ in ()).throw(_http_diagnostic_failure(403))) as sender:
+        result, text = _diagnostic_model_reply(tmp_path, reads, capabilities, "data_quality_report",
+                                              {"model": "sale.order", "checks": ["duplicates"] * 10, "key_fields": ["name"]})
+    assert result["success"] is True and result["summary"]["clean"] is False
+    assert result["summary"]["checks_errored"] == ["duplicates"] * 10
+    assert result["read_failure_count"] == sender.call_count == 10
+    assert len(result["read_failure_details"]) == 8 and result["read_failures_truncated"]
+    assert all(row["reason_code"] == "permission_denied" for row in result["read_failure_details"])
+    assert "PRIVATE" not in text
+
+
+def test_large_native_partial_diagnostics_survive_both_compaction_inputs(tmp_path):
+    reads, capabilities = _native_diagnostics()
+    reads.cache["sale.order"] = {"id": {"type": "integer"}, "name": {"type": "char"}}
+    with patch("urllib.request.urlopen", side_effect=lambda *_args, **_kwargs: (_ for _ in ()).throw(_http_diagnostic_failure(403))) as sender:
+        result, text = _diagnostic_model_reply(tmp_path, reads, capabilities, "data_quality_report",
+                                              {"model": "sale.order", "checks": ["missing_required"] * 10 + ["duplicates"],
+                                               "key_fields": ["name"]})
+    assert sender.call_count == 1 and len(text) > 2000
+    assert len(result["results"]) == 11 and all(row["ok"] for row in result["results"][:10])
+    assert result["summary"]["clean"] is False and result["summary"]["checks_errored"] == ["duplicates"]
+    message = ToolResultMessage(tool_call_id="offline-data_quality_report", tool_name="mcp_odoo_data_quality_report",
+                                content=[TextContent(text=text)])
+    for prompt in (build_compaction_summary_prompt((message,)), build_turn_prefix_summary_prompt((message,))):
+        assert '"clean":false' in prompt and "checks_errored" in prompt
+        assert "permission_denied" in prompt and "check_permissions" in prompt
+        assert '"http_status":403' in prompt and "PRIVATE" not in prompt
+
+
+@pytest.mark.parametrize("name", ["inspect_model_relationships", "data_quality_report"])
+def test_native_diagnostic_normal_paths_preserve_input_metadata_and_clean_report(tmp_path, name):
+    reads, capabilities = _native_diagnostics()
+    metadata = {"id": {"type": "integer"}, "name": {"type": "char"}}
+    reads.cache["sale.order"] = metadata
+    arguments = {"model": "sale.order"}
+    if name == "inspect_model_relationships":
+        arguments["fields_metadata"] = metadata
+    else:
+        arguments.update(checks=["missing_required"])
+    with patch("urllib.request.urlopen", side_effect=AssertionError("no RPC needed")) as sender:
+        expected = capabilities.call(name, arguments)
+        result, _text = _diagnostic_model_reply(tmp_path, reads, capabilities, name, arguments)
+    assert _text == to_json(expected).decode()
+    assert result["success"] is True
+    if name == "inspect_model_relationships":
+        assert result["metadata_used"]["source"] == "input"
+        assert result["summary"]["field_count"] == 2
+    else:
+        assert result["summary"]["clean"] is True and not result["summary"]["checks_errored"]
+        assert "read_failure_details" not in result
+    assert "reason_code" not in result
+    sender.assert_not_called()
+
+
+@pytest.mark.parametrize("groups,parsed,applies", [
+    (None, set(), True), (False, set(), True), ([], set(), True),
+    ([1, 7], {1, 7}, True), ([[1, "Group"], (7, "Group")], {1, 7}, True),
+    ([8], {8}, False), (True, None, False), ({}, None, False),
+    ("invalid", None, False), ([True], None, False), ([0], None, False),
+    ([-1], None, False), ([7, True], None, False), ([[7]], None, False),
+    ([[7, False]], None, False), ([[7, "Group", "extra"]], None, False),
+])
+def test_access_many_to_many_groups_preserve_unknown_instead_of_global(groups, parsed, applies):
+    assert _m2m_ids(groups) == parsed
+    assert _rule_applies({"groups": groups}, {1}) is applies
+    if parsed:
+        assert not _rule_applies({"groups": groups}, None)
+
+
+@pytest.mark.parametrize("target,groups,valid", [
+    ("direct", [1], True), ("direct", [], True), ("direct", [True], False),
+    ("direct", {}, False), ("all", [True], False), ("all", [[1]], False),
+    ("rule", [], True), ("rule", [1], True), ("rule", [True], False),
+    ("rule", {}, False), ("rule", "invalid", False),
+])
+def test_native_access_unknown_m2m_metadata_never_grants_or_becomes_global(tmp_path, target, groups, valid):
+    reads, capabilities = _native_diagnostics()
+    metadata = {
+        "ir.model": ["id", "name", "model"],
+        "ir.model.access": ["id", "name", "model_id", "group_id", "perm_read", "perm_write", "perm_create", "perm_unlink"],
+        "res.users": ["id", "name", "groups_id", "all_group_ids"],
+        "ir.rule": ["id", "name", "model_id", "domain_force", "groups", "active", "perm_read", "perm_write", "perm_create", "perm_unlink"],
+    }
+    for model, names in metadata.items():
+        reads.cache[model] = {name: {"type": "char"} for name in names}
+    user = {"id": 2, "name": "User", "groups_id": groups if target == "direct" else [1], "all_group_ids": []}
+    if target == "all":
+        user["all_group_ids"] = groups
+    acl = {"id": 1, "name": "Reader", "model_id": [12, "Sale"], "group_id": [1, "Reader"],
+           "perm_read": True, "perm_write": False, "perm_create": False, "perm_unlink": False}
+    rule = {"id": 1, "name": "Rule", "model_id": [12, "Sale"], "domain_force": "[]", "active": True,
+            "perm_read": True, "perm_write": False, "perm_create": False, "perm_unlink": False,
+            "groups": groups if target == "rule" else []}
+
+    def response(request, **kwargs):
+        if request.full_url.endswith("/ir.model/search_read"):
+            value = [{"id": 12, "name": "Sale", "model": "sale.order"}]
+        elif request.full_url.endswith("/res.users/context_get"):
+            value = {"uid": 2}
+        elif request.full_url.endswith("/res.users/read"):
+            value = [user]
+        elif request.full_url.endswith("/ir.model.access/search_read"):
+            value = [acl]
+        elif request.full_url.endswith("/ir.rule/search_read"):
+            value = [rule]
+        else:
+            raise AssertionError("Unexpected read-only RPC")
+        return io.BytesIO(json.dumps(value).encode())
+
+    with patch("urllib.request.urlopen", side_effect=response) as sender:
+        result, text = _diagnostic_model_reply(tmp_path, reads, capabilities, "diagnose_access", {"model": "sale.order"})
+    assert result["success"] is True and result["actual_count"] is None
+    assert result["current_user"]["record"] == user
+    expected_groups = groups if target == "direct" and valid else [1] if valid or target == "rule" else None
+    assert result["current_user"]["group_ids"] == expected_groups
+    assert result["access"]["granting_count"] == (1 if expected_groups else 0)
+    assert result["rules"]["global"] == ([] if target == "rule" and groups != [] else [rule])
+    assert result["rules"]["applicable"] == ([] if target == "rule" and not valid else [rule])
+    if valid:
+        assert not result["metadata_errors"]
+    else:
+        stage = "ir.rule.groups" if target == "rule" else "res.users.groups"
+        failure = next(row for row in result["metadata_errors"] if row["stage"] == stage)
+        assert failure["reason_code"] == "invalid_response"
+        assert any(row["code"] == "metadata_access_unavailable" for row in result["diagnosis"]["codes"])
+        assert not any(row["code"] == "no_access_issue_detected" for row in result["diagnosis"]["codes"])
+    assert "PRIVATE" not in text and sender.call_count == 5
+
+
+def test_capability_policy_exception_preserves_safe_field_diagnostics_once():
+    error = ValueError("Field policy denies access to ['amount_residual'] on account.move.line; aggregation on restricted fields is blocked to prevent inference.")
+    runtime = SimpleNamespace(client=SimpleNamespace(uid=None), _lock=threading.RLock(), _refresh_scope=lambda: None)
+    client = _PolicyReadClient(runtime)
+    with pytest.raises(_CapabilityReadFailure) as caught:
+        client._locked(lambda: (_ for _ in ()).throw(error))
+    failure = caught.value.failure
+    assert failure["restricted_fields"] == ["amount_residual"] and failure["model"] == "account.move.line"
+    assert failure["reason_code"] == "field_policy_denied" and failure["next_action"] == "check_field_policy"
+    assert "amount_residual" in failure["error"]
+    assert client.read_failures == [failure] and client.read_failure_count == 1
+    forged = _CapabilityReadFailure({**failure, "restricted_fields": ["PRIVATE_BODY"],
+                                    "model": "PRIVATE_TOKEN", "next_action": "unsafe", "error": "PRIVATE_BODY"})
+    assert "PRIVATE" not in str(forged.failure)
+    assert "restricted_fields" not in forged.failure and "model" not in forged.failure
+    assert forged.failure["next_action"] == "check_field_policy"

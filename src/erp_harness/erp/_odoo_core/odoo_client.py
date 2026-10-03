@@ -73,6 +73,9 @@ class OdooJson2Error(ValueError):
 class OdooClient:
     """Client for interacting with Odoo via XML-RPC or JSON-2."""
 
+    # Legacy helpers keep their error envelopes. Native reads preserve typed causes.
+    _raise_read_errors = False
+
     def __init__(
         self,
         url: str,
@@ -437,6 +440,8 @@ class OdooClient:
                 return cast(dict[str, Any], version_info)
             return self._http_get_json("/web/version")
         except Exception as e:
+            if self._raise_read_errors:
+                raise
             print(f"Error retrieving server version: {str(e)}", file=sys.stderr)
             return {"error": str(e)}
 
@@ -446,6 +451,8 @@ class OdooClient:
             context = self._execute("res.users", "context_get")
             return cast(dict[str, Any], context)
         except Exception as e:
+            if self._raise_read_errors:
+                raise
             print(f"Error retrieving user context: {str(e)}", file=sys.stderr)
             return {"error": str(e)}
 
@@ -462,6 +469,8 @@ class OdooClient:
             )
             return cast(list[dict[str, Any]], result)
         except Exception as e:
+            if self._raise_read_errors:
+                raise
             print(f"Error retrieving installed modules: {str(e)}", file=sys.stderr)
             return []
 
@@ -526,6 +535,8 @@ class OdooClient:
             model_ids = self._execute("ir.model", "search", [])
 
             if not model_ids:
+                if self._raise_read_errors:
+                    return {"model_names": [], "models_details": {}}
                 return {
                     "model_names": [],
                     "models_details": {},
@@ -549,6 +560,8 @@ class OdooClient:
 
             return models_info
         except Exception as e:
+            if self._raise_read_errors:
+                raise
             print(f"Error retrieving models: {str(e)}", file=sys.stderr)
             return {"model_names": [], "models_details": {}, "error": str(e)}
 
@@ -581,6 +594,8 @@ class OdooClient:
 
             return cast(dict[str, Any], result[0])
         except Exception as e:
+            if self._raise_read_errors:
+                raise
             print(f"Error retrieving model info: {str(e)}", file=sys.stderr)
             return {"error": str(e)}
 
@@ -623,6 +638,8 @@ class OdooClient:
             )
             return cast(dict[str, Any], fields)
         except Exception as e:
+            if self._raise_read_errors:
+                raise
             print(f"Error retrieving fields: {str(e)}", file=sys.stderr)
             return {"error": str(e)}
 

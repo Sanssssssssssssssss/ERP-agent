@@ -4,8 +4,84 @@ from __future__ import annotations
 from collections import defaultdict, deque
 
 from .business_operations import _Evidence, _number
+from .read_failures import InvalidReadResponseError, tool_failure
 from .store import ActionStore
 from .write_guards import _id
+
+_ALLOCATION_CHECKS = ["sales_origin_membership", "company_product_unit_identity", "shared_sales_demand_capacity"]
+_NOT_CHECKED = ["supplier_offer_identity", "delivery_dates_and_terms", "supplier_offer_consolidation_policy",
+                "complete_business_acceptance"]
+
+
+def _purchase_split_diagnostic(guard, purchases, lines):
+    """Similar commercial dimensions suggest a split, without proving offer identity."""
+    active = {row["id"]: row for row in purchases if row["state"] in {"purchase", "done"}}
+    scope = {"purchase_ids": sorted(active), "states": ["purchase", "done"],
+             "coverage": "selected confirmed purchases only; other purchases are not searched"}
+    result = {"status": "no_candidates", "scope": scope, "warnings": [], "candidate_groups": [],
+              "candidate_group_count": 0, "candidate_groups_truncated": False,
+              "offer_identity_verified": False, "not_checked": list(_NOT_CHECKED)}
+    active_lines = [line for line in lines if line["purchase_id"] in active]
+    if len(active) < 2 or not active_lines:
+        return result
+    try:
+        # Optional diagnostics have their own field policy and availability boundary.
+        fields = {"purchase.order": {"id", "partner_id", "currency_id"},
+                  "purchase.order.line": {"id", "price_unit"}}
+        policy = getattr(guard.runtime, "policy", None)
+        if policy is not None and any(policy.restricted_fields(guard.payload["instance"], model, names)
+                                      for model, names in fields.items()):
+            return {**result, "status": "unknown", "failure": tool_failure({"reason_code": "field_policy_denied"})}
+
+        def read_fields(model, ids, names):
+            # The optional boundary retains typed transport failures, unlike a write guard's refusal.
+            rows = guard.client.read_records(model, ids, fields=["id", *names])
+            if (not isinstance(rows, list) or len(rows) != len(ids)
+                    or any(not isinstance(row, dict) or type(row.get("id")) is not int or row["id"] <= 0
+                           or any(field not in row for field in names) for row in rows)
+                    or {row["id"] for row in rows} != set(ids)):
+                raise InvalidReadResponseError()
+            return rows
+
+        commercial = {row["id"]: row for row in read_fields("purchase.order", sorted(active), ("partner_id", "currency_id"))}
+        prices = {}
+        line_ids = sorted({line["id"] for line in active_lines})
+        for offset in range(0, len(line_ids), 20):
+            for row in read_fields("purchase.order.line", line_ids[offset:offset + 20], ("price_unit",)):
+                try:
+                    prices[row["id"]] = _number(row["price_unit"])
+                except ValueError:
+                    raise InvalidReadResponseError() from None
+        grouped = defaultdict(lambda: defaultdict(float))
+        for line in active_lines:
+            po = line["purchase_id"]
+            vendor, currency = _id(commercial[po]["partner_id"]), _id(commercial[po]["currency_id"])
+            if vendor is None or currency is None:
+                raise InvalidReadResponseError()
+            key = (*line["key"], vendor, currency, prices[line["id"]])
+            grouped[key][po] += line["quantity"]
+        for key, quantities in sorted(grouped.items()):
+            if len(quantities) < 2:
+                continue
+            result["candidate_group_count"] += 1
+            if len(result["candidate_groups"]) >= 8:
+                continue
+            candidate = {"company_id": key[0], "product_id": key[1], "unit_id": key[2],
+                         "supplier_id": key[3], "currency_id": key[4], "unit_price": key[5],
+                         "purchase_ids": sorted(quantities), "total_quantity": sum(quantities.values()),
+                         "purchases": [{"id": po, "name": active[po]["name"], "quantity": quantity}
+                                       for po, quantity in sorted(quantities.items())]}
+            result["candidate_groups"].append(candidate)
+        result["candidate_groups_truncated"] = result["candidate_group_count"] > len(result["candidate_groups"])
+        if result["candidate_group_count"]:
+            result["status"] = "warning"
+            result["warnings"] = [{"reason_code": "possible_supplier_offer_split",
+                "message": "同供应商、公司、产品、单位、币种和单价存在多张已确认采购单，可能拆分了同一报价。请核对实际报价、交期、条款及已确认的合单要求；来源和容量通过不代表合单要求已通过。"}]
+        if result["candidate_groups_truncated"]:
+            result["notice"] = "仅展示前8组候选；其余分组的详情及合单政策结论未知，请缩小范围继续核对。"
+        return result
+    except Exception as exc:  # Optional evidence cannot change the original allocation outcome.
+        return {**result, "status": "unknown", "failure": tool_failure(exc)}
 
 
 class PurchaseAllocationError(ValueError):
@@ -75,7 +151,8 @@ def allocate(purchases, demand, minimum=1e-6):
     return used
 
 
-def inspect_purchase_allocation(runtime, purchase_ids, order_ids, *, minimum=1e-6, product_id=None):
+def inspect_purchase_allocation(runtime, purchase_ids, order_ids, *, minimum=1e-6, product_id=None,
+                                include_split_diagnostic=True):
     """Explicit scope, same company/product/UOM; unavailable evidence stays unknown."""
     for ids in (purchase_ids, order_ids):
         if (not isinstance(ids, list) or not 1 <= len(ids) <= 20
@@ -94,7 +171,7 @@ def inspect_purchase_allocation(runtime, purchase_ids, order_ids, *, minimum=1e-
         by_name = {row["name"]: row for row in orders if row["state"] != "cancel"}
         if len(by_name) != len(orders):
             raise ValueError("sale source identity is cancelled or ambiguous")
-        demands, quantities = defaultdict(float), defaultdict(float)
+        demands, quantities, purchase_lines = defaultdict(float), defaultdict(float), []
         for model, parents, quantity_field, target in (
                 ("sale.order.line", orders, "product_uom_qty", demands),
                 ("purchase.order.line", purchases, "product_qty", quantities)):
@@ -127,6 +204,9 @@ def inspect_purchase_allocation(runtime, purchase_ids, order_ids, *, minimum=1e-
                         raise ValueError("company, product or unit identity is unavailable")
                     if parent["state"] != "cancel" and qty:
                         target[key, parent["id"]] += qty
+                        if model == "purchase.order.line":
+                            purchase_lines.append({"id": line["id"], "purchase_id": parent["id"],
+                                                   "key": key, "quantity": qty})
         groups, checks, allocations = defaultdict(list), [], []
         for (key, po), qty in quantities.items():
             purchase = next(row for row in purchases if row["id"] == po)
@@ -149,10 +229,16 @@ def inspect_purchase_allocation(runtime, purchase_ids, order_ids, *, minimum=1e-
                 allocations.extend({"purchase_id": po, "sale_order_id": so, "quantity": qty,
                                     "product_id": key[1], "unit_id": key[2]} for (po, so), qty in result.items())
         return {"status": "failed" if any(c["status"] == "failed" for c in checks) else "passed" if checks else "unknown",
-                "scope": scope, "checks": checks, "feasible_allocation": allocations,
+                "scope": scope,
+                **({"checked": list(_ALLOCATION_CHECKS), "not_checked": list(_NOT_CHECKED),
+                    "purchase_split_diagnostic": _purchase_split_diagnostic(g, purchases, purchase_lines)}
+                   if include_split_diagnostic else {}),
+                "checks": checks, "feasible_allocation": allocations,
                 "notice": "Feasibility evidence, not an actual reservation, write approval or ERP-Bench score."}
     except ValueError as exc:
-        return {"status": "unknown", "scope": scope, "reason": str(exc), "checks": []}
+        return {"status": "unknown", "scope": scope, "reason": str(exc), "checks": [],
+                **({"checked": [], "not_checked": [*_ALLOCATION_CHECKS, *_NOT_CHECKED]}
+                   if include_split_diagnostic else {})}
 
 
 def final_purchase_verification(actions):

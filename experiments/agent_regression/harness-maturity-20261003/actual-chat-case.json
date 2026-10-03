@@ -1,0 +1,250 @@
+{
+  "schema_version": 1,
+  "id": "HMC-CHAT-01",
+  "origin": "observed_normal_conversation_runtime_diagnostic_gap",
+  "category": "host_run_observability",
+  "actual_user": {
+    "id": "m_cadd466b7ea0463aa38a3d194771a318",
+    "role": "user",
+    "text": "为什么失败了",
+    "created_at": "2026-09-22T16:58:56.004566Z",
+    "business_id": null,
+    "context_business_id": "b_1096e25c43f24e09a803c0d8dd52eec6"
+  },
+  "session_id": "s_dc8e3b28ff3946e0b5c66ea92da21312",
+  "failed_business_run_id": "r_1cc5a9c184e44b548a277ac26700fbc7",
+  "original_conversation_run_id": "c_f5ded723eaa74eea85747d8d9484aa53",
+  "original_source_commit": null,
+  "source_manifest": {
+    "path": ".runtime/harness-maturity-20261003/inspection-evidence-search/actual-failure-chat/manifest.json",
+    "sha256": "8ebe71598007cf07676cd5a44dcdcb74646971a37aea18a469489ad378f07036"
+  },
+  "earliest_causal_request": {
+    "kind": "business_model_transport_failure",
+    "request_file": "0057",
+    "http_status": 520,
+    "request_id": null
+  },
+  "first_diagnostic_request": "0001",
+  "first_actual_corrective_request": null,
+  "original_observed_issue": "The real user asked why the selected run failed. Historical normal chat could read documents but lacked runtime diagnostics; it explicitly could not access runtime logs and inferred invoice delivery as the cause. The selected business run actually ended on provider HTTP520.",
+  "expected_contract": {
+    "selected_run_only": true,
+    "diagnostics_local_readonly": true,
+    "snapshot_is_current_business_truth": false,
+    "http_success_implies_completion": false,
+    "unknown_write_replay_allowed": false
+  },
+  "initial_candidate": {
+    "model": "deepseek/deepseek-v4.1-flash",
+    "reasoning_effort": "high",
+    "max_output_tokens": null,
+    "producer_fix_commit": "3d2ceea",
+    "prepared_git_head": "dd6baee8aa3556522f02d6c1ee345c1d54094324",
+    "private_manifest": {
+      "path": ".runtime/harness-maturity-20261003/actual-chat-prepare/candidate-current/manifest.json",
+      "sha256": "b74b0757f4c5c220d01de50718ab5232f3fe541e8d0c205a91130ece3218522c"
+    },
+    "candidate": {
+      "path": ".runtime/harness-maturity-20261003/actual-chat-prepare/candidate-current/candidate.json",
+      "sha256": "e7e8fd29a468a982bc6f98c5f1281b54bc8b462e7426365cce2ceb5b124cf64e"
+    },
+    "local_diagnostic_snapshot": {
+      "path": ".runtime/harness-maturity-20261003/actual-chat-prepare/candidate-current/snapshot.json",
+      "sha256": "804a1241f1895c795b7e3b5a021b6b7cd80c9efea4800f9f839a518d5cc3440b"
+    },
+    "messages": 31,
+    "unchanged_middle_messages": 29,
+    "inverse_restores_original": true,
+    "changes": [
+      "model v4 → v4.1 Flash/high",
+      "system → current production CONVERSATION_POLICY",
+      "tools → current normal conversation seven-tool set",
+      "last user → current host prompt from exact actual Chinese user text; original wire is corrupted"
+    ],
+    "temporal_boundary": "In-memory replay view; removed later runs/messages and retained source run/ledger bytes. The five selected business prompt fields come from the original question wire context; this is not the original complete state at that moment. Other persisted fields are not a reconstructed historical fact.",
+    "identity_boundary": "Actual saved explicit connection configuration matches every failure-run ledger identity; never authorizes from old receipts alone.",
+    "session_projection_boundary": "summarize_run includes only tool calls explicitly bound by selected run/session metadata. This legacy run has no new request metadata, so session tool bodies are not automatically associated. Ledger identity/run/session checks still apply; an evidence_complete flag does not establish business completion or exact as-of state completeness."
+  },
+  "original_candidate_assessment": {
+    "status": "partially_correct_with_coverage_misreading",
+    "model_terminal_stop": true,
+    "read_tool_selection_appropriate": true,
+    "last_http520_explained": true,
+    "current_connection_refused_distinguished": true,
+    "unsupported_no_write_receipts_assertion": true,
+    "tool_history_absence_not_verified": true,
+    "ledger_truth": {
+      "matching_receipts": 8,
+      "local_status_counts": {
+        "verified": 8
+      }
+    },
+    "source_coverage": {
+      "request_files": 57,
+      "metadata_files": 0,
+      "call_association": "unknown"
+    },
+    "business_verified": false,
+    "final_answer_fully_accepted": false,
+    "failure_boundaries": [
+      "HTTP520 identifies the last model-side interruption, not absence of earlier business-rule refusals.",
+      "No current invoice state was verified because both current authentication reads were refused.",
+      "Original final response wrongly stated no write receipts; empty diagnostic items exclude verified actions."
+    ],
+    "earliest_frozen_causal_evidence": {
+      "path": ".runtime/harness-maturity-20261003/diagnostic-coverage-failure/before-manifest.json",
+      "sha256": "62c2c38383c97662edc48ef23e507d8dd8a0a46c67614af6f036069753b8c32d"
+    },
+    "first_corrective_request": null
+  },
+  "actual_coverage_failure": {
+    "request_id": "req_0892c22091b446f19a20ea6d2138ba5c",
+    "first_corrective_request": null,
+    "before_manifest": {
+      "path": ".runtime/harness-maturity-20261003/diagnostic-reporting-guidance/before-manifest.json",
+      "sha256": "24303ce7af5f325f459616b91d6421cc5046da1fec9578c08f6aeeeb7736aca7"
+    },
+    "visible_diagnostic_utf8_bytes": 1293,
+    "local_action_receipt_count": 8,
+    "local_action_status_counts": {
+      "verified": 8
+    },
+    "request_files": 57,
+    "requests_missing_metadata": 57,
+    "evidence_complete": false,
+    "assessment": "The complete response exposed these facts. The model omitted both counts and coverage and incorrectly ruled out business-rule rejection; this was not a truncation or missing-field failure."
+  },
+  "fixes": [
+    {
+      "commit": "3d2ceea",
+      "semantics": "Selected-run legacy numeric HTTP header evidence; no completion inference from HTTP200.",
+      "offline_packet": {
+        "path": ".runtime/harness-maturity-20261003/legacy-diagnostic-headers/after-manifest.json",
+        "sha256": "3589b4a0fa1153825008b07b23091e89af91ffab2aa7663781c0da61f5b48d5a"
+      },
+      "tests": 142,
+      "subtests": 100
+    },
+    {
+      "commit": "e95810e",
+      "semantics": "Only associated historical failures/incomplete calls and unresolved actions are listed. Identity-matched local ledger records are counted by fixed status. Missing/broken metadata cannot prove full call history; unreadable ledger count stays unknown. Verified local actions are not current business verification.",
+      "offline_packet": {
+        "path": ".runtime/harness-maturity-20261003/diagnostic-coverage-failure/after-manifest.json",
+        "sha256": "52545873b685c0653d50ce86e5f239cad84b27ff0d46ca6833d39a48a520ce51"
+      },
+      "tests": 197,
+      "subtests": 100
+    },
+    {
+      "commit": "4c28225663db879ea04d2ccaba531d7486b3184d",
+      "semantics": "Shared normal/inspection guidance requires recorded action status counts, historical coverage limits, and latest-interruption separation.",
+      "offline_packet": {
+        "path": ".runtime/harness-maturity-20261003/diagnostic-reporting-guidance/after-manifest.json",
+        "sha256": "50a2a743e8fdbe65212b65aa97313801993fe9e51f4075d339a9ee3d3b504672"
+      },
+      "tests": 21,
+      "subtests": 33,
+      "mechanism_only_probe": {
+        "path": ".runtime/harness-maturity-20261003/diagnostic-reporting-guidance/offline-loop-probe.json",
+        "sha256": "ba47d869850f7d93ef651c02a3a886299019b774c2784f60d801577e208bad02"
+      }
+    }
+  ],
+  "coverage_candidate": {
+    "manifest": {
+      "path": ".runtime/harness-maturity-20261003/diagnostic-coverage-candidate/manifest.json",
+      "sha256": "eab2019f93f199f488b548039e979fe63718a438feb0946506f748370a20c38b"
+    },
+    "single_mutation": "/messages/32/content",
+    "all_other_context_schemas_ids_reasoning_unchanged": true
+  },
+  "policy_candidate": {
+    "manifest": {
+      "path": ".runtime/harness-maturity-20261003/diagnostic-policy-candidate/manifest.json",
+      "sha256": "0d225ea0e4ce9ccafc264536eb7a6b5420e8417bf344846f22513686235002b2"
+    },
+    "single_mutation": "/messages/0/content",
+    "all_other_context_schemas_ids_reasoning_tool_replies_and_times_unchanged": true,
+    "offline_check": {
+      "path": ".runtime/harness-maturity-20261003/diagnostic-policy-candidate/offline-check.json",
+      "sha256": "38c5591f76f0b3694c176cc3bfc93ecd53ed0ca7bed43193c175459d990724f2"
+    },
+    "local_corrective_request": "req_1ab17ca809f24539954c091d15ec9364",
+    "assessment": {
+      "case_id": "HMC-CHAT-01",
+      "status": "bounded_diagnostic_reporting_accepted_with_wording_limit",
+      "request_id": "req_1ab17ca809f24539954c091d15ec9364",
+      "provider_call_id": "call_fb216823003643ed9ced80e3b73c9e23",
+      "http_status": 200,
+      "stop_reason": "stop",
+      "oracles": {
+        "recorded_local_action_status_counts_reported": true,
+        "incomplete_historical_association_and_empty_list_limit_reported": true,
+        "latest_interruption_distinguished_from_earlier_unknown_failures": true,
+        "current_erp_unknown_and_no_repeat_before_read_only_reconciliation": true
+      },
+      "assessment": "The public answer explicitly reports eight local ledger-verified receipts and incomplete association for all historical request files. It does not infer absence of earlier tool failures or writes; current invoice facts stay unknown and it forbids repeating writes before read-only reconciliation.",
+      "wording_limit": "The sentence saying the last upstream HTTP520 is not an ERP business-rule rejection is acceptable in its latest-interruption context and is qualified by the later historical-coverage caveat. Detached from that context it is too broad; this verdict does not exclude earlier business-rule failures.",
+      "timestamp_boundary": "The original captured_at and actual prior connection-check observed_at remain unchanged. The counterfactual executes no new ERP read and does not verify current service availability.",
+      "business_verified": false,
+      "active_inspection_verified": false,
+      "executed_tools": 0,
+      "live_odoo_rpc": 0,
+      "writes": 0,
+      "private_reasoning_not_used": true,
+      "not_a_complete_business_acceptance": true,
+      "usage": {
+        "request_count": 1,
+        "fresh_input": 18945,
+        "cache_reads": 0,
+        "output_including_reasoning": 605,
+        "reasoning_subset": 229,
+        "compaction": 0,
+        "total_tokens": 19550,
+        "cost": null
+      },
+      "artifacts": {
+        "wire.request.json": {
+          "path": ".runtime/harness-maturity-20261003/diagnostic-policy-candidate/api/wire.request.json",
+          "sha256": "382a05bc7b39182d947d81748f979d5e6c12baafab2498a14600bb3b7e47d469"
+        },
+        "output.json": {
+          "path": ".runtime/harness-maturity-20261003/diagnostic-policy-candidate/api/output.json",
+          "sha256": "2c8f2acadd1fbf68a5350fcf383783aaf89392ad6d3c572031a687ba6f366bc3"
+        },
+        "response.sse": {
+          "path": ".runtime/harness-maturity-20261003/diagnostic-policy-candidate/api/response.sse",
+          "sha256": "ab8a7d4b66d79824cbac866d41a3ca1da2fcd791ac781128e259c97f070f4e24"
+        },
+        "requests/0001.meta.json": {
+          "path": ".runtime/harness-maturity-20261003/diagnostic-policy-candidate/api/requests/0001.meta.json",
+          "sha256": "f9c8d8d5b2845afdfca1f308877d8d6e013c531d16cc671de4b0b337cdea93e8"
+        }
+      },
+      "candidate_manifest": {
+        "path": ".runtime/harness-maturity-20261003/diagnostic-policy-candidate/manifest.json",
+        "sha256": "0d225ea0e4ce9ccafc264536eb7a6b5420e8417bf344846f22513686235002b2"
+      },
+      "review_basis": "Public response text and tool calls only; not private reasoning or a hard-coded expected text."
+    },
+    "after_api_packet": {
+      "path": ".runtime/harness-maturity-20261003/diagnostic-reporting-guidance/after-api-manifest.json",
+      "sha256": "4c225bb2a543c70b927d8c173520dc2f9c3cd48f0d530e24a2888efc39dc893a"
+    }
+  },
+  "boundaries": [
+    "The local verified count is receipt evidence, not current invoice completion.",
+    "No metadata association was guessed from the shared legacy session.",
+    "HTTP520 identifies the last model interruption; incomplete history cannot exclude earlier business-rule refusals.",
+    "Actual connection reads were October3, not September22 ERP snapshots.",
+    "Original source commit was not retained; current review commits cannot fill that gap.",
+    "No historical/raw verdict is overwritten and no returned business write is executed.",
+    "Offline route checks do not prove real model compliance or active inspection acceptance."
+  ],
+  "business_verified": false,
+  "api_results": {
+    "path": "experiments/agent_regression/harness-maturity-20261003/actual-chat-api-results.json",
+    "sha256": "5919f3dd7a6b8ee8a93c389274307c1177fafb3ca015f2da5be8aa97632296c2"
+  }
+}

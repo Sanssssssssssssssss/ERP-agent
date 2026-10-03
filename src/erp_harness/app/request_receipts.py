@@ -13,8 +13,9 @@ from time import monotonic
 from uuid import uuid4
 
 from erp_harness.app.stream_events import public_events
-from erp_harness.runtime.provider import provider_request_kind
+from erp_harness.providers.provider import ProviderRequestRejected
 from erp_harness.runtime.messages import AssistantMessage
+from erp_harness.runtime.provider import provider_request_kind
 
 routing_decision_id = ContextVar("routing_decision_id", default=None)
 
@@ -46,6 +47,16 @@ def _message_usage(message: AssistantMessage) -> object | None:
     return usage
 
 
+class ReceiptPersistenceError(ProviderRequestRejected):
+    """Request capture is required before a new model request may be sent."""
+
+    def __init__(self):
+        super().__init__(
+            "Request evidence could not be persisted; repair receipt storage before "
+            "starting another model request. No new request was sent."
+        )
+
+
 class RequestReceipts:
     def __init__(self, directory: Path, max_model_requests: int | None = None):
         if max_model_requests is not None and (type(max_model_requests) is not int or max_model_requests < 1):
@@ -60,8 +71,9 @@ class RequestReceipts:
         self._round_id = None
         self._unwrapped = None
         self._warned = set()
+        self._persistence_failed = False
 
-    def _write(self, stem, suffix, value):
+    def _write(self, stem, suffix, value, *, strict=False):
         try:
             self.directory.mkdir(parents=True, exist_ok=True)
             path = self.directory / f"{stem}.{suffix}.json"
@@ -69,11 +81,14 @@ class RequestReceipts:
             temporary.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
             temporary.replace(path)
         except (OSError, TypeError, ValueError) as exc:
+            self._persistence_failed = True
             filename = f"{stem}.{suffix}.json"
             if filename not in self._warned:
                 self._warned.add(filename)
                 with suppress(OSError):
                     print(json.dumps({"type": "receipt_warning", "file": filename, "error_type": type(exc).__name__}), flush=True)
+            if strict:
+                raise ReceiptPersistenceError() from exc
 
     def _publish(self, event_type, row):
         with suppress(OSError, TypeError, ValueError):
@@ -82,6 +97,10 @@ class RequestReceipts:
             print(json.dumps({"type": event_type, **public}, ensure_ascii=False), flush=True)
 
     def _allocate(self, payload):
+        if self._persistence_failed:
+            raise ReceiptPersistenceError()
+        if self.max_model_requests is not None and self.number >= self.max_model_requests:
+            raise ProviderRequestRejected("max_model_requests exceeded; no new request was sent")
         self.number += 1
         scope = self._scope.get()
         row = {"schema_version": 1, "request_id": "req_" + uuid4().hex,
@@ -96,7 +115,8 @@ class RequestReceipts:
         else:
             self._unwrapped = row
         self._rows[row["request_id"]] = row
-        self._write(row["request_file"], "request", payload)
+        self._write(row["request_file"], "request", payload, strict=True)
+        self._write(row["request_file"], "meta", row, strict=True)
         return row
 
     def _current(self):
@@ -104,8 +124,6 @@ class RequestReceipts:
         return scope.get("row") if scope else self._unwrapped
 
     async def before_provider_request(self, payload):
-        if self.max_model_requests is not None and self.number >= self.max_model_requests:
-            raise RuntimeError(f"max_model_requests ({self.max_model_requests}) exceeded")
         self._allocate(payload)
         return payload
 

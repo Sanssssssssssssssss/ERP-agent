@@ -1,0 +1,1882 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-03",
+  "scope": "Actual failures from the three frozen full-business runs. Shared context and complete private traces remain hash-bound; no synthetic paid case.",
+  "source_commit": "475330018d2319cd938308e50c90b2b1a5087304",
+  "source_tree_sha256": "480320d596f2d41a2ae5cabd8dd2d391dab32458cea0340e99607393b64b3e2a",
+  "frozen_source": {
+    "path": ".runtime/tool-self-debug-business-20261003-round2/frozen.json",
+    "sha256": "9a447eba737ff91508cf905c3fd612e0ecd9fcef49c8edd286144f54ae59ff4c"
+  },
+  "immutable_recovery_audit": {
+    "path": ".runtime/tool-self-debug-business-20261003-round2/private/recovery-audit.json",
+    "sha256": "1df8a57e1c0575d7234ecf8288934da9486c339ce4257b430c4b5701376a0d91"
+  },
+  "manufacturing_root_cause_audit": {
+    "path": ".runtime/tool-self-debug-business-20261003-round2/private/manufacturing-deadline-audit.json",
+    "sha256": "5345ee3e43d5c9ba3179bbe2d519950425ef02338eb15ab28f0fc8378780ef0e"
+  },
+  "business_constraints": {
+    "2010": {
+      "task_path": ".runtime/unseen-bench-no-output-cap-20261002/tasks/2010_easy_02_buy_only_immediate_invoicing",
+      "task_seed": 7875635300548504898,
+      "original_task_hashes": {
+        "instruction.md": "a5ffd9ab22a28a2edb370312471d276fa107d93b6e7a95142fe62170f35ecaf4",
+        "task.toml": "d2fa8f01c84ebdff5d16d25dcf8ae668134400448a1eedd123fcfb603b341148",
+        "environment/Dockerfile": "67a64f460f9aa70678a95812ee7f1c30d85450ab9b4cc30fa6ce6ce69bb4e2c8",
+        "environment/entrypoint.sh": "17081066295528704b6c9af5c66864884ea682640bcc9a154b03e862fe8ccbc5",
+        "environment/odoo.conf": "30a5cd6cdc5f0e10926ad5d3a9f424e0826fe6bcbbb785d4ef0aeedc7628a6c8",
+        "environment/scenario_data.json": "fefb7b7eae854a7f07a42028dd7415f2bac8d28a752c4b549222c7dcd73c9553",
+        "environment/setup_scenario.py": "1a532a2f1c1cb68fb965e4ca5d072528b4b4a992327685de71ffa0000ac94714",
+        "solution/optimal_plan.json": "eb2946ea29f46dd426a890d0dbf1456ec87ec40033225c8276f83ef88c8e61fd",
+        "solution/solve.sh": "3ce28de3de08570673a2d8f969160d321d80b1b9487d9727b27b5a31cf61e7f2",
+        "solution/solver.py": "7e169f55d10abb5088a1a736bd694b919bbbcae8940ee1b4a3fafb8a90a690da",
+        "tests/checks.py": "c50e7ebcdfa4370a2eabe8ebb06bacb14e5c1fce4a364e5db7c04441c92861c3",
+        "tests/test.sh": "71ad75d713d7fad6ea3fe675709a46cae53e68136916efbccf208231b6f7bf78"
+      },
+      "host_task_evidence": {
+        "purchase_sources": [
+          {
+            "check_demand_capacity": true,
+            "minimum_per_origin": 1,
+            "product": {
+              "domain": [
+                [
+                  "name",
+                  "=",
+                  "48U High-Density Cabinet"
+                ]
+              ],
+              "model": "product.product"
+            },
+            "purchases": {
+              "domain": [
+                [
+                  "order_line.product_id.name",
+                  "=",
+                  "48U High-Density Cabinet"
+                ],
+                [
+                  "state",
+                  "!=",
+                  "cancel"
+                ]
+              ],
+              "model": "purchase.order"
+            },
+            "source": {
+              "domain": [
+                [
+                  "partner_id.name",
+                  "in",
+                  [
+                    "Riverdale Engineering",
+                    "Matrix Bazaar",
+                    "Bridgeway Workshop",
+                    "Aegis Enterprises"
+                  ]
+                ],
+                [
+                  "order_line.product_id.name",
+                  "=",
+                  "48U High-Density Cabinet"
+                ]
+              ],
+              "field": "name",
+              "model": "sale.order"
+            }
+          }
+        ],
+        "version": 1
+      },
+      "runtime_guards": [
+        "per-action approval",
+        "no automatic replay of unknown writes"
+      ],
+      "original_verifier_unmodified": true
+    },
+    "2066": {
+      "task_path": ".runtime/unseen-bench-no-output-cap-20261002/tasks/2066_medium_08_single_bom_single_workcenter",
+      "task_seed": 9017999767261374303,
+      "original_task_hashes": {
+        "instruction.md": "845223695995bac85a3ccd3e00ccd8d5f4a09ba46a4c0914c5e592d5836a251a",
+        "task.toml": "ee51894dd526596e7730d1b0646d0f2310096b28726bbcf883930ffb3031912a",
+        "environment/Dockerfile": "67a64f460f9aa70678a95812ee7f1c30d85450ab9b4cc30fa6ce6ce69bb4e2c8",
+        "environment/entrypoint.sh": "17081066295528704b6c9af5c66864884ea682640bcc9a154b03e862fe8ccbc5",
+        "environment/odoo.conf": "30a5cd6cdc5f0e10926ad5d3a9f424e0826fe6bcbbb785d4ef0aeedc7628a6c8",
+        "environment/scenario_data.json": "0724768e263f54f47be68287a28e0712355a1a57d75c4922c5f65c2663304e46",
+        "environment/setup_scenario.py": "1a532a2f1c1cb68fb965e4ca5d072528b4b4a992327685de71ffa0000ac94714",
+        "solution/optimal_plan.json": "5f960eb3667e705214fff2dc738bd101c236582830bdf13b028d3d4c84d6c9fd",
+        "solution/solve.sh": "15039f4f15026d0dcdc398918051b00515262b58c008a6184b796fea0f1c5007",
+        "solution/solver.py": "44027526a268227172ade8a364b1ebdd7ba62b5d4f5e7e489c3cdbdbb5d265a9",
+        "tests/checks.py": "06e1f7bb4c76a2a8e450d572629cdb2a274050c067a71d05af12819abfc5f996",
+        "tests/test.sh": "fffa4a90824ca4300e9506e1311ca056444b969148cabb38b4dc944a0483c7c2"
+      },
+      "host_task_evidence": null,
+      "notes_policy": "Instruction requires stock/customer/vendor/workcenter Internal Notes; res.company notes are not an explicit required source. No substitute is claimed to complete the failed company-note read.",
+      "original_verifier_unmodified": true
+    },
+    "2279": {
+      "task_path": ".runtime/unseen-bench-no-output-cap-20261002/tasks/2279_easy_repair_plan_easy",
+      "task_seed": 8655087571913428299,
+      "original_task_hashes": {
+        "instruction.md": "d7167e55c093f3a3ebb90a6f91cfe91ab081db914049378aaf6bebe082c0a20e",
+        "task.toml": "4954bf2715283a787748e8884a6775721e80eb634047f4c766eb3eb5ede310ef",
+        "environment/Dockerfile": "67a64f460f9aa70678a95812ee7f1c30d85450ab9b4cc30fa6ce6ce69bb4e2c8",
+        "environment/entrypoint.sh": "17081066295528704b6c9af5c66864884ea682640bcc9a154b03e862fe8ccbc5",
+        "environment/odoo.conf": "30a5cd6cdc5f0e10926ad5d3a9f424e0826fe6bcbbb785d4ef0aeedc7628a6c8",
+        "environment/scenario_data.json": "3eb90fc0f287cbf93d56d98d326e38077455ff4901370203aafa0cd937da9769",
+        "environment/setup_scenario.py": "1a532a2f1c1cb68fb965e4ca5d072528b4b4a992327685de71ffa0000ac94714",
+        "solution/optimal_plan.json": "63bb64143b5567cdb115abcbdc917e26f0e37e2c701480195ab7c01f39ffc625",
+        "solution/solve.sh": "6636bbbf181b0f746e988eef95de06c52dd33e32b60d8b213aee49ce140a5f06",
+        "solution/solver.py": "9f11be45e75129efe262b3571d1aacc8817d0a85de6b162a726b47a038bfa7ec",
+        "tests/checks.py": "51d0b02cfb91297747f54b645dcb1710e77929d226d2edccd332d9c54f208fc6",
+        "tests/test.sh": "6ab8f3f3cbc14afc31593614fc3467c0fda6209b79e6eef30c1efad17d234cb2"
+      },
+      "host_task_evidence": null
+    }
+  },
+  "summary": {
+    "tool_failure_nodes": 10,
+    "unknown_field_nodes": 8,
+    "schema_argument_nodes": 1,
+    "action_prestate_changed_nodes": 1,
+    "same_target_actual_recovery_nodes": 7,
+    "executed_alternate_absence_discovery_nodes": 1,
+    "optional_company_read_unclosed_nodes": 1,
+    "redundant_line_read_unclosed_nodes": 1,
+    "business_missing_deadline_nodes": 1,
+    "total_derived_nodes": 11,
+    "business_passes": 2,
+    "business_attempts": 3,
+    "additional_paid_requests_by_this_audit": 0
+  },
+  "cases": [
+    {
+      "id": "TFR2-2010-01",
+      "business": "2010",
+      "trial_id": "2010_easy_02_buy_only_immediate__NNM63nJ",
+      "failure_layer": "unknown_field",
+      "tool": "mcp_odoo_read_record",
+      "model": "purchase.order.line",
+      "unknown_fields": [
+        "taxes_id"
+      ],
+      "failed_arguments": {
+        "fields": [
+          "product_id",
+          "name",
+          "product_qty",
+          "price_unit",
+          "price_subtotal",
+          "date_planned",
+          "taxes_id",
+          "product_uom_id"
+        ],
+        "model": "purchase.order.line",
+        "record_ids": [
+          1
+        ]
+      },
+      "original_error": "Unknown field(s) ['taxes_id'] on purchase.order.line; use live get_model_fields. Valid candidates: tax_ids, id, product_id.",
+      "causal_request": "0016",
+      "first_followup_request": "0017",
+      "first_corrective_request": "0017",
+      "first_actual_corrective_request": "0018",
+      "local_frozen_context": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests",
+      "context_sha256": {
+        "0016.request.json": "7a08cb68a9545dc981a33e864852bdea1f2ba8108fc568a903613d23045bfcc4",
+        "0016.meta.json": "8508cd91236952da6f5b5b628a5a39d3a8b3cf15af21d2afd9db0cd0cf64e796",
+        "0016.output.json": "cbebe7795a0b15bda1a10ee74e04532ee4521f6c466d8030ba37184d306ff4d6",
+        "0016.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        "0017.request.json": "4f1c133540e91e5eeebd0c966a6cc475ef2fc48446abe2ae1f16d5ab1b56dea2",
+        "0017.meta.json": "70792941fe5e3f7493e76a9383240043afc139cdd8271a5682b7ee5240659422",
+        "0017.output.json": "bbc82c8c9fd8ef7322f32d28735e342ece9cfad9642f4804a98b1d1cb16c52da",
+        "0017.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        "0018.request.json": "9d6bf0d8de8a6a9361268c7c1b824b3b8bb9dd8b97244e25e8c194c67b268ddd",
+        "0018.meta.json": "b44c9df7484ba6e1f994362b2a85d38623dc56d5b47c0b053b86a57e38c58e55",
+        "0018.output.json": "ddda85df29295211929f58c0a15b494821ea9b15bed297ff0bfc34c8de6e3360",
+        "0018.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "assessment": {
+        "original_error_repeated": false,
+        "first_followup_original_target_succeeded": false,
+        "new_sibling_failure_at_first_followup": true,
+        "strict_recovery_request_followed": false,
+        "explicit_metadata_discovery_after_failure": false,
+        "metadata_absence_does_not_prove_invalid_field": true,
+        "product_uom_first_observed_refusal": "0017",
+        "world_bug_demonstrated": false,
+        "finding": "Already returned valid tax_ids/product_uom_id metadata was visible in request0008, but externalized by0016/17. Failure includes exact unknown_fields plus callable live metadata recovery. First correction changes tax field without metadata recall and introduces new product_uom; request0018 removes it and actual read succeeds."
+      },
+      "tool_call_id": "call_01_60buq22mwqvjjz19g9qs1qlj",
+      "frozen_causal": {
+        "number": "0016",
+        "request_id": "req_6382a584735e4af5a054f3574807c790",
+        "provider_call_id": "call_105b799b15f646ed8f50f5fe5a191917",
+        "tool_call_ids": [
+          "call_00_balcl4zr5iptonfndaqeclwf",
+          "call_01_60buq22mwqvjjz19g9qs1qlj"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0016.request.json",
+            "sha256": "7a08cb68a9545dc981a33e864852bdea1f2ba8108fc568a903613d23045bfcc4"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0016.meta.json",
+            "sha256": "8508cd91236952da6f5b5b628a5a39d3a8b3cf15af21d2afd9db0cd0cf64e796"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0016.output.json",
+            "sha256": "cbebe7795a0b15bda1a10ee74e04532ee4521f6c466d8030ba37184d306ff4d6"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0016.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "dccd1d802a78557206fa77a41712d7bea8458e6d876bffcb121278f69825c0bd"
+      },
+      "frozen_first_followup": {
+        "number": "0017",
+        "request_id": "req_7bd9dde14c7a405385cdec11780d71c2",
+        "provider_call_id": "call_01573c024bae4de885c325c4f567ebca",
+        "tool_call_ids": [
+          "call_00_a61v7zra2jqo1n6m6z6zyqjy",
+          "call_01_fdb23gti0mjlg2s0anrsjt1g"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0017.request.json",
+            "sha256": "4f1c133540e91e5eeebd0c966a6cc475ef2fc48446abe2ae1f16d5ab1b56dea2"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0017.meta.json",
+            "sha256": "70792941fe5e3f7493e76a9383240043afc139cdd8271a5682b7ee5240659422"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0017.output.json",
+            "sha256": "bbc82c8c9fd8ef7322f32d28735e342ece9cfad9642f4804a98b1d1cb16c52da"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0017.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "dccd1d802a78557206fa77a41712d7bea8458e6d876bffcb121278f69825c0bd"
+      },
+      "frozen_first_actual_corrective": {
+        "number": "0018",
+        "request_id": "req_efd7939a5907418aa613feff32cc7f05",
+        "provider_call_id": "call_02d206673bae460dac5cdb17e8770567",
+        "tool_call_ids": [
+          "call_00_6r0c01mk5j91ch4xyxcx0euu",
+          "call_01_hnfhtnzpgq7gb2qq7z30qwnk"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0018.request.json",
+            "sha256": "9d6bf0d8de8a6a9361268c7c1b824b3b8bb9dd8b97244e25e8c194c67b268ddd"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0018.meta.json",
+            "sha256": "b44c9df7484ba6e1f994362b2a85d38623dc56d5b47c0b053b86a57e38c58e55"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0018.output.json",
+            "sha256": "ddda85df29295211929f58c0a15b494821ea9b15bed297ff0bfc34c8de6e3360"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0018.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "dccd1d802a78557206fa77a41712d7bea8458e6d876bffcb121278f69825c0bd"
+      },
+      "offline_tests": [
+        "tests/test_bench_tool_regression.py::test_all_observed_unknown_fields_refuse_before_data_rpc_and_offer_discovery",
+        "tests/test_bench_tool_regression.py::test_recovery_verdict_checks_sibling_fields_from_the_same_frozen_environment",
+        "tests/test_world.py::WorldStoreTest::test_projection_keeps_pairing_latest_full_result_and_recovery_safety"
+      ],
+      "offline_test": "tests/test_bench_tool_regression.py::test_all_observed_unknown_fields_refuse_before_data_rpc_and_offer_discovery",
+      "offline_status": "included in existing data-driven test inputs",
+      "api_binding": {
+        "kind": "executed full business on frozen candidate",
+        "business": "2010",
+        "result": "experiments/agent_regression/tool-self-debug-business-20261003/results.json",
+        "additional_paid_cut_requests": 0
+      },
+      "actual_recovery_tool_call_ids": [
+        "call_00_6r0c01mk5j91ch4xyxcx0euu"
+      ]
+    },
+    {
+      "id": "TFR2-2010-02",
+      "business": "2010",
+      "trial_id": "2010_easy_02_buy_only_immediate__NNM63nJ",
+      "failure_layer": "unknown_field",
+      "tool": "mcp_odoo_read_record",
+      "model": "purchase.order.line",
+      "unknown_fields": [
+        "product_uom"
+      ],
+      "failed_arguments": {
+        "fields": [
+          "product_id",
+          "name",
+          "product_qty",
+          "price_unit",
+          "price_subtotal",
+          "date_planned",
+          "tax_ids",
+          "product_uom_id",
+          "product_uom"
+        ],
+        "model": "purchase.order.line",
+        "record_id": 1
+      },
+      "original_error": "Unknown field(s) ['product_uom'] on purchase.order.line; use live get_model_fields. Valid candidates: product_uom_id, product_uom_qty, price_unit_product_uom.",
+      "causal_request": "0017",
+      "first_followup_request": "0018",
+      "first_corrective_request": "0018",
+      "first_actual_corrective_request": "0018",
+      "local_frozen_context": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests",
+      "context_sha256": {
+        "0017.request.json": "4f1c133540e91e5eeebd0c966a6cc475ef2fc48446abe2ae1f16d5ab1b56dea2",
+        "0017.meta.json": "70792941fe5e3f7493e76a9383240043afc139cdd8271a5682b7ee5240659422",
+        "0017.output.json": "bbc82c8c9fd8ef7322f32d28735e342ece9cfad9642f4804a98b1d1cb16c52da",
+        "0017.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        "0018.request.json": "9d6bf0d8de8a6a9361268c7c1b824b3b8bb9dd8b97244e25e8c194c67b268ddd",
+        "0018.meta.json": "b44c9df7484ba6e1f994362b2a85d38623dc56d5b47c0b053b86a57e38c58e55",
+        "0018.output.json": "ddda85df29295211929f58c0a15b494821ea9b15bed297ff0bfc34c8de6e3360",
+        "0018.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "assessment": {
+        "original_error_repeated": false,
+        "first_followup_original_target_succeeded": true,
+        "new_sibling_failure_at_first_followup": false,
+        "strict_recovery_request_followed": false,
+        "explicit_metadata_discovery_after_failure": false,
+        "metadata_absence_does_not_prove_invalid_field": true,
+        "product_uom_first_observed_refusal": "0017",
+        "world_bug_demonstrated": false,
+        "finding": "Already returned valid tax_ids/product_uom_id metadata was visible in request0008, but externalized by0016/17. Failure includes exact unknown_fields plus callable live metadata recovery. First correction changes tax field without metadata recall and introduces new product_uom; request0018 removes it and actual read succeeds."
+      },
+      "tool_call_id": "call_00_a61v7zra2jqo1n6m6z6zyqjy",
+      "frozen_causal": {
+        "number": "0017",
+        "request_id": "req_7bd9dde14c7a405385cdec11780d71c2",
+        "provider_call_id": "call_01573c024bae4de885c325c4f567ebca",
+        "tool_call_ids": [
+          "call_00_a61v7zra2jqo1n6m6z6zyqjy",
+          "call_01_fdb23gti0mjlg2s0anrsjt1g"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0017.request.json",
+            "sha256": "4f1c133540e91e5eeebd0c966a6cc475ef2fc48446abe2ae1f16d5ab1b56dea2"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0017.meta.json",
+            "sha256": "70792941fe5e3f7493e76a9383240043afc139cdd8271a5682b7ee5240659422"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0017.output.json",
+            "sha256": "bbc82c8c9fd8ef7322f32d28735e342ece9cfad9642f4804a98b1d1cb16c52da"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0017.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "dccd1d802a78557206fa77a41712d7bea8458e6d876bffcb121278f69825c0bd"
+      },
+      "frozen_first_followup": {
+        "number": "0018",
+        "request_id": "req_efd7939a5907418aa613feff32cc7f05",
+        "provider_call_id": "call_02d206673bae460dac5cdb17e8770567",
+        "tool_call_ids": [
+          "call_00_6r0c01mk5j91ch4xyxcx0euu",
+          "call_01_hnfhtnzpgq7gb2qq7z30qwnk"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0018.request.json",
+            "sha256": "9d6bf0d8de8a6a9361268c7c1b824b3b8bb9dd8b97244e25e8c194c67b268ddd"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0018.meta.json",
+            "sha256": "b44c9df7484ba6e1f994362b2a85d38623dc56d5b47c0b053b86a57e38c58e55"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0018.output.json",
+            "sha256": "ddda85df29295211929f58c0a15b494821ea9b15bed297ff0bfc34c8de6e3360"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0018.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "dccd1d802a78557206fa77a41712d7bea8458e6d876bffcb121278f69825c0bd"
+      },
+      "frozen_first_actual_corrective": {
+        "number": "0018",
+        "request_id": "req_efd7939a5907418aa613feff32cc7f05",
+        "provider_call_id": "call_02d206673bae460dac5cdb17e8770567",
+        "tool_call_ids": [
+          "call_00_6r0c01mk5j91ch4xyxcx0euu",
+          "call_01_hnfhtnzpgq7gb2qq7z30qwnk"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0018.request.json",
+            "sha256": "9d6bf0d8de8a6a9361268c7c1b824b3b8bb9dd8b97244e25e8c194c67b268ddd"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0018.meta.json",
+            "sha256": "b44c9df7484ba6e1f994362b2a85d38623dc56d5b47c0b053b86a57e38c58e55"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0018.output.json",
+            "sha256": "ddda85df29295211929f58c0a15b494821ea9b15bed297ff0bfc34c8de6e3360"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2010/tool-self-debug-round2-2010-20261003/2010_easy_02_buy_only_immediate__NNM63nJ/agent/requests/0018.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "dccd1d802a78557206fa77a41712d7bea8458e6d876bffcb121278f69825c0bd"
+      },
+      "offline_tests": [
+        "tests/test_bench_tool_regression.py::test_all_observed_unknown_fields_refuse_before_data_rpc_and_offer_discovery",
+        "tests/test_bench_tool_regression.py::test_recovery_verdict_checks_sibling_fields_from_the_same_frozen_environment",
+        "tests/test_world.py::WorldStoreTest::test_projection_keeps_pairing_latest_full_result_and_recovery_safety"
+      ],
+      "offline_test": "tests/test_bench_tool_regression.py::test_all_observed_unknown_fields_refuse_before_data_rpc_and_offer_discovery",
+      "offline_status": "included in existing data-driven test inputs",
+      "api_binding": {
+        "kind": "executed full business on frozen candidate",
+        "business": "2010",
+        "result": "experiments/agent_regression/tool-self-debug-business-20261003/results.json",
+        "additional_paid_cut_requests": 0
+      },
+      "actual_recovery_tool_call_ids": [
+        "call_00_6r0c01mk5j91ch4xyxcx0euu"
+      ]
+    },
+    {
+      "id": "TFR2-2066-01",
+      "business": "2066",
+      "trial_id": "2066_medium_08_single_bom_single__nG4JWj2",
+      "failure_layer": "unknown_field",
+      "tool": "mcp_odoo_read_record",
+      "model": "res.company",
+      "unknown_fields": [
+        "comment",
+        "note"
+      ],
+      "failed_arguments": {
+        "fields": [
+          "id",
+          "name",
+          "comment",
+          "note"
+        ],
+        "model": "res.company",
+        "record_id": 1
+      },
+      "original_error": "Unknown field(s) ['comment', 'note'] on res.company; use live get_model_fields. Valid candidates: name, partner_id, currency_id.",
+      "causal_request": "0007",
+      "first_followup_request": "0008",
+      "first_corrective_request": null,
+      "first_actual_corrective_request": null,
+      "local_frozen_context": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests",
+      "context_sha256": {
+        "0007.request.json": "56b5789e4de2edb44a8ad5f0aa2ea4776cf85fdaf8d6f436f55698b532b40963",
+        "0007.meta.json": "a9a57d8d374a0f0e700e182bfc43e6b787b60b0b32d5b3d8eeb38ae0c9509309",
+        "0007.output.json": "27bea7de5acbd0d94a4dd16d75b42f5b202aa4f1dc99a59cf5ccb20eb3174b1a",
+        "0007.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        "0008.request.json": "83d6def19c4ed8ca4c6d4833410d46e5c238a86fb574ec8cbb85cacf68bff979",
+        "0008.meta.json": "c5cc29bb78f853e873b0060b2409e31b195e970e34e1851bde1dc3faba3405a8",
+        "0008.output.json": "291b13f87b47c1c6610417b84d0fe476938ed4b27e9861cde22b8fe8fcc4dfae",
+        "0008.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "assessment": {
+        "original_error_repeated": false,
+        "strict_recovery_request_followed": false,
+        "same_purpose_actual_recovery": false,
+        "company_notes_read_unclosed": true,
+        "no_business_failure_inferred_from_optional_read": true,
+        "new_sibling_failure_at_first_followup": false,
+        "finding": "No later company read or field discovery; valid BOM/vendor/stock reads continue. Optional company read remains unclosed."
+      },
+      "tool_call_id": "call_02_3970gh9ztkbwyjv485l07785",
+      "frozen_causal": {
+        "number": "0007",
+        "request_id": "req_2cb12729592e4f6380c07cf3796f8feb",
+        "provider_call_id": "call_64867df1ef7c44059eea36fcec328e4c",
+        "tool_call_ids": [
+          "call_00_r76is9ta5qnw4tlj0ktt78lr",
+          "call_01_sgj815h73ccxcepqthvstzk7",
+          "call_02_3970gh9ztkbwyjv485l07785",
+          "call_03_v2bj1lb5oviv82ix8iv1p1n2"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0007.request.json",
+            "sha256": "56b5789e4de2edb44a8ad5f0aa2ea4776cf85fdaf8d6f436f55698b532b40963"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0007.meta.json",
+            "sha256": "a9a57d8d374a0f0e700e182bfc43e6b787b60b0b32d5b3d8eeb38ae0c9509309"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0007.output.json",
+            "sha256": "27bea7de5acbd0d94a4dd16d75b42f5b202aa4f1dc99a59cf5ccb20eb3174b1a"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0007.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "9cb121ed8fdc2d5deaa43db8eab6335cafdd6e6733a250e66d7975b2389932df"
+      },
+      "frozen_first_followup": {
+        "number": "0008",
+        "request_id": "req_2b7ee510524346d3ae48683ebb1405c1",
+        "provider_call_id": "call_9576bffdb7e8405f8658eb33c9dfc418",
+        "tool_call_ids": [
+          "call_00_9dyhof3udo821d4oybsebv58",
+          "call_01_ac0ir9irp6hp8c4jh3pmjnhh",
+          "call_02_2n7q6vj6dv7za8rnprxgqc6z",
+          "call_03_ko03e7k5mort2dh8hprmv0pb",
+          "call_04_7q2306yx4txvafjwaj2ybba0"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0008.request.json",
+            "sha256": "83d6def19c4ed8ca4c6d4833410d46e5c238a86fb574ec8cbb85cacf68bff979"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0008.meta.json",
+            "sha256": "c5cc29bb78f853e873b0060b2409e31b195e970e34e1851bde1dc3faba3405a8"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0008.output.json",
+            "sha256": "291b13f87b47c1c6610417b84d0fe476938ed4b27e9861cde22b8fe8fcc4dfae"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0008.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "9cb121ed8fdc2d5deaa43db8eab6335cafdd6e6733a250e66d7975b2389932df"
+      },
+      "frozen_first_actual_corrective": null,
+      "offline_tests": [
+        "tests/test_bench_tool_regression.py::test_all_observed_unknown_fields_refuse_before_data_rpc_and_offer_discovery"
+      ],
+      "offline_test": "tests/test_bench_tool_regression.py::test_all_observed_unknown_fields_refuse_before_data_rpc_and_offer_discovery",
+      "offline_status": "included in existing data-driven test inputs",
+      "api_binding": {
+        "kind": "executed full business on frozen candidate",
+        "business": "2066",
+        "result": "experiments/agent_regression/tool-self-debug-business-20261003/results.json",
+        "additional_paid_cut_requests": 0
+      }
+    },
+    {
+      "id": "TFR2-2066-02",
+      "business": "2066",
+      "trial_id": "2066_medium_08_single_bom_single__nG4JWj2",
+      "failure_layer": "schema_argument",
+      "tool": "mcp_odoo_read_record",
+      "model": "res.partner",
+      "unknown_fields": [],
+      "failed_arguments": {
+        "fields": [
+          "id",
+          "name",
+          "comment"
+        ],
+        "model": "res.partner",
+        "record_ids": [
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32
+        ]
+      },
+      "original_error": "调用参数不符合已发布的工具契约；请按参数路径和规则修正后再提交。",
+      "causal_request": "0010",
+      "first_followup_request": "0011",
+      "first_corrective_request": "0011",
+      "first_actual_corrective_request": "0011",
+      "local_frozen_context": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests",
+      "context_sha256": {
+        "0010.request.json": "c87559908f8a411f3cc0250c609b485d77e6052cf86938ea7936d875de5031e0",
+        "0010.meta.json": "9c7e7203f515e47260d806355294735c52631a118b48c386b87b541b7e5b7b4c",
+        "0010.output.json": "daefa08b28139e3622b0f3c97fa6f34813f9bc1d11f0b26ccdfdc654afc57191",
+        "0010.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        "0011.request.json": "be4ef320591ea077ca69e4e6c016e51c6d0b0c810a8445de3643ad310fb7abd7",
+        "0011.meta.json": "9a6177dff54b2ee35943a877d45ea51412e5b8dc193c232a319b783199393857",
+        "0011.output.json": "0d7fce90ae7a6172110b62fdd6c169d4727b0d579bedbd5aaccb7bd6583843b8",
+        "0011.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "assessment": {
+        "original_error_repeated": false,
+        "strict_recovery_request_followed": true,
+        "same_purpose_actual_recovery": true,
+        "company_notes_read_unclosed": false,
+        "no_business_failure_inferred_from_optional_read": true,
+        "new_sibling_failure_at_first_followup": false,
+        "finding": "27 IDs rejected before dispatch; next request splits exactly20+7, both reads succeed, all original IDs covered with no duplicates."
+      },
+      "tool_call_id": "call_01_pk35ccwi0v6qb4c4xr8v44uz",
+      "frozen_causal": {
+        "number": "0010",
+        "request_id": "req_41f72bc4689a4bf2a108ecf2fcba32b5",
+        "provider_call_id": "call_d8d14b97ec3d4864919ca88bbc31b31f",
+        "tool_call_ids": [
+          "call_00_ccy3hmwud8odyq88vpvyb3zj",
+          "call_01_pk35ccwi0v6qb4c4xr8v44uz"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0010.request.json",
+            "sha256": "c87559908f8a411f3cc0250c609b485d77e6052cf86938ea7936d875de5031e0"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0010.meta.json",
+            "sha256": "9c7e7203f515e47260d806355294735c52631a118b48c386b87b541b7e5b7b4c"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0010.output.json",
+            "sha256": "daefa08b28139e3622b0f3c97fa6f34813f9bc1d11f0b26ccdfdc654afc57191"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0010.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "9cb121ed8fdc2d5deaa43db8eab6335cafdd6e6733a250e66d7975b2389932df"
+      },
+      "frozen_first_followup": {
+        "number": "0011",
+        "request_id": "req_e4d6c6c554864290a11c02b2e73f675d",
+        "provider_call_id": "call_e7243a95af084156abcacdb674ee0da7",
+        "tool_call_ids": [
+          "call_00_8b93b1uvx7yzyxg1u7teqr03",
+          "call_01_u9jk3p0myzlqbmf13wfcxn7o"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0011.request.json",
+            "sha256": "be4ef320591ea077ca69e4e6c016e51c6d0b0c810a8445de3643ad310fb7abd7"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0011.meta.json",
+            "sha256": "9a6177dff54b2ee35943a877d45ea51412e5b8dc193c232a319b783199393857"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0011.output.json",
+            "sha256": "0d7fce90ae7a6172110b62fdd6c169d4727b0d579bedbd5aaccb7bd6583843b8"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0011.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "9cb121ed8fdc2d5deaa43db8eab6335cafdd6e6733a250e66d7975b2389932df"
+      },
+      "frozen_first_actual_corrective": {
+        "number": "0011",
+        "request_id": "req_e4d6c6c554864290a11c02b2e73f675d",
+        "provider_call_id": "call_e7243a95af084156abcacdb674ee0da7",
+        "tool_call_ids": [
+          "call_00_8b93b1uvx7yzyxg1u7teqr03",
+          "call_01_u9jk3p0myzlqbmf13wfcxn7o"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0011.request.json",
+            "sha256": "be4ef320591ea077ca69e4e6c016e51c6d0b0c810a8445de3643ad310fb7abd7"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0011.meta.json",
+            "sha256": "9a6177dff54b2ee35943a877d45ea51412e5b8dc193c232a319b783199393857"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0011.output.json",
+            "sha256": "0d7fce90ae7a6172110b62fdd6c169d4727b0d579bedbd5aaccb7bd6583843b8"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0011.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "9cb121ed8fdc2d5deaa43db8eab6335cafdd6e6733a250e66d7975b2389932df"
+      },
+      "offline_tests": [
+        "tests/test_bench_tool_regression.py::test_actual_schema_argument_calls_are_invalid"
+      ],
+      "offline_test": "tests/test_bench_tool_regression.py::test_actual_schema_argument_calls_are_invalid",
+      "offline_status": "included in existing data-driven test inputs",
+      "api_binding": {
+        "kind": "executed full business on frozen candidate",
+        "business": "2066",
+        "result": "experiments/agent_regression/tool-self-debug-business-20261003/results.json",
+        "additional_paid_cut_requests": 0
+      },
+      "actual_recovery_tool_call_ids": [
+        "call_00_8b93b1uvx7yzyxg1u7teqr03",
+        "call_01_u9jk3p0myzlqbmf13wfcxn7o"
+      ]
+    },
+    {
+      "id": "BFR2-2066-01",
+      "business": "2066",
+      "trial_id": "2066_medium_08_single_bom_single__nG4JWj2",
+      "failure_layer": "final_business_verification",
+      "tool": "mcp_odoo_validate_write",
+      "model": "mrp.production",
+      "unknown_fields": [],
+      "failed_arguments": {
+        "model": "mrp.production",
+        "operation": "create",
+        "values_list": [
+          {
+            "product_id": 2,
+            "product_qty": 12,
+            "bom_id": 1,
+            "origin": "S00005",
+            "date_start": "2026-10-07 00:00:00",
+            "picking_type_id": 11
+          },
+          {
+            "product_id": 2,
+            "product_qty": 14,
+            "bom_id": 1,
+            "origin": "S00006",
+            "date_start": "2026-10-08 00:00:00",
+            "picking_type_id": 11
+          },
+          {
+            "product_id": 2,
+            "product_qty": 14,
+            "bom_id": 1,
+            "origin": "S00007",
+            "date_start": "2026-10-09 00:00:00",
+            "picking_type_id": 11
+          },
+          {
+            "product_id": 2,
+            "product_qty": 15,
+            "bom_id": 1,
+            "origin": "S00008",
+            "date_start": "2026-10-11 00:00:00",
+            "picking_type_id": 11
+          },
+          {
+            "product_id": 2,
+            "product_qty": 18,
+            "bom_id": 1,
+            "origin": "S00009",
+            "date_start": "2026-10-11 00:00:00",
+            "picking_type_id": 11
+          }
+        ]
+      },
+      "causal_request": "0018",
+      "first_followup_request": "0019",
+      "first_corrective_request": null,
+      "first_actual_corrective_request": null,
+      "local_frozen_context": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests",
+      "context_sha256": {
+        "0018.request.json": "5683fbbbc06e5fe27255707b87147aa5d65f91ac29c8a44dbc329b2a88b1090c",
+        "0018.meta.json": "05c941c86683b0748eb004543cfecd7e66349f47492d25b131c0a6d57c89d6bc",
+        "0018.output.json": "30168f979f7fb4cbd023ffce8232e6d0f9a54521122544a5da447257bca044a7",
+        "0018.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        "0019.request.json": "dc78720215e08d884a87a70a2b55883b529bf714e25a1e3f3962b6346218c15f",
+        "0019.meta.json": "527cb77d1b59269e5c46df269a47478297d37be354a652027a2874b9baa9dcfd",
+        "0019.output.json": "7076898f0ed84e671dc0f3e61526749a20ae058521d00912c2edc64704afc146",
+        "0019.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        "0020.request.json": "0a83e23919b2dd4f97858127318ba75c78df54f2a89f8a3765d5ae0ad4752eba",
+        "0020.meta.json": "7cbffb6212c4addf7f4050cd19cb3d46744307388b49f4d3de6491005761cabc",
+        "0020.output.json": "eae8c836c485af46a403c1c5b682e5fe22a9104a3261ed132450c5b3c517d6aa",
+        "0020.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        "0022.request.json": "ad00fb78190bc1f4b2ba68ee93bca9bcf9347838d9010802896c0c50ba0dada7",
+        "0022.meta.json": "394fd6d95cd6757d3f1c8444dced8485671e845219f703b85165986aa670bab7",
+        "0022.output.json": "19e6adf453e726119f8855401cdad18fdb247aebf6be3beeecb1014adc220390",
+        "0022.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        "0027.request.json": "98c0a89b0e8b822f13dc8403daa150773cb2d53c6c39201ade87b81c5dfa4498",
+        "0027.meta.json": "78fc39315a8db8d5ca782219693779db7afb630695303f48fe19b42092e68c44",
+        "0027.output.json": "e8f4fd1f7e2a547b74ab1e48b48863e3a789941b00cbbeceef93be4f34166d21",
+        "0027.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        "0029.request.json": "c6a4d2c95803e4152ab833d21f6727499560660936a799486d38c164f4e31a18",
+        "0029.meta.json": "365cb08485c00f0186bcd254fcd1a8ffabfb15f315a8307acef41e360ef2114e",
+        "0029.output.json": "87a9ba9a56ba6ea123fe9b314f07645a4a4410c2b4477147e4ba98ae5f0974c2",
+        "0029.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        "0006.request.json": "6e2401bc8007a419ddcab966a24bf7f9ff8dfdd5e9ace46d2d06d9dc4eda2d5d",
+        "0006.meta.json": "30be037f495dc320e8822c4bcde4d1e8850bd0f95d7483b92e785161d5c46e2d",
+        "0006.output.json": "6c12665f8ae7f72c2ffede0bb1eafe09a856048eadb052d61fdd598d42db7412",
+        "0006.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        "0012.request.json": "bd381fe5d5cf0211c3648022d5e1f41071f8d31852a9d46e3d494ecc7f3f064c",
+        "0012.meta.json": "9dae28862da7b53666c34ed361356c8e1ac14363c59401123beeab58eab7a726",
+        "0012.output.json": "fb38f27b2f185738cf68c977e5698ca747da02cea819fa188f20e12cf83cf146",
+        "0012.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "assessment": {
+        "cause": "Create/validate request0018 omits task-required due-date field date_deadline on all5MOs; request0019 actually executes approved creation. Readbacks0020/0027 inspect date_finished and never request date_deadline; final0029 declares completion with the field still NULL.",
+        "actual_corrective_request_observed": false,
+        "date_finished_is_not_proof_date_deadline_is_set": true,
+        "native_required_schema_is_not_entire_task_contract": true,
+        "manufacturing_quantities_or_workcenter_capacity_failure_proven": false,
+        "provider_private_reasoning_not_used": true
+      },
+      "offline_coverage_gap": "Existing field/schema failure regressions do not cover a successful write that omits a user-required due-date field or a final readback that misses that field. This actual case is frozen for a task/verification regression; production candidate is unchanged.",
+      "tool_call_id": "call_00_4q99ftsdb1ypcu5gmaubfes0",
+      "frozen_causal": {
+        "number": "0018",
+        "request_id": "req_efa1074cb31949b7a6304f99b968f910",
+        "provider_call_id": "call_48941179b5834b3cb411f897f06563aa",
+        "tool_call_ids": [
+          "call_00_4q99ftsdb1ypcu5gmaubfes0"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0018.request.json",
+            "sha256": "5683fbbbc06e5fe27255707b87147aa5d65f91ac29c8a44dbc329b2a88b1090c"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0018.meta.json",
+            "sha256": "05c941c86683b0748eb004543cfecd7e66349f47492d25b131c0a6d57c89d6bc"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0018.output.json",
+            "sha256": "30168f979f7fb4cbd023ffce8232e6d0f9a54521122544a5da447257bca044a7"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0018.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "tool_schemas_sha256": "9cb121ed8fdc2d5deaa43db8eab6335cafdd6e6733a250e66d7975b2389932df"
+      },
+      "frozen_first_followup": {
+        "number": "0019",
+        "request_id": "req_05407b53e9b94347a103a3f12944ea7e",
+        "provider_call_id": "call_5b3be7ffdb57442aa138b201b2606d03",
+        "tool_call_ids": [
+          "call_00_ig6x8ibww0h597zwd375l85a"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0019.request.json",
+            "sha256": "dc78720215e08d884a87a70a2b55883b529bf714e25a1e3f3962b6346218c15f"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0019.meta.json",
+            "sha256": "527cb77d1b59269e5c46df269a47478297d37be354a652027a2874b9baa9dcfd"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0019.output.json",
+            "sha256": "7076898f0ed84e671dc0f3e61526749a20ae058521d00912c2edc64704afc146"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2066/tool-self-debug-round2-2066-20261003/2066_medium_08_single_bom_single__nG4JWj2/agent/requests/0019.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "tool_schemas_sha256": "9cb121ed8fdc2d5deaa43db8eab6335cafdd6e6733a250e66d7975b2389932df"
+      },
+      "frozen_first_actual_corrective": null,
+      "offline_tests": [],
+      "offline_test": null,
+      "offline_status": "pending known business guard fix",
+      "api_binding": {
+        "kind": "executed full business on frozen candidate",
+        "business": "2066",
+        "result": "experiments/agent_regression/tool-self-debug-business-20261003/results.json",
+        "additional_paid_cut_requests": 0
+      }
+    },
+    {
+      "id": "TFR2-2279-01",
+      "business": "2279",
+      "trial_id": "2279_easy_repair_plan_easy__JK87new",
+      "failure_layer": "unknown_field",
+      "tool": "mcp_odoo_read_record",
+      "model": "sale.order.line",
+      "unknown_fields": [
+        "product_uom"
+      ],
+      "failed_arguments": {
+        "fields": [
+          "order_id",
+          "product_id",
+          "name",
+          "product_uom_qty",
+          "qty_delivered",
+          "qty_invoiced",
+          "price_unit",
+          "price_subtotal",
+          "price_total",
+          "tax_ids",
+          "product_uom"
+        ],
+        "model": "sale.order.line",
+        "record_ids": [
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "original_error": "Unknown field(s) ['product_uom'] on sale.order.line; use live get_model_fields. Valid candidates: product_uom_readonly, product_uom_qty, product_uom_id.",
+      "causal_request": "0004",
+      "first_followup_request": "0005",
+      "first_corrective_request": "0005",
+      "first_actual_corrective_request": "0005",
+      "local_frozen_context": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests",
+      "context_sha256": {
+        "0004.request.json": "4c3153e9eab676021ccdb018b87dae9250e4a59b0c41ac2cab678e9573cd8c2b",
+        "0004.meta.json": "f16b1882d0c985d6e5c3fa2623a0ed263190ae87104551c1f01a005a083ff0ff",
+        "0004.output.json": "427ef7ea57e26b72b71d1fc085e40349295e06f95f58bc183a3b25f932637323",
+        "0004.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        "0005.request.json": "b8e16df15ee9d6e044c683b41a2bd515f2df1009c2e50198585d3d57780e3d14",
+        "0005.meta.json": "282d36a6f4fe3b12e167b3c01ad4f2994e2bad38e3d5136f287cf0103ff668a6",
+        "0005.output.json": "40f85ae024c8cc59599d8c0983a34d44b76c4a864db2eaf534d3fdb59904f80a",
+        "0005.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "assessment": {
+        "finding": "Replaced product_uom with product_uom_id; live sale.order.line metadata was returned in the same causal batch before request0005. Successful actual reread. Exact suggested query was not called.",
+        "original_error_repeated": false,
+        "strict_recovery_request_followed": false,
+        "same_target_actual_recovery": true,
+        "alternate_actual_recovery": false,
+        "original_failed_read_unclosed": false,
+        "no_business_failure_inferred_from_tool_refusal": true
+      },
+      "tool_call_id": "call_00_mkfpfgazoc8a5fxvacafwmvs",
+      "frozen_causal": {
+        "number": "0004",
+        "request_id": "req_fb4f3f9b9fb143b48dd12dc961b2c7dc",
+        "provider_call_id": "call_cd651d536ce44c86ba8c863b922ff47e",
+        "tool_call_ids": [
+          "call_00_mkfpfgazoc8a5fxvacafwmvs",
+          "call_01_92lwr6ro6irgzlcosfvd4ad6",
+          "call_02_4iw9okritxpkhe2hwxdd0r6e",
+          "call_03_me2c5wdwkjm6sne32337to0w"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0004.request.json",
+            "sha256": "4c3153e9eab676021ccdb018b87dae9250e4a59b0c41ac2cab678e9573cd8c2b"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0004.meta.json",
+            "sha256": "f16b1882d0c985d6e5c3fa2623a0ed263190ae87104551c1f01a005a083ff0ff"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0004.output.json",
+            "sha256": "427ef7ea57e26b72b71d1fc085e40349295e06f95f58bc183a3b25f932637323"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0004.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "0ad013835f1c185979c3cb4b3f88c7ed5dc4879ab9417c21453bf375f9036622"
+      },
+      "frozen_first_followup": {
+        "number": "0005",
+        "request_id": "req_6a7ccd08b1d2442fbe52a87c8609dae9",
+        "provider_call_id": "call_fff0786df4524a7ebcd800aaecf09750",
+        "tool_call_ids": [
+          "call_00_gf4l3iqha4f7bv2ar72dxla0",
+          "call_01_r25wqc034wg7mkposw2gn1bl"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0005.request.json",
+            "sha256": "b8e16df15ee9d6e044c683b41a2bd515f2df1009c2e50198585d3d57780e3d14"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0005.meta.json",
+            "sha256": "282d36a6f4fe3b12e167b3c01ad4f2994e2bad38e3d5136f287cf0103ff668a6"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0005.output.json",
+            "sha256": "40f85ae024c8cc59599d8c0983a34d44b76c4a864db2eaf534d3fdb59904f80a"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0005.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "0ad013835f1c185979c3cb4b3f88c7ed5dc4879ab9417c21453bf375f9036622"
+      },
+      "frozen_first_actual_corrective": {
+        "number": "0005",
+        "request_id": "req_6a7ccd08b1d2442fbe52a87c8609dae9",
+        "provider_call_id": "call_fff0786df4524a7ebcd800aaecf09750",
+        "tool_call_ids": [
+          "call_00_gf4l3iqha4f7bv2ar72dxla0",
+          "call_01_r25wqc034wg7mkposw2gn1bl"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0005.request.json",
+            "sha256": "b8e16df15ee9d6e044c683b41a2bd515f2df1009c2e50198585d3d57780e3d14"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0005.meta.json",
+            "sha256": "282d36a6f4fe3b12e167b3c01ad4f2994e2bad38e3d5136f287cf0103ff668a6"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0005.output.json",
+            "sha256": "40f85ae024c8cc59599d8c0983a34d44b76c4a864db2eaf534d3fdb59904f80a"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0005.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "0ad013835f1c185979c3cb4b3f88c7ed5dc4879ab9417c21453bf375f9036622"
+      },
+      "offline_tests": [
+        "tests/test_bench_tool_regression.py::test_all_observed_unknown_fields_refuse_before_data_rpc_and_offer_discovery"
+      ],
+      "offline_test": "tests/test_bench_tool_regression.py::test_all_observed_unknown_fields_refuse_before_data_rpc_and_offer_discovery",
+      "offline_status": "included in existing data-driven test inputs",
+      "api_binding": {
+        "kind": "executed full business on frozen candidate",
+        "business": "2279",
+        "result": "experiments/agent_regression/tool-self-debug-business-20261003/results.json",
+        "additional_paid_cut_requests": 0
+      },
+      "actual_recovery_tool_call_ids": [
+        "call_00_gf4l3iqha4f7bv2ar72dxla0"
+      ]
+    },
+    {
+      "id": "TFR2-2279-02",
+      "business": "2279",
+      "trial_id": "2279_easy_repair_plan_easy__JK87new",
+      "failure_layer": "unknown_field",
+      "tool": "mcp_odoo_read_record",
+      "model": "purchase.order.line",
+      "unknown_fields": [
+        "taxes_id",
+        "product_uom"
+      ],
+      "failed_arguments": {
+        "fields": [
+          "order_id",
+          "product_id",
+          "name",
+          "product_qty",
+          "qty_received",
+          "qty_invoiced",
+          "price_unit",
+          "price_subtotal",
+          "price_total",
+          "taxes_id",
+          "product_uom",
+          "date_planned",
+          "price_unit"
+        ],
+        "model": "purchase.order.line",
+        "record_ids": [
+          1,
+          2
+        ]
+      },
+      "original_error": "Unknown field(s) ['taxes_id', 'product_uom'] on purchase.order.line; use live get_model_fields. Valid candidates: tax_ids, id, product_id.",
+      "causal_request": "0004",
+      "first_followup_request": "0005",
+      "first_corrective_request": "0005",
+      "first_actual_corrective_request": "0005",
+      "local_frozen_context": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests",
+      "context_sha256": {
+        "0004.request.json": "4c3153e9eab676021ccdb018b87dae9250e4a59b0c41ac2cab678e9573cd8c2b",
+        "0004.meta.json": "f16b1882d0c985d6e5c3fa2623a0ed263190ae87104551c1f01a005a083ff0ff",
+        "0004.output.json": "427ef7ea57e26b72b71d1fc085e40349295e06f95f58bc183a3b25f932637323",
+        "0004.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        "0005.request.json": "b8e16df15ee9d6e044c683b41a2bd515f2df1009c2e50198585d3d57780e3d14",
+        "0005.meta.json": "282d36a6f4fe3b12e167b3c01ad4f2994e2bad38e3d5136f287cf0103ff668a6",
+        "0005.output.json": "40f85ae024c8cc59599d8c0983a34d44b76c4a864db2eaf534d3fdb59904f80a",
+        "0005.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "assessment": {
+        "finding": "Replaced taxes_id/product_uom with tax_ids/product_uom_id from live metadata in the same causal batch; actual purchase-line reread succeeded.",
+        "original_error_repeated": false,
+        "strict_recovery_request_followed": false,
+        "same_target_actual_recovery": true,
+        "alternate_actual_recovery": false,
+        "original_failed_read_unclosed": false,
+        "no_business_failure_inferred_from_tool_refusal": true
+      },
+      "tool_call_id": "call_01_92lwr6ro6irgzlcosfvd4ad6",
+      "frozen_causal": {
+        "number": "0004",
+        "request_id": "req_fb4f3f9b9fb143b48dd12dc961b2c7dc",
+        "provider_call_id": "call_cd651d536ce44c86ba8c863b922ff47e",
+        "tool_call_ids": [
+          "call_00_mkfpfgazoc8a5fxvacafwmvs",
+          "call_01_92lwr6ro6irgzlcosfvd4ad6",
+          "call_02_4iw9okritxpkhe2hwxdd0r6e",
+          "call_03_me2c5wdwkjm6sne32337to0w"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0004.request.json",
+            "sha256": "4c3153e9eab676021ccdb018b87dae9250e4a59b0c41ac2cab678e9573cd8c2b"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0004.meta.json",
+            "sha256": "f16b1882d0c985d6e5c3fa2623a0ed263190ae87104551c1f01a005a083ff0ff"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0004.output.json",
+            "sha256": "427ef7ea57e26b72b71d1fc085e40349295e06f95f58bc183a3b25f932637323"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0004.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "0ad013835f1c185979c3cb4b3f88c7ed5dc4879ab9417c21453bf375f9036622"
+      },
+      "frozen_first_followup": {
+        "number": "0005",
+        "request_id": "req_6a7ccd08b1d2442fbe52a87c8609dae9",
+        "provider_call_id": "call_fff0786df4524a7ebcd800aaecf09750",
+        "tool_call_ids": [
+          "call_00_gf4l3iqha4f7bv2ar72dxla0",
+          "call_01_r25wqc034wg7mkposw2gn1bl"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0005.request.json",
+            "sha256": "b8e16df15ee9d6e044c683b41a2bd515f2df1009c2e50198585d3d57780e3d14"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0005.meta.json",
+            "sha256": "282d36a6f4fe3b12e167b3c01ad4f2994e2bad38e3d5136f287cf0103ff668a6"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0005.output.json",
+            "sha256": "40f85ae024c8cc59599d8c0983a34d44b76c4a864db2eaf534d3fdb59904f80a"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0005.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "0ad013835f1c185979c3cb4b3f88c7ed5dc4879ab9417c21453bf375f9036622"
+      },
+      "frozen_first_actual_corrective": {
+        "number": "0005",
+        "request_id": "req_6a7ccd08b1d2442fbe52a87c8609dae9",
+        "provider_call_id": "call_fff0786df4524a7ebcd800aaecf09750",
+        "tool_call_ids": [
+          "call_00_gf4l3iqha4f7bv2ar72dxla0",
+          "call_01_r25wqc034wg7mkposw2gn1bl"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0005.request.json",
+            "sha256": "b8e16df15ee9d6e044c683b41a2bd515f2df1009c2e50198585d3d57780e3d14"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0005.meta.json",
+            "sha256": "282d36a6f4fe3b12e167b3c01ad4f2994e2bad38e3d5136f287cf0103ff668a6"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0005.output.json",
+            "sha256": "40f85ae024c8cc59599d8c0983a34d44b76c4a864db2eaf534d3fdb59904f80a"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0005.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "0ad013835f1c185979c3cb4b3f88c7ed5dc4879ab9417c21453bf375f9036622"
+      },
+      "offline_tests": [
+        "tests/test_bench_tool_regression.py::test_all_observed_unknown_fields_refuse_before_data_rpc_and_offer_discovery"
+      ],
+      "offline_test": "tests/test_bench_tool_regression.py::test_all_observed_unknown_fields_refuse_before_data_rpc_and_offer_discovery",
+      "offline_status": "included in existing data-driven test inputs",
+      "api_binding": {
+        "kind": "executed full business on frozen candidate",
+        "business": "2279",
+        "result": "experiments/agent_regression/tool-self-debug-business-20261003/results.json",
+        "additional_paid_cut_requests": 0
+      },
+      "actual_recovery_tool_call_ids": [
+        "call_01_r25wqc034wg7mkposw2gn1bl"
+      ]
+    },
+    {
+      "id": "TFR2-2279-03",
+      "business": "2279",
+      "trial_id": "2279_easy_repair_plan_easy__JK87new",
+      "failure_layer": "unknown_field",
+      "tool": "mcp_odoo_read_record",
+      "model": "stock.move",
+      "unknown_fields": [
+        "name"
+      ],
+      "failed_arguments": {
+        "record_ids": [
+          1,
+          52,
+          53,
+          54,
+          55,
+          56,
+          57
+        ],
+        "model": "stock.move",
+        "fields": [
+          "name",
+          "product_id",
+          "product_uom_qty",
+          "state",
+          "picking_id",
+          "purchase_line_id",
+          "sale_line_id",
+          "location_id",
+          "location_dest_id",
+          "date"
+        ]
+      },
+      "original_error": "Unknown field(s) ['name'] on stock.move; use live get_model_fields. Valid candidates: display_name, inventory_name.",
+      "causal_request": "0009",
+      "first_followup_request": "0010",
+      "first_corrective_request": "0010",
+      "first_actual_corrective_request": "0010",
+      "local_frozen_context": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests",
+      "context_sha256": {
+        "0009.request.json": "c2b6b69e4416d1ac868617bbc32fa7ecbcdfa38e354ad1dd4ac3d19c4eec9996",
+        "0009.meta.json": "4296f32208f794694f91873eb0da9d88adad21ca86fefdaf5b1a9b9628f7299c",
+        "0009.output.json": "89b89e71c336505f889b876a2d970f26d81bd50b9a179cd0dfef1c6650c67301",
+        "0009.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        "0010.request.json": "4831ed56b51f33c50625386d63844ef8f4f5d25c09f954e6b7747d655845d480",
+        "0010.meta.json": "0c53d27150a47f0865950db5a43f9d618f10a40acc57dca26b9a0e7be8e2a28a",
+        "0010.output.json": "c602a3d33d5f0956ae6e81f568916901b1f34015d3bbf565ef6a3a398f27c5e6",
+        "0010.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "assessment": {
+        "finding": "Replaced name with display_name; same stock.move target IDs were actually reread successfully. No exact suggested metadata query occurred between these requests.",
+        "original_error_repeated": false,
+        "strict_recovery_request_followed": false,
+        "same_target_actual_recovery": true,
+        "alternate_actual_recovery": false,
+        "original_failed_read_unclosed": false,
+        "no_business_failure_inferred_from_tool_refusal": true
+      },
+      "tool_call_id": "call_01_69a0h6c0418ph7anby70eclr",
+      "frozen_causal": {
+        "number": "0009",
+        "request_id": "req_e4d16723eafd46a9bf80fccab6a6baca",
+        "provider_call_id": "call_a81f1f2cf33d471d8438affa0a954fcb",
+        "tool_call_ids": [
+          "call_00_tefqltc8un25jme8rv7etc5s",
+          "call_01_69a0h6c0418ph7anby70eclr",
+          "call_02_snrqvt9t2h64v4m89vvozsse",
+          "call_03_yxynhwhwtt3viifxwt31bdmm",
+          "call_04_iisoq4hof6n0bw413vefq214"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0009.request.json",
+            "sha256": "c2b6b69e4416d1ac868617bbc32fa7ecbcdfa38e354ad1dd4ac3d19c4eec9996"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0009.meta.json",
+            "sha256": "4296f32208f794694f91873eb0da9d88adad21ca86fefdaf5b1a9b9628f7299c"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0009.output.json",
+            "sha256": "89b89e71c336505f889b876a2d970f26d81bd50b9a179cd0dfef1c6650c67301"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0009.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "0ad013835f1c185979c3cb4b3f88c7ed5dc4879ab9417c21453bf375f9036622"
+      },
+      "frozen_first_followup": {
+        "number": "0010",
+        "request_id": "req_088bc439fd5a4023843a12792b273b33",
+        "provider_call_id": "call_f871123a099341969136284947200361",
+        "tool_call_ids": [
+          "call_00_rlsq6ti08p58o99t1112mnqa",
+          "call_01_j6tsbhhry2x3iluxtjvjzsi0",
+          "call_02_eq5vqd3jbztfizbr5mh77ajs"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0010.request.json",
+            "sha256": "4831ed56b51f33c50625386d63844ef8f4f5d25c09f954e6b7747d655845d480"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0010.meta.json",
+            "sha256": "0c53d27150a47f0865950db5a43f9d618f10a40acc57dca26b9a0e7be8e2a28a"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0010.output.json",
+            "sha256": "c602a3d33d5f0956ae6e81f568916901b1f34015d3bbf565ef6a3a398f27c5e6"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0010.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "0ad013835f1c185979c3cb4b3f88c7ed5dc4879ab9417c21453bf375f9036622"
+      },
+      "frozen_first_actual_corrective": {
+        "number": "0010",
+        "request_id": "req_088bc439fd5a4023843a12792b273b33",
+        "provider_call_id": "call_f871123a099341969136284947200361",
+        "tool_call_ids": [
+          "call_00_rlsq6ti08p58o99t1112mnqa",
+          "call_01_j6tsbhhry2x3iluxtjvjzsi0",
+          "call_02_eq5vqd3jbztfizbr5mh77ajs"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0010.request.json",
+            "sha256": "4831ed56b51f33c50625386d63844ef8f4f5d25c09f954e6b7747d655845d480"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0010.meta.json",
+            "sha256": "0c53d27150a47f0865950db5a43f9d618f10a40acc57dca26b9a0e7be8e2a28a"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0010.output.json",
+            "sha256": "c602a3d33d5f0956ae6e81f568916901b1f34015d3bbf565ef6a3a398f27c5e6"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0010.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "0ad013835f1c185979c3cb4b3f88c7ed5dc4879ab9417c21453bf375f9036622"
+      },
+      "offline_tests": [
+        "tests/test_bench_tool_regression.py::test_all_observed_unknown_fields_refuse_before_data_rpc_and_offer_discovery"
+      ],
+      "offline_test": "tests/test_bench_tool_regression.py::test_all_observed_unknown_fields_refuse_before_data_rpc_and_offer_discovery",
+      "offline_status": "included in existing data-driven test inputs",
+      "api_binding": {
+        "kind": "executed full business on frozen candidate",
+        "business": "2279",
+        "result": "experiments/agent_regression/tool-self-debug-business-20261003/results.json",
+        "additional_paid_cut_requests": 0
+      },
+      "actual_recovery_tool_call_ids": [
+        "call_00_rlsq6ti08p58o99t1112mnqa"
+      ]
+    },
+    {
+      "id": "TFR2-2279-04",
+      "business": "2279",
+      "trial_id": "2279_easy_repair_plan_easy__JK87new",
+      "failure_layer": "unknown_field",
+      "tool": "mcp_odoo_read_record",
+      "model": "mrp.production",
+      "unknown_fields": [
+        "date_planned_start",
+        "date_planned_finished"
+      ],
+      "failed_arguments": {
+        "fields": [
+          "name",
+          "product_id",
+          "product_qty",
+          "state",
+          "origin",
+          "date_planned_start",
+          "date_planned_finished",
+          "location_src_id",
+          "location_dest_id",
+          "move_raw_ids",
+          "move_finished_ids",
+          "workorder_ids"
+        ],
+        "model": "mrp.production",
+        "record_ids": [
+          1
+        ]
+      },
+      "original_error": "Unknown field(s) ['date_planned_start', 'date_planned_finished'] on mrp.production; use live get_model_fields. Valid candidates: date_start, is_planned, activity_state.",
+      "causal_request": "0010",
+      "first_followup_request": "0011",
+      "first_corrective_request": "0011",
+      "first_actual_corrective_request": "0011",
+      "local_frozen_context": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests",
+      "context_sha256": {
+        "0010.request.json": "4831ed56b51f33c50625386d63844ef8f4f5d25c09f954e6b7747d655845d480",
+        "0010.meta.json": "0c53d27150a47f0865950db5a43f9d618f10a40acc57dca26b9a0e7be8e2a28a",
+        "0010.output.json": "c602a3d33d5f0956ae6e81f568916901b1f34015d3bbf565ef6a3a398f27c5e6",
+        "0010.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        "0011.request.json": "f18f7305e8ac8936a79ea0ed6c0113d23c020932201b1ad472781dc5ada33a05",
+        "0011.meta.json": "a8d7ba4c03968787d2819dd221e157524e7edd249fda4bdd3420bc5915dbcafb",
+        "0011.output.json": "96e960bc0808d675e1276b7eb97793dfa4ee6be3c162ce20cb6c8311af3f91fa",
+        "0011.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "assessment": {
+        "finding": "Actual find_records on mrp.production returned count=0, has_more=false, so the assumed record1 was absent. No successful original read or legacy date-field correction occurred. This is an executed alternate discovery, not exact guidance compliance.",
+        "original_error_repeated": false,
+        "strict_recovery_request_followed": false,
+        "same_target_actual_recovery": false,
+        "alternate_actual_recovery": true,
+        "original_failed_read_unclosed": true,
+        "no_business_failure_inferred_from_tool_refusal": true
+      },
+      "tool_call_id": "call_01_j6tsbhhry2x3iluxtjvjzsi0",
+      "frozen_causal": {
+        "number": "0010",
+        "request_id": "req_088bc439fd5a4023843a12792b273b33",
+        "provider_call_id": "call_f871123a099341969136284947200361",
+        "tool_call_ids": [
+          "call_00_rlsq6ti08p58o99t1112mnqa",
+          "call_01_j6tsbhhry2x3iluxtjvjzsi0",
+          "call_02_eq5vqd3jbztfizbr5mh77ajs"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0010.request.json",
+            "sha256": "4831ed56b51f33c50625386d63844ef8f4f5d25c09f954e6b7747d655845d480"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0010.meta.json",
+            "sha256": "0c53d27150a47f0865950db5a43f9d618f10a40acc57dca26b9a0e7be8e2a28a"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0010.output.json",
+            "sha256": "c602a3d33d5f0956ae6e81f568916901b1f34015d3bbf565ef6a3a398f27c5e6"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0010.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "0ad013835f1c185979c3cb4b3f88c7ed5dc4879ab9417c21453bf375f9036622"
+      },
+      "frozen_first_followup": {
+        "number": "0011",
+        "request_id": "req_3d6cc457c2fe4ed395272382b9967938",
+        "provider_call_id": "call_7586051e35934a8598931d4f8c75cb8a",
+        "tool_call_ids": [
+          "call_00_mxyroz5qkwsv9pbt9zygslf3",
+          "call_01_uk6jmzoxso42lebdohxrdy06",
+          "call_02_cx2lkhat1kvqwjffl10kedud",
+          "call_03_9mq3y1mmle7l46fskt12r5ve",
+          "call_04_ke3jnq6pht96pwe5eomgthx1"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0011.request.json",
+            "sha256": "f18f7305e8ac8936a79ea0ed6c0113d23c020932201b1ad472781dc5ada33a05"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0011.meta.json",
+            "sha256": "a8d7ba4c03968787d2819dd221e157524e7edd249fda4bdd3420bc5915dbcafb"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0011.output.json",
+            "sha256": "96e960bc0808d675e1276b7eb97793dfa4ee6be3c162ce20cb6c8311af3f91fa"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0011.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "0ad013835f1c185979c3cb4b3f88c7ed5dc4879ab9417c21453bf375f9036622"
+      },
+      "frozen_first_actual_corrective": {
+        "number": "0011",
+        "request_id": "req_3d6cc457c2fe4ed395272382b9967938",
+        "provider_call_id": "call_7586051e35934a8598931d4f8c75cb8a",
+        "tool_call_ids": [
+          "call_00_mxyroz5qkwsv9pbt9zygslf3",
+          "call_01_uk6jmzoxso42lebdohxrdy06",
+          "call_02_cx2lkhat1kvqwjffl10kedud",
+          "call_03_9mq3y1mmle7l46fskt12r5ve",
+          "call_04_ke3jnq6pht96pwe5eomgthx1"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0011.request.json",
+            "sha256": "f18f7305e8ac8936a79ea0ed6c0113d23c020932201b1ad472781dc5ada33a05"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0011.meta.json",
+            "sha256": "a8d7ba4c03968787d2819dd221e157524e7edd249fda4bdd3420bc5915dbcafb"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0011.output.json",
+            "sha256": "96e960bc0808d675e1276b7eb97793dfa4ee6be3c162ce20cb6c8311af3f91fa"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0011.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "0ad013835f1c185979c3cb4b3f88c7ed5dc4879ab9417c21453bf375f9036622"
+      },
+      "offline_tests": [
+        "tests/test_bench_tool_regression.py::test_all_observed_unknown_fields_refuse_before_data_rpc_and_offer_discovery"
+      ],
+      "offline_test": "tests/test_bench_tool_regression.py::test_all_observed_unknown_fields_refuse_before_data_rpc_and_offer_discovery",
+      "offline_status": "included in existing data-driven test inputs",
+      "api_binding": {
+        "kind": "executed full business on frozen candidate",
+        "business": "2279",
+        "result": "experiments/agent_regression/tool-self-debug-business-20261003/results.json",
+        "additional_paid_cut_requests": 0
+      },
+      "actual_recovery_tool_call_ids": [
+        "call_00_mxyroz5qkwsv9pbt9zygslf3"
+      ]
+    },
+    {
+      "id": "TFR2-2279-05",
+      "business": "2279",
+      "trial_id": "2279_easy_repair_plan_easy__JK87new",
+      "failure_layer": "action_prestate_changed",
+      "tool": "mcp_odoo_execute_approved_write",
+      "model": "purchase.order",
+      "unknown_fields": [],
+      "failed_arguments": {
+        "approval": {
+          "action_id": "db9ef63b-5651-476c-9672-67fde3fca632"
+        },
+        "confirm": true
+      },
+      "original_error": "Odoo state changed after validation or required evidence is unavailable; validate again",
+      "causal_request": "0016",
+      "first_followup_request": "0017",
+      "first_corrective_request": "0017",
+      "first_actual_corrective_request": "0018",
+      "local_frozen_context": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests",
+      "context_sha256": {
+        "0016.request.json": "accb22c562ff4a471cbc949ccc76a32d490ca55ac85bb277477f186e7bf70414",
+        "0016.meta.json": "1622fd377cc5ea5cdeeef5aa123dd7b144972becab212627a5f5c4a89df61f64",
+        "0016.output.json": "30d345152c5a9f0b67bee3df9ae392f0ff9f738594fe4bf3af95a7b68379462c",
+        "0016.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        "0017.request.json": "2fbb510fb128fd81245e7b11bda5f703bea21a6122e79e75a177e03cd93d073c",
+        "0017.meta.json": "10ea99115ea9c019021041b4ee8a8574942312c8e8434a3bfcd7b641eeb52161",
+        "0017.output.json": "9ac4f13ab8f9b29798a05397031ee0fda914201d2d7d7b268566cb3ead05f592",
+        "0017.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        "0018.request.json": "7e93975a448b3ac3425f4b91f13dcd6ca4c21870cf026026bc5fc7756d33977b",
+        "0018.meta.json": "edba7c0321bee9ae7ed787ae32e7cd57448377670dc762d8ad65091c14f18a8e",
+        "0018.output.json": "9a832eda65ce65b74fd5c15b0c12dee566a45241e8944a156d313c558598ba36",
+        "0018.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        "0015.request.json": "29d4b6a37dcb9f40975c51dc13376cb5ccfd0d18e23f776bf7948a9f83d789d5",
+        "0015.meta.json": "ee40eccab23b17e4794018b824e69c5e77ddb48494c37854692f12d9afcd6de5",
+        "0015.output.json": "3c7dedeb5b6d6d0d181c9f3f55d698fd76adbba7c4fc7e783c8df926980eb67b",
+        "0015.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "assessment": {
+        "finding": "PO line update changed PO header computed arrival after validation. Guard rejected original header approval before send. Request0017 read state and issued new validation; request0018 executed only new action and verified. Original approved action remained unsent.",
+        "original_error_repeated": false,
+        "strict_recovery_request_followed": true,
+        "same_target_actual_recovery": true,
+        "alternate_actual_recovery": false,
+        "original_failed_read_unclosed": false,
+        "no_business_failure_inferred_from_tool_refusal": true
+      },
+      "tool_call_id": "call_01_lw842438ch1o7emhs9ti3ca5",
+      "frozen_causal": {
+        "number": "0016",
+        "request_id": "req_14925c5e4af24baba2286a394487d8ca",
+        "provider_call_id": "call_ab4457874a064bda88074c4b1a7dd904",
+        "tool_call_ids": [
+          "call_00_9uaam08dhiw87jor4rqy27ym",
+          "call_01_lw842438ch1o7emhs9ti3ca5",
+          "call_02_bw8qqnfxyovzuehltqw062yg"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0016.request.json",
+            "sha256": "accb22c562ff4a471cbc949ccc76a32d490ca55ac85bb277477f186e7bf70414"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0016.meta.json",
+            "sha256": "1622fd377cc5ea5cdeeef5aa123dd7b144972becab212627a5f5c4a89df61f64"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0016.output.json",
+            "sha256": "30d345152c5a9f0b67bee3df9ae392f0ff9f738594fe4bf3af95a7b68379462c"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0016.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "5242fec0ebd6822220d5e6011cf087f7f3f8bc87c4e6608c726db1138e04ebdd"
+      },
+      "frozen_first_followup": {
+        "number": "0017",
+        "request_id": "req_345867a1c0fd4f63a3b9b3faa99ebf30",
+        "provider_call_id": "call_ccdf6bb441c14c6f836d6aa5e8831f5e",
+        "tool_call_ids": [
+          "call_00_n1atc4pdhni4cfb8drf03teh",
+          "call_01_at3cotfq41flxxqdphvipay0",
+          "call_02_3s8cvosmp7wkc2z54gypxu6e",
+          "call_03_15xtroqbovlqfav6b5jyv75y"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0017.request.json",
+            "sha256": "2fbb510fb128fd81245e7b11bda5f703bea21a6122e79e75a177e03cd93d073c"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0017.meta.json",
+            "sha256": "10ea99115ea9c019021041b4ee8a8574942312c8e8434a3bfcd7b641eeb52161"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0017.output.json",
+            "sha256": "9ac4f13ab8f9b29798a05397031ee0fda914201d2d7d7b268566cb3ead05f592"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0017.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "5242fec0ebd6822220d5e6011cf087f7f3f8bc87c4e6608c726db1138e04ebdd"
+      },
+      "frozen_first_actual_corrective": {
+        "number": "0018",
+        "request_id": "req_240d9ba97cf848849dcfa62b8b86861a",
+        "provider_call_id": "call_0cc0bde64b4c44f4b2fd604d3c780de2",
+        "tool_call_ids": [
+          "call_00_0kbsgcxva9ztbfzjx2ymc8eh"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0018.request.json",
+            "sha256": "7e93975a448b3ac3425f4b91f13dcd6ca4c21870cf026026bc5fc7756d33977b"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0018.meta.json",
+            "sha256": "edba7c0321bee9ae7ed787ae32e7cd57448377670dc762d8ad65091c14f18a8e"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0018.output.json",
+            "sha256": "9a832eda65ce65b74fd5c15b0c12dee566a45241e8944a156d313c558598ba36"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0018.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "5242fec0ebd6822220d5e6011cf087f7f3f8bc87c4e6608c726db1138e04ebdd"
+      },
+      "offline_tests": [
+        "tests/test_actions.py::NativeActionCheckpointTests::test_external_change_file_replacement_and_unknown_method_fail_closed",
+        "tests/test_actions.py::NativeActionCheckpointTests::test_verification_failure_duplicate_and_concurrent_submission_do_not_resend",
+        "tests/test_typed_action_failures.py::test_host_approved_action_recheck_retains_typed_refusal_and_action_identity"
+      ],
+      "offline_test": "tests/test_actions.py::NativeActionCheckpointTests::test_external_change_file_replacement_and_unknown_method_fail_closed",
+      "offline_status": "existing shared guard coverage; full business supplies this exact-state recovery evidence",
+      "api_binding": {
+        "kind": "executed full business on frozen candidate",
+        "business": "2279",
+        "result": "experiments/agent_regression/tool-self-debug-business-20261003/results.json",
+        "additional_paid_cut_requests": 0
+      },
+      "actual_recovery_tool_call_ids": [
+        "call_00_0kbsgcxva9ztbfzjx2ymc8eh"
+      ]
+    },
+    {
+      "id": "TFR2-2279-06",
+      "business": "2279",
+      "trial_id": "2279_easy_repair_plan_easy__JK87new",
+      "failure_layer": "unknown_field",
+      "tool": "mcp_odoo_read_record",
+      "model": "sale.order.line",
+      "unknown_fields": [
+        "commitment_date"
+      ],
+      "failed_arguments": {
+        "fields": [
+          "name",
+          "state",
+          "commitment_date",
+          "purchase_line_ids"
+        ],
+        "model": "sale.order.line",
+        "record_ids": [
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "original_error": "Unknown field(s) ['commitment_date'] on sale.order.line; use live get_model_fields. Valid candidates: scheduled_date, forecast_expected_date, virtual_available_at_date.",
+      "causal_request": "0020",
+      "first_followup_request": "0021",
+      "first_corrective_request": null,
+      "first_actual_corrective_request": null,
+      "local_frozen_context": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests",
+      "context_sha256": {
+        "0020.request.json": "d0c78b8673f830e2c0f6694cb46bbad6544f43e89ee0df4c5397cbb4df355fcc",
+        "0020.meta.json": "2f5c91e71087856a05810a8556e9ebd5e09ed5d57d7072888d2a5b1291f97e68",
+        "0020.output.json": "b66b2604cb5b4cdc0394e1853a9ebfb749c8743343cc044e2c8a17ef146a44b4",
+        "0020.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        "0021.request.json": "f0ed01da260179d989e904b491c785e3153ec9351bb31c29d14d029e494b0993",
+        "0021.meta.json": "cc8bbb5a8df652c67b5a2b86392b63b03e7ea4bc940adbb4fc7eeceb6f4d6d41",
+        "0021.output.json": "fcb449e120f4e0b1651b5eb9fc00fadc1f3c646d58036b07ce5ca8dac1e44090",
+        "0021.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1",
+        "0019.request.json": "579bc7f64a0f238e3e330307f4d9241b2e98ae11f1f95fd2503ad12171da8eee",
+        "0019.meta.json": "6e2472c8f0b95086d879798874de1c8f8e598a0ad6221ba3d52252a2e3fffb5d",
+        "0019.output.json": "260367f1bfd19a36a3c92b33e1f467cb9d4078cf34ac23a5535e1c4bdf73ed96",
+        "0019.response.json": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+      },
+      "assessment": {
+        "finding": "commitment_date was requested on sale.order.line and refused. Request0021 stopped without a corrective call. Request0019 had already successfully read commitment_date on all four sale.order headers; this redundant read failure is not a business failure inferred from tool status.",
+        "original_error_repeated": false,
+        "strict_recovery_request_followed": false,
+        "same_target_actual_recovery": false,
+        "alternate_actual_recovery": false,
+        "original_failed_read_unclosed": true,
+        "no_business_failure_inferred_from_tool_refusal": true
+      },
+      "tool_call_id": "call_02_6buck4vt3qt3m1dqba2oupmy",
+      "frozen_causal": {
+        "number": "0020",
+        "request_id": "req_86cc2854b29b4061af28f63218e6f30a",
+        "provider_call_id": "call_57628e0d72144826a5c6fb7c1b2f44a2",
+        "tool_call_ids": [
+          "call_00_7dzwb3qysl50z22wz8zohh37",
+          "call_01_ugh41dxbesc9upqv68l0702l",
+          "call_02_6buck4vt3qt3m1dqba2oupmy"
+        ],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0020.request.json",
+            "sha256": "d0c78b8673f830e2c0f6694cb46bbad6544f43e89ee0df4c5397cbb4df355fcc"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0020.meta.json",
+            "sha256": "2f5c91e71087856a05810a8556e9ebd5e09ed5d57d7072888d2a5b1291f97e68"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0020.output.json",
+            "sha256": "b66b2604cb5b4cdc0394e1853a9ebfb749c8743343cc044e2c8a17ef146a44b4"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0020.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "5242fec0ebd6822220d5e6011cf087f7f3f8bc87c4e6608c726db1138e04ebdd"
+      },
+      "frozen_first_followup": {
+        "number": "0021",
+        "request_id": "req_34b7bf02f7b742ba948f6954232a2fa4",
+        "provider_call_id": "call_8c6cf12fdd5a4ae09ca80af127ae3693",
+        "tool_call_ids": [],
+        "files": {
+          "request.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0021.request.json",
+            "sha256": "f0ed01da260179d989e904b491c785e3153ec9351bb31c29d14d029e494b0993"
+          },
+          "meta.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0021.meta.json",
+            "sha256": "cc8bbb5a8df652c67b5a2b86392b63b03e7ea4bc940adbb4fc7eeceb6f4d6d41"
+          },
+          "output.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0021.output.json",
+            "sha256": "fcb449e120f4e0b1651b5eb9fc00fadc1f3c646d58036b07ce5ca8dac1e44090"
+          },
+          "response.json": {
+            "path": ".runtime/tool-self-debug-business-20261003-round2/jobs/2279/tool-self-debug-round2-2279-20261003/2279_easy_repair_plan_easy__JK87new/agent/requests/0021.response.json",
+            "sha256": "3b93eb56cd50f020d66d30ad02c2716da4e74c946e85fb1b6add166df095d0e1"
+          }
+        },
+        "full_context_contains_system_messages_tool_schemas": true,
+        "tool_schemas_sha256": "5242fec0ebd6822220d5e6011cf087f7f3f8bc87c4e6608c726db1138e04ebdd"
+      },
+      "frozen_first_actual_corrective": null,
+      "offline_tests": [
+        "tests/test_bench_tool_regression.py::test_all_observed_unknown_fields_refuse_before_data_rpc_and_offer_discovery"
+      ],
+      "offline_test": "tests/test_bench_tool_regression.py::test_all_observed_unknown_fields_refuse_before_data_rpc_and_offer_discovery",
+      "offline_status": "included in existing data-driven test inputs",
+      "api_binding": {
+        "kind": "executed full business on frozen candidate",
+        "business": "2279",
+        "result": "experiments/agent_regression/tool-self-debug-business-20261003/results.json",
+        "additional_paid_cut_requests": 0
+      }
+    }
+  ],
+  "notes": [
+    "Complete requests include system context and exact tool schemas. Raw provider SSE is unavailable; normalized output, response headers, session and runtime event streams are retained.",
+    "First corrective intent and first actual successful correction are separate. Alternate absence discovery does not repair invalid date fields.",
+    "Business scores do not turn optional unread fields into successful tool calls.",
+    "BFR2-2066-01 has no corrective request or preventive regression yet; its guard gap is reproduced offline."
+  ]
+}

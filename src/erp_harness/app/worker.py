@@ -12,6 +12,17 @@ from pathlib import Path
 
 from erp_harness.erp.business_operations import ENTERPRISE_METHODS
 
+DESKTOP_BUSINESS_METHODS = (
+    "sale.order.action_confirm",
+    "purchase.order.button_confirm",
+    "purchase.order.button_approve",
+    "sale.advance.payment.inv.create_invoices",
+    "account.move.action_post",
+    "account.move.message_post",
+    "account.move.send.wizard.action_send_and_print",
+    *ENTERPRISE_METHODS,
+)
+
 
 def _field_policy_environment() -> dict[str, str]:
     from erp_harness.erp._odoo_core.field_policy import field_policy_file_path
@@ -63,16 +74,7 @@ def child_environment(session_id: str, run_id: str) -> dict[str, str]:
     # 启用写能力不等于批准写入。每个动作仍须通过宿主审批和账本检查。
     env["ODOO_TRANSPORT"] = "json2"
     env["ODOO_MCP_ENABLE_WRITES"] = "1"
-    env["ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS"] = ",".join((
-        "sale.order.action_confirm",
-        "purchase.order.button_confirm",
-        "purchase.order.button_approve",
-        "sale.advance.payment.inv.create_invoices",
-        "account.move.action_post",
-        "account.move.message_post",
-        "account.move.send.wizard.action_send_and_print",
-        *ENTERPRISE_METHODS,
-    ))
+    env["ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS"] = ",".join(DESKTOP_BUSINESS_METHODS)
     # The shared parser uses legacy completeness detection before honoring API_KEY.
     if env.get("ODOO_API_KEY") and not env.get("ODOO_PASSWORD"):
         env["ODOO_PASSWORD"] = env["ODOO_API_KEY"]
@@ -92,6 +94,17 @@ def conversation_environment(session_id: str, run_id: str) -> dict[str, str]:
     env["HARBOR_TRIAL_ID"] = run_id
     env.update(_field_policy_environment())
     return env
+
+
+def configured_business_identity():
+    """Local scope only, using the business worker's explicit JSON-2 defaults."""
+    from erp_harness.erp.reads import configured_identity
+
+    required = ("ODOO_URL", "ODOO_DB", "ODOO_USERNAME", "ODOO_API_KEY")
+    if any(not os.environ.get(key) for key in required):
+        raise ValueError("explicit Odoo connection settings are required")
+    return configured_identity(url=os.environ["ODOO_URL"], db=os.environ["ODOO_DB"],
+                               username=os.environ["ODOO_USERNAME"], api_key=os.environ["ODOO_API_KEY"])
 
 
 def worker_source_revision():

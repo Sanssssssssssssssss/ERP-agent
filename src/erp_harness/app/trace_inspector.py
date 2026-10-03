@@ -121,6 +121,28 @@ class TraceInspector:
         return sorted((p.name.removesuffix(".request.json") for p in directory.glob("*.request.json")
                        if _REQUEST_FILE.fullmatch(p.name.removesuffix(".request.json"))), key=int)
 
+    def _response_headers(self, identifier: str) -> dict[str, Any]:
+        if not _REQUEST_FILE.fullmatch(identifier):
+            raise ValueError("invalid request id")
+        path = self._path("requests", f"{identifier}.response.json")
+        if path.stat().st_size > 256_000:
+            raise ValueError("response headers too large")
+        return _read_object(path)
+
+    def latest_legacy_request_headers(self) -> dict[str, Any] | None:
+        """Only a recorded HTTP status; no round identity or response completion inference."""
+        identifiers = self._request_ids()
+        if not identifiers:
+            return None
+        identifier = identifiers[-1]
+        if self._path("requests", f"{identifier}.meta.json").exists():
+            return None
+        status = self._response_headers(identifier).get("status")
+        if type(status) is not int or not 100 <= status <= 599:
+            return None
+        return {"request_file": identifier, "http_status": status,
+                "source": "legacy_response_headers", "association": "unlinked"}
+
     def _request_meta(self, identifier: str) -> tuple[dict[str, Any], str | None]:
         path = self._path("requests", f"{identifier}.meta.json")
         if not path.exists():
@@ -377,7 +399,8 @@ class TraceInspector:
         response = {}
         for suffix, key in (("response", "headers"), ("output", "output")):
             try:
-                response[key] = _read_object(self._path("requests", f"{identifier}.{suffix}.json"))
+                response[key] = (self._response_headers(identifier) if suffix == "response" else
+                                 _read_object(self._path("requests", f"{identifier}.{suffix}.json")))
             except (OSError, ValueError, RecursionError):
                 response[key] = None
         headers = response.pop("headers") or {}
