@@ -1208,6 +1208,71 @@ class WorkbenchHostTests(unittest.TestCase):
                 "erp_harness.tools.run_diagnostics.summarize_run", side_effect=AssertionError("scope must fail before reading")):
                 self.assertEqual(self.host._conversation_status_context(query)["run_diagnostics"]["error_code"], "scope_mismatch")
 
+    def test_chat_diagnostics_legacy_headers_do_not_infer_completion_or_read_private_bodies(self):
+        business, run = self._run("legacy model failure")
+        run.update(status="failed", phase="model_output", events=[])
+        directory = self.host.store.root / "runs" / run["id"] / "requests"
+        directory.mkdir(parents=True)
+        # Selecting a numeric request file must not parse its body or an orphan response.
+        (directory / "0057.request.json").write_text("PRIVATE_INVALID_REQUEST", encoding="utf-8")
+        (directory / "9999.response.json").write_text('{"status": 401}', encoding="utf-8")
+        before = copy.deepcopy(self.host.store.data)
+        for status in (520, 200):
+            with self.subTest(status=status):
+                (directory / "0057.response.json").write_text(json.dumps({
+                    "status": status, "request_ids": {}, "private": "PRIVATE_RESPONSE_BODY"}), encoding="utf-8")
+                with patch.object(self.host, "_native_reads", side_effect=AssertionError("must not connect")):
+                    diagnostic = self.host._conversation_status_context({
+                        "session_id": self.sid, "context_business_id": business["id"]})["run_diagnostics"]
+                self.assertEqual(diagnostic["runtime"]["latest_request"], {
+                    "request_id": None, "status": "unknown", "http_status": status,
+                    "request_file": "0057", "source": "legacy_response_headers", "association": "unlinked"})
+                self.assertEqual(diagnostic["runtime"]["status"], "failed")
+                self.assertTrue(diagnostic["snapshot"])
+                self.assertFalse(diagnostic["business_truth"])
+                self.assertNotIn("PRIVATE_", json.dumps(diagnostic))
+                self.assertEqual(self.host.store.data, before)
+
+    def test_chat_diagnostics_legacy_fallback_rejects_damaged_headers_and_current_metadata(self):
+        business, run = self._run("damaged model receipt")
+        run.update(status="failed", events=[])
+        directory = self.host.store.root / "runs" / run["id"] / "requests"
+        directory.mkdir(parents=True)
+        (directory / "0001.request.json").write_text("PRIVATE_REQUEST", encoding="utf-8")
+        response = directory / "0001.response.json"
+        bad = [json.dumps({"status": value}) for value in (True, "520", 99, 600, None, [])]
+        bad += ["[]", "{", " " * 256_001]
+        for content in bad:
+            with self.subTest(content=content[:50]):
+                response.write_text(content, encoding="utf-8")
+                diagnostic = self.host._conversation_status_context({
+                    "session_id": self.sid, "context_business_id": business["id"]})["run_diagnostics"]
+                self.assertEqual(diagnostic["runtime"]["latest_request"], {
+                    "request_id": None, "status": "unknown", "http_status": None})
+        response.write_text('{"status": 520}', encoding="utf-8")
+        # A present new-format receipt is authoritative even when it is damaged.
+        (directory / "0001.meta.json").write_text("{", encoding="utf-8")
+        diagnostic = self.host._conversation_status_context({
+            "session_id": self.sid, "context_business_id": business["id"]})["run_diagnostics"]
+        self.assertIsNone(diagnostic["runtime"]["latest_request"]["http_status"])
+
+    def test_chat_diagnostics_current_events_take_precedence_over_legacy_headers(self):
+        business, run = self._run("current request")
+        directory = self.host.store.root / "runs" / run["id"] / "requests"
+        directory.mkdir(parents=True)
+        (directory / "0057.request.json").write_text("{}", encoding="utf-8")
+        (directory / "0057.response.json").write_text('{"status": 520}', encoding="utf-8")
+        for event in ({"type": "request_started", "request_id": "current-1", "status": "running"},
+                      {"type": "request_finished", "request_id": "current-1", "status": "completed", "http_status": 200}):
+            with self.subTest(event=event):
+                run["events"] = [event]
+                diagnostic = self.host._conversation_status_context({
+                    "session_id": self.sid, "context_business_id": business["id"]})["run_diagnostics"]
+                latest = diagnostic["runtime"]["latest_request"]
+                self.assertEqual(latest["request_id"], "current-1")
+                self.assertEqual(latest["http_status"], event.get("http_status"))
+                self.assertNotIn("source", latest)
+
     def test_confirm_business_is_idempotent_but_cannot_reverse_a_decision(self):
         business = self._business("one workspace")
         proposal_id = self.host.store.data["messages"][self.sid][-1]["proposal"]["id"]

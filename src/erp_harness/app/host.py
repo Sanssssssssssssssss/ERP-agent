@@ -812,6 +812,14 @@ class Workbench:
             "status": latest.get("status") if latest.get("status") in {"prepared", "running", "completed", "error", "aborted", "retry"} else "unknown",
             "http_status": latest.get("http_status") if type(latest.get("http_status")) is int and 100 <= latest["http_status"] <= 599 else None,
         }
+        if not latest:
+            from .trace_inspector import TraceInspector
+            try:
+                legacy = TraceInspector(self.store.root, selected).latest_legacy_request_headers()
+                if legacy:
+                    runtime["latest_request"].update(legacy)
+            except (OSError, ValueError, TypeError, RecursionError):
+                pass  # Missing or damaged history cannot establish response completion.
         runtime["receipt_warnings"] = sum(row.get("type") == "receipt_warning" for row in events)
         return {**diagnostic, **scope, "scope": "selected_business_run", "run_id": selected["id"], "runtime": runtime}
 

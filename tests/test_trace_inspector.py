@@ -146,6 +146,26 @@ def test_legacy_request_never_links_by_position_or_http_success(trace):
     assert detail["association"] == "unlinked"
 
 
+def test_legacy_header_lookup_enforces_the_existing_selected_run_path_guard(trace):
+    host, run, directory = trace
+    write_request(directory)
+    inspector = trace_inspector.TraceInspector(host.store.root, run)
+    with pytest.raises(ValueError, match="invalid request"):
+        inspector._response_headers("../../outside")
+    # Resolve is the shared boundary used for response headers and normal trace detail.
+    outside = directory.parent / "outside.response.json"
+    outside.write_text('{"status": 520}', encoding="utf-8")
+    original_resolve = Path.resolve
+
+    def escaped(path, *args, **kwargs):
+        if path.name == "0001.response.json":
+            return original_resolve(outside)
+        return original_resolve(path, *args, **kwargs)
+
+    with patch.object(Path, "resolve", escaped), pytest.raises(ValueError, match="outside the run"):
+        inspector.latest_legacy_request_headers()
+
+
 def test_conflicting_explicit_ids_do_not_select_a_round(trace):
     _, run, directory = trace
     run["rounds"].append({"index": 2, "round_id": "round_two", "request_id": "req_two"})
