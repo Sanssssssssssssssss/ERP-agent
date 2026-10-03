@@ -243,6 +243,42 @@ def test_optional_commercial_evidence_never_changes_host_capacity_approval_prest
         actions.store.close()
 
 
+def test_existing_approved_capacity_receipt_keeps_the_legacy_report_shape_after_upgrade(tmp_path):
+    actions, writer, runtime = consolidation_seed(tmp_path)
+    try:
+        actions.approval_mode = 'host'
+        runtime.client.records['product.product'][2] = {'id': 2, 'name': 'Product'}
+        runtime.client.records['purchase.order'][3]['state'] = 'draft'
+        runtime.client.records['purchase.order.line'][3].update(tax_ids=[], date_planned='2026-10-10')
+        spec = {'version': 1, 'instruction_sha256': 'existing-host-capacity', 'purchase_sources': [{
+            'product': {'model': 'product.product', 'domain': [['id', '=', 2]]},
+            'source': {'model': 'sale.order', 'domain': [['id', 'in', [1, 2, 3, 4]]], 'field': 'name'},
+            'purchases': {'model': 'purchase.order', 'domain': [['id', 'in', [1, 3, 4]]]},
+            'check_demand_capacity': True}]}
+        actions.task_evidence = TaskEvidence(actions.reads, spec, tmp_path / 'evidence.json')
+        report = inspect_purchase_allocation(runtime, [1, 3, 4], [1, 2, 3, 4], product_id=2)
+        # Persist the original pre-advisory contract, independently of the current opt-out.
+        legacy = {name: report[name] for name in ('status', 'scope', 'checks', 'feasible_allocation', 'notice')}
+        with patch('erp_harness.erp.purchase_allocation.inspect_purchase_allocation', return_value=legacy), \
+                patch.dict(os.environ, {'ODOO_MCP_ENABLE_WRITES': '1',
+                    'ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS': 'purchase.order.button_confirm'}):
+            pending = actions.execute_method('purchase.order', 'button_confirm', kwargs={'ids': [3]})
+        assert pending['approval_required'] and actions.store.approve(pending['action_id'], 'desktop-user')
+        row = actions.store.get(pending['action_id'])
+        current = inspect_purchase_allocation(runtime, [1, 3, 4], [1, 2, 3, 4], product_id=2,
+                                              include_split_diagnostic=False)
+        assert current == legacy
+        assert actions._current_prestate_matches(row) is True
+        assert row['status'] == 'approved' and writer.calls == []
+        runtime.client.records['sale.order.line'].pop(4)
+        unavailable = inspect_purchase_allocation(runtime, [1, 3, 4], [1, 2, 3, 4],
+                                                  include_split_diagnostic=False)
+        assert unavailable['status'] == 'unknown'
+        assert set(unavailable) == {'status', 'scope', 'reason', 'checks'}
+    finally:
+        actions.store.close()
+
+
 @pytest.mark.parametrize('qty,demand', [(10, 7), (6, 4)])
 def test_actual_failure_sizes_and_valid_multiple_origins(tmp_path, qty, demand):
     actions, writer, runtime = seed(tmp_path, (demand, 12), qty)

@@ -229,14 +229,16 @@ def inspect_purchase_allocation(runtime, purchase_ids, order_ids, *, minimum=1e-
                 allocations.extend({"purchase_id": po, "sale_order_id": so, "quantity": qty,
                                     "product_id": key[1], "unit_id": key[2]} for (po, so), qty in result.items())
         return {"status": "failed" if any(c["status"] == "failed" for c in checks) else "passed" if checks else "unknown",
-                "scope": scope, "checked": list(_ALLOCATION_CHECKS), "not_checked": list(_NOT_CHECKED),
-                **({"purchase_split_diagnostic": _purchase_split_diagnostic(g, purchases, purchase_lines)}
+                "scope": scope,
+                **({"checked": list(_ALLOCATION_CHECKS), "not_checked": list(_NOT_CHECKED),
+                    "purchase_split_diagnostic": _purchase_split_diagnostic(g, purchases, purchase_lines)}
                    if include_split_diagnostic else {}),
                 "checks": checks, "feasible_allocation": allocations,
                 "notice": "Feasibility evidence, not an actual reservation, write approval or ERP-Bench score."}
     except ValueError as exc:
         return {"status": "unknown", "scope": scope, "reason": str(exc), "checks": [],
-                "checked": [], "not_checked": [*_ALLOCATION_CHECKS, *_NOT_CHECKED]}
+                **({"checked": [], "not_checked": [*_ALLOCATION_CHECKS, *_NOT_CHECKED]}
+                   if include_split_diagnostic else {})}
 
 
 def final_purchase_verification(actions):
