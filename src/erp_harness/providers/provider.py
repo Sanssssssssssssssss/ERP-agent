@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 from typing import Protocol
 
+from erp_harness.providers._provider_events import ProviderEvent
+from erp_harness.providers.events import AssistantMessageEvent
 from erp_harness.runtime.provider import CancellationToken, ModelProvider
 
 
@@ -42,6 +44,27 @@ async def emit_provider_response(
         await hooks.after_provider_response(status, headers)
 
 
+async def observe_provider_attempt(hooks: ProviderHooks | None, name: str, *args: object) -> None:
+    observer = getattr(hooks, name, None)
+    if callable(observer):
+        try:
+            await observer(*args)
+        except ProviderRequestRejected:
+            raise
+        except Exception:  # noqa: BLE001 - optional observers are isolated
+            return
+
+
+def wrap_provider_stream(
+    hooks: ProviderHooks | None,
+    source: AsyncIterator[AssistantMessageEvent],
+    *,
+    raw: AsyncIterator[ProviderEvent],
+) -> AsyncIterator[AssistantMessageEvent]:
+    observer = getattr(hooks, "wrap_provider_stream", None)
+    return observer(source, raw=raw) if callable(observer) else source
+
+
 __all__ = [
     "CancellationToken",
     "ModelProvider",
@@ -50,4 +73,6 @@ __all__ = [
     "apply_provider_headers",
     "apply_provider_payload",
     "emit_provider_response",
+    "observe_provider_attempt",
+    "wrap_provider_stream",
 ]

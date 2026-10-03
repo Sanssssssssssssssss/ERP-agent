@@ -53,6 +53,8 @@ from erp_harness.providers.provider import (
     apply_provider_headers,
     apply_provider_payload,
     emit_provider_response,
+    observe_provider_attempt,
+    wrap_provider_stream,
 )
 from erp_harness.providers.retry import provider_retry_event, retry_delay_seconds, wait_for_retry
 from erp_harness.providers.stream import canonicalize_provider_stream
@@ -110,9 +112,10 @@ class AnthropicProvider:
         raw = self._stream_provider_events(
             model=model, system=system, messages=messages, tools=tools, signal=signal
         )
-        return canonicalize_provider_stream(
+        stream = canonicalize_provider_stream(
             raw, api="anthropic-messages", provider="anthropic", model=model
         )
+        return wrap_provider_stream(self._config.provider_hooks, stream, raw=raw)
 
     def _stream_provider_events(
         self,
@@ -175,6 +178,9 @@ class AnthropicProvider:
             attempt = 0
             while True:
                 emitted_content = False
+                await observe_provider_attempt(
+                    self._config.provider_hooks, "before_provider_attempt", request_payload, attempt + 1
+                )
                 try:
                     async with client.stream(
                         "POST", url, json=request_payload, headers=headers
@@ -191,6 +197,9 @@ class AnthropicProvider:
                                 delay = retry_delay_seconds(
                                     attempt,
                                     max_delay_seconds=self._config.max_retry_delay_seconds,
+                                )
+                                await observe_provider_attempt(
+                                    self._config.provider_hooks, "after_provider_attempt", "retry"
                                 )
                                 yield provider_retry_event(
                                     attempt=attempt,
@@ -319,6 +328,9 @@ class AnthropicProvider:
                                 attempt,
                                 max_delay_seconds=self._config.max_retry_delay_seconds,
                             )
+                            await observe_provider_attempt(
+                                self._config.provider_hooks, "after_provider_attempt", "retry"
+                            )
                             yield provider_retry_event(
                                 attempt=attempt,
                                 max_retries=self._config.max_retries,
@@ -359,6 +371,9 @@ class AnthropicProvider:
                         delay = retry_delay_seconds(
                             attempt,
                             max_delay_seconds=self._config.max_retry_delay_seconds,
+                        )
+                        await observe_provider_attempt(
+                            self._config.provider_hooks, "after_provider_attempt", "retry"
                         )
                         yield provider_retry_event(
                             attempt=attempt,

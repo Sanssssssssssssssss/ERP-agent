@@ -51,9 +51,12 @@ from erp_harness.providers.openai_cache import openai_prompt_cache_key
 from erp_harness.providers.provider import (
     CancellationToken,
     ProviderHooks,
+    ProviderRequestRejected,
     apply_provider_headers,
     apply_provider_payload,
     emit_provider_response,
+    observe_provider_attempt,
+    wrap_provider_stream,
 )
 from erp_harness.providers.retry import provider_retry_event, retry_delay_seconds, wait_for_retry
 from erp_harness.providers.stream import canonicalize_provider_stream
@@ -160,9 +163,10 @@ class OpenAICodexProvider:
             signal=signal,
             session_id=session_id,
         )
-        return canonicalize_provider_stream(
+        stream = canonicalize_provider_stream(
             raw, api="openai-codex-responses", provider="openai-codex", model=model
         )
+        return wrap_provider_stream(self._config.provider_hooks, stream, raw=raw)
 
     def _stream_provider_events(
         self,
@@ -196,6 +200,9 @@ class OpenAICodexProvider:
             while True:
                 emitted_content = False
                 emitted_thinking = False
+                await observe_provider_attempt(
+                    self._config.provider_hooks, "before_provider_attempt", request_payload, attempt + 1
+                )
                 try:
                     credentials = await self._config.credential_resolver()
                     headers = _build_codex_headers(
@@ -228,6 +235,9 @@ class OpenAICodexProvider:
                                 delay = retry_delay_seconds(
                                     attempt,
                                     max_delay_seconds=self._config.max_retry_delay_seconds,
+                                )
+                                await observe_provider_attempt(
+                                    self._config.provider_hooks, "after_provider_attempt", "retry"
                                 )
                                 yield provider_retry_event(
                                     attempt=attempt,
@@ -285,6 +295,9 @@ class OpenAICodexProvider:
                             attempt,
                             max_delay_seconds=self._config.max_retry_delay_seconds,
                         )
+                        await observe_provider_attempt(
+                            self._config.provider_hooks, "after_provider_attempt", "retry"
+                        )
                         yield provider_retry_event(
                             attempt=attempt,
                             max_retries=self._config.max_retries,
@@ -301,6 +314,9 @@ class OpenAICodexProvider:
                         delay = retry_delay_seconds(
                             attempt,
                             max_delay_seconds=self._config.max_retry_delay_seconds,
+                        )
+                        await observe_provider_attempt(
+                            self._config.provider_hooks, "after_provider_attempt", "retry"
                         )
                         yield provider_retry_event(
                             attempt=attempt,
@@ -321,6 +337,8 @@ class OpenAICodexProvider:
                         data={"attempts": attempt + 1},
                     )
                     return
+                except ProviderRequestRejected:
+                    raise
                 except Exception as exc:  # noqa: BLE001 - provider errors are surfaced as events
                     yield ProviderErrorEvent(message=str(exc), data={"attempts": attempt + 1})
                     return

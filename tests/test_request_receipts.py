@@ -18,7 +18,15 @@ from erp_harness.app.request_receipts import ReceiptPersistenceError, RequestRec
 from erp_harness.app.worker import child_environment
 from erp_harness.context.paths import RuntimePaths
 from erp_harness.context.resources import ResourcePaths
-from erp_harness.providers.env import OpenAICompatibleConfig
+from erp_harness.providers.anthropic import AnthropicProvider
+from erp_harness.providers.env import AnthropicConfig, OpenAICompatibleConfig
+from erp_harness.providers.google import GoogleGenerativeAIProvider
+from erp_harness.providers.mistral import MistralConversationsProvider
+from erp_harness.providers.openai_codex import (
+    OpenAICodexConfig,
+    OpenAICodexCredentials,
+    OpenAICodexProvider,
+)
 from erp_harness.providers.openai_compatible import OpenAICompatibleProvider
 from erp_harness.providers.provider import ProviderRequestRejected
 from erp_harness.providers.retry import is_retryable_assistant_error
@@ -58,6 +66,40 @@ def endpoint_response(api):
 
 def rows(root):
     return [json.loads(path.read_text(encoding="utf-8")) for path in sorted(root.glob("*.meta.json"))]
+
+
+COMPATIBILITY_APIS = ("anthropic", "google", "mistral", "codex")
+
+
+def compatibility_provider(api, client, hooks, retries=1):
+    common = {"base_url": "https://unused.invalid/v1", "provider_hooks": hooks,
+              "max_retries": retries, "max_retry_delay_seconds": 0}
+    if api == "anthropic":
+        return AnthropicProvider(AnthropicConfig(api_key="test-only", **common), client=client)
+    if api == "codex":
+        async def credentials():
+            return OpenAICodexCredentials(access_token="test-only", account_id="test")
+        return OpenAICodexProvider(OpenAICodexConfig(credential_resolver=credentials, **common), client=client)
+    cls = GoogleGenerativeAIProvider if api == "google" else MistralConversationsProvider
+    return cls(OpenAICompatibleConfig(api_key="test-only", **common), client=client)
+
+
+def compatibility_response(api):
+    if api == "anthropic":
+        body = (
+            'data: {"type":"message_start","message":{"usage":{"input_tokens":4}}}\n\n'
+            'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}\n\n'
+            'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}\n\n'
+            'data: {"type":"message_stop"}\n\n')
+    elif api == "google":
+        body = 'data: {"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}\n\n'
+    elif api == "codex":
+        body = ('data: {"type":"response.output_text.delta","delta":"ok"}\n\n'
+                'data: {"type":"response.completed","response":{"status":"completed",'
+                '"usage":{"input_tokens":4,"output_tokens":2,"total_tokens":6}}}\n\n')
+    else:
+        body = 'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
+    return httpx.Response(200, text=body, headers={"content-type": "text/event-stream"})
 
 
 class RequestReceiptTests(unittest.IsolatedAsyncioTestCase):
@@ -159,6 +201,179 @@ class RequestReceiptTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(receipts.number, cap)
                     self.assertEqual([row["status"] for row in rows(root)],
                                      ["retry"] if cap == 1 else ["retry", "completed"])
+
+    async def test_compatibility_adapters_gate_every_http_and_network_retry_attempt(self):
+        for api in COMPATIBILITY_APIS:
+            for failure in ("http", "network"):
+                for cap in (1, 2):
+                    with self.subTest(api=api, failure=failure, cap=cap):
+                        root = self.root / api / failure / str(cap)
+                        receipts, sent = RequestReceipts(root, max_model_requests=cap), []
+                        def handler(request, _sent=sent, _api=api, _failure=failure):
+                            _sent.append(json.loads(request.content))
+                            if len(_sent) == 1:
+                                if _failure == "network":
+                                    raise httpx.ConnectError("offline connection failure", request=request)
+                                return httpx.Response(503, text="offline transient")
+                            return compatibility_response(_api)
+                        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                            stream = scoped_provider_stream(compatibility_provider(api, client, receipts).stream_response(
+                                model="test", system="s", messages=[], tools=[]), "normal")
+                            if cap == 1:
+                                with self.assertRaises(ProviderRequestRejected):
+                                    _ = [event async for event in stream]
+                            else:
+                                events = [event async for event in stream]
+                                self.assertEqual(events[-1].type, "done")
+                        metadata = rows(root)
+                        self.assertEqual(len(sent), cap)
+                        self.assertEqual(receipts.number, cap)
+                        self.assertEqual([r["status"] for r in metadata], ["retry"] if cap == 1 else ["retry", "completed"])
+                        if cap == 2:
+                            self.assertEqual(sent[0], sent[1])
+                            self.assertEqual(metadata[0]["call_id"], metadata[1]["call_id"])
+                            self.assertEqual([r["attempt"] for r in metadata], [1, 2])
+                            self.assertEqual(metadata[1]["usage"]["total_tokens"], 6 if api in {"anthropic", "codex"} else None)
+
+    async def test_compatibility_stream_retries_share_the_physical_attempt_gate(self):
+        retry_bodies = {
+            "anthropic": 'data: {"type":"error","error":{"type":"overloaded_error","message":"offline overload"}}\n\n',
+            "google": "",
+            "codex": 'data: {"type":"response.failed","response":{"error":{"type":"service_unavailable_error","code":"server_is_overloaded","message":"offline overload"}}}\n\n',
+        }
+        for api, body in retry_bodies.items():
+            for cap in (1, 2):
+                with self.subTest(api=api, cap=cap):
+                    root = self.root / api / "stream" / str(cap)
+                    receipts, sent = RequestReceipts(root, max_model_requests=cap), []
+                    def handler(request, _sent=sent, _api=api, _body=body):
+                        _sent.append(request)
+                        return httpx.Response(200, text=_body) if len(_sent) == 1 else compatibility_response(_api)
+                    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                        stream = compatibility_provider(api, client, receipts).stream_response(model="test", system="s", messages=[], tools=[])
+                        if cap == 1:
+                            with self.assertRaises(ProviderRequestRejected):
+                                _ = [event async for event in stream]
+                        else:
+                            events = [event async for event in stream]
+                            self.assertEqual(events[-1].type, "done")
+                    self.assertEqual(len(sent), cap)
+                    self.assertEqual([r["status"] for r in rows(root)], ["retry"] if cap == 1 else ["retry", "completed"])
+
+    async def test_compatibility_retry_disk_faults_block_new_posts(self):
+        write = Path.write_text
+        for api in COMPATIBILITY_APIS:
+            for fault in ("initial_request", "retry_request", "first_response"):
+                with self.subTest(api=api, fault=fault):
+                    root = self.root / api / fault
+                    receipts, sent = RequestReceipts(root), []
+                    target = {"initial_request": "0001.request.tmp", "retry_request": "0002.request.tmp",
+                              "first_response": "0001.response.tmp"}[fault]
+                    def write_fault(path, *args, _root=root, _target=target, **kwargs):
+                        if path.parent == _root and path.name == _target:
+                            raise OSError("PRIVATE_DISK_DETAIL 503")
+                        return write(path, *args, **kwargs)
+                    def handler(request, _sent=sent, _api=api):
+                        _sent.append(request)
+                        return httpx.Response(503, text="retry") if len(_sent) == 1 else compatibility_response(_api)
+                    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                        with patch.object(Path, "write_text", write_fault), self.assertRaises(ReceiptPersistenceError) as caught:
+                            _ = [event async for event in compatibility_provider(api, client, receipts).stream_response(
+                                model="test", system="s", messages=[], tools=[])]
+                    self.assertNotIn("PRIVATE_DISK_DETAIL", str(caught.exception))
+                    self.assertEqual(len(sent), 0 if fault == "initial_request" else 1)
+
+    async def test_compatibility_output_fault_keeps_done_then_blocks_next_request(self):
+        write = Path.write_text
+        for api in COMPATIBILITY_APIS:
+            with self.subTest(api=api):
+                root = self.root / api
+                receipts, sent = RequestReceipts(root), []
+                def handler(request, _sent=sent, _api=api):
+                    _sent.append(request)
+                    return compatibility_response(_api)
+                def write_fault(path, *args, _root=root, **kwargs):
+                    if path.parent == _root and path.name == "0001.output.tmp":
+                        raise OSError("PRIVATE_DISK_DETAIL")
+                    return write(path, *args, **kwargs)
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    adapter = compatibility_provider(api, client, receipts)
+                    with patch.object(Path, "write_text", write_fault):
+                        events = [event async for event in adapter.stream_response(model="test", system="s", messages=[], tools=[])]
+                    self.assertEqual(events[-1].type, "done")
+                    with self.assertRaises(ReceiptPersistenceError):
+                        _ = [event async for event in adapter.stream_response(model="test", system="s", messages=[], tools=[])]
+                self.assertEqual(len(sent), 1)
+
+    async def test_compatibility_optional_observer_errors_stay_isolated(self):
+        class Observers(RequestReceipts):
+            async def before_provider_attempt(self, *args):
+                await super().before_provider_attempt(*args)
+                raise RuntimeError("ordinary observer failure")
+            async def after_provider_attempt(self, *args):
+                await super().after_provider_attempt(*args)
+                raise RuntimeError("ordinary observer failure")
+        for api in COMPATIBILITY_APIS:
+            with self.subTest(api=api):
+                receipts, sent = Observers(self.root / api), []
+                def handler(request, _sent=sent, _api=api):
+                    _sent.append(request)
+                    return httpx.Response(503, text="retry") if len(_sent) == 1 else compatibility_response(_api)
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    events = [event async for event in compatibility_provider(api, client, receipts).stream_response(
+                        model="test", system="s", messages=[], tools=[])]
+                self.assertEqual(events[-1].type, "done")
+                self.assertEqual([r["status"] for r in rows(self.root / api)], ["retry", "completed"])
+
+    async def test_compatibility_partial_transport_failure_is_not_replayed_and_usage_stays_unknown(self):
+        for api in COMPATIBILITY_APIS:
+            with self.subTest(api=api):
+                root = self.root / api
+                receipts, sent = RequestReceipts(root), []
+                body = compatibility_response(api).content
+                if api == "anthropic":
+                    body = body.split(b'data: {"type":"message_delta"')[0]
+                elif api == "codex":
+                    body = body.split(b'data: {"type":"response.completed"')[0]
+                elif api == "mistral":
+                    body = body.split(b"data: [DONE]")[0]
+                class Interrupted(httpx.AsyncByteStream):
+                    def __init__(self, content):
+                        self.content = content
+                    async def __aiter__(self):
+                        yield self.content
+                        raise httpx.ReadError("offline partial response")
+                def handler(request, _sent=sent, _body=body):
+                    _sent.append(request)
+                    return httpx.Response(200, stream=Interrupted(_body))
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    events = [event async for event in compatibility_provider(api, client, receipts).stream_response(
+                        model="test", system="s", messages=[], tools=[])]
+                self.assertEqual(events[-1].type, "error")
+                self.assertEqual(len(sent), 1)
+                self.assertEqual(rows(root)[0]["status"], "error")
+                self.assertTrue(all(value is None for value in rows(root)[0]["usage"].values()))
+
+    async def test_compatibility_authoritative_header_and_retry_observer_rejections_propagate(self):
+        for api in COMPATIBILITY_APIS:
+            for phase in ("headers", "retry"):
+                with self.subTest(api=api, phase=phase):
+                    class Rejected(RequestReceipts):
+                        async def before_provider_headers(self, headers, _phase=phase):
+                            if _phase == "headers":
+                                raise ProviderRequestRejected("offline authoritative gate")
+                            return await super().before_provider_headers(headers)
+                        async def after_provider_attempt(self, _status):
+                            raise ProviderRequestRejected("offline authoritative gate")
+                    receipts, sent = Rejected(self.root / api / phase), []
+                    def handler(request, _sent=sent):
+                        _sent.append(request)
+                        return httpx.Response(503, text="offline transient")
+                    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                        with self.assertRaises(ProviderRequestRejected):
+                            _ = [event async for event in compatibility_provider(api, client, receipts).stream_response(
+                                model="test", system="s", messages=[], tools=[])]
+                    self.assertEqual(len(sent), 0 if phase == "headers" else 1)
 
     async def test_retry_capture_failures_block_new_posts_in_both_endpoints(self):
         write, replace = Path.write_text, Path.replace

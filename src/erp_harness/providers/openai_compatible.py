@@ -62,10 +62,11 @@ from erp_harness.providers.http_errors import provider_http_error_message
 from erp_harness.providers.openai_cache import is_direct_openai_url, openai_prompt_cache_key
 from erp_harness.providers.provider import (
     CancellationToken,
-    ProviderRequestRejected,
     apply_provider_headers,
     apply_provider_payload,
     emit_provider_response,
+    observe_provider_attempt,
+    wrap_provider_stream,
 )
 from erp_harness.providers.retry import provider_retry_event, retry_delay_seconds, wait_for_retry
 from erp_harness.providers.stream import canonicalize_provider_stream
@@ -140,8 +141,7 @@ class OpenAICompatibleProvider:
             provider=getattr(self._config, "provider_name", "openai-compatible"),
             model=model,
         )
-        observer = getattr(self._config.provider_hooks, "wrap_provider_stream", None)
-        return observer(stream, raw=raw) if callable(observer) else stream
+        return wrap_provider_stream(self._config.provider_hooks, stream, raw=raw)
 
     def _stream_provider_events(
         self,
@@ -417,14 +417,7 @@ class OpenAICompatibleProvider:
         return iterator()
 
     async def _observe_attempt(self, name: str, *args: object) -> None:
-        observer = getattr(self._config.provider_hooks, name, None)
-        if callable(observer):
-            try:
-                await observer(*args)
-            except ProviderRequestRejected:
-                raise
-            except Exception:  # noqa: BLE001 - optional observers are isolated
-                return
+        await observe_provider_attempt(self._config.provider_hooks, name, *args)
 
     def _prompt_cache_key(self, affinity_id: str | None) -> str | None:
         supports = self._config.compat.get("supportsPromptCacheKey")
