@@ -4,7 +4,7 @@
     "path": ".runtime/harness-maturity-20261003/business-patchset1/business-review.json",
     "sha256": "5c813b36849570e7ce5f5f03d33886628eec0471eda8759c15e304a5ee4ba91f"
   },
-  "boundary": "Two original ERP-Bench scorers and unchanged tasks, one fresh attempt each. Source7153a79 only; later fixes are not covered by these runs.",
+  "boundary": "Three original ERP-Bench scorers with unchanged task/scope, one fresh attempt per case. 2010/2066 use source7153a79, 2279 uses c55f8ee; fourth-patch classifier/active-inspection changes are not included in these business runs.",
   "model": "deepseek/deepseek-v4.1-flash",
   "reasoning_effort": "high",
   "baseline_tag": "harness-maturity-baseline-20261003",
@@ -175,7 +175,7 @@
       },
       "independent_audit": {
         "path": ".runtime/harness-maturity-20261003/business-patchset1/private/independent-audit-2066.json",
-        "sha256": "28b38632287c9a24b92d2883a2f81d7273f5e719232ad40c84610535fc318d9b"
+        "sha256": "bffe990152338466bd603b8c4f7bd47fbc04bd12609bf9012a3b10700b5d6589"
       },
       "limitations": [
         "Single fresh complete sample, no paid retry.",
@@ -208,7 +208,7 @@
         "current_reason_code": "server_error",
         "current_next_action": "check_service_logs",
         "actual_model_recovery": "Next request splits the malformed combined partner OR query into eight simple name queries; all eight return success true.",
-        "minimal_future_fix": "Recognize explicit malformed-domain exception as query_invalid/correct_query, without reclassifying generic HTTP 500. Retain a sanitized public typed error, and correct the corrupted detail text.",
+        "minimal_future_fix": "Recognize explicit malformed-domain exception as query_invalid/correct_query, without reclassifying generic HTTP 500. Retain a sanitized public typed error. The original detail has valid Chinese Unicode; console display corruption is not a producer defect.",
         "source_request_evidence": {
           "path": ".runtime/harness-maturity-20261003/business-patchset1/jobs/2066/harness-maturity-patchset1-2066-20261003/2066_medium_08_single_bom_single__ZJ4K2Un/agent/requests/0005.request.json",
           "sha256": "f91e8516f96e39919f884ae5e09de86b662034d6124394e925acf86bd00dc9fe"
@@ -218,29 +218,204 @@
           "sha256": "5d234c7a2be215717bd9b449f3dcbd9aab75227d405031a48a6e131772b35eeb"
         }
       }
+    },
+    {
+      "case": "2279",
+      "source_commit": "c55f8ee64444a4ae27b5852d022310c3b1afe241",
+      "source_tree_sha256": "f7c5556cd1f466c85ed7d4abb48d501e4a4acce03f5c3b0afcb548735eb3e0f9",
+      "wheel_sha256": "3baa226016b60939a085236f21c63a333bb4ca5e6252420fd23786c3861e3694",
+      "config_sha256": "d95c19828b0354870146c99aa43b0d3bb696d865ade76e676aa7f33d35d21527",
+      "task_hashes": {
+        "instruction.md": "d7167e55c093f3a3ebb90a6f91cfe91ab081db914049378aaf6bebe082c0a20e",
+        "task.toml": "4954bf2715283a787748e8884a6775721e80eb634047f4c766eb3eb5ede310ef",
+        "environment/Dockerfile": "67a64f460f9aa70678a95812ee7f1c30d85450ab9b4cc30fa6ce6ce69bb4e2c8",
+        "environment/entrypoint.sh": "17081066295528704b6c9af5c66864884ea682640bcc9a154b03e862fe8ccbc5",
+        "environment/odoo.conf": "30a5cd6cdc5f0e10926ad5d3a9f424e0826fe6bcbbb785d4ef0aeedc7628a6c8",
+        "environment/scenario_data.json": "3eb90fc0f287cbf93d56d98d326e38077455ff4901370203aafa0cd937da9769",
+        "environment/setup_scenario.py": "1a532a2f1c1cb68fb965e4ca5d072528b4b4a992327685de71ffa0000ac94714",
+        "solution/optimal_plan.json": "63bb64143b5567cdb115abcbdc917e26f0e37e2c701480195ab7c01f39ffc625",
+        "solution/solve.sh": "6636bbbf181b0f746e988eef95de06c52dd33e32b60d8b213aee49ce140a5f06",
+        "solution/solver.py": "9f11be45e75129efe262b3571d1aacc8817d0a85de6b162a726b47a038bfa7ec",
+        "tests/checks.py": "51d0b02cfb91297747f54b645dcb1710e77929d226d2edccd332d9c54f208fc6",
+        "tests/test.sh": "6ab8f3f3cbc14afc31593614fc3467c0fda6209b79e6eef30c1efad17d234cb2"
+      },
+      "task_scope_sha256": null,
+      "official_reward": {
+        "overall_score": 100.0,
+        "passed": true,
+        "constraint": {
+          "earned": 32,
+          "total": 32
+        },
+        "hygiene": {
+          "earned": 6,
+          "total": 6
+        },
+        "optimality": {
+          "score": 100.0,
+          "total": 100.0
+        }
+      },
+      "official_failed_rules": [],
+      "official_reward_path": ".runtime/harness-maturity-20261003/business-patchset2-2279/jobs/2279/harness-maturity-patchset2-2279-20261003/2279_easy_repair_plan_easy__cCvjDW5/verifier/reward.json",
+      "official_reward_sha256": "a3b327c3bac5d00350b8a14ffe61e657bb5762e90a513dca158eb321b3682d8b",
+      "runner_stop_reason": "stop",
+      "harbor_exception_type": "ValidationError",
+      "harbor_nested_reward_parser_only": true,
+      "derived_report": ".runtime/harness-maturity-20261003/business-patchset2-2279/reports/2279/index.html",
+      "usage": {
+        "request_count": 19,
+        "fresh_input": 120719,
+        "cache_reads": 529024,
+        "output_including_reasoning": 30109,
+        "reasoning_subset": 23992,
+        "compaction": 0,
+        "total_tokens": 679852,
+        "cost": null
+      },
+      "usage_complete": true,
+      "tool_calls": 60,
+      "tool_refusals": 1,
+      "action_status_counts": {
+        "verified": 5
+      },
+      "unknown_write": {
+        "observed": false,
+        "automatic_replay_observed": false,
+        "boundary": "All five persisted actions verified. No uncertain-write recovery path was executed."
+      },
+      "independent_audit": {
+        "path": ".runtime/harness-maturity-20261003/business-patchset2-2279/private/independent-audit-2279.json",
+        "sha256": "da7a6859f5cfad9f3ef8de2d827d09b1d49e5c01465642fe8fa976c659b9fcf2"
+      },
+      "business_checks": {
+        "existing_sales_orders_reused": 4,
+        "sales_order_ids_and_commitment_dates_unchanged": true,
+        "cancelled_cosmo_purchase_id": 2,
+        "retained_indigo_purchase_id": 1,
+        "retained_indigo_quantity_before": 12,
+        "retained_indigo_quantity_after": 16,
+        "retained_indigo_origins": [
+          "S00001",
+          "S00002",
+          "S00003",
+          "S00004"
+        ],
+        "new_sierra_purchase_id": 3,
+        "new_sierra_quantity": 15,
+        "new_sierra_origins": [
+          "S00003",
+          "S00004"
+        ],
+        "active_incoming_quantity": 31,
+        "on_hand_finished_stock_per_task": 5,
+        "total_customer_demand": 36,
+        "manufacturing_orders": 0,
+        "received_quantity": 0,
+        "delivered_quantity": 0,
+        "done_pickings": 0
+      },
+      "recovery": {
+        "classification": "existing_unknown_fields_normal_control",
+        "causal_request": "0010",
+        "first_metadata_corrective_request": "0011",
+        "first_corrected_read_request": "0012",
+        "first_success_reply_request": "0013",
+        "corrective_call": {
+          "id": "call_00_vqmypje1o3jr0mzvhsnujpdh",
+          "name": "mcp_odoo_get_model_fields",
+          "arguments": {
+            "max_fields": 30,
+            "model": "stock.move",
+            "query": "quantity reserved state picking product"
+          }
+        },
+        "corrected_read_call": {
+          "id": "call_00_plvsmwavu88f8dy6hyihh6mb",
+          "name": "mcp_odoo_read_record",
+          "arguments": {
+            "fields": [
+              "product_uom_qty",
+              "quantity",
+              "state",
+              "picking_id",
+              "product_id",
+              "sale_line_id",
+              "purchase_line_id",
+              "location_id",
+              "location_dest_id"
+            ],
+            "model": "stock.move",
+            "record_ids": [
+              52,
+              53,
+              54,
+              55,
+              56,
+              57
+            ]
+          }
+        },
+        "corrected_read_success": true
+      },
+      "baseline_score": 100,
+      "baseline_requests": 21,
+      "baseline_total_tokens": 950050,
+      "efficiency": "2 fewer requests and 270198 fewer total tokens in this sample; no isolated causal efficiency claim.",
+      "coverage_boundary": [
+        "Fixed c55f8ee excludes uncommitted active-chat and malformed-domain classification changes.",
+        "Original null scope exercises final-verification receipt integration; host release_fields enforcement is not active.",
+        "Read-only live-field discovery and subsequent corrected data read executed successfully.",
+        "This single fresh sample does not prove patch-level efficiency changes.",
+        "Official task score is separately read from the original verifier, not derived from readbacks."
+      ],
+      "approval_invalid_revalidation": {
+        "observed": false,
+        "boundary": "This fresh sample executed five valid actions without a stale-approval refusal. The historical repair task is a normal business control, not proof that the stale-approval branch executed again."
+      },
+      "task_final_verification": {
+        "check": "release_fields_presence",
+        "status": "not_applicable",
+        "enforced": false,
+        "retry_safe": false
+      }
     }
   ],
   "aggregate_usage": {
-    "request_count": 77,
-    "fresh_input": 387216,
-    "cache_reads": 4469504,
-    "output_including_reasoning": 114502,
-    "reasoning_subset": 94574,
+    "request_count": 96,
+    "fresh_input": 507935,
+    "cache_reads": 4998528,
+    "output_including_reasoning": 144611,
+    "reasoning_subset": 118566,
     "compaction": 0,
-    "total_tokens": 4971222,
+    "total_tokens": 5651074,
     "cost": null
   },
   "current_goal_usage_including_local_api": {
-    "request_count": 78,
-    "fresh_input": 390432,
-    "cache_reads": 4532992,
-    "output_including_reasoning": 114961,
-    "reasoning_subset": 94918,
+    "request_count": 98,
+    "fresh_input": 513040,
+    "cache_reads": 5092736,
+    "output_including_reasoning": 145729,
+    "reasoning_subset": 119141,
     "compaction": 0,
-    "total_tokens": 5038385,
+    "total_tokens": 5751505,
     "cost": null
   },
   "goal_token_budget": 100000000,
-  "remaining_known_token_budget": 94961615,
-  "historical_baseline_tokens_excluded_from_current_goal": 3680054
+  "remaining_known_token_budget": 94248495,
+  "historical_baseline_tokens_excluded_from_current_goal": 3680054,
+  "sources": [
+    {
+      "path": ".runtime/harness-maturity-20261003/business-patchset1/business-review.json",
+      "sha256": "5c813b36849570e7ce5f5f03d33886628eec0471eda8759c15e304a5ee4ba91f"
+    },
+    {
+      "path": ".runtime/harness-maturity-20261003/business-patchset2-2279/business-review.json",
+      "sha256": "df0bac1475d94054cf4051e8b00dc72ea6edd2834ca7fd64fc62dc0d52ace887"
+    }
+  ],
+  "local_api_results": [
+    "experiments/agent_regression/harness-maturity-20261003/api-results.json",
+    "experiments/agent_regression/harness-maturity-20261003/malformed-domain-api-results.json"
+  ]
 }

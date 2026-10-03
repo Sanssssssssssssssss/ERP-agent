@@ -205,5 +205,61 @@
       }
     ]
   },
-  "usage_results": "experiments/agent_regression/harness-maturity-20261003/business-results.json"
+  "usage_results": "experiments/agent_regression/harness-maturity-20261003/business-results.json",
+  "fourth_patchset": {
+    "commits": [
+      "ff91738",
+      "5fcac07"
+    ],
+    "verification": {
+      "passed": 1573,
+      "skipped": 4,
+      "subtests_passed": 363,
+      "log": {
+        "path": ".runtime/harness-maturity-20261003/patchset4-full-tests.log",
+        "sha256": "3321541a2289ebc0e07dab42fdfac19d0c87d8030da3c72b14039fc83d932540"
+      },
+      "test_index_check": "passed",
+      "desktop_typecheck": "passed",
+      "desktop_build": {
+        "path": ".runtime/harness-maturity-20261003/active-chat-inspection/desktop-build-final.log",
+        "sha256": "09b888a876346bb76438fa9b2822abca4c5849d29e7f508358e2ee3d7a8b467c"
+      },
+      "renderer_check": {
+        "path": ".runtime/harness-maturity-20261003/active-chat-inspection/renderer-check-final.log",
+        "sha256": "5b97696420554263b9a6b2b6f2ff482db9b1ffd5024ca683a83db8146d782e86"
+      },
+      "independent_host_review": {
+        "path": ".runtime/harness-maturity-20261003/active-chat-diagnostics/independent-host-review.json",
+        "sha256": "a058e341e35482a2d0ad2ddc8361b8448664858b7b7a1e9c8dd341981ea24624"
+      }
+    },
+    "bindings": [
+      {
+        "case_id": "TFR3-2066-01",
+        "origin": "observed_tool_classification_failure_recovered",
+        "fix_commit": "ff91738",
+        "producer": "src/erp_harness/erp/read_failures.py",
+        "case": "experiments/agent_regression/harness-maturity-20261003/malformed-domain-case.json",
+        "api_result": "experiments/agent_regression/harness-maturity-20261003/malformed-domain-api-results.json",
+        "boundary": "One actual corrective request; tools not executed. Original full business already passed."
+      },
+      {
+        "case_id": null,
+        "origin": "observed_ui_capability_gap_and_offline_concurrency_probes",
+        "fix_commit": "5fcac07",
+        "producer": "src/erp_harness/app/host.py",
+        "offline_tests": [
+          "tests/test_workbench_host.py",
+          "tests/test_workbench_conversation.py",
+          "desktop/scripts/renderer-check.mjs"
+        ],
+        "before_after": {
+          "path": ".runtime/harness-maturity-20261003/active-chat-diagnostics/after-comparison.json",
+          "sha256": "fb9ce989764bf37b057b988de585270165ea7f266a95a7df888c9fb6d68692bf"
+        },
+        "boundary": "Running business accepts one same-scope read-only question. Authorization sources, materials, cancellations and approval continuation are covered offline. Tool explains a startup snapshot; live model answer and active-process timing are not full business acceptance. No synthetic paid failure case."
+      }
+    ]
+  }
 }
