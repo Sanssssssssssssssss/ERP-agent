@@ -15,6 +15,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 import ssl
 import time
 import urllib.error
@@ -73,6 +74,22 @@ def read_context(context: Any) -> dict[str, Any]:
     return copy.deepcopy(context)
 
 
+def normalize_read_scope(url: str, lang: str | None, context: dict | None):
+    """Pure JSON-2 scope normalization, also consumed by the authenticating client."""
+    if not re.match(r"^https?://", url):
+        url = f"http://{url}"
+    return url.rstrip("/"), (lang or "").strip() or None, read_context({} if context is None else context)
+
+
+def read_scope_fingerprint(*, url, db, username, api_key, uid, lang, context,
+                           transport, json2_database_header, verify_ssl) -> str:
+    """Hash explicit values only; configuration scope is not authentication evidence."""
+    return hashlib.sha256(json.dumps([
+        url, db, username, api_key, uid, lang, context,
+        transport, json2_database_header, verify_ssl,
+    ], sort_keys=True).encode()).hexdigest()
+
+
 class Json2ReadClient(OdooClient):
     """Closed read-only facade over the existing, tested JSON-2 transport."""
 
@@ -80,17 +97,18 @@ class Json2ReadClient(OdooClient):
                  password: str = "", transport: str = "json2", context: dict | None = None, **kwargs):
         if transport != "json2":
             raise ValueError("Native reads require the JSON-2 transport")
-        self.context = read_context({} if context is None else context)
+        url, lang, self.context = normalize_read_scope(url, kwargs.pop("lang", None), context)
         super().__init__(
-            url, db, username, password, transport=transport, api_key=api_key, **kwargs
+            url, db, username, password, transport=transport, api_key=api_key, lang=lang, **kwargs
         )
 
     def scope_fingerprint(self) -> str:
         """Private cache scope includes credential identity even when JSON-2 uid is None."""
-        return hashlib.sha256(json.dumps([
-            self.url, self.db, self.username, self.api_key, self.uid, self.lang, self.context,
-            self.transport, self.json2_database_header, self.verify_ssl,
-        ], sort_keys=True).encode()).hexdigest()
+        return read_scope_fingerprint(
+            url=self.url, db=self.db, username=self.username, api_key=self.api_key,
+            uid=self.uid, lang=self.lang, context=self.context, transport=self.transport,
+            json2_database_header=self.json2_database_header, verify_ssl=self.verify_ssl,
+        )
 
     def _apply_lang_context(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         context = {**read_context(self.context), **read_context(kwargs.get("context", {}))}

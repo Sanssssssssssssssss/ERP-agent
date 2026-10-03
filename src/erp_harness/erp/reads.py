@@ -88,7 +88,7 @@ from erp_harness.erp._odoo_core.write_policy import (
     writes_enabled,
 )
 
-from .gateway import Json2ReadClient, read_context
+from .gateway import Json2ReadClient, normalize_read_scope, read_context, read_scope_fingerprint
 
 READ_RESPONSES = {
     "get_odoo_profile": GetOdooProfileResponse,
@@ -214,6 +214,47 @@ def normalize_read_arguments(name: str, arguments: dict[str, Any]) -> dict[str, 
         return model.model_validate(parsed).model_dump()
     except ValueError as exc:
         raise RuntimeError(f"Error executing tool {name}: {exc}") from exc
+
+
+def _read_identity(*, instance, url, db, username, lang, context, transport, fingerprint):
+    identity = {
+        "instance": instance, "url": url, "database": db, "username": username,
+        "lang": lang, "context": copy.deepcopy(context), "transport": transport,
+        "credential_scope_sha256": fingerprint,
+    }
+    identity["identity_id"] = hashlib.sha256(json.dumps([
+        instance, fingerprint,
+    ], sort_keys=True).encode()).hexdigest()[:20]
+    return identity
+
+
+def configured_identity(*, url: str, db: str, username: str, api_key: str,
+                        instance: str = "default", lang: str | None = None,
+                        context: dict | None = None, uid: int | None = None,
+                        json2_database_header: bool = True, verify_ssl: bool = True) -> dict[str, Any]:
+    """Scope explicit current JSON-2 configuration without RPC or authentication proof.
+
+    Defaults match the desktop worker's explicit configuration. This function never
+    reads environment/config files or authorizes an identity supplied by a receipt.
+    """
+    if any(not isinstance(value, str) or not value for value in (url, db, username, api_key)):
+        raise ValueError("Explicit URL, database, username and API key are required")
+    if not isinstance(instance, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", instance):
+        raise ValueError("Invalid instance name")
+    if lang is not None and not isinstance(lang, str):
+        raise ValueError("lang must be a string or None")
+    if uid is not None and (type(uid) is not int or uid < 1):
+        raise ValueError("uid must be a positive integer or None")
+    if type(json2_database_header) is not bool or type(verify_ssl) is not bool:
+        raise ValueError("Database header and SSL settings must be boolean")
+    url, lang, context = normalize_read_scope(url, lang, context)
+    fingerprint = read_scope_fingerprint(
+        url=url, db=db, username=username, api_key=api_key, uid=uid, lang=lang,
+        context=context, transport="json2", json2_database_header=json2_database_header,
+        verify_ssl=verify_ssl,
+    )
+    return _read_identity(instance=instance, url=url, db=db, username=username,
+                          lang=lang, context=context, transport="json2", fingerprint=fingerprint)
 
 
 class NativeReads:
@@ -388,16 +429,11 @@ class NativeReads:
         if runtime is None:
             raise ValueError(f"Unknown Odoo instance {instance!r}")
         client = runtime.client
-        identity = {
-            "instance": runtime.instance, "url": client.url, "database": client.db,
-            "username": client.username, "lang": client.lang,
-            "context": copy.deepcopy(client.context), "transport": client.transport,
-            "credential_scope_sha256": client.scope_fingerprint(),
-        }
-        identity["identity_id"] = hashlib.sha256(json.dumps([
-            runtime.instance, identity["credential_scope_sha256"],
-        ], sort_keys=True).encode()).hexdigest()[:20]
-        return identity
+        return _read_identity(
+            instance=runtime.instance, url=client.url, db=client.db, username=client.username,
+            lang=client.lang, context=client.context, transport=client.transport,
+            fingerprint=client.scope_fingerprint(),
+        )
 
     def world_metadata(self, name: str, arguments: dict[str, Any]) -> dict[str, dict[str, Any]]:
         """Return only metadata already loaded by the read; observation adds no RPC."""

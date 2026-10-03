@@ -10,12 +10,76 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from erp_harness.app import conversation
-from erp_harness.erp._odoo_core.odoo_client import OdooJson2Error
+from erp_harness.erp._odoo_core.field_policy import FieldPolicy
+from erp_harness.erp._odoo_core.odoo_client import OdooClient, OdooJson2Error
+from erp_harness.erp.gateway import Json2ReadClient
 from erp_harness.erp.read_failures import read_failure, tool_failure
-from erp_harness.erp.reads import NativeReads
+from erp_harness.erp.reads import NativeReads, configured_identity
 
 
 class ConnectionAwarenessTests(unittest.TestCase):
+    def test_explicit_configured_identity_matches_authenticated_client_without_rpc(self):
+        base = {"url": "fixture///", "db": "bench", "username": "admin", "api_key": "offline-test-key"}
+        variations = [
+            {}, {"url": "https://fixture/"}, {"db": "other"}, {"username": "other"},
+            {"api_key": "offline-other-key"}, {"lang": " en_US "},
+            {"context": {"lang": "zh_CN", "allowed_company_ids": [2]}},
+            {"uid": 8}, {"json2_database_header": False}, {"verify_ssl": False},
+            {"instance": "warehouse"},
+        ]
+        identities = []
+        for variation in variations:
+            with self.subTest(variation=variation):
+                values = {**base, **variation}
+                with (patch.object(OdooClient, "_connect", side_effect=AssertionError("must not authenticate")),
+                      patch("urllib.request.urlopen", side_effect=AssertionError("must not send RPC"))):
+                    configured = configured_identity(**values)
+                instance, uid = values.pop("instance", "default"), values.pop("uid", None)
+                with patch.object(Json2ReadClient, "_json2_call_once", return_value={}) as rpc:
+                    client = Json2ReadClient(**values)
+                    self.assertEqual(rpc.call_args.args[:2], ("res.users", "context_get"))
+                    self.assertEqual(rpc.call_count, 1)
+                    client.uid = uid
+                    actual = NativeReads(client, instance=instance, policy=FieldPolicy({})).identity_context()
+                self.assertEqual(configured, actual)
+                self.assertEqual(configured["credential_scope_sha256"], client.scope_fingerprint())
+                self.assertNotIn("offline-test-key", json.dumps(configured))
+                self.assertNotIn("offline-other-key", json.dumps(configured))
+                identities.append(configured)
+        self.assertEqual(len({row["identity_id"] for row in identities}), len(variations))
+        # Frozen pre-patch producer scope: existing ledgers/World identities must match.
+        self.assertEqual(identities[0]["credential_scope_sha256"],
+                         "c7efc4549c51312e868b6dddd0e4a977d08b39df5dfae310bb388b41036b343b")
+
+    def test_configured_identity_is_explicit_validated_and_detached(self):
+        base = {"url": "fixture///", "db": "bench", "username": "admin", "api_key": "offline-test-key"}
+        context = {"allowed_company_ids": [2], "active_test": False}
+        with (patch.object(OdooClient, "_connect", side_effect=AssertionError("must not authenticate")),
+              patch.dict(os.environ, {"ODOO_URL": "https://other", "ODOO_LOCALE": "fr_FR",
+                                      "ODOO_VERIFY_SSL": "0", "ODOO_JSON2_DATABASE_HEADER": "0"})):
+            first = configured_identity(**base, context=context)
+            context["allowed_company_ids"].append(3)
+            self.assertEqual(first["context"]["allowed_company_ids"], [2])
+            second = configured_identity(**base, context=context)
+            self.assertNotEqual(first["identity_id"], second["identity_id"])
+            for variation in ({"api_key": ""}, {"api_key": None}, {"db": ""}, {"username": 1},
+                              {"url": None}, {"uid": True}, {"uid": 0}, {"verify_ssl": "0"},
+                              {"json2_database_header": 1}, {"instance": "../other"},
+                              {"lang": []}, {"context": {"allowed_company_ids": [True]}},
+                              {"context": {"untrusted": "secret-value"}}):
+                with self.subTest(variation=variation), self.assertRaises(ValueError) as caught:
+                    configured_identity(**{**base, **variation})
+                self.assertNotIn("secret-value", str(caught.exception))
+
+    def test_client_still_authenticates_when_configured_identity_is_available(self):
+        values = {"url": "http://fixture", "db": "bench", "username": "admin", "api_key": "offline-test-key"}
+        configured_identity(**values)
+        with patch.object(Json2ReadClient, "_json2_call_once", side_effect=ConnectionRefusedError("offline")) as rpc:
+            with self.assertRaises(ConnectionError):
+                Json2ReadClient(**values)
+            self.assertEqual(rpc.call_args.args[:2], ("res.users", "context_get"))
+            self.assertEqual(rpc.call_count, 1)
+
     def test_missing_model_survives_metadata_wrapper_without_becoming_connection_error(self):
         message = "JSON-2 request base.automation.fields_get failed with HTTP 404: the model 'base.automation' does not exist secret"
         for error in (OdooJson2Error(message, status_code=404), ValueError(message)):
