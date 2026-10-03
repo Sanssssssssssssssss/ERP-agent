@@ -18,6 +18,41 @@ from pathlib import Path
 
 DATABASE = "bench"
 CASE_ENV = "PI_ODOO_SNAPSHOT_CASE"
+REPAIR_SIDECAR = Path("/tmp/repair_seeded_records.json")
+
+
+def checked_repair_sidecar(source: Path) -> bytes:
+    """Keep the original fixture bytes; reject a broken checker dependency."""
+    raw = source.read_bytes()
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError
+        for group, key in (("purchase_orders", "po_id"), ("manufacturing_orders", "mo_id")):
+            rows = data.get(group)
+            if not isinstance(rows, dict):
+                raise ValueError
+            for row in rows.values():
+                if (not isinstance(row, dict) or type(row.get(key)) is not int or row[key] < 1
+                        or not isinstance(row.get("name"), str) or not row["name"]
+                        or row.get("plan_ref") is not None and not isinstance(row["plan_ref"], str)):
+                    raise ValueError
+    except (ValueError, UnicodeError) as exc:
+        raise ValueError("Invalid benchmark repair sidecar") from exc
+    return raw
+
+
+def capture_repair_sidecar(destination: Path, source: Path | None = None) -> bool:
+    source = REPAIR_SIDECAR if source is None else source
+    if not source.exists():
+        return False
+    raw = checked_repair_sidecar(source)
+    with destination.open("xb") as stream:
+        stream.write(raw)
+    destination.with_suffix(destination.suffix + ".sha256").write_text(
+        f"{hashlib.sha256(raw).hexdigest()}  {destination.name}\n", encoding="ascii"
+    )
+    return True
 
 
 def snapshot_case() -> str:
@@ -122,12 +157,15 @@ def capture(destination: Path) -> None:
         with tarfile.open(destination / "filestore.tar", "w") as archive:
             archive.add(filestore, arcname=DATABASE)
         (destination / "api_key").write_bytes(Path("/etc/odoo/api_key").read_bytes())
+        names = ["database.dump", "filestore.tar", "api_key"]
+        if capture_repair_sidecar(destination / REPAIR_SIDECAR.name):
+            names.append(REPAIR_SIDECAR.name)
         manifest = {
             "format": 1, "case": snapshot_case(), "database": DATABASE,
             "captured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "fingerprint": state, "filestore_files": files,
             "sha256": {name: digest(destination / name)
-                       for name in ("database.dump", "filestore.tar", "api_key")},
+                       for name in names},
         }
         (destination / "manifest.json").write_text(json.dumps(manifest, indent=2))
         print(json.dumps({"snapshot": "captured", "tables": len(state["tables"]), "files": len(files)}))
@@ -143,6 +181,11 @@ def checked_manifest(source: Path) -> dict:
     for name in ("database.dump", "filestore.tar", "api_key"):
         if digest(source / name) != manifest["sha256"][name]:
             raise ValueError(f"Snapshot checksum mismatch: {name}")
+    if REPAIR_SIDECAR.name in manifest["sha256"]:
+        path = source / REPAIR_SIDECAR.name
+        if digest(path) != manifest["sha256"][REPAIR_SIDECAR.name]:
+            raise ValueError(f"Snapshot checksum mismatch: {REPAIR_SIDECAR.name}")
+        checked_repair_sidecar(path)
     return manifest
 
 
@@ -162,6 +205,12 @@ def restore(source: Path) -> None:
     target = data_dir() / "filestore"
     if (target / DATABASE).exists():
         raise RuntimeError("Refusing to overwrite an existing benchmark filestore")
+    repair = (checked_repair_sidecar(source / REPAIR_SIDECAR.name)
+              if REPAIR_SIDECAR.name in manifest["sha256"] else None)
+    if repair is None and REPAIR_SIDECAR.exists():
+        raise RuntimeError("Refusing to restore with an unbound benchmark repair sidecar")
+    if repair is not None and REPAIR_SIDECAR.exists() and REPAIR_SIDECAR.read_bytes() != repair:
+        raise RuntimeError("Refusing to overwrite an existing benchmark repair sidecar")
     sql("""DO $$ BEGIN
       IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='odoo') THEN
         CREATE ROLE odoo LOGIN PASSWORD 'odoo' CREATEDB CREATEROLE SUPERUSER;
@@ -180,6 +229,8 @@ def restore(source: Path) -> None:
                 raise ValueError("Unsafe snapshot archive member")
         archive.extractall(target, filter="data")
     Path("/etc/odoo/api_key").write_bytes((source / "api_key").read_bytes())
+    if repair is not None:
+        REPAIR_SIDECAR.write_bytes(repair)
     actual = fingerprint()
     actual_files = filestore_files(target / DATABASE)
     if actual != manifest["fingerprint"] or actual_files != manifest["filestore_files"]:
@@ -210,9 +261,15 @@ def restore(source: Path) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("capture", "restore"))
+    parser.add_argument("mode", choices=("capture", "restore", "capture-repair-sidecar"))
     parser.add_argument("directory", type=Path)
     args = parser.parse_args()
-    if os.environ.get("PI_ODOO_LAB_SNAPSHOT") != "1":
+    if args.mode == "capture-repair-sidecar":
+        if not Path("/tmp/saas_setup_complete").is_file():
+            parser.error("Only a seeded benchmark fixture may be captured")
+        captured = capture_repair_sidecar(args.directory.resolve())
+        print(json.dumps({"repair_sidecar_captured": captured}))
+    elif os.environ.get("PI_ODOO_LAB_SNAPSHOT") != "1":
         parser.error("Run only in a disposable lab container with PI_ODOO_LAB_SNAPSHOT=1")
-    (capture if args.mode == "capture" else restore)(args.directory.resolve())
+    else:
+        (capture if args.mode == "capture" else restore)(args.directory.resolve())
