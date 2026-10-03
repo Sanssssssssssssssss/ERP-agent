@@ -6,10 +6,28 @@ import errno
 import re
 import socket
 import ssl
+import urllib.error
 
 from pydantic import ValidationError
 
 from ._odoo_core.odoo_client import OdooJson2Error
+
+
+class InvalidReadResponseError(ValueError):
+    """The native read reply violated its contract, rather than its inputs."""
+
+    def __init__(self):
+        super().__init__("Odoo returned an invalid or incomplete read response")
+
+
+class _LocalReadRefusal(ValueError):
+    """An exact local contract refusal; external bodies must not use this type."""
+
+    def __init__(self, message: str, reason_code: str = "query_invalid"):
+        if reason_code not in {"query_invalid", "field_policy_denied", "record_unavailable"}:
+            raise ValueError("Invalid local read refusal code")
+        super().__init__(message)
+        self.reason_code = reason_code
 
 # Stable public guidance is shared by tool replies and execution diagnostics.
 # Arbitrary error bodies never become recovery instructions.
@@ -106,6 +124,10 @@ def is_malformed_domain_error(error: Exception | dict) -> bool:
 
 
 def read_failure(error: Exception | dict) -> dict:
+    if type(error) is _LocalReadRefusal:
+        code = error.reason_code
+        return {"status": "permission_denied" if code == "field_policy_denied" else "error",
+                "reason_code": code, "error": str(error), "next_action": FAILURE_GUIDANCE[code][1]}
     if isinstance(error, dict) and error.get("reason_code"):
         result = {key: error[key] for key in ("status", "reason_code", "error", "next_action", "http_status") if key in error}
         result["error"] = error.get("detail", result.get("error", "读取失败。"))
@@ -117,8 +139,20 @@ def read_failure(error: Exception | dict) -> dict:
         current = current.__cause__ or current.__context__
     text = " ".join(str(item).lower() for item in chain)
     names = " ".join(str((getattr(item, "odoo_error", None) or {}).get("name", "")).lower() for item in chain)
-    http = next((getattr(item, "status_code", None) for item in chain if isinstance(getattr(item, "status_code", None), int)), None)
-    if "explicit odoo connection settings" in text:
+    http = next((item.code if isinstance(item, urllib.error.HTTPError) else item.status_code
+                 for item in chain if isinstance(item, urllib.error.HTTPError)
+                 or isinstance(getattr(item, "status_code", None), int)), None)
+    if http == 401:
+        code, message, action = "authentication_failed", "Odoo 认证失败，请检查账号及 API 密钥。", "check_credentials"
+    elif http == 403:
+        code, message, action = "permission_denied", "当前账号或字段策略不允许这项读取。", "check_permissions"
+    elif http == 429 or (isinstance(error, dict) and error.get("rate_limited")):
+        code, message, action = "rate_limited", "只读请求受到限流。", "wait_then_recheck"
+    elif "accessdenied" in names:
+        code, message, action = "authentication_failed", "Odoo 认证失败，请检查账号及 API 密钥。", "check_credentials"
+    elif "accesserror" in names:
+        code, message, action = "permission_denied", "当前账号或字段策略不允许这项读取。", "check_permissions"
+    elif "explicit odoo connection settings" in text:
         code, message, action = "connection_unconfigured", "未配置完整的 Odoo 连接信息。", "configure_connection"
     elif "unknown odoo instance" in text:
         code, message, action = "instance_unknown", "指定的 Odoo 实例未配置，请选择当前已配置的实例。", "select_configured_instance"
@@ -134,14 +168,12 @@ def read_failure(error: Exception | dict) -> dict:
         code, message, action = "connection_unavailable", "Odoo 网络连接不可用。", "check_connection"
     elif "database" in text and any(token in text for token in ("does not exist", "not found", "unknown database")):
         code, message, action = "database_unavailable", "指定的 Odoo 数据库不存在或不可用。", "check_database"
-    elif http == 401 or "accessdenied" in names:
-        code, message, action = "authentication_failed", "Odoo 认证失败，请检查账号及 API 密钥。", "check_credentials"
     elif "field policy denies" in text:
         code, message, action = "field_policy_denied", "本地字段访问策略拒绝这项读取。", "check_field_policy"
-    elif http == 403 or "accesserror" in names or any(isinstance(item, PermissionError) for item in chain) or any(token in text for token in ("accesserror", "access denied", "permission denied", "forbidden")):
+    elif any(isinstance(item, PermissionError) for item in chain) or any(token in text for token in ("accesserror", "access denied", "permission denied", "forbidden")):
         code, message, action = "permission_denied", "当前账号或字段策略不允许这项读取。", "check_permissions"
-    elif http == 429 or (isinstance(error, dict) and error.get("rate_limited")):
-        code, message, action = "rate_limited", "只读请求受到限流。", "wait_then_recheck"
+    elif any(isinstance(item, InvalidReadResponseError) for item in chain):
+        code, message, action = "invalid_response", "Odoo 返回的数据格式无效或缺少请求字段。", "check_service_logs"
     elif re.search(r"\bthe model ['\"][a-z0-9_.]+['\"] does not exist\b", text):
         code, message, action = "model_unavailable", "当前 Odoo 实例没有该模型；请先查看可用模型及已安装模块。", "list_models"
     elif http == 404:
@@ -175,6 +207,8 @@ def tool_failure(error: Exception | dict) -> dict:
             code = "tool_failed_unknown"
         result = {"status": "error", "reason_code": code,
                   "error": "工具调用失败；请按错误分类检查对应条件。"}
+        if type(error.get("http_status")) is int and 100 <= error["http_status"] <= 599:
+            result["http_status"] = error["http_status"]
     else:
         result = read_failure(error)
         current, seen, validation = error, set(), None
@@ -184,13 +218,13 @@ def tool_failure(error: Exception | dict) -> dict:
                 validation = current
                 break
             current = current.__cause__ or current.__context__
-        if validation is not None:
+        if validation is not None and result["reason_code"] in {"read_failed_unknown", "query_invalid"}:
             issues = [{"path": ".".join(str(part) for part in row["loc"]), "type": row["type"]}
                       for row in validation.errors(include_input=False, include_context=False, include_url=False)[:8]]
             result.update(reason_code="tool_arguments_invalid", error="工具参数不符合当前契约。",
                           parameter_issues=issues)
             result["error"] += " 参数：" + "、".join(row["path"] for row in issues)
-        if result["reason_code"] == "field_policy_denied" and type(error) is ValueError:
+        if result["reason_code"] == "field_policy_denied" and type(error) in {ValueError, _LocalReadRefusal}:
             match = re.fullmatch(r"Field policy denies access to (\[[^\n]{1,2000}\]) on ([A-Za-z0-9_.]+)(?:; aggregation on restricted fields is blocked to prevent inference\.)?", str(error))
             if match:
                 try:

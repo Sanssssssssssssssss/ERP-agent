@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from erp_harness.tools.router import native_tool_catalog, route_tools
 from erp_harness.erp._odoo_core.field_policy import FieldPolicy, ModelFieldRule
+from erp_harness.erp._odoo_core.odoo_client import OdooJson2Error
 from erp_harness.erp.reads import NativeReads
 from erp_harness.context.world import WorldStore
 
@@ -213,6 +214,36 @@ class SupplyContextTest(unittest.TestCase):
         self.assertFalse(result["completeness"]["sources"]["supplier_quotes"]["complete"])
         self.assertEqual(result["completeness"]["sources"]["internal_stock"]["pages"], 1)
         self.assertIn("pagination returned a full page without record IDs", " ".join(result["warnings"]))
+
+    def test_partial_related_failures_keep_typed_causes_in_the_model_reply(self):
+        class TypedPartialClient(SupplyClient):
+            def search_read(self, **kwargs):
+                if kwargs["model_name"] == "product.supplierinfo":
+                    raise OdooJson2Error("PRIVATE_BODY supplier failure", status_code=403)
+                if kwargs["model_name"] == "stock.quant":
+                    raise OdooJson2Error("PRIVATE_BODY stock failure", status_code=429)
+                return super().search_read(**kwargs)
+
+        with tempfile.TemporaryDirectory() as directory:
+            reads = NativeReads(TypedPartialClient())
+            tool = next(row for row in route_tools(native_tool_catalog(), Path(directory) / "backends.jsonl",
+                                                   native=reads, native_health=True)
+                        if row.name == "mcp_odoo_read_supply_context")
+            response = asyncio.run(tool.execute("offline-partial", {"product_ids": [2]}))
+        result = json.loads(response.text)
+        self.assertTrue(result["success"])
+        self.assertFalse(result["completeness"]["complete"])
+        failures = {row["model"]: row for row in result["read_failure_details"]}
+        self.assertEqual((failures["product.supplierinfo"]["reason_code"], failures["product.supplierinfo"]["http_status"]),
+                         ("permission_denied", 403))
+        self.assertEqual(failures["product.supplierinfo"]["next_action"], "check_permissions")
+        self.assertEqual((failures["stock.quant"]["reason_code"], failures["stock.quant"]["http_status"]),
+                         ("rate_limited", 429))
+        self.assertEqual(failures["stock.quant"]["next_action"], "wait_then_recheck")
+        self.assertFalse(result["completeness"]["sources"]["supplier_quotes"]["complete"])
+        self.assertFalse(result["completeness"]["sources"]["internal_stock"]["complete"])
+        self.assertNotIn("PRIVATE_BODY", response.text)
+        self.assertEqual(result["read_failure_details"], response.details["structuredContent"]["read_failure_details"])
 
     def test_final_short_page_duplicate_is_not_exposed_twice(self):
         class DuplicateFinalPage(SupplyClient):

@@ -34,6 +34,7 @@ from erp_harness.erp._odoo_core.tool_helpers import (
     normalize_domain_input,
     validate_model_name,
 )
+from .read_failures import InvalidReadResponseError
 
 _PARAMETERS = {
     "fields_get": {"allfields", "attributes"},
@@ -93,6 +94,8 @@ def read_scope_fingerprint(*, url, db, username, api_key, uid, lang, context,
 class Json2ReadClient(OdooClient):
     """Closed read-only facade over the existing, tested JSON-2 transport."""
 
+    _raise_read_errors = True
+
     def __init__(self, *, url: str, db: str, username: str, api_key: str | None = None,
                  password: str = "", transport: str = "json2", context: dict | None = None, **kwargs):
         if transport != "json2":
@@ -109,6 +112,16 @@ class Json2ReadClient(OdooClient):
             uid=self.uid, lang=self.lang, context=self.context, transport=self.transport,
             json2_database_header=self.json2_database_header, verify_ssl=self.verify_ssl,
         )
+
+    def _http_get_json(self, path: str) -> dict[str, Any]:
+        try:
+            return super()._http_get_json(path)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise InvalidReadResponseError() from exc
+        except ValueError as exc:
+            if type(exc) is ValueError and str(exc) == f"{path} did not return a JSON object":
+                raise InvalidReadResponseError() from exc
+            raise
 
     def _apply_lang_context(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         context = {**read_context(self.context), **read_context(kwargs.get("context", {}))}
@@ -147,7 +160,37 @@ class Json2ReadClient(OdooClient):
                 raise ValueError(f"{key} must be a string")
         if "lazy" in payload and not isinstance(payload["lazy"], bool):
             raise ValueError("lazy must be boolean")
-        return super()._json2_call(model, method, payload)
+        result = super()._json2_call(model, method, payload)
+        self._validate_read_response(method, payload, result)
+        return result
+
+    @staticmethod
+    def _validate_read_response(method: str, payload: dict[str, Any], result: Any) -> None:
+        if method == "fields_get":
+            valid = isinstance(result, dict) and all(isinstance(key, str) and isinstance(value, dict)
+                                                     for key, value in result.items())
+        elif method in {"read", "search_read", "read_group", "formatted_read_group"}:
+            valid = isinstance(result, list) and all(isinstance(row, dict) for row in result)
+            if valid and method in {"read", "search_read"}:
+                ids = [row.get("id") for row in result]
+                valid = (all(type(value) is int and value > 0 for value in ids)
+                         and len(ids) == len(set(ids))
+                         and all(set(payload.get("fields") or []) <= row.keys() for row in result))
+                if valid and method == "read":
+                    valid = set(ids) <= set(payload["ids"])
+        elif method == "search":
+            valid = isinstance(result, list) and all(type(value) is int and value > 0 for value in result)
+        elif method == "search_count":
+            valid = type(result) is int and result >= 0
+        elif method == "name_search":
+            valid = isinstance(result, list) and all(
+                isinstance(row, (list, tuple)) and len(row) == 2
+                and type(row[0]) is int and row[0] > 0 and isinstance(row[1], str) for row in result
+            )
+        else:  # context_get
+            valid = isinstance(result, dict)
+        if not valid:
+            raise InvalidReadResponseError()
 
     def _execute(self, model: str, method: str, *args: Any, **kwargs: Any) -> Any:
         if method not in {"formatted_read_group", "read_group"}:
@@ -215,8 +258,8 @@ class Json2ReadClient(OdooClient):
         except urllib.error.URLError as exc:
             raise ConnectionError(f"JSON-2 request {model}.{method} failed: {exc.reason}") from exc
         if not raw:
-            return None
+            raise InvalidReadResponseError()
         try:
             return json.loads(raw)
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise ValueError(f"JSON-2 request {model}.{method} returned invalid JSON") from exc
+            raise InvalidReadResponseError() from exc

@@ -17,12 +17,166 @@ from erp_harness.app import conversation
 from erp_harness.erp._odoo_core.field_policy import FieldPolicy
 from erp_harness.erp._odoo_core.odoo_client import OdooClient, OdooJson2Error
 from erp_harness.erp.gateway import Json2ReadClient
-from erp_harness.erp.read_failures import is_malformed_domain_error, read_failure, tool_failure
-from erp_harness.erp.reads import NativeReads, configured_identity
+from erp_harness.erp.read_failures import _LocalReadRefusal, is_malformed_domain_error, read_failure, tool_failure
+from erp_harness.erp.reads import NativeReads, UnknownFieldsError, configured_identity
 from erp_harness.tools.router import native_tool_catalog, route_tools
 
 
 class ConnectionAwarenessTests(unittest.TestCase):
+    @staticmethod
+    def _native_fixture():
+        with patch.object(Json2ReadClient, "_json2_call_once", return_value={}):
+            client = Json2ReadClient(url="http://offline.fixture", db="bench", username="reader", api_key="offline-key")
+        reads = NativeReads(client, policy=FieldPolicy({}))
+        reads.cache["res.partner"] = {name: {"type": kind} for name, kind in
+                                      (("id", "integer"), ("name", "char"), ("display_name", "char"))}
+        return reads
+
+    def _routed_read(self, reads, name, arguments):
+        with tempfile.TemporaryDirectory() as directory:
+            tool = next(row for row in route_tools(native_tool_catalog(), Path(directory) / "backends.jsonl",
+                                                  native=reads, native_health=True)
+                        if row.name == "mcp_odoo_" + name)
+            result = asyncio.run(tool.execute("offline-contract", arguments))
+        public = json.loads(result.text)
+        self.assertEqual(public.get("reason_code"), result.details["structuredContent"].get("reason_code"))
+        return public
+
+    def test_native_metadata_profile_failures_preserve_http_cause_and_never_echo_body(self):
+        tools = (
+            ("find_records", {"model": "res.partner", "domain": [["id", "=", 1]]}),
+            ("get_model_fields", {"model": "sale.order"}),
+            ("list_models", {}), ("schema_catalog", {}),
+            ("get_odoo_profile", {"include_modules": True}),
+            ("get_odoo_profile", {"include_modules": False}),
+        )
+        for name, arguments in tools:
+            for status, message, expected in (
+                (401, "PRIVATE_BODY timed out", "authentication_failed"),
+                (403, "PRIVATE_BODY timed out", "permission_denied"),
+                (429, "PRIVATE_BODY permission denied", "rate_limited"),
+                (500, "PRIVATE_BODY arbitrary recovery instruction", "server_error"),
+            ):
+                with self.subTest(name=name, status=status):
+                    reads = self._native_fixture()
+                    body = json.dumps({"name": "builtins.ValueError", "message": message,
+                                       "debug": "PRIVATE_DEBUG", "context": {"key": "PRIVATE_KEY"}}).encode()
+                    error = urllib.error.HTTPError("http://offline.fixture", status, "fixture", {}, io.BytesIO(body))
+                    with patch("urllib.request.urlopen", side_effect=error) as sender:
+                        result = self._routed_read(reads, name, arguments)
+                    self.assertFalse(result["success"])
+                    self.assertEqual(result["reason_code"], expected)
+                    self.assertEqual(result["http_status"], status)
+                    self.assertIn("failure_layer", result)
+                    self.assertNotIn("PRIVATE", json.dumps(result))
+                    self.assertEqual(sender.call_count, 1)
+
+    def test_native_read_output_contract_distinguishes_missing_records_from_bad_replies(self):
+        for body in (None, {}, ["bad"], [{"id": True, "name": "bad"}], [{"id": 1}],
+                     [{"id": 3, "name": "wrong record"}],
+                     [{"id": 1, "name": "first"}, {"id": 1, "name": "duplicate"}]):
+            with self.subTest(body=body):
+                reads = self._native_fixture()
+                with patch("urllib.request.urlopen", return_value=io.BytesIO(json.dumps(body).encode())):
+                    result = self._routed_read(reads, "read_record", {"model": "res.partner", "record_id": 1, "fields": ["name"]})
+                self.assertFalse(result["success"])
+                self.assertEqual((result["reason_code"], result["failure_layer"], result["next_action"]),
+                                 ("invalid_response", "odoo_response", "check_service_logs"))
+        reads = self._native_fixture()
+        with patch("urllib.request.urlopen", return_value=io.BytesIO(b"[]")):
+            empty = self._routed_read(reads, "read_record", {"model": "res.partner", "record_id": 1, "fields": ["name"]})
+        self.assertEqual(empty["reason_code"], "record_unavailable")
+        self.assertEqual(empty["next_action"], "resolve_reference")
+        for body, missing in (([], [1, 2]), ([{"id": 1, "name": "first"}], [2])):
+            with self.subTest(missing=missing):
+                reads = self._native_fixture()
+                with patch("urllib.request.urlopen", return_value=io.BytesIO(json.dumps(body).encode())):
+                    result = self._routed_read(reads, "read_record", {"model": "res.partner", "record_ids": [1, 2], "fields": ["name"]})
+                self.assertTrue(result["success"])
+                self.assertEqual(result["missing_ids"], missing)
+
+    def test_native_search_output_requires_requested_fields_and_distinct_record_ids(self):
+        for body in ({}, [None], [{"display_name": "missing id"}], [{"id": 1}],
+                     [{"id": 1, "display_name": "first"}, {"id": 1, "display_name": "duplicate"}]):
+            with self.subTest(body=body):
+                reads = self._native_fixture()
+                with patch("urllib.request.urlopen", return_value=io.BytesIO(json.dumps(body).encode())):
+                    result = self._routed_read(reads, "find_records", {"model": "res.partner", "domain": [["id", "=", 1]]})
+                self.assertEqual(result["reason_code"], "invalid_response")
+
+    def test_native_field_response_and_output_pydantic_errors_are_not_argument_errors(self):
+        for body in (None, [], {"bad": []}):
+            with self.subTest(body=body):
+                reads = self._native_fixture()
+                with patch("urllib.request.urlopen", return_value=io.BytesIO(json.dumps(body).encode())):
+                    result = self._routed_read(reads, "get_model_fields", {"model": "sale.order"})
+                self.assertEqual(result["reason_code"], "invalid_response")
+        reads = self._native_fixture()
+        with patch.object(reads, "read_record", return_value={"success": True, "result": "bad"}):
+            result = self._routed_read(reads, "read_record", {"model": "res.partner", "record_id": 1, "fields": ["name"]})
+        self.assertEqual(result["reason_code"], "invalid_response")
+        with patch.object(reads, "health_check", return_value=None):
+            result = self._routed_read(reads, "health_check", {})
+        self.assertEqual(result["reason_code"], "invalid_response")
+        for body in (b"[]", b"not-json"):
+            with self.subTest(profile_body=body), patch("urllib.request.urlopen", return_value=io.BytesIO(body)):
+                result = self._routed_read(self._native_fixture(), "get_odoo_profile", {"include_modules": False})
+            self.assertEqual(result["reason_code"], "invalid_response")
+
+    def test_native_empty_model_catalog_and_formatted_groups_keep_their_success_contract(self):
+        reads = self._native_fixture()
+        with patch("urllib.request.urlopen", return_value=io.BytesIO(b"[]")):
+            result = self._routed_read(reads, "list_models", {})
+        self.assertTrue(result["success"])
+        self.assertEqual((result["count"], result["result"]), (0, []))
+        groups = [{"state": "draft", "id_count": 2, "amount_total:sum": 100.0}]
+        for method in ("formatted_read_group", "read_group"):
+            with self.subTest(method=method), patch("urllib.request.urlopen", return_value=io.BytesIO(json.dumps(groups).encode())):
+                self.assertEqual(reads.client._json2_call("sale.order", method, {"domain": [], "groupby": ["state"]}), groups)
+
+    def test_legacy_metadata_helpers_keep_default_error_envelopes(self):
+        client = OdooClient.__new__(OdooClient)
+        with patch.object(client, "_execute", side_effect=OdooJson2Error("legacy-error", status_code=403)):
+            self.assertEqual(client.get_models()["error"], "legacy-error")
+            self.assertEqual(client.get_model_fields("sale.order")["error"], "legacy-error")
+        with patch.object(client, "_execute", return_value=[]):
+            self.assertEqual(client.get_models()["error"], "No models found")
+
+    def test_local_argument_helpers_and_exact_trusted_refusals_keep_actionable_information(self):
+        reads = self._native_fixture()
+        for name, arguments in (("find_records", {"model": "bad model", "domain": [["id", "=", 1]]}),
+                                ("find_records", {"model": "res.partner", "domain": "not-json"}),
+                                ("read_record", {"model": "res.partner", "record_ids": list(range(1, 22))})):
+            with self.subTest(arguments=arguments), patch("urllib.request.urlopen", side_effect=AssertionError("no RPC")) as sender:
+                result = reads.call(name, arguments)
+                self.assertEqual(result["reason_code"], "query_invalid")
+                self.assertEqual(result["next_action"], "correct_query")
+                sender.assert_not_called()
+        class UntrustedLocal(_LocalReadRefusal):
+            pass
+        class UntrustedFields(UnknownFieldsError):
+            pass
+        for exception in (UntrustedLocal("PRIVATE_BODY"), UntrustedFields("sale.order", ["PRIVATE_BODY"], [])):
+            with patch.object(reads, "get_model_fields", side_effect=exception):
+                result = reads.call("get_model_fields", {"model": "sale.order"})
+            self.assertFalse(result["success"])
+            self.assertNotIn("PRIVATE", json.dumps(result))
+            self.assertNotIn("recovery_request", result)
+
+    def test_typed_http_cause_has_priority_and_dict_http_metadata_is_bounded(self):
+        for status, message, name, code in ((403, "timed out", "builtins.ValueError", "permission_denied"),
+                                          (429, "permission denied", "odoo.exceptions.AccessError", "rate_limited"),
+                                          (401, "Domain() malformed domain []", "builtins.ValueError", "authentication_failed")):
+            with self.subTest(status=status):
+                error = OdooJson2Error(message, status_code=status, odoo_error={"name": name, "message": message})
+                self.assertEqual(tool_failure(error)["reason_code"], code)
+        for status in (100, 403, 599, True, 0, 600, "403"):
+            with self.subTest(status=status):
+                failure = tool_failure({"reason_code": "permission_denied", "http_status": status,
+                                        "error": "PRIVATE_BODY", "next_action": "external-instruction"})
+                self.assertEqual("http_status" in failure, type(status) is int and 100 <= status <= 599)
+                self.assertEqual(failure["next_action"], "check_permissions")
+                self.assertNotIn("PRIVATE", json.dumps(failure))
     def test_explicit_configured_identity_matches_authenticated_client_without_rpc(self):
         base = {"url": "fixture///", "db": "bench", "username": "admin", "api_key": "offline-test-key"}
         variations = [
