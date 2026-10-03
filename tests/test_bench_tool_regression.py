@@ -71,6 +71,7 @@ def test_all_observed_unknown_fields_refuse_before_data_rpc_and_offer_discovery(
                'model': row['failed_arguments']['model']}
               for row in read(INDEX.parent / 'tool-self-debug-20261003/fresh-fixed-cases.json')['cases']
               if row['tool'] == 'mcp_odoo_read_record']
+    fresh += read(INDEX.parent / 'tool-self-debug-business-20261003/cases.json')['cases']
     for case in [*read(INDEX), *fresh]:
         if case.get('failure_layer', case.get('failure_kind')) not in {'unknown_field', 'invalid_query_field'}:
             continue
@@ -116,6 +117,7 @@ def test_actual_sop_and_empty_domain_arguments():
 
 def test_actual_schema_argument_calls_are_invalid():
     fresh = read(INDEX.parent / 'self-debug-fresh-20261003/cases.json')['cases']
+    fresh += read(INDEX.parent / 'tool-self-debug-business-20261003/cases.json')['cases']
     for case in [*read(INDEX), *fresh]:
         if case.get('failure_layer', case.get('failure_kind')) not in {'schema_argument', 'schema_argument_limit'}:
             continue
